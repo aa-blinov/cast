@@ -1632,6 +1632,39 @@ function App() {
 		initClientState().finally(() => setBootstrapping(false));
 	}, []);
 
+	// The daemon behind this page, for the status dot's tooltip. One cheap read
+	// on mount and after every reconnect — the same endpoint `cast server
+	// status` prints, so the dot can say which daemon it is talking to and
+	// since when, not just that a socket is open.
+	const [serverStatus, setServerStatus] = useState(null);
+	const refreshServerStatus = useCallback(() => {
+		api("GET", "/api/server/status")
+			.then((s) => s && setServerStatus(s))
+			.catch(() => {});
+	}, []);
+	useEffect(() => {
+		refreshServerStatus();
+	}, [reconnectNonce, refreshServerStatus]);
+	const statusDotState = backendUp ? (connected || connectionUsable() ? "connected" : "reconnecting") : "offline";
+	const statusDotTitle = useMemo(() => {
+		const where = serverStatus?.running ? `${serverStatus.host}:${serverStatus.port}` : window.location.host;
+		const lines = [];
+		if (statusDotState === "offline") lines.push(`No connection to ${where} — retrying`);
+		else if (statusDotState === "reconnecting") lines.push(`Reconnecting to ${where}`);
+		else if (!activeId) lines.push(`Connected to ${where} — this chat becomes a session with your first message`);
+		else lines.push(`Connected to ${where} — ${running ? "turn running" : "idle"}`);
+		// Only while it is actually answering: after a restart the pid and start
+		// time on hand are the previous process's, and reporting those under
+		// "Reconnecting" would be a confident lie.
+		if (serverStatus?.running && statusDotState === "connected") {
+			const startedAt = serverStatus.startedAt ? new Date(serverStatus.startedAt) : null;
+			lines.push(
+				`Daemon pid ${serverStatus.pid}${serverStatus.foreground ? " (foreground)" : ""}${startedAt ? `, up since ${startedAt.toLocaleString()}` : ""}`,
+			);
+		}
+		return lines.join("\n");
+	}, [statusDotState, serverStatus, activeId, running]);
+
 	// Reconnect on visibility change — when the tab comes back to
 	// foreground after being backgrounded, the SSE connection may have
 	// dropped silently. Force a reconnect to sync state.
@@ -1882,8 +1915,10 @@ function App() {
 				<button class="menu-toggle${sidebarVisible ? " active" : " collapsed"}" onClick=${toggleSidebar} aria-label=${sidebarVisible ? "Collapse sessions" : "Expand sessions"}>
 					<${icons.chevronRight} class="chevron-icon" />
 				</button>
-				<span class="header-logo">
-					<span class="status-dot ${backendUp ? (connected || connectionUsable() ? "connected" : "reconnecting") : "offline"}" />
+				<!-- The title sits on the wrapper too: the dot itself is 10px, and
+				     the padding around it is part of what a pointer aims at. -->
+				<span class="header-logo" title=${statusDotTitle} onPointerEnter=${refreshServerStatus}>
+					<span class="status-dot ${statusDotState}" aria-label=${statusDotTitle} role="img" />
 				</span>
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
@@ -2114,7 +2149,7 @@ function App() {
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 							${
 								session?.cwd &&
-								html`<span class="composer-role-cwd" title=${session.cwd}>${`\u200e${session.cwd}`}</span>`
+								html`<span class="composer-role-cwd" title=${session.cwd}>(<span class="composer-role-cwd-path">${`\u200e${session.cwd}`}</span>)</span>`
 							}
 							${session?.worktree && html`<span class="composer-role-mode composer-role-worktree">worktree</span>`}
 						</div>

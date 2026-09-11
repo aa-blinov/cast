@@ -624,12 +624,18 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 /* The session's cwd, next to the persona: it was visible nowhere in the UI,
    and two sessions in different projects looked identical above the composer. */
 .composer-role-cwd {
+	/* The brackets sit outside the path's own box, which is the part that
+	   truncates — inside it they would be reordered by the RTL trick below. */
+	display: inline-flex;
+	min-width: 0;
 	font-family: var(--font-mono);
 	/* The role line is set in small caps; a path is case-sensitive. */
 	text-transform: none;
 	letter-spacing: 0;
 	font-size: .68rem;
 	color: var(--text-muted);
+}
+.composer-role-cwd-path {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
