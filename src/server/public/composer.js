@@ -190,7 +190,10 @@ export function Composer({
 
 	const [sending, setSending] = useState(false);
 	const handleSubmit = useCallback(() => {
-		if (!ready || !sendReady || sending) return;
+		// `sendReady` (the daemon connection) is deliberately not a gate here:
+		// submitMessage asks for a reconnect and waits a few seconds, which
+		// beats a tap that does nothing while the page is catching up.
+		if (!ready || sending) return;
 		if (!canSubmitAttachments(docs)) return;
 		const trimmed = value.trim();
 		const readyDocs = docs.filter((d) => (d.path || d.pending) && !d.uploading && !d.error);
@@ -209,10 +212,16 @@ export function Composer({
 				: trimmed;
 		// Snapshot to restore only if submit explicitly reports failure (e.g. connection lost before SSE ready)
 		const snapshot = { value, images: [...images], docs: [...docs] };
-		// Optimistic clear — feels instant, no "Sending…" hang
-		setValue("");
-		setImages([]);
-		setDocs([]);
+		// Optimistic clear — feels instant, no "Sending…" hang. Not while the
+		// daemon connection is down, though: that submit waits for a reconnect,
+		// and emptying the box for those seconds looks like the message went
+		// somewhere. It clears when the send actually goes out.
+		const clearDraft = () => {
+			setValue("");
+			setImages([]);
+			setDocs([]);
+		};
+		if (sendReady) clearDraft();
 		setCmdVisible(false);
 		if (textareaRef.current) {
 			textareaRef.current.style.height = "auto";
@@ -224,10 +233,16 @@ export function Composer({
 			textareaRef.current.focus();
 		}
 		setSending(true);
-		// Brief debounce to prevent double-Enter spam, not tied to network
-		setTimeout(() => setSending(false), 400);
+		// Brief debounce to prevent double-Enter spam, not tied to network —
+		// except while the connection is down, where the submit waits for a
+		// reconnect and releasing the button early would send it twice.
+		if (sendReady) setTimeout(() => setSending(false), 400);
 		Promise.resolve(onSubmit(text, images, pendingDocs.length > 0 ? pendingDocs : undefined))
+			.finally(() => {
+				if (!sendReady) setSending(false);
+			})
 			.then((result) => {
+				if (result !== false && !sendReady) clearDraft();
 				if (result === false) {
 					// Restore only if user hasn't already typed something new
 					setValue((prev) => (prev ? prev : snapshot.value));
@@ -310,7 +325,7 @@ export function Composer({
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
 	const attachmentsBlocked = !canSubmitAttachments(docs) || resizingImages > 0;
 	const hasReadyDocs = docs.some((d) => (d.path || d.pending) && !d.uploading && !d.error);
-	const sendBlocked = !ready || !sendReady || sending || resizingImages > 0;
+	const sendBlocked = !ready || sending || resizingImages > 0;
 
 	// Arrow-key nav must scroll the picker, not just select past the visible
 	// edge — mouse/scroll-wheel already worked, but the highlighted row could

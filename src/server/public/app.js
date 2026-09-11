@@ -870,8 +870,15 @@ function App() {
 		sessionStreamWaitersRef.current.delete(id);
 		waiter.resolve(ready);
 	}, []);
+	// Read through refs, not the captured state: a submit that waits for a
+	// reconnect outlives the render it started in, and the stale `connected`
+	// it closed over would still say "down" after the link is back.
+	const connectedRef = useRef(false);
+	const backendUpRef = useRef(true);
+	connectedRef.current = connected;
+	backendUpRef.current = backendUp;
 	const waitForSessionStream = useCallback((id) => {
-		if (!connected || !backendUp) return Promise.resolve(false);
+		if (!connectedRef.current || !backendUpRef.current) return Promise.resolve(false);
 		if (activeSessionIdRef.current === id && esRef.current?.readyState === EventSource.OPEN) return Promise.resolve(true);
 		const existing = sessionStreamWaitersRef.current.get(id);
 		if (existing) return existing.promise;
@@ -885,7 +892,7 @@ function App() {
 		}, 400);
 		sessionStreamWaitersRef.current.set(id, { promise, resolve: resolveWaiter, timer });
 		return promise;
-	}, [activeSessionIdRef, connected, backendUp]);
+	}, [activeSessionIdRef]);
 	const {
 		loadSessions,
 		loadMoreSessions,
@@ -934,6 +941,46 @@ function App() {
 			setBackendUp,
 			applyTheme,
 		});
+	/**
+	 * Resolves once the daemon is reachable again, kicking the reconnect loop
+	 * instead of waiting for its next scheduled attempt. A phone whose screen
+	 * was off, or a daemon that restarted, leaves the page disconnected for as
+	 * long as the retry cadence takes; the user pressing send is the clearest
+	 * possible signal to try right now.
+	 */
+	const awaitConnection = useCallback(
+		(timeoutMs = 6000) => {
+			if (connectedRef.current && backendUpRef.current) return Promise.resolve(true);
+			// The loop sleeps 3s between attempts and skips a kick while one is
+			// scheduled, so a plain call can sit out most of the wait doing
+			// nothing. Drop the scheduled timer and go now, then keep nudging it
+			// about once a second for as long as the user is waiting.
+			const kick = () => {
+				const timer = reconnectTimerRef.current;
+				if (timer && timer !== "pending") {
+					clearTimeout(timer);
+					reconnectTimerRef.current = null;
+				}
+				if (reconnectTimerRef.current !== "pending") startReconnectLoop();
+			};
+			kick();
+			return new Promise((resolve) => {
+				const deadline = Date.now() + timeoutMs;
+				let lastKick = Date.now();
+				const check = () => {
+					if (connectedRef.current && backendUpRef.current) return resolve(true);
+					if (Date.now() >= deadline) return resolve(false);
+					if (Date.now() - lastKick >= 1000) {
+						lastKick = Date.now();
+						kick();
+					}
+					setTimeout(check, 100);
+				};
+				setTimeout(check, 100);
+			});
+		},
+		[startReconnectLoop, reconnectTimerRef],
+	);
 
 	// The sidebar's Delete action — actually removes the session (and its
 	// messages) from disk, unlike the old close/soft-hide it replaced. Drops
@@ -1116,7 +1163,8 @@ function App() {
 				waitForSessionStream,
 				pendingOutgoingRef,
 				setRunning,
-				canSend: () => Boolean(session && connected && backendUp),
+				canSend: () => Boolean(session && connectedRef.current && backendUpRef.current),
+				awaitConnection,
 		}),
 		[
 			planRefineArmedRef,
@@ -1134,6 +1182,7 @@ function App() {
 			setPendingQueue,
 			setInputsRefreshNonce,
 			waitForSessionStream,
+			awaitConnection,
 			pendingOutgoingRef,
 			setRunning,
 			connected,
@@ -1575,8 +1624,17 @@ function App() {
 				startReconnectLoop();
 			}
 		};
+		// Same for the network itself coming back — a phone leaving a dead spot
+		// fires this long before the retry loop's next attempt.
+		const onOnline = () => {
+			if (!connectedRef.current) startReconnectLoop();
+		};
 		document.addEventListener("visibilitychange", onVisibilityChange);
-		return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+		window.addEventListener("online", onOnline);
+		return () => {
+			document.removeEventListener("visibilitychange", onVisibilityChange);
+			window.removeEventListener("online", onOnline);
+		};
 	}, [connected, startReconnectLoop]);
 
 	// Back/forward through browser history moves between sessions too, since

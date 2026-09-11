@@ -6,6 +6,8 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Restarting the daemon told every open tab "This session was closed".** A shutdown closes the sessions it holds in memory, and the browser reported that as an error — the thread is on disk and the page reconnects to it seconds later. The event carries the reason now, and a shutdown is not announced: the status dot already shows the reconnect.
+- **Sending while the page was reconnecting failed instead of waiting.** A phone coming back from a locked screen, or a daemon that just restarted, leaves the page disconnected for as long as the retry loop takes to notice — and a send in that window bounced with "Connection lost", with the typed text only reappearing afterwards. Pressing send now asks for a reconnect immediately (instead of sitting out the retry's 3s sleep), keeps the draft on screen while it waits, and sends as soon as the daemon answers; measured end to end with a daemon restart, the message goes out with no error at all. It gives up after 6 seconds, which is the only case that still reports "Connection lost". The reconnect is also kicked when the browser reports the network back.
 - **The turn timer appeared a round trip after the message was sent.** The composer flips to Abort the moment a send leaves the browser, but the elapsed counter waited for the daemon's `status:running` event to name a start time: measured at 125ms on localhost and 232ms with 150ms of latency, and longer on a phone. It now starts from the send itself and adopts the daemon's timestamp when it arrives, whichever is earlier, so the reading never jumps backwards. Steering into a running turn keeps that turn's own start.
 
 ## 0.31.1

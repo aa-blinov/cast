@@ -25,11 +25,19 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		setPendingQueue,
 		setInputsRefreshNonce,
 		waitForSessionStream,
+		awaitConnection,
 		pendingOutgoingRef,
 		setRunning,
 		canSend,
 	} = context;
-	const connectionReady = canSend?.() ?? true;
+	// Pressing send while the page is reconnecting used to fail on the spot.
+	// It now asks for a reconnect and gives it a few seconds — the usual case
+	// (a phone waking up, a daemon that just restarted) recovers well inside
+	// that, and the message goes out with no error at all.
+	const ensureConnection = async () => {
+		if (canSend?.() ?? true) return true;
+		return (await awaitConnection?.()) === true;
+	};
 	// If a question is pending, treat the composer text as a free-form answer
 	// applied to all questions (one value, repeated). Skips the option picker
 	// entirely — the user types in the composer and hits Enter, same as
@@ -45,7 +53,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		text?.trim() &&
 		!text.trim().startsWith("/")
 	) {
-		if (!connectionReady) {
+		if (!(await ensureConnection())) {
 			showToast?.("Connection lost — answer kept in the composer until the daemon reconnects", "error");
 			return false;
 		}
@@ -109,7 +117,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		}
 		return true;
 	}
-	if (!connectionReady) {
+	if (!(await ensureConnection())) {
 		showToast?.("Connection lost — message kept in the composer until the daemon reconnects", "error");
 		return false;
 	}
