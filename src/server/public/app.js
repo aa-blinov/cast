@@ -764,12 +764,17 @@ function App() {
 	// scroll handler none the wiser (content growth fires no scroll event).
 	useEffect(() => {
 		const inner = messagesInnerRef.current;
-		if (!inner || typeof ResizeObserver === "undefined") return;
+		const box = messagesRef.current;
+		if (!inner || !box || typeof ResizeObserver === "undefined") return;
 		const ro = new ResizeObserver(() => {
 			if (autoScrollRef.current && messagesRef.current)
 				messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
 		});
 		ro.observe(inner);
+		// The viewport shrinking counts too: an on-screen keyboard opening takes
+		// ~390px off the list's height, and content that fitted a moment ago is
+		// then below the fold with no scroll event to notice it.
+		ro.observe(box);
 		return () => ro.disconnect();
 	}, []);
 	const _scrollStreamingFrame = useCallback(() => {
