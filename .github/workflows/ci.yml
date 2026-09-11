@@ -37,6 +37,14 @@ jobs:
         run: npm run build
 
       - name: Run tests
+        # CAST_SESSIONS_DB points at a tmpdir file so the
+        # AgentActorRegistry singleton's watchdog timer (set up by
+        # test/web-bridge.test.ts via src/core/actors.ts) has a safe
+        # path to land on if it fires after the test that started it
+        # has finished — src/core/db.ts's safety guard otherwise throws
+        # when a fire-and-forget background task outlives the test.
+        env:
+          CAST_SESSIONS_DB: ${{ runner.temp }}/cast-ci-sessions-${{ github.run_id }}.db
         run: npm test
 
       - name: Coverage + per-file floor
