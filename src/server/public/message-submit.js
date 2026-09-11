@@ -117,7 +117,11 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		}
 		return true;
 	}
-	if (!(await ensureConnection())) {
+	// Only worth checking when there is a session to send into. A draft's first
+	// message creates the session, and that POST is itself the proof the daemon
+	// is there — its failure is reported verbatim below, rather than pre-judged
+	// from a stream a draft does not have yet.
+	if (activeId && !(await ensureConnection())) {
 		showToast?.("Connection lost — message kept in the composer until the daemon reconnects", "error");
 		return false;
 	}
@@ -215,10 +219,10 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	// Commands wait before dispatch; normal chat waits after its optimistic row
 	// is visible below.
 	if (finalText.startsWith("/")) {
-		if ((await waitForSessionStream?.(id)) === false) {
-			showToast?.("Connection lost — command kept in the composer until the daemon reconnects", "error");
-			return false;
-		}
+		// Best effort: a stream that is still opening delays the dispatch, it
+		// does not cancel it. The connect handler refetches the session, so
+		// anything the command emits in the meantime is picked up there.
+		await waitForSessionStream?.(id);
 		try {
 			const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
 			if (text === "/sessions") await loadSessions();
@@ -342,12 +346,10 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	// reached OPEN. Keep the prompt visible while waiting, then send only after
 	// the live stream is ready so user_message/status/token events cannot race
 	// past an unsubscribed browser tab.
-	const streamReady = (await waitForSessionStream?.(id)) !== false;
-	if (!streamReady) {
-		setRunning(false);
-		if (isCurrentDraft()) showToast?.("Connection lost — message kept locally until the daemon reconnects", "error");
-		return true;
-	}
+	// Same here: waiting orders the events nicely, but a stream that has not
+	// opened yet must not cost the message. The POST below is what actually
+	// sends it, and its failure — the real one — is handled in the catch.
+	await waitForSessionStream?.(id);
 	try {
 		await api("POST", `/api/sessions/${id}/chat`, {
 			text: finalText,

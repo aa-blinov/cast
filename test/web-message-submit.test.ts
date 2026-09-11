@@ -39,12 +39,17 @@ describe("web message submission", () => {
 		expect(setRunning).toHaveBeenCalledWith(true);
 	});
 
-	it("keeps the message pending instead of posting when the SSE connection is unavailable", async () => {
+	it("posts the message even when the event stream is not open yet", async () => {
+		// A stream that is still opening used to cancel the send and report
+		// "Connection lost" — which is what a new chat on a phone hit every
+		// time, since its stream only exists once the session does. The POST is
+		// what sends the message; the connect handler refetches the session, so
+		// nothing that happens in between is lost.
 		vi.mocked(api).mockClear();
 		vi.mocked(api).mockResolvedValue({ ok: true });
-		const selectSession = vi.fn().mockResolvedValue(undefined);
 		const pendingOutgoingRef = { current: new Map() };
 		const setRunning = vi.fn();
+		const showToast = vi.fn();
 		const context = {
 			planRefineArmedRef: { current: false },
 			session: { id: "session-1", messages: [] },
@@ -53,20 +58,49 @@ describe("web message submission", () => {
 			setSession: vi.fn(),
 			pendingOutgoingRef,
 			waitForSessionStream: vi.fn().mockResolvedValue(false),
-			selectSession,
+			selectSession: vi.fn().mockResolvedValue(undefined),
 			setRunning,
-			showToast: vi.fn(),
+			showToast,
 		};
 
 		await submitMessage("hello", undefined, undefined, context);
 
-		expect(selectSession).not.toHaveBeenCalled();
-		expect(api).not.toHaveBeenCalled();
+		expect(api).toHaveBeenCalledWith(
+			"POST",
+			"/api/sessions/session-1/chat",
+			expect.objectContaining({ text: "hello" }),
+		);
+		// Sent, so nothing is left queued for a retry and nothing is reported.
+		expect(pendingOutgoingRef.current.size).toBe(0);
+		expect(showToast).not.toHaveBeenCalled();
+		expect(setRunning).toHaveBeenCalledWith(true);
+		expect(setRunning).not.toHaveBeenCalledWith(false);
+	});
+
+	it("keeps the message for a retry when the post itself fails", async () => {
+		vi.mocked(api).mockClear();
+		vi.mocked(api).mockRejectedValue(new Error("Failed to fetch"));
+		const pendingOutgoingRef = { current: new Map() };
+		const setRunning = vi.fn();
+		const showToast = vi.fn();
+		const context = {
+			planRefineArmedRef: { current: false },
+			session: { id: "session-1", messages: [] },
+			draftVersionRef: { current: 0 },
+			activeId: "session-1",
+			setSession: vi.fn(),
+			pendingOutgoingRef,
+			waitForSessionStream: vi.fn().mockResolvedValue(true),
+			selectSession: vi.fn().mockResolvedValue(undefined),
+			setRunning,
+			showToast,
+		};
+
+		expect(await submitMessage("hello", undefined, undefined, context)).toBe(false);
 		expect(pendingOutgoingRef.current.size).toBe(1);
 		expect([...pendingOutgoingRef.current.values()][0]).toMatchObject({ text: "hello" });
-		// Rolled back when the stream isn't ready — no message was actually sent.
-		expect(setRunning).toHaveBeenNthCalledWith(1, true);
 		expect(setRunning).toHaveBeenLastCalledWith(false);
+		expect(showToast).toHaveBeenCalled();
 	});
 
 	it("does not answer a pending question while the backend is disconnected", async () => {
