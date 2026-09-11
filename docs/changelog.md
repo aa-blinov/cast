@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **The turn timer appeared a round trip after the message was sent.** The composer flips to Abort the moment a send leaves the browser, but the elapsed counter waited for the daemon's `status:running` event to name a start time: measured at 125ms on localhost and 232ms with 150ms of latency, and longer on a phone. It now starts from the send itself and adopts the daemon's timestamp when it arrives, whichever is earlier, so the reading never jumps backwards. Steering into a running turn keeps that turn's own start.
+
 ## 0.31.1
 
 ### Fixed
