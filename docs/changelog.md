@@ -4,6 +4,14 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Added
+
+- **The connection dot in the header says what it means on hover.** It was a coloured dot and nothing else. The tooltip now names the state (connected and idle, a turn running, reconnecting, no connection), which daemon it is talking to, and that daemon's pid and start time — the same facts `cast server status` prints. It is re-read when you point at it, so it is current rather than whatever was true at page load.
+
+### Changed
+
+- **The session's directory is in brackets next to the persona:** `SENIOR DEVELOPER (/home/ubuntu/pet/cast)`.
+
 ### Fixed
 
 - **Restarting the daemon told every open tab "This session was closed".** A shutdown closes the sessions it holds in memory, and the browser reported that as an error — the thread is on disk and the page reconnects to it seconds later. The event carries the reason now, and a shutdown is not announced: the status dot already shows the reconnect.
