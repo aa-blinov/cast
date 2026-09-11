@@ -877,8 +877,24 @@ function App() {
 	const backendUpRef = useRef(true);
 	connectedRef.current = connected;
 	backendUpRef.current = backendUp;
+	/**
+	 * Whether a message can go out right now: the daemon answers, and either
+	 * this session's event stream is live or there is no session yet. A draft
+	 * ("new chat") deliberately has no stream — startDraft closes the previous
+	 * one and waits for the first message to create the session — so requiring
+	 * `connected` there declared the page disconnected and refused the very
+	 * message that was supposed to create the session.
+	 */
+	const connectionUsable = useCallback(
+		() => backendUpRef.current && (connectedRef.current || activeSessionIdRef.current === null),
+		[activeSessionIdRef],
+	);
 	const waitForSessionStream = useCallback((id) => {
-		if (!connectedRef.current || !backendUpRef.current) return Promise.resolve(false);
+		// Only a daemon that isn't answering is hopeless. `connected` is false
+		// for the moment it takes a fresh EventSource to open — which is exactly
+		// the moment a just-committed draft sends its first message — and the
+		// waiter below is what onopen settles.
+		if (!backendUpRef.current) return Promise.resolve(false);
 		if (activeSessionIdRef.current === id && esRef.current?.readyState === EventSource.OPEN) return Promise.resolve(true);
 		const existing = sessionStreamWaitersRef.current.get(id);
 		if (existing) return existing.promise;
@@ -889,7 +905,7 @@ function App() {
 		const timer = setTimeout(() => {
 			sessionStreamWaitersRef.current.delete(id);
 			resolveWaiter(false);
-		}, 400);
+		}, 1500);
 		sessionStreamWaitersRef.current.set(id, { promise, resolve: resolveWaiter, timer });
 		return promise;
 	}, [activeSessionIdRef]);
@@ -950,7 +966,7 @@ function App() {
 	 */
 	const awaitConnection = useCallback(
 		(timeoutMs = 6000) => {
-			if (connectedRef.current && backendUpRef.current) return Promise.resolve(true);
+			if (connectionUsable()) return Promise.resolve(true);
 			// The loop sleeps 3s between attempts and skips a kick while one is
 			// scheduled, so a plain call can sit out most of the wait doing
 			// nothing. Drop the scheduled timer and go now, then keep nudging it
@@ -968,7 +984,7 @@ function App() {
 				const deadline = Date.now() + timeoutMs;
 				let lastKick = Date.now();
 				const check = () => {
-					if (connectedRef.current && backendUpRef.current) return resolve(true);
+					if (connectionUsable()) return resolve(true);
 					if (Date.now() >= deadline) return resolve(false);
 					if (Date.now() - lastKick >= 1000) {
 						lastKick = Date.now();
@@ -979,7 +995,7 @@ function App() {
 				setTimeout(check, 100);
 			});
 		},
-		[startReconnectLoop, reconnectTimerRef],
+		[startReconnectLoop, reconnectTimerRef, connectionUsable],
 	);
 
 	// The sidebar's Delete action — actually removes the session (and its
@@ -1163,7 +1179,7 @@ function App() {
 				waitForSessionStream,
 				pendingOutgoingRef,
 				setRunning,
-				canSend: () => Boolean(session && connectedRef.current && backendUpRef.current),
+				canSend: () => Boolean(session && connectionUsable()),
 				awaitConnection,
 		}),
 		[
@@ -1183,6 +1199,7 @@ function App() {
 			setInputsRefreshNonce,
 			waitForSessionStream,
 			awaitConnection,
+			connectionUsable,
 			pendingOutgoingRef,
 			setRunning,
 			connected,
@@ -1866,7 +1883,7 @@ function App() {
 					<${icons.chevronRight} class="chevron-icon" />
 				</button>
 				<span class="header-logo">
-					<span class="status-dot ${backendUp ? (connected ? "connected" : "reconnecting") : "offline"}" />
+					<span class="status-dot ${backendUp ? (connected || connectionUsable() ? "connected" : "reconnecting") : "offline"}" />
 				</span>
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
@@ -2135,7 +2152,7 @@ function App() {
 						</button>
 					`
 					}
-					<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connected && backendUp)} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+					<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
 				</div>
 			</main>
 
