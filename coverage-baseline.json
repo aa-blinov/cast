@@ -1,0 +1,624 @@
+{
+	"generatedAt": "2026-09-11T14:48:04.269Z",
+	"minLinesToTrack": 70,
+	"files": {
+		"src/core/actors.ts": {
+			"lines": 94.55,
+			"branches": 80.23,
+			"functions": 95.74,
+			"statements": 94.55
+		},
+		"src/core/agents.ts": {
+			"lines": 100,
+			"branches": 75.86,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/checkpoint-validation.ts": {
+			"lines": 96.58,
+			"branches": 90,
+			"functions": 100,
+			"statements": 96.58
+		},
+		"src/core/checkpoint.ts": {
+			"lines": 91.61,
+			"branches": 64.15,
+			"functions": 100,
+			"statements": 91.61
+		},
+		"src/core/compaction-reminder.ts": {
+			"lines": 84.12,
+			"branches": 88.37,
+			"functions": 100,
+			"statements": 84.12
+		},
+		"src/core/config.ts": {
+			"lines": 90.07,
+			"branches": 72.89,
+			"functions": 100,
+			"statements": 90.07
+		},
+		"src/core/context-files.ts": {
+			"lines": 100,
+			"branches": 92.68,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/date-rollover-reminder.ts": {
+			"lines": 90.69,
+			"branches": 85.71,
+			"functions": 100,
+			"statements": 90.69
+		},
+		"src/core/db.ts": {
+			"lines": 80.98,
+			"branches": 65.51,
+			"functions": 100,
+			"statements": 80.98
+		},
+		"src/core/frontmatter.ts": {
+			"lines": 96.61,
+			"branches": 93.47,
+			"functions": 100,
+			"statements": 96.61
+		},
+		"src/core/hooks.ts": {
+			"lines": 94.57,
+			"branches": 78.74,
+			"functions": 94.59,
+			"statements": 94.57
+		},
+		"src/core/image-resize.ts": {
+			"lines": 90.36,
+			"branches": 82.35,
+			"functions": 100,
+			"statements": 90.36
+		},
+		"src/core/interrupt-reminder.ts": {
+			"lines": 100,
+			"branches": 90.47,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/llm.ts": {
+			"lines": 94.76,
+			"branches": 87.13,
+			"functions": 100,
+			"statements": 94.76
+		},
+		"src/core/loop.ts": {
+			"lines": 84.87,
+			"branches": 86.83,
+			"functions": 86.66,
+			"statements": 84.87
+		},
+		"src/core/mcp.ts": {
+			"lines": 88.6,
+			"branches": 81.76,
+			"functions": 88.88,
+			"statements": 88.6
+		},
+		"src/core/memory-files-index.ts": {
+			"lines": 91.87,
+			"branches": 72.36,
+			"functions": 100,
+			"statements": 91.87
+		},
+		"src/core/memory-files.ts": {
+			"lines": 80,
+			"branches": 93.75,
+			"functions": 90.47,
+			"statements": 80
+		},
+		"src/core/memory.ts": {
+			"lines": 91.73,
+			"branches": 77.76,
+			"functions": 92.66,
+			"statements": 91.73
+		},
+		"src/core/migrations.ts": {
+			"lines": 94.41,
+			"branches": 92,
+			"functions": 100,
+			"statements": 94.41
+		},
+		"src/core/models-dev.ts": {
+			"lines": 95.49,
+			"branches": 77.77,
+			"functions": 100,
+			"statements": 95.49
+		},
+		"src/core/open-work-gate.ts": {
+			"lines": 100,
+			"branches": 95.45,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/permissions.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/personas.ts": {
+			"lines": 95.78,
+			"branches": 86.04,
+			"functions": 100,
+			"statements": 95.78
+		},
+		"src/core/plan.ts": {
+			"lines": 93.43,
+			"branches": 89.91,
+			"functions": 100,
+			"statements": 93.43
+		},
+		"src/core/project-root.ts": {
+			"lines": 100,
+			"branches": 95.65,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/project.ts": {
+			"lines": 83.82,
+			"branches": 69.9,
+			"functions": 96.15,
+			"statements": 83.82
+		},
+		"src/core/prompts.ts": {
+			"lines": 79.48,
+			"branches": 50,
+			"functions": 100,
+			"statements": 79.48
+		},
+		"src/core/readline.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/rules.ts": {
+			"lines": 97.94,
+			"branches": 93.3,
+			"functions": 100,
+			"statements": 97.94
+		},
+		"src/core/runner.ts": {
+			"lines": 100,
+			"branches": 92.85,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/session-query.ts": {
+			"lines": 100,
+			"branches": 90,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/session-title.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/session.ts": {
+			"lines": 95.54,
+			"branches": 84.1,
+			"functions": 100,
+			"statements": 95.54
+		},
+		"src/core/settings.ts": {
+			"lines": 91.62,
+			"branches": 90,
+			"functions": 100,
+			"statements": 91.62
+		},
+		"src/core/skills.ts": {
+			"lines": 92.48,
+			"branches": 83.18,
+			"functions": 100,
+			"statements": 92.48
+		},
+		"src/core/ssh.ts": {
+			"lines": 83.87,
+			"branches": 76,
+			"functions": 92.85,
+			"statements": 83.87
+		},
+		"src/core/stdin-manager.ts": {
+			"lines": 73.17,
+			"branches": 95.45,
+			"functions": 41.17,
+			"statements": 73.17
+		},
+		"src/core/subagents.ts": {
+			"lines": 89.74,
+			"branches": 57.14,
+			"functions": 100,
+			"statements": 89.74
+		},
+		"src/core/system-reminder.ts": {
+			"lines": 84.21,
+			"branches": 100,
+			"functions": 66.66,
+			"statements": 84.21
+		},
+		"src/core/telemetry.ts": {
+			"lines": 90.2,
+			"branches": 74.52,
+			"functions": 85.29,
+			"statements": 90.2
+		},
+		"src/core/todo.ts": {
+			"lines": 100,
+			"branches": 87.09,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/tools.ts": {
+			"lines": 97.02,
+			"branches": 76.92,
+			"functions": 100,
+			"statements": 97.02
+		},
+		"src/core/turn-runner-state.ts": {
+			"lines": 81.81,
+			"branches": 82.75,
+			"functions": 100,
+			"statements": 81.81
+		},
+		"src/core/vendors.ts": {
+			"lines": 93.81,
+			"branches": 81.81,
+			"functions": 100,
+			"statements": 93.81
+		},
+		"src/core/worktree.ts": {
+			"lines": 89.66,
+			"branches": 81.9,
+			"functions": 95,
+			"statements": 89.66
+		},
+		"src/core/acp/bridge.ts": {
+			"lines": 87.83,
+			"branches": 76.31,
+			"functions": 85.71,
+			"statements": 87.83
+		},
+		"src/core/tools/bash-background.ts": {
+			"lines": 92.25,
+			"branches": 82.24,
+			"functions": 96,
+			"statements": 92.25
+		},
+		"src/core/tools/bash.ts": {
+			"lines": 78.22,
+			"branches": 88.59,
+			"functions": 76.47,
+			"statements": 78.22
+		},
+		"src/core/tools/files.ts": {
+			"lines": 86.87,
+			"branches": 81.37,
+			"functions": 100,
+			"statements": 86.87
+		},
+		"src/core/tools/long-running.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/core/tools/search.ts": {
+			"lines": 77.39,
+			"branches": 74.79,
+			"functions": 94.11,
+			"statements": 77.39
+		},
+		"src/core/tools/shared.ts": {
+			"lines": 89.47,
+			"branches": 92.5,
+			"functions": 100,
+			"statements": 89.47
+		},
+		"src/core/tools/skill.ts": {
+			"lines": 75.55,
+			"branches": 75,
+			"functions": 50,
+			"statements": 75.55
+		},
+		"src/core/tools/ssh.ts": {
+			"lines": 76.62,
+			"branches": 64.4,
+			"functions": 50,
+			"statements": 76.62
+		},
+		"src/core/tools/task.ts": {
+			"lines": 85.36,
+			"branches": 87.75,
+			"functions": 100,
+			"statements": 85.36
+		},
+		"src/core/tools/web.ts": {
+			"lines": 92.05,
+			"branches": 80.25,
+			"functions": 94.73,
+			"statements": 92.05
+		},
+		"src/pickers/domain.ts": {
+			"lines": 92.09,
+			"branches": 84.49,
+			"functions": 95,
+			"statements": 92.09
+		},
+		"src/pickers/match.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/pickers/types.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/server/api-v1.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/server/commands.ts": {
+			"lines": 93.71,
+			"branches": 70,
+			"functions": 60,
+			"statements": 93.71
+		},
+		"src/server/daemon-log.ts": {
+			"lines": 100,
+			"branches": 75,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/server/daemon-state.ts": {
+			"lines": 82.85,
+			"branches": 88.37,
+			"functions": 94.11,
+			"statements": 82.85
+		},
+		"src/server/inputs.ts": {
+			"lines": 94.44,
+			"branches": 85.71,
+			"functions": 80,
+			"statements": 94.44
+		},
+		"src/ui/ChatLog.tsx": {
+			"lines": 79.87,
+			"branches": 79.24,
+			"functions": 94.11,
+			"statements": 79.87
+		},
+		"src/ui/Spinner.tsx": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/commands.ts": {
+			"lines": 75.49,
+			"branches": 64.43,
+			"functions": 98.78,
+			"statements": 75.49
+		},
+		"src/ui/display-width.ts": {
+			"lines": 92,
+			"branches": 89.74,
+			"functions": 100,
+			"statements": 92
+		},
+		"src/ui/markdown-terminal.ts": {
+			"lines": 96.45,
+			"branches": 91.78,
+			"functions": 91.3,
+			"statements": 96.45
+		},
+		"src/ui/paste.ts": {
+			"lines": 100,
+			"branches": 93.33,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/plan-question.ts": {
+			"lines": 100,
+			"branches": 85.71,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/readClipboardImage.ts": {
+			"lines": 70,
+			"branches": 52.17,
+			"functions": 100,
+			"statements": 70
+		},
+		"src/ui/statusbar.tsx": {
+			"lines": 83.97,
+			"branches": 82,
+			"functions": 73.07,
+			"statements": 83.97
+		},
+		"src/ui/syntax.ts": {
+			"lines": 97.36,
+			"branches": 93.02,
+			"functions": 91.66,
+			"statements": 97.36
+		},
+		"src/ui/task-tool-summary.ts": {
+			"lines": 100,
+			"branches": 94.11,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/input/draft-layout.ts": {
+			"lines": 80.43,
+			"branches": 95.23,
+			"functions": 66.66,
+			"statements": 80.43
+		},
+		"src/ui/input/input-parser.ts": {
+			"lines": 89.88,
+			"branches": 85.71,
+			"functions": 60,
+			"statements": 89.88
+		},
+		"src/ui/input/keybindings.ts": {
+			"lines": 98.24,
+			"branches": 86.66,
+			"functions": 100,
+			"statements": 98.24
+		},
+		"src/ui/input/keys.ts": {
+			"lines": 82.14,
+			"branches": 66.02,
+			"functions": 70,
+			"statements": 82.14
+		},
+		"src/ui/input/path-complete.ts": {
+			"lines": 100,
+			"branches": 87.5,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/input/prompt-history.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/input/textarea.ts": {
+			"lines": 73.05,
+			"branches": 86,
+			"functions": 77.41,
+			"statements": 73.05
+		},
+		"src/ui/themes/ayu.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/cast.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/catppuccin.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/dracula.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/everforest.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/github.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/gruvbox.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/index.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/kanagawa.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/molokai.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/monokai.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/night-owl.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/nord.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/one-dark.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/registry.ts": {
+			"lines": 90.38,
+			"branches": 100,
+			"functions": 50,
+			"statements": 90.38
+		},
+		"src/ui/themes/rose-pine.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/solarized.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/synthwave-84.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/tokyo-night.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/themes/tomorrow-night.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		}
+	}
+}

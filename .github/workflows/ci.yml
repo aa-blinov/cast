@@ -38,3 +38,16 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Coverage + per-file floor
+        # Runs the vitest suite with v8 coverage, then checks every
+        # tracked file in coverage-baseline.json against its committed
+        # line-coverage floor. Global thresholds (lines 70 / branches
+        # 75 / functions 85) live in vitest.config.ts; the per-file
+        # floors that catch "one module quietly lost 20pp" live in
+        # coverage-baseline.json and ratchet up only when someone
+        # commits tests that raise them. See scripts/check-coverage-
+        # floor.mjs and scripts/sync-coverage-baseline.mjs.
+        run: |
+          npm run coverage
+          npm run coverage:check
