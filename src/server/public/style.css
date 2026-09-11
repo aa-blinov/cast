@@ -167,6 +167,12 @@ body.resizing-sidebar * { user-select: none; }
    every time; same story for .modal-confirm/.modal-share/.modal-preview. */
 .modal-status-body {
 	padding: 12px 14px;
+	/* The modal is a flex column with a max height; a body without these two
+	   refuses to shrink (min-height defaults to its content) and the last rows
+	   are drawn below the modal, over the page. A long model id or branch name
+	   is all it takes. */
+	min-height: 0;
+	overflow-y: auto;
 }
 
 /* ── Confirm modal ────────────────────────────────────────────────── */
@@ -174,6 +180,10 @@ body.resizing-sidebar * { user-select: none; }
 	padding: 16px 14px 4px;
 	font-size: .85rem;
 	color: var(--text);
+	/* Same reason as .modal-status-body — a long message (a path-heavy confirm)
+	   would otherwise run past the bottom edge. */
+	min-height: 0;
+	overflow-y: auto;
 }
 
 
