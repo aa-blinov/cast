@@ -223,7 +223,7 @@ export type WebEvent =
 	| { type: "session_update"; session: SessionSummary }
 	| { type: "decision_state"; question: PlanQuestion | undefined; planTransition: { kind: "done" } | undefined }
 	| { type: "session_end"; usage: SessionState["usage"]; messageCount: number }
-	| { type: "session_closed" }
+	| { type: "session_closed"; reason?: "shutdown" }
 	| { type: "turn_meta"; model: string; provider: string; totalMs: number }
 	| { type: "plan_decision"; content: string }
 	/** Non-error status message (e.g. an automatic model switch) — the client
@@ -2883,7 +2883,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 		// Told before removal, and before clearing listeners, so any open SSE
 		// connection gets one last frame to close itself on (see server.ts).
-		broadcast(ws, { type: "session_closed" });
+		// The reason rides along: a daemon shutting down closes every session
+		// it holds, and the browser must not report that as "this session was
+		// closed" — the session is on disk and comes back with the daemon.
+		broadcast(ws, { type: "session_closed", ...(reason ? { reason } : {}) });
 		ws.listeners.clear();
 		const eviction = idleSessionEvictions.get(sessionId);
 		if (eviction) clearTimeout(eviction);

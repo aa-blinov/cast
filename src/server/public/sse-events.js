@@ -435,8 +435,11 @@ export function handleSseEvent(event, context) {
 			addNotice("Plan steps still open — max retries reached, ending turn");
 			break;
 		case "session_closed":
+			// reason "shutdown": the daemon is restarting, not closing the
+			// thread. The status dot already shows it, and the page reconnects
+			// to this very session on its own.
 			if (selfClosingRef.current === activeId) selfClosingRef.current = null;
-			else showToast("This session was closed", "error");
+			else if (event.reason !== "shutdown") showToast("This session was closed", "error");
 			break;
 	}
 }
