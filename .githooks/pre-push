@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pre-push hook for cast — runs the full vitest suite before push so the
+# kind of latent failure we saw with c781bed (a test that was never
+# actually green) doesn't reach CI. Coverage and per-file floor checks
+# stay in CI; the pre-push hook only needs to catch "tests don't even
+# pass on this machine" cases quickly.
+#
+# Bypass with `git push --no-verify` when you have a reason (CI already
+# green on the same SHA from another machine, or you're pushing a docs/
+# only change and the hook is the wrong gate for it).
+set -euo pipefail
+
+echo "[pre-push] running npm test before push..."
+if ! npm test; then
+	echo "" >&2
+	echo "[pre-push] npm test failed — push aborted." >&2
+	echo "[pre-push] bypass with: git push --no-verify" >&2
+	exit 1
+fi
+echo "[pre-push] all tests passed."
