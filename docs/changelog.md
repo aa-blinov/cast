@@ -6,7 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
-- **The connection dot in the header says what it means on hover.** It was a coloured dot and nothing else. The tooltip now names the state (connected and idle, a turn running, reconnecting, no connection), which daemon it is talking to, and that daemon's pid and start time — the same facts `cast server status` prints. It is re-read when you point at it, so it is current rather than whatever was true at page load.
+- **The connection dot in the header says what it means on hover:** `Connected`, `Reconnecting…` or `No connection`. It was a coloured dot and nothing else.
 
 ### Changed
 
@@ -14,6 +14,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **A tooltip kept the text the element was born with.** The themed tooltips copy an element's `title` once, so every title that changes with state — the connection dot, Abort while it is aborting, Send while it is sending — showed its original wording forever. The text is re-read each time the pointer arrives.
 - **Restarting the daemon told every open tab "This session was closed".** A shutdown closes the sessions it holds in memory, and the browser reported that as an error — the thread is on disk and the page reconnects to it seconds later. The event carries the reason now, and a shutdown is not announced: the status dot already shows the reconnect.
 - **The first message in a new, empty chat could fail with "Connection lost".** A draft has no event stream on purpose — it is created by the very message being sent — and two separate checks treated that as a dead connection: the composer's "can I send?" (so a new chat showed "Reconnecting…" and refused outright), and the wait for the stream after the session was created (so on a slow link the message was dropped back into the composer once the wait timed out). Sending is gated on the daemon answering now, a live stream is required only once the session exists, and waiting for the stream orders the events without ever cancelling the send — the POST is what sends the message, and only its own failure is reported (and retried). Verified with 400-900ms of latency per request and with the event stream held open for 3-5 seconds: the message goes out every time, with no error.
 - **Sending while the page was reconnecting failed instead of waiting.** A phone coming back from a locked screen, or a daemon that just restarted, leaves the page disconnected for as long as the retry loop takes to notice — and a send in that window bounced with "Connection lost", with the typed text only reappearing afterwards. Pressing send now asks for a reconnect immediately (instead of sitting out the retry's 3s sleep), keeps the draft on screen while it waits, and sends as soon as the daemon answers; measured end to end with a daemon restart, the message goes out with no error at all. It gives up after 6 seconds, which is the only case that still reports "Connection lost". The reconnect is also kicked when the browser reports the network back.

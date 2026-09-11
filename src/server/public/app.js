@@ -207,7 +207,15 @@ function initTooltips() {
 		// previous wiring) was too late — by the time the timer
 		// fired, the browser had already grabbed the title text
 		// for its own bubble.
-		el.addEventListener("mouseenter", () => el.removeAttribute("title"));
+		el.addEventListener("mouseenter", () => {
+			// Re-read it: data-tooltip is written once at setup, but plenty of
+			// titles in here change with state (the connection dot, Abort while
+			// aborting, Send while sending) and the bubble was showing whatever
+			// the element was born with.
+			const current = el.getAttribute("title");
+			if (current) el.setAttribute("data-tooltip", current);
+			el.removeAttribute("title");
+		});
 		el.addEventListener("mouseleave", () => {
 			cancelPending(el);
 			hide(el);
@@ -1632,38 +1640,11 @@ function App() {
 		initClientState().finally(() => setBootstrapping(false));
 	}, []);
 
-	// The daemon behind this page, for the status dot's tooltip. One cheap read
-	// on mount and after every reconnect — the same endpoint `cast server
-	// status` prints, so the dot can say which daemon it is talking to and
-	// since when, not just that a socket is open.
-	const [serverStatus, setServerStatus] = useState(null);
-	const refreshServerStatus = useCallback(() => {
-		api("GET", "/api/server/status")
-			.then((s) => s && setServerStatus(s))
-			.catch(() => {});
-	}, []);
-	useEffect(() => {
-		refreshServerStatus();
-	}, [reconnectNonce, refreshServerStatus]);
 	const statusDotState = backendUp ? (connected || connectionUsable() ? "connected" : "reconnecting") : "offline";
-	const statusDotTitle = useMemo(() => {
-		const where = serverStatus?.running ? `${serverStatus.host}:${serverStatus.port}` : window.location.host;
-		const lines = [];
-		if (statusDotState === "offline") lines.push(`No connection to ${where} — retrying`);
-		else if (statusDotState === "reconnecting") lines.push(`Reconnecting to ${where}`);
-		else if (!activeId) lines.push(`Connected to ${where} — this chat becomes a session with your first message`);
-		else lines.push(`Connected to ${where} — ${running ? "turn running" : "idle"}`);
-		// Only while it is actually answering: after a restart the pid and start
-		// time on hand are the previous process's, and reporting those under
-		// "Reconnecting" would be a confident lie.
-		if (serverStatus?.running && statusDotState === "connected") {
-			const startedAt = serverStatus.startedAt ? new Date(serverStatus.startedAt) : null;
-			lines.push(
-				`Daemon pid ${serverStatus.pid}${serverStatus.foreground ? " (foreground)" : ""}${startedAt ? `, up since ${startedAt.toLocaleString()}` : ""}`,
-			);
-		}
-		return lines.join("\n");
-	}, [statusDotState, serverStatus, activeId, running]);
+	// Just the connection, in as few words as it takes — the dot is a glance,
+	// not a report. `cast server status` and Settings > Server have the rest.
+	const statusDotTitle =
+		statusDotState === "connected" ? "Connected" : statusDotState === "reconnecting" ? "Reconnecting…" : "No connection";
 
 	// Reconnect on visibility change — when the tab comes back to
 	// foreground after being backgrounded, the SSE connection may have
@@ -1917,8 +1898,8 @@ function App() {
 				</button>
 				<!-- The title sits on the wrapper too: the dot itself is 10px, and
 				     the padding around it is part of what a pointer aims at. -->
-				<span class="header-logo" title=${statusDotTitle} onPointerEnter=${refreshServerStatus}>
-					<span class="status-dot ${statusDotState}" aria-label=${statusDotTitle} role="img" />
+				<span class="header-logo" title=${statusDotTitle}>
+					<span class="status-dot ${statusDotState}" title=${statusDotTitle} aria-label=${statusDotTitle} role="img" />
 				</span>
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
