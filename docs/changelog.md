@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.31.1
 
 ### Fixed
 
