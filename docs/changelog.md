@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **Mobile: the keyboard closed on send and popped back up mid-request.** Tapping Send moved focus from the textarea to the button — the keyboard started sliding away — and the composer only refocused the textarea after `onSubmit` had resolved, so the keyboard came back a network round trip later, right as the answer started loading. The composer buttons no longer take focus on press, and the textarea is refocused synchronously inside the tap, so the keyboard simply stays up. Focus also no longer ends up on the Abort button that replaces Send when the turn starts.
+- **Mobile: the persona above the composer wrapped mid-label and the path ran off the screen.** The role line is one line now, and the path is truncated from the left (`…/scratchpad/panel/home/proj1`), since the end of it is what names the project. The full path stays in the tooltip, and a wide screen still shows all of it.
+
 ## 0.31.0
 
 ### Removed

@@ -2034,7 +2034,7 @@ function App() {
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 							${
 								session?.cwd &&
-								html`<span class="composer-role-cwd" title=${session.cwd}>${session.cwd}</span>`
+								html`<span class="composer-role-cwd" title=${session.cwd}>${`\u200e${session.cwd}`}</span>`
 							}
 							${session?.worktree && html`<span class="composer-role-mode composer-role-worktree">worktree</span>`}
 						</div>

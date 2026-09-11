@@ -610,6 +610,10 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .composer-role-left {
 	display: flex; align-items: center; gap: 6px;
 	color: var(--persona);
+	/* The path is the one part allowed to shrink; the persona keeps its own
+	   width and stays on one line (it wrapped mid-label on a phone). */
+	min-width: 0;
+	white-space: nowrap;
 }
 .composer-role-dot {
 	width: 5px; height: 5px;
@@ -630,6 +634,12 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	/* Truncate from the left: on a phone the end of the path is what names the
+	   project, the start is /home/<user>. An RTL paragraph puts the ellipsis at
+	   the start; the U+200E the markup prepends keeps the leading "/" from
+	   being reordered to the other end. */
+	direction: rtl;
+	text-align: left;
 }
 .composer-role-mode {
 	font-size: .65rem;
