@@ -4,6 +4,8 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.31.2
+
 ### Added
 
 - **The connection dot in the header says what it means on hover:** `Connected`, `Reconnecting…` or `No connection`. It was a coloured dot and nothing else.
@@ -15,6 +17,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **`grep` (and `glob`) against a sibling directory returned a path the model could not read.** With `path: ../proj-extra`, rg was run with `cwd: ../proj-extra` and the relative argument `.`, so a hit in `b.txt` came back as `b.txt:1:hit here` — a bare basename the model then couldn't `read`. The directory search path is now resolved to an absolute root, rg is run with that as its cwd, and rg's output is rewritten so every path is absolute again. The JS fallback already produced absolute paths and is unchanged.
 - **"Load more" in the sidebar looked like it ignored the click.** The button had no pending state at all: the next page of sessions appeared 200ms later on a fast link and well past half a second on a phone, with nothing happening in between. It now shows a spinner and refuses a second click while the page is on its way — measured at 27ms from the click, whatever the latency. While it spins, the button drops its frame: there is nothing to press, so only the spinner is left.
 - **The Status dialog spilled its last rows outside the box.** It is a flex column with a capped height, and its body never declared that it may shrink and scroll — so with a long model id, provider name or branch, "Git branch" and "Worktree" were drawn below the dialog, on top of the page behind it. The body scrolls inside the dialog now. The confirm dialog had the same gap and got the same fix.
 - **A tooltip kept the text the element was born with.** The themed tooltips copy an element's `title` once, so every title that changes with state — the connection dot, Abort while it is aborting, Send while it is sending — showed its original wording forever. The text is re-read each time the pointer arrives.

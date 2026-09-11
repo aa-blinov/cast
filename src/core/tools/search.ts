@@ -9,13 +9,14 @@
 import { execFile } from "node:child_process";
 import { constants, type Dirent } from "node:fs";
 import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "../config.ts";
 import { formatSize, relativeToCwd, resolvePath, type ToolResult, toolError } from "./shared.ts";
 
 const REGEX_ESCAPE_RE = /[.*+?^${}()|[\]\\]/g;
 const SEARCH_PATH_PREFIX_RE = /^\.\//gm;
+const RG_PATH_LINE_RE = /^([^:\n]+):/gm;
 const PERMISSION_DENIED_RE = /operation not permitted|permission denied/i;
 
 // execFile (not execFileSync) — the sync variant blocks the whole Node event
@@ -37,6 +38,28 @@ function abortedSearchResult(): ToolResult {
 
 function throwIfSearchAborted(signal: AbortSignal | undefined): void {
 	if (signal?.aborted) throw new SearchAbortedError();
+}
+
+// rg with `cwd: root` prints paths relative to `root` — including just the
+// basename for `rg pattern .`, which is the case that breaks the model's
+// follow-up `read` (a hit in `/w/proj-extra/b.txt` was returned as `b.txt`).
+// Reattach the root, then hand the absolute path to the same relativeToCwd
+// helper the JS fallback uses, so the two paths agree: relative to cwd
+// when the file really is under cwd, absolute otherwise. rg sometimes
+// prefixes a relative path with `./` (`./b.txt`) — strip it so the join
+// doesn't leave `/root/./b.txt` in the output.
+function relativizeRgPaths(stdout: string, root: string, cwd: string): string {
+	const prefix = root.endsWith(sep) ? root : root + sep;
+	return stdout.replace(RG_PATH_LINE_RE, (_match, rel) => {
+		let absPath: string;
+		if (isAbsolute(rel) || rel.startsWith(prefix)) {
+			absPath = rel;
+		} else {
+			const cleaned = rel.startsWith("./") || rel.startsWith(".\\") ? rel.slice(2) : rel;
+			absPath = `${prefix}${cleaned}`;
+		}
+		return `${relativeToCwd(absPath, cwd)}:`;
+	});
 }
 
 // ============================================================================
@@ -491,21 +514,27 @@ export async function execGrep(
 		const searchPathIsDirectory = await stat(searchPath)
 			.then((stats) => stats.isDirectory())
 			.catch(() => false);
-		const { stdout } = await execFileAsync(
-			"rg",
-			[...flags, "--", pattern, searchPathIsDirectory ? "." : searchPath],
-			{
-				encoding: "utf-8",
-				timeout: 10_000,
-				maxBuffer: config.maxToolOutputBytes,
-				signal,
-				...(searchPathIsDirectory ? { cwd: searchPath } : {}),
-			},
-		);
-		// Match globs relative to the requested directory, rather than an
-		// absolute command argument whose parent names could accidentally match
-		// a directory component. The fallback uses the same root-relative form.
-		output = searchPathIsDirectory ? stdout.replace(SEARCH_PATH_PREFIX_RE, "") : stdout;
+		// Resolve to an absolute root before handing it to rg, so the paths it
+		// prints back are easy to turn into paths the model can `read` again.
+		// With a relative cwd, rg's output is relative to that cwd — and for
+		// `rg pattern .` in `cwd: ../proj-extra`, the path comes back as the
+		// bare basename (`b.txt:1:…`), which resolves to nothing from the
+		// daemon's cwd.
+		const searchRoot = searchPathIsDirectory ? resolvePath(searchPath, cwd) : undefined;
+		const { stdout } = await execFileAsync("rg", [...flags, "--", pattern, searchRoot ? "." : searchPath], {
+			encoding: "utf-8",
+			timeout: 10_000,
+			maxBuffer: config.maxToolOutputBytes,
+			signal,
+			...(searchRoot ? { cwd: searchRoot } : {}),
+		});
+		// The single-file path already returns an absolute or usable relative
+		// path (rg prints what it was given). The directory path needs the
+		// root glued back on. Match globs relative to the requested directory,
+		// rather than an absolute command argument whose parent names could
+		// accidentally match a directory component — the fallback uses the
+		// same root-relative form.
+		output = searchRoot ? relativizeRgPaths(stdout, searchRoot, cwd) : stdout.replace(SEARCH_PATH_PREFIX_RE, "");
 	} catch (err) {
 		if (signal?.aborted) return abortedSearchResult();
 		// rg's exit codes: 0 = matches found, 1 = ran cleanly but nothing
