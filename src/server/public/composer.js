@@ -15,6 +15,16 @@ const PERSONA_CMD_RE = /^\/persona\s+(\S*)$/i;
 
 const html = htm.bind(h);
 
+/**
+ * Keeps the caret (and with it the on-screen keyboard) in the textarea when a
+ * composer button is pressed: the default pointerdown behaviour moves focus to
+ * the button, which on a phone closes the keyboard before the tap has even
+ * fired its click.
+ */
+function keepComposerFocus(event) {
+	event.preventDefault();
+}
+
 export function canSubmitAttachments(docs) {
 	return docs.every((doc) => !doc.uploading && !doc.error);
 }
@@ -204,7 +214,15 @@ export function Composer({
 		setImages([]);
 		setDocs([]);
 		setCmdVisible(false);
-		if (textareaRef.current) textareaRef.current.style.height = "auto";
+		if (textareaRef.current) {
+			textareaRef.current.style.height = "auto";
+			// Synchronously, inside the tap/keypress that submitted: a mobile
+			// browser only keeps (or re-opens) the on-screen keyboard for a
+			// focus call made during a user gesture. This used to happen after
+			// onSubmit resolved, so the keyboard slid away on send and then
+			// jumped back up mid-request.
+			textareaRef.current.focus();
+		}
 		setSending(true);
 		// Brief debounce to prevent double-Enter spam, not tied to network
 		setTimeout(() => setSending(false), 400);
@@ -222,8 +240,6 @@ export function Composer({
 							textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 150)}px`;
 						}
 					});
-				} else {
-					requestAnimationFrame(() => textareaRef.current?.focus());
 				}
 			})
 			.catch(() => {
@@ -441,8 +457,8 @@ export function Composer({
 				/>
 				${
 						running
-						? html`<button class="composer-abort" onClick=${onAbort} disabled=${aborting} aria-label=${aborting ? "Aborting…" : "Abort"} title=${aborting ? "Aborting…" : sendReady ? "Abort (Esc)" : "Abort — waiting for connection"} aria-busy=${aborting ? "true" : "false"}><${aborting ? icons.spinner : icons.stop} /></button>`
-						: html`<button class="composer-send" onClick=${handleSubmit} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></button>`
+						? html`<button class="composer-abort" onPointerDown=${keepComposerFocus} onClick=${onAbort} disabled=${aborting} aria-label=${aborting ? "Aborting…" : "Abort"} title=${aborting ? "Aborting…" : sendReady ? "Abort (Esc)" : "Abort — waiting for connection"} aria-busy=${aborting ? "true" : "false"}><${aborting ? icons.spinner : icons.stop} /></button>`
+						: html`<button class="composer-send" onPointerDown=${keepComposerFocus} onClick=${handleSubmit} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></button>`
 				}
 			</div>
 		</div>
