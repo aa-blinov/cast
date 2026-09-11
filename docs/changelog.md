@@ -10,7 +10,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Changed
 
-- **The Status dialog is the same window as Settings** — same width and height, full-bleed on a phone the same way, since the two are opened and read the same way.
+- **Status and Keyboard shortcuts are the same window as Settings** — same width and height, full-bleed on a phone the same way, so the three dialogs are one shape instead of three.
 - **The session's directory is in brackets next to the persona:** `SENIOR DEVELOPER (/home/ubuntu/pet/cast)`.
 
 ### Fixed
