@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<!-- resizes-content: the on-screen keyboard shrinks the layout viewport instead of
+     covering the page, so the composer sits on top of it and the transcript keeps
+     its own scroll (the default, resizes-visual, pans the header off-screen). -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, interactive-widget=resizes-content">
 <title>Cast</title>
 <script>
 // Applies the last-known theme/font/scale (cached by app.js — see
