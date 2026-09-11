@@ -325,6 +325,13 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 /* Keeps the button exactly as tall with the spinner in it as with its label,
    so the list below doesn't shift by a pixel while a page loads. */
 .sidebar-load-more-spinner { width: 14px; height: 14px; vertical-align: -2px; }
+/* While it is loading there is nothing to press, so the slab around the
+   spinner carries no meaning — only the spinner stays. The box keeps its size
+   so the list doesn't shift. */
+.sidebar-load-more[aria-busy="true"] {
+	background: none;
+	border-color: transparent;
+}
 .sidebar-load-more[aria-busy="true"] svg { animation: spin .7s linear infinite; }
 .sidebar-empty {
 	display: flex; align-items: center; justify-content: center;
