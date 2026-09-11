@@ -35,6 +35,7 @@ export function Sidebar({
 	onResizeStart,
 	hasMore,
 	onLoadMore,
+	loadingMore,
 }) {
 	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
@@ -301,7 +302,7 @@ export function Sidebar({
 					${!sessionsLoaded && html`<div class="sidebar-empty">Loading</div>`}
 					${sessionsLoaded && searching && html`<div class="sidebar-empty">Searching…</div>`}
 					${sessionsLoaded && !searching && (isSearching ? filtered.length === 0 : sessionGroups.length === 0) && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
-					${!isSearching && hasMore && sessionsLoaded && html`<button ref=${loadMoreRef} class="sidebar-load-more" onClick=${onLoadMore}>Load more</button>`}
+					${!isSearching && hasMore && sessionsLoaded && html`<button ref=${loadMoreRef} class="sidebar-load-more" onClick=${onLoadMore} disabled=${loadingMore} aria-busy=${loadingMore ? "true" : "false"}>${loadingMore ? html`<${icons.spinner} class="sidebar-load-more-spinner" />` : "Load more"}</button>`}
 				</div>
 			</div>
 			<div class="sidebar-footer" title=${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading")}>

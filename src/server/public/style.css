@@ -320,7 +320,12 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	text-align: center;
 	transition: background .15s, color .15s, border-color .15s;
 }
-.sidebar-load-more:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-active); }
+.sidebar-load-more:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); border-color: var(--border-active); }
+.sidebar-load-more:disabled { cursor: default; }
+/* Keeps the button exactly as tall with the spinner in it as with its label,
+   so the list below doesn't shift by a pixel while a page loads. */
+.sidebar-load-more-spinner { width: 14px; height: 14px; vertical-align: -2px; }
+.sidebar-load-more[aria-busy="true"] svg { animation: spin .7s linear infinite; }
 .sidebar-empty {
 	display: flex; align-items: center; justify-content: center;
 	flex: 1;

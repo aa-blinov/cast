@@ -920,6 +920,7 @@ function App() {
 	const {
 		loadSessions,
 		loadMoreSessions,
+		loadingMore,
 		selectSession,
 		selectingId,
 		commitSession,
@@ -1951,6 +1952,7 @@ function App() {
 				confirm=${requestConfirm}
 				hasMore=${hasMoreSessions}
 				onLoadMore=${loadMoreSessions}
+				loadingMore=${loadingMore}
 			/>
 
 			<${ShareModal} session=${shareModalSession} onClose=${() => setShareModalSession(null)} />
