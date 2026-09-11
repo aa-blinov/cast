@@ -21,6 +21,29 @@ export function computeStartMs(turnStartedAt, clockOffsetMs) {
 	return turnStartedAt + clockOffsetMs;
 }
 
+/**
+ * Where the timer counts from. The daemon's `status:running` is the authority,
+ * but it costs a round trip — the composer flips to Abort the moment the send
+ * leaves the browser, and the timer used to appear only once that event landed
+ * (measured: 125ms on localhost, 232ms with 150ms of latency, more on a phone).
+ * The send time of the message still in flight starts it immediately instead.
+ *
+ * Both are in client-clock terms (the server's has the skew folded in), and the
+ * earliest wins: the send always precedes the turn it starts, so the displayed
+ * time never jumps backwards when the server's timestamp arrives. A message
+ * steered into a turn already running is later than that turn's start, which is
+ * why this is a min and not "whichever we have".
+ *
+ * `previousStartMs` carries the answer across the moment the send stops being
+ * in flight: the pending flag is cleared when the POST resolves, which is right
+ * about when the status event lands, so without it the start would fall back to
+ * the (later) server timestamp and the reading would drop back to 0.0s.
+ */
+export function resolveStartMs(serverStartMs, pendingSinceMs, previousStartMs) {
+	const candidates = [serverStartMs, pendingSinceMs, previousStartMs].filter((v) => typeof v === "number");
+	return candidates.length > 0 ? Math.min(...candidates) : undefined;
+}
+
 /** Never negative — a startMs that's briefly in the future (clock skew, a stale offset) shouldn't flash a negative duration. */
 export function computeElapsedMs(clientNowMs, startMs) {
 	return Math.max(0, clientNowMs - startMs);
@@ -35,21 +58,23 @@ export function shouldTick({ running, connected, startMs }) {
 	return Boolean(running) && Boolean(connected) && typeof startMs === "number";
 }
 
-// Only from SSE `status:running` (turnStartedAt). No pendingSince —
-// until `running` nothing is shown, so no jump/reset.
-export function ElapsedTimer({ running, connected, turnStartedAt }) {
+export function ElapsedTimer({ running, connected, turnStartedAt, pendingSince }) {
 	const [elapsedMs, setElapsedMs] = useState(0);
 	const serverToClientRef = useRef(null);
+	const startRef = useRef(undefined);
 	if (turnStartedAt == null) serverToClientRef.current = null;
-	let startMs;
+	let serverStartMs;
 	if (typeof turnStartedAt === "number") {
 		if (serverToClientRef.current === null) {
 			serverToClientRef.current = computeClockOffsetMs(turnStartedAt, Date.now());
 		}
-		startMs = computeStartMs(turnStartedAt, serverToClientRef.current);
-	} else {
-		startMs = undefined;
+		serverStartMs = computeStartMs(turnStartedAt, serverToClientRef.current);
 	}
+	// Sticky for the length of one turn (see resolveStartMs), dropped as soon as
+	// the turn is over so the next one starts from its own send.
+	if (!running) startRef.current = undefined;
+	startRef.current = resolveStartMs(serverStartMs, pendingSince, startRef.current);
+	const startMs = startRef.current;
 	useEffect(() => {
 		if (shouldTick({ running, connected, startMs })) {
 			setElapsedMs(computeElapsedMs(Date.now(), startMs));

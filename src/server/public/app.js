@@ -508,9 +508,9 @@ function App() {
 		pendingPlanSignalRef,
 		planRefineArmedRef,
 	} = useSessionState();
-	// Earliest send time among in-flight (pending) user messages — lets the
-	// composer timer start the moment the user hits send, before the daemon's
-	// status:running round-trip (no "sending…" label in the transcript).
+	// Earliest send time among in-flight (pending) user messages — it starts the
+	// composer timer the moment the user hits send, instead of a round trip
+	// later when the daemon's status:running lands (see ElapsedTimer).
 	const pendingSince = (session?.messages ?? []).reduce(
 		(acc, m) => (m.role === "user" && m.pending && typeof m.pendingAt === "number" ? Math.min(acc, m.pendingAt) : acc),
 		Infinity,
@@ -2043,7 +2043,7 @@ function App() {
 							}
 							${session?.worktree && html`<span class="composer-role-mode composer-role-worktree">worktree</span>`}
 						</div>
-						<${ElapsedTimer} key=${activeId} running=${running} connected=${connected} turnStartedAt=${session?.turnStartedAt} />
+						<${ElapsedTimer} key=${activeId} running=${running} connected=${connected} turnStartedAt=${session?.turnStartedAt} pendingSince=${pendingSinceMs} />
 					</div>
 				`
 				}

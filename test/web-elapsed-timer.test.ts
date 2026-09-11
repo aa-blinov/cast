@@ -12,6 +12,7 @@ import {
 	computeStartMs,
 	ElapsedTimer,
 	formatElapsed,
+	resolveStartMs,
 	shouldTick,
 } from "../src/server/public/elapsed-timer.js";
 
@@ -72,5 +73,31 @@ describe("shouldTick", () => {
 
 	it("does not tick before turnStartedAt has resolved to a start time", () => {
 		expect(shouldTick({ running: true, connected: true, startMs: undefined })).toBe(false);
+	});
+});
+
+describe("resolveStartMs", () => {
+	it("starts from the send while the daemon's status:running is still in flight", () => {
+		expect(resolveStartMs(undefined, 1000)).toBe(1000);
+	});
+
+	it("keeps the send time once the server's start lands, so the reading never jumps back", () => {
+		// The send is always earlier than the turn it starts — by the round trip.
+		expect(resolveStartMs(1120, 1000)).toBe(1000);
+	});
+
+	it("holds the start after the send stops being in flight", () => {
+		// The POST resolving clears the pending flag at about the same moment
+		// the status event lands; without the carried value the timer would
+		// restart from the server's (later) timestamp.
+		expect(resolveStartMs(1120, undefined, 1000)).toBe(1000);
+	});
+
+	it("uses the turn's own start for a message steered into a turn already running", () => {
+		expect(resolveStartMs(1000, 5000)).toBe(1000);
+	});
+
+	it("has nothing to show with neither", () => {
+		expect(resolveStartMs(undefined, undefined)).toBe(undefined);
 	});
 });
