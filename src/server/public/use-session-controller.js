@@ -152,12 +152,18 @@ export function useSessionController({
 	}, [setSessions, setSessionsLoaded, sessionsLoadVersionRef]);
 
 	const loadingMoreRef = useRef(false);
+	// State as well as the ref: the ref stops a second request, the state is
+	// what lets the button say it is working. Without it the click had no
+	// visible effect until the rows landed — 200ms on a fast link, longer on a
+	// phone — which reads as a button that did not register the tap.
+	const [loadingMore, setLoadingMore] = useState(false);
 	const loadMoreSessions = useCallback(async () => {
 		if (loadingMoreRef.current) return;
 		const offset = sessionsOffsetRef.current;
 		const total = sessionsTotalRef.current;
 		if (offset >= total) return;
 		loadingMoreRef.current = true;
+		setLoadingMore(true);
 		try {
 			const data = await api("GET", `/api/sessions?limit=50&offset=${offset}`);
 			const sessions = Array.isArray(data) ? data : data.sessions ?? [];
@@ -165,8 +171,11 @@ export function useSessionController({
 			setSessions((prev) => [...prev, ...sessions]);
 			sessionsOffsetRef.current += sessions.length;
 		} catch {}
-		finally { loadingMoreRef.current = false; }
-	}, [setSessions]);
+		finally {
+			loadingMoreRef.current = false;
+			setLoadingMore(false);
+		}
+	}, [setSessions, sessionsOffsetRef, sessionsTotalRef]);
 
 	// Select session — `push` controls whether this lands as a new browser
 	// history entry (a real click) or just replaces the current URL
@@ -599,6 +608,7 @@ export function useSessionController({
 	return {
 		loadSessions,
 		loadMoreSessions,
+		loadingMore,
 		selectSession,
 		selectingId,
 		commitSession,
