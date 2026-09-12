@@ -895,6 +895,79 @@ describe("web bridge", () => {
 		expect(r.dirty).toBe(false);
 	});
 
+	// Slice 3 characterization — pinned below /repo before the registry
+	// gains deps for fork/plan-note/abort/steer/queue (appendMessage,
+	// saveSession, broadcaster, abort, submit, runner.steeringQueue /
+	// followUpQueue). These pin the public return values; existing
+	// tests in this file already cover /fork and the empty-arg case
+	// for /steer + /queue.
+
+	it("/plan-note appends a system-reminder user message and returns Recorded", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/plan-note Use type extraction");
+		expect(result).toEqual({ ok: true, result: "Recorded" });
+		// The decision is appended as a user-role message wrapped in a
+		// <system-reminder> tag, so the loop can route it the same way as
+		// any other internal protocol reminder.
+		const last = ws.session.messages[ws.session.messages.length - 1];
+		expect(last).toMatchObject({
+			role: "user",
+			content: "<system-reminder>Use type extraction</system-reminder>",
+		});
+	});
+
+	it("/plan-note (no arg) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/plan-note");
+		expect(result).toEqual({ ok: false, error: "Usage: /plan-note <decision>" });
+	});
+
+	it("/abort returns Aborted", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/abort")).toEqual({ ok: true, result: "Aborted" });
+	});
+
+	it("/stop (alias of /abort) returns Aborted", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/stop")).toEqual({ ok: true, result: "Aborted" });
+	});
+
+	it("/queue-reset returns Queue cleared", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/queue-reset")).toEqual({ ok: true, result: "Queue cleared" });
+	});
+
+	it("/qr (alias of /queue-reset) returns Queue cleared", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/qr")).toEqual({ ok: true, result: "Queue cleared" });
+	});
+
+	it("/steer (running) routes the message into the steering queue and returns Steered into the running turn", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.status = "running";
+		expect(await bridge.executeCommand(ws.id, "/steer adjust plan")).toEqual({
+			ok: true,
+			result: "Steered into the running turn",
+		});
+	});
+
+	it("/queue (running) routes the message into the follow-up queue and returns Queued for after this turn", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.status = "running";
+		expect(await bridge.executeCommand(ws.id, "/queue follow-up task")).toEqual({
+			ok: true,
+			result: "Queued for after this turn",
+		});
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
