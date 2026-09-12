@@ -167,7 +167,7 @@ export {
 	toDisplayMessages,
 } from "./bridge/display.ts";
 
-import { buildGoalPrompt, isCommandBlocking, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "./commands.ts";
+import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
 
 export { type EvolveSkillSuggestion, parseEvolveJson, parseSuggestionJson } from "./bridge/parsers.ts";
 
@@ -2842,8 +2842,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			appendMessage,
 			saveSession,
 			broadcaster,
-			submit: (sessionId, text) => {
-				void submit(sessionId, text);
+			submit: (sessionId, text, images, clientMessageId, queuedMessages, opts) => {
+				return submit(sessionId, text, images, clientMessageId, queuedMessages, opts);
 			},
 			abort,
 			forkSessionInstance,
@@ -2885,27 +2885,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			},
 		});
 		if (registered !== undefined) return registered;
-		if (name === "/goal") {
-			const { goal, maxIterations } = parseGoalInput(arg);
-			if (!goal) return { ok: false, error: "Usage: /goal [N] <what to achieve>  (or /goal --steps N <desc>)" };
-			// /goal is blocking (isCommandBlocking), so this only runs idle.
-			// Kick off the autonomous run with the chosen iteration budget and
-			// let the SSE stream carry the work.
-			void submit(ws.id, buildGoalPrompt(goal, maxIterations), undefined, undefined, undefined, {
-				maxOuterIterations: maxIterations,
-			}).catch((error) => {
-				console.error(`[cast server] /goal submit failed:`, error);
-			});
-			return { ok: true, result: `Working toward the goal autonomously (budget: ${maxIterations})…` };
-		}
-		if (name === "/review") {
-			// /review is blocking (isCommandBlocking), so this only runs idle.
-			// Start the review turn without awaiting it — the SSE stream carries			// the agent's work; the command just acknowledges the kick-off.
-			void submit(ws.id, REVIEW_PROMPT).catch((error) => {
-				console.error(`[cast server] /review submit failed:`, error);
-			});
-			return { ok: true, result: "Reviewing the session's work…" };
-		}
 		if (name === "/evolve") {
 			return await evolveSkills(ws);
 		}

@@ -1528,6 +1528,75 @@ describe("web bridge", () => {
 		expect(result).toEqual({ ok: true, result: { sessionId: wsB.id } });
 	});
 
+	// Slice 12 characterization — /goal and /review before the registry
+	// gains them. Both are blocking commands (isCommandBlocking gate),
+	// fire-and-forget via the closure's submit() — the registry path
+	// calls it through `ctx.submit`, which forwards to the same closure.
+	// Since submit() is closure-private (no public bridge.submit to spy
+	// on), the indirect observation is runAgentLoop, which submit()
+	// eventually invokes. runAgentLoop is mocked at file scope, so we
+	// can wait for it to be called after the command returns.
+
+	it("/goal (no arg) returns the usage error without running the loop", async () => {
+		runAgentLoop.mockClear();
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/goal");
+		expect(result).toEqual({
+			ok: false,
+			error: "Usage: /goal [N] <what to achieve>  (or /goal --steps N <desc>)",
+		});
+		// No submit was fired — the loop stays quiet for at least one tick.
+		await new Promise((r) => setTimeout(r, 50));
+		expect(runAgentLoop).not.toHaveBeenCalled();
+	});
+
+	it("/goal <goal> returns the kick-off message and the loop sees the prompt", async () => {
+		runAgentLoop.mockClear();
+		runAgentLoop.mockImplementationOnce(async (messages: unknown) => messages);
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/goal write a poem");
+		expect(result.ok).toBe(true);
+		expect(result.result).toMatch(/^Working toward the goal autonomously \(budget: \d+\)…$/);
+		await waitFor(() => runAgentLoop.mock.calls.length >= 1);
+		// runAgentLoop signature is (initialMessages, loopConfig). The loop
+		// config carries sessionId, maxOuterIterations, etc.; submit() packs
+		// the goal prompt into initialMessages and threads the budget via
+		// loopConfig.maxOuterIterations.
+		const [messages, loopConfig] = runAgentLoop.mock.calls[0]!;
+		expect((loopConfig as { sessionId: string }).sessionId).toBe(ws.session.id);
+		expect((loopConfig as { maxOuterIterations?: number }).maxOuterIterations).toEqual(expect.any(Number));
+		// The synthesized prompt reaches the loop with the user's goal text.
+		const promptText = (messages as Array<{ content: string }>).map((m) => m.content).join("\n");
+		expect(promptText).toContain("write a poem");
+	});
+
+	it("/goal 50 <goal> honours the explicit step budget", async () => {
+		runAgentLoop.mockClear();
+		runAgentLoop.mockImplementationOnce(async (messages: unknown) => messages);
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		await bridge.executeCommand(ws.id, "/goal 50 ship the report");
+		await waitFor(() => runAgentLoop.mock.calls.length >= 1);
+		const [, loopConfig] = runAgentLoop.mock.calls[0]!;
+		expect((loopConfig as { maxOuterIterations?: number }).maxOuterIterations).toBe(50);
+	});
+
+	it("/review returns the kick-off message and the loop runs with the review prompt", async () => {
+		runAgentLoop.mockClear();
+		runAgentLoop.mockImplementationOnce(async (messages: unknown) => messages);
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/review");
+		expect(result).toEqual({ ok: true, result: "Reviewing the session's work…" });
+		await waitFor(() => runAgentLoop.mock.calls.length >= 1);
+		const [messages, loopConfig] = runAgentLoop.mock.calls[0]!;
+		expect((loopConfig as { sessionId: string }).sessionId).toBe(ws.session.id);
+		const promptText = (messages as Array<{ content: string }>).map((m) => m.content).join("\n");
+		expect(promptText).toMatch(/[Rr]eview/);
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
