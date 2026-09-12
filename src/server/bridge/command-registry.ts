@@ -16,13 +16,15 @@ import { join } from "node:path";
 
 const ARG_WHITESPACE_SPLIT = /\s+/;
 
-import type { AppConfig } from "../../core/config.ts";
+import type { AppConfig, ModelInfo } from "../../core/config.ts";
 import type { Message } from "../../core/llm.ts";
 import type { Persona } from "../../core/personas.ts";
 import { listHooksForCwdSettings } from "../../core/project.ts";
 import type { SessionState } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import { updateSettings } from "../../core/settings.ts";
+import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
+import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { ALL_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession } from "../bridge.ts";
 import { SLASH_COMMANDS } from "../commands.ts";
@@ -113,6 +115,28 @@ export interface CommandContext {
 	 *  name. Captured at dispatch time so a /reload-driven refresh is
 	 *  visible on the next command. */
 	personas: Persona[];
+	/** Default persona used as the fallback when resolvePersona fails. */
+	currentPersona: Persona;
+	/** Rebuilder for the per-session system prompt. Reads the closure's
+	 *  skills, rules, and MCP — needs to live in the closure, so the
+	 *  registry calls it back rather than re-implementing it. */
+	computeSystemPrompt: (persona: Persona, model: string, sessionCwd: string, mode?: "plan" | "build") => string;
+	/** Closure-local model-info lookup (cache-aware). /model uses it to
+	 *  pick up the new model's reasoning metadata. */
+	modelInfoFor: (model: string) => ModelInfo | undefined;
+	/** Closure-local reasoning-option lookup (model + format aware). /reasoning
+	 *  uses it to list/set the active level. */
+	reasoningOptionsFor: (model: string) => Array<{ value: string; label: string }>;
+	/** Resolve a sensible reasoning level for a model under a given format
+	 *  and requested level. /reasoning and /reasoning-format use it to
+	 *  re-derive config.reasoningLevel after a format/model switch. */
+	reasoningLevelForModel: (model: string, format?: ReasoningFormat, requested?: string) => string;
+	/** Mutate the closure-local defaultModel slot — the model new sessions
+	 *  start on. /model writes it so the choice persists across /new. */
+	setDefaultModel: (model: string) => void;
+	/** Mutate the closure-local reasoningMeta. /model writes it so the next
+	 *  /current and /reasoning read sees the new model's metadata. */
+	setReasoningMeta: (meta: ModelReasoningMeta | undefined) => void;
 }
 
 /** Synchronous handlers — async work happens before this entry point. */
@@ -525,6 +549,114 @@ const commandHandlers: Record<string, CommandHandler> = {
 		setPlanModelProvider(arg);
 		updateSettings({ planModelProvider: arg });
 		return { ok: true, result: { planModelProvider: arg } };
+	},
+	"/model": ({
+		ws,
+		arg,
+		cwd,
+		config,
+		modelInfoFor,
+		reasoningLevelForModel,
+		computeSystemPrompt,
+		currentPersona,
+		personas,
+		saveSession,
+		broadcaster,
+		setReasoningMeta,
+		setDefaultModel,
+	}) => {
+		if (!arg) return { ok: true, result: { model: ws.session.model } };
+		ws.session.model = arg;
+		ws.session.providerUrl = config.baseURL;
+		// Not resolved against a specific saved provider — this switches the
+		// model on whatever's currently active, so any provider pin this
+		// session had is no longer meaningful and must not be trusted stale.
+		ws.session.providerName = undefined;
+		setReasoningMeta(modelInfoFor(arg)?.reasoning);
+		config.reasoningLevel = reasoningLevelForModel(arg);
+		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, arg);
+		ws.systemPrompt = computeSystemPrompt(
+			personas.find((p) => p.name === (ws.session.persona ?? "")) ?? currentPersona,
+			arg,
+			ws.session.cwd ?? cwd,
+			ws.session.mode,
+		);
+		saveSession(ws.session);
+		// Persist as the default for future sessions too — otherwise a model
+		// switch only ever applied to the session it was issued on, and every
+		// new session kept starting on whatever was active when the server
+		// started (confirmed: switching M2 -> M3 then /new still opened M2).
+		setDefaultModel(arg);
+		updateSettings({ model: arg, reasoningLevel: config.reasoningLevel });
+		// Sidebar footer reads the model off the session-list summary, not the
+		// open session's live state — without this it kept showing the old
+		// model until the turn ended (which resends it) or the page reloaded.
+		broadcaster.broadcastSessionUpdate(ws);
+		return { ok: true, result: { model: arg } };
+	},
+	"/reasoning": ({ ws, arg, config, reasoningOptionsFor }) => {
+		const options = reasoningOptionsFor(ws.session.model);
+		if (options.length === 0) {
+			return {
+				ok: true,
+				result: {
+					reasoningLevel: config.reasoningLevel,
+					options: [],
+					note: "This provider exposes no reasoning controls for this model.",
+				},
+			};
+		}
+		if (!arg)
+			return {
+				ok: true,
+				result: { reasoningLevel: config.reasoningLevel, options: options.map((o) => o.value) },
+			};
+		if (!options.some((o) => o.value === arg)) {
+			return {
+				ok: false,
+				error: `Unknown reasoning level: ${arg}. Options: ${options.map((o) => o.value).join(", ")}`,
+			};
+		}
+		// Global, same as the TUI — `config` is a shared mutable object, so this
+		// takes effect on the next turn in every session, not just this one.
+		config.reasoningLevel = arg;
+		config.reasoningParams = buildReasoningParams(arg, config.reasoningFormat, ws.session.model);
+		updateSettings({ reasoningLevel: arg });
+		return { ok: true, result: { reasoningLevel: arg } };
+	},
+	"/persona": ({ ws, arg, cwd, personas, computeSystemPrompt, saveSession }) => {
+		if (!arg) return { ok: true, result: { persona: ws.session.persona } };
+		const persona = personas.find((p) => p.name === arg);
+		if (!persona) {
+			return {
+				ok: false,
+				error: `Unknown persona: ${arg}. Available: ${personas.map((p) => p.name).join(", ")}`,
+			};
+		}
+		ws.session.persona = persona.name;
+		ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, ws.session.cwd ?? cwd, ws.session.mode);
+		saveSession(ws.session);
+		return { ok: true, result: { persona: persona.name, label: persona.label } };
+	},
+	"/reasoning-format": ({ ws, arg, config, reasoningLevelForModel, loadSettings }) => {
+		const current = config.reasoningFormat;
+		const options = REASONING_FORMAT_OPTIONS.map((o) => o.value);
+		if (!arg) return { ok: true, result: { reasoningFormat: current, options } };
+		if (!options.includes(arg as ReasoningFormat)) {
+			return { ok: false, error: `Unknown reasoning format: ${arg}. Options: ${options.join(", ")}` };
+		}
+		config.reasoningFormat = resolveReasoningFormat(config.baseURL, arg as ReasoningFormat);
+		const selected = arg as ReasoningFormat;
+		config.reasoningLevel = reasoningLevelForModel(ws.session.model, config.reasoningFormat);
+		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, ws.session.model);
+		const settings = loadSettings();
+		const providers = settings.providers?.map((provider) =>
+			provider.url === config.baseURL && provider.apiKey === config.apiKey
+				? { ...provider, reasoningFormat: selected }
+				: provider,
+		);
+		updateSettings({ providers, reasoningLevel: config.reasoningLevel });
+		return { ok: true, result: { reasoningFormat: config.reasoningFormat } };
 	},
 };
 
