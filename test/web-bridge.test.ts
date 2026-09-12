@@ -1402,6 +1402,49 @@ describe("web bridge", () => {
 		expect(result).toEqual({ ok: true, result: "Compacting…" });
 	});
 
+	// Slice 9 characterization — /plan and /build before the registry
+	// gains its own handlers. All the deps (computeSystemPrompt,
+	// currentPersona, personas, saveSession, broadcaster) already exist in
+	// CommandContext from slice 7 (/model and /persona). Existing tests
+	// cover the planTransition-clearing side effect; slice 9 pins the
+	// happy-path mode toggle + system prompt rebuild.
+
+	it("/plan switches the session to plan mode and returns the Plan-mode message", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const beforePrompt = ws.systemPrompt;
+		const result = await bridge.executeCommand(ws.id, "/plan");
+		expect(result).toEqual({
+			ok: true,
+			result: "Plan mode — read-only exploration and planning; /build to exit",
+		});
+		expect(ws.session.mode).toBe("plan");
+		// Rebuilding the prompt is the whole point of the toggle — without
+		// it, the model still sees the build-mode toolset on the next turn.
+		expect(ws.systemPrompt).not.toBe(beforePrompt);
+	});
+
+	it("/build switches the session back to build mode and returns the Build-mode message", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.mode = "plan";
+		const beforePrompt = ws.systemPrompt;
+		const result = await bridge.executeCommand(ws.id, "/build");
+		expect(result).toEqual({ ok: true, result: "Build mode — full toolset" });
+		expect(ws.session.mode).toBe("build");
+		expect(ws.systemPrompt).not.toBe(beforePrompt);
+	});
+
+	it("/plan clears a stale planQuestion so the next turn doesn't carry it forward", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// Synthesise the pre-existing state a /plan-question that never
+		// resolved would leave behind — the /plan switch must drop it.
+		ws.session.planQuestion = { id: "stale" } as never;
+		await bridge.executeCommand(ws.id, "/plan");
+		expect(ws.session.planQuestion).toBeUndefined();
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
