@@ -31,6 +31,7 @@ const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
 
+import { filesLostByRestore, restoreCheckpoint } from "../../core/checkpoint.ts";
 import type { AppConfig, ModelInfo } from "../../core/config.ts";
 import { fetchModels, probeProvider } from "../../core/config.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
@@ -56,7 +57,7 @@ import {
 import { setModelsCache } from "../../core/readline.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
-import { addUsage, clearSessionMessages, recordCompaction } from "../../core/session.ts";
+import { addUsage, clearSessionMessages, dropLastCheckpoint, recordCompaction } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import {
 	checkpointFork,
@@ -1561,6 +1562,45 @@ const commandHandlers: Record<string, CommandHandler> = {
 		return { ok: true, result: { model, provider: provider.name } };
 	},
 	"/reload": ({ ws, cwd, reloadBridgeState }) => reloadBridgeState(ws.session.cwd ?? cwd),
+	"/undo": ({ ws, arg, saveSession, broadcaster }) => {
+		const checkpoints = ws.session.checkpoints || [];
+		if (checkpoints.length === 0) return { ok: false, error: "No checkpoint available to undo" };
+		const lastCheckpoint = checkpoints[checkpoints.length - 1]!;
+		// `git clean -fd` runs as part of the restore and takes untracked
+		// files created after the checkpoint with it — including anything the
+		// user wrote while the agent worked. There is no picker on this path,
+		// so name them and refuse; `/undo --force` proceeds.
+		const lost = filesLostByRestore(lastCheckpoint);
+		if (lost.length > 0 && !arg.includes("--force") && !arg.includes("-f")) {
+			const shown = lost.slice(0, 10).join(", ");
+			const more = lost.length > 10 ? `, and ${lost.length - 10} more` : "";
+			return {
+				ok: false,
+				error: `Undo would delete ${lost.length} file(s) created since the checkpoint (${shown}${more}). Re-run as "/undo --force" to proceed.`,
+			};
+		}
+		checkpoints.pop();
+		const res = restoreCheckpoint(lastCheckpoint);
+		if (!res.ok) return { ok: false, error: `Undo failed: ${res.message}` };
+		// Drop the matching row so the persisted list stays in sync.
+		dropLastCheckpoint(ws.session.id);
+
+		const msgs = ws.session.messages;
+		let lastUserIdx = -1;
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			if (msgs[i]?.role === "user") {
+				lastUserIdx = i;
+				break;
+			}
+		}
+		if (lastUserIdx !== -1) {
+			ws.session.messages = msgs.slice(0, lastUserIdx);
+		}
+		ws.session.checkpoints = checkpoints;
+		saveSession(ws.session);
+		broadcaster.broadcastSessionUpdate(ws);
+		return { ok: true, result: `Undone: ${res.message}` };
+	},
 };
 
 /** Tiny inline helper used by /mcp — splits "sub rest" into [sub, rest].

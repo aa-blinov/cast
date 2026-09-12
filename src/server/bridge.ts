@@ -10,12 +10,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import { type AgentActorNotification, agentActorRegistry } from "../core/actors.ts";
-import {
-	backupFileForCheckpoint,
-	createCheckpoint,
-	filesLostByRestore,
-	restoreCheckpoint,
-} from "../core/checkpoint.ts";
+import { backupFileForCheckpoint, createCheckpoint } from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import {
 	formatContextFilesForPrompt,
@@ -73,7 +68,6 @@ import {
 	countTurnMessages,
 	createSession,
 	deleteSession,
-	dropLastCheckpoint,
 	forkSession,
 	getHistoryPage,
 	hasRecentClientMessageId,
@@ -2938,46 +2932,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return await evolveSkills(ws);
 		}
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
-		if (name === "/undo") {
-			const checkpoints = ws.session.checkpoints || [];
-			if (checkpoints.length === 0) return { ok: false, error: "No checkpoint available to undo" };
-			const lastCheckpoint = checkpoints[checkpoints.length - 1]!;
-			// `git clean -fd` runs as part of the restore and takes untracked
-			// files created after the checkpoint with it — including anything the
-			// user wrote while the agent worked. There is no picker on this path,
-			// so name them and refuse; `/undo --force` proceeds.
-			const lost = filesLostByRestore(lastCheckpoint);
-			if (lost.length > 0 && !arg.includes("--force") && !arg.includes("-f")) {
-				const shown = lost.slice(0, 10).join(", ");
-				const more = lost.length > 10 ? `, and ${lost.length - 10} more` : "";
-				return {
-					ok: false,
-					error: `Undo would delete ${lost.length} file(s) created since the checkpoint (${shown}${more}). Re-run as "/undo --force" to proceed.`,
-				};
-			}
-			checkpoints.pop();
-			const res = restoreCheckpoint(lastCheckpoint);
-			if (!res.ok) return { ok: false, error: `Undo failed: ${res.message}` };
-			// Drop the matching row so the persisted list stays in sync.
-			dropLastCheckpoint(ws.session.id);
-
-			const msgs = ws.session.messages;
-			let lastUserIdx = -1;
-			for (let i = msgs.length - 1; i >= 0; i--) {
-				if (msgs[i]?.role === "user") {
-					lastUserIdx = i;
-					break;
-				}
-			}
-			if (lastUserIdx !== -1) {
-				ws.session.messages = msgs.slice(0, lastUserIdx);
-			}
-			ws.session.checkpoints = checkpoints;
-			saveSession(ws.session);
-			broadcaster.broadcastSessionUpdate(ws);
-			return { ok: true, result: `Undone: ${res.message}` };
-		}
-
 		// Native `/<skill-id>` invocation — falls through here only once every
 		// built-in name above has failed to match, so a skill can never shadow a
 		// built-in command. Mirrors /rule:'s "submit as a real user turn" shape,

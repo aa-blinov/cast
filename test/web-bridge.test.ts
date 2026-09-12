@@ -708,6 +708,22 @@ describe("web bridge", () => {
 		expect(result.error).toMatch(/Agent running/);
 	});
 
+	it("/undo with no checkpoint returns the no-checkpoint error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/undo");
+		expect(result).toEqual({ ok: false, error: "No checkpoint available to undo" });
+	});
+
+	it("/undo while the agent is running fails with the idle-required error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.status = "running";
+		const result = await bridge.executeCommand(ws.id, "/undo");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Agent running/);
+	});
+
 	it("/provider edit updates the active provider in place, keeping the model and the slots", async () => {
 		// The web form used to delete + re-add, and deleting the active provider
 		// switched to a fallback, cleared the model and dropped the slots.
