@@ -172,6 +172,10 @@ describe("BackgroundTaskRegistry", () => {
 		// the exit signal the task itself provides, then poll for the output —
 		// a fixed 5s window was enough on an idle machine and not enough under
 		// load, which is what made this test flake.
+		//
+		// Per-test timeout (90s) is set because the test's own 30s polling
+		// deadline + the PTY's exit-signal wait can together exceed vitest's
+		// 30s global testTimeout under parallel load.
 		await task.exitPromise;
 		const deadline = Date.now() + 30_000;
 		let lineCount = task.rawOutput.split("\n").filter(Boolean).length;
@@ -184,7 +188,7 @@ describe("BackgroundTaskRegistry", () => {
 		// exercised at read-time, verified via bash_output in tools.test.ts).
 		expect(lineCount).toBe(20);
 		expect(task.status).toBe("exited");
-	});
+	}, 90_000);
 
 	it("does not apply the foreground default timeout when background timeout is omitted", async () => {
 		const registry = new BackgroundTaskRegistry();
