@@ -968,6 +968,68 @@ describe("web bridge", () => {
 		});
 	});
 
+	// Slice 4 characterization — /sessions and /hooks before the registry
+	// gains listSessions / listHooksForCwdSettings / updateSettings as
+	// deps. The /hooks verb branch is the easy "list + diagnostics"
+	// surface; enable/disable requires settings state and is best
+	// verified through the public return value rather than mutated
+	// settings internals.
+
+	it("/sessions returns the list of session summaries", async () => {
+		const bridge = createServerBridge(makeResult());
+		bridge.createSession(); // first session
+		const second = bridge.createSession(); // second session
+		const result = await bridge.executeCommand(second.id, "/sessions");
+		expect(result.ok).toBe(true);
+		expect(Array.isArray(result.result)).toBe(true);
+		const summaries = result.result as Array<{ id: string }>;
+		expect(summaries.length).toBeGreaterThanOrEqual(2);
+		expect(summaries.some((s) => s.id === second.id)).toBe(true);
+	});
+
+	it("/hooks help returns the help string", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/hooks help");
+		expect(result.ok).toBe(true);
+		expect(typeof result.result).toBe("string");
+		expect(result.result as string).toContain("/hooks");
+	});
+
+	it("/hooks (no verb) returns entries and diagnostics", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/hooks");
+		expect(result.ok).toBe(true);
+		const r = result.result as { entries: unknown[]; diagnostics: unknown[] };
+		expect(Array.isArray(r.entries)).toBe(true);
+		expect(Array.isArray(r.diagnostics)).toBe(true);
+	});
+
+	it("/hooks enable <unknown-id> returns an error naming the missing id", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/hooks enable nonexistent-hook");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/No hook with id "nonexistent-hook"/);
+	});
+
+	it("/hooks enable <empty-id> returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/hooks enable");
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe("Usage: /hooks enable <id>");
+	});
+
+	it("/hooks unknown-verb returns an error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/hooks frobnicate");
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe("Unknown /hooks frobnicate");
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

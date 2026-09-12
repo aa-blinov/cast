@@ -51,7 +51,6 @@ import {
 import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
-	listHooksForCwdSettings,
 	projectMcpPath,
 	readSkillsShSources,
 	removeMcpServerFromDisk,
@@ -2869,6 +2868,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			},
 			abort,
 			forkSessionInstance,
+			listSessions,
+			trustForSessionCwd,
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/goal") {
@@ -3195,38 +3196,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			updateSettings({ theme: found.id });
 			return { ok: true, result: { theme: found.id, label: found.label, colors: found.colors } };
 		}
-		if (name === "/sessions") {
-			return { ok: true, result: listSessions() };
-		}
-
-		if (name === "/hooks") {
-			const sessionCwd = ws.session.cwd ?? cwd;
-			const [verb, ...rest] = arg.split(WHITESPACE_SPLIT).filter(Boolean);
-			if (verb === "help") {
-				return {
-					ok: true,
-					result: "/hooks – /hooks enable <id> – /hooks disable <id> — see docs/hooks.md",
-				};
-			}
-			const { entries, diagnostics } = listHooksForCwdSettings(sessionCwd, trustForSessionCwd(sessionCwd));
-			if (!verb) {
-				return { ok: true, result: { entries, diagnostics } };
-			}
-			if (verb === "enable" || verb === "disable") {
-				const id = rest.join(" ").trim();
-				if (!id) return { ok: false, error: `Usage: /hooks ${verb} <id>` };
-				if (!entries.some((e) => e.id === id)) return { ok: false, error: `No hook with id "${id}"` };
-				updateSettings((current) => {
-					const disabled = new Set(current.disabledHooks ?? []);
-					if (verb === "disable") disabled.add(id);
-					else disabled.delete(id);
-					return { disabledHooks: [...disabled] };
-				});
-				return { ok: true, result: `Hook ${id} ${verb}d` };
-			}
-			return { ok: false, error: `Unknown /hooks ${verb}` };
-		}
-
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
 		if (name === "/clear") {
 			clearSessionMessages(ws.session);
