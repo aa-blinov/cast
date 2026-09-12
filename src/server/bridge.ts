@@ -143,6 +143,10 @@ import type { ThemeColors } from "../ui/themes/types.ts";
 // calls them through `broadcaster.X(...)` instead of as closure-local
 // functions.
 import { createBroadcaster } from "./bridge/broadcaster.ts";
+// Command registry — the dispatch table that bridge.executeCommand consults
+// before falling through to its inline logic. Slice 1: only /help and /usage
+// are registered. Future slices add /current, /repo, and the rest.
+import { dispatchRegisteredCommand } from "./bridge/command-registry.ts";
 // DisplayMessage / DisplayStreamBlock and the three display-side helpers
 // (appendActiveText, reconcileActiveStream, toDisplayMessages) live in
 // ./bridge/display.ts — bridge.ts re-exports the public functions below
@@ -2839,9 +2843,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// Non-blocking commands — work while the agent is running. Mirrors
 		// src/ui/commands.ts's /steer and /queue semantics (see there): with
 		// nothing running, both just submit the message as a normal turn.
-		if (name === "/help") {
-			return { ok: true, result: getHelpText() };
-		}
+		// Consult the command registry first; falls through to inline logic
+		// for commands not yet registered.
+		const registered = dispatchRegisteredCommand(name, { ws, arg });
+		if (registered !== undefined) return registered;
 		if (name === "/fork") {
 			const fork = forkSessionInstance(sessionId);
 			if (!fork) return { ok: false, error: "Could not fork session" };
@@ -4621,24 +4626,4 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		suggestCommand,
 		getSlashCommands,
 	};
-}
-
-function getHelpText(): string {
-	// No column-padding here — this renders through the same proportional-font
-	// markdown pipe as chat prose, where fixed-width alignment doesn't hold.
-	// Hidden commands (MCP/skills/provider/SSH/theme/...) live in the
-	// Settings modal now, not this list — repeating them here would be the
-	// exact chat clutter that modal exists to avoid.
-	const visible = SLASH_COMMANDS.filter((c) => !c.hidden);
-	const lines = visible.map((c) => `- \`${c.name}\` — ${c.description}`);
-	const blocking = visible.filter((c) => c.blocking).map((c) => c.name);
-	return [
-		"**Available commands:**",
-		"",
-		...lines,
-		"",
-		`*Blocking (require idle): ${blocking.join(", ")}. Everything else works while the agent runs.*`,
-		"",
-		"*MCP, skills, provider, SSH, theme, model/reasoning details, and usage live in Settings (gear icon).*",
-	].join("\n");
 }

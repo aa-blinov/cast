@@ -786,6 +786,49 @@ describe("web bridge", () => {
 		expect(config.reasoningLevel).toBe("high");
 	});
 
+	// Characterization tests for the read-only "session info" commands. These
+	// exist before the executeCommand → registry refactor so they pin the
+	// exact result shape (including the markdown that /help renders and the
+	// non-git fallback that /repo returns for a fresh tmpdir cwd). Once the
+	// commands move into per-handler files, the public seam stays the same
+	// — these tests are what makes that move safe.
+
+	it("/help returns the visible-command list as a single markdown string", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/help");
+		expect(result.ok).toBe(true);
+		expect(typeof result.result).toBe("string");
+		expect(result.result).toContain("**Available commands:**");
+		expect(result.result).toContain("Blocking (require idle):");
+	});
+
+	it("/usage returns the session's cumulative token counter untouched", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/usage");
+		expect(result.ok).toBe(true);
+		expect(result.result).toEqual({
+			promptTokens: 0,
+			completionTokens: 0,
+			totalTokens: 0,
+			cost: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			uncachedTokens: 0,
+			subagentTokens: 0,
+		});
+	});
+
+	it("/repo returns isGit:false for a fresh tmpdir cwd that has no .git", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/repo");
+		expect(result.ok).toBe(true);
+		expect(result.result).toMatchObject({ isGit: false });
+		expect(typeof (result.result as { cwd: string }).cwd).toBe("string");
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
