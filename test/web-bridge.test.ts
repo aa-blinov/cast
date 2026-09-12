@@ -1486,6 +1486,48 @@ describe("web bridge", () => {
 		expect(distill).toEqual({ ok: false, error: "Project memory writing is disabled" });
 	});
 
+	// Slice 11 characterization — /continue before the registry gains it.
+	// Zero existing coverage for this command; the inline implementation
+	// in bridge.ts is six lines that pick the most-recently-updated session
+	// other than the source. Three tests pin the three behaviors:
+	// no-peers → error, has-peers → returns id, excludes source session.
+
+	it("/continue with no other sessions returns the No other sessions error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/continue");
+		expect(result).toEqual({ ok: false, error: "No other sessions to continue" });
+	});
+
+	it("/continue returns the most-recently-updated other session", async () => {
+		const bridge = createServerBridge(makeResult());
+		const wsA = bridge.createSession();
+		const wsB = bridge.createSession();
+		const wsC = bridge.createSession();
+		// Make wsA oldest, wsC newest (the default order would be
+		// creation order). UpdatedAt is a number, so we set it directly.
+		wsA.session.updatedAt = 100;
+		wsB.session.updatedAt = 200;
+		wsC.session.updatedAt = 300;
+
+		const result = await bridge.executeCommand(wsB.id, "/continue");
+		expect(result.ok).toBe(true);
+		expect((result.result as { sessionId: string }).sessionId).toBe(wsC.id);
+	});
+
+	it("/continue excludes the source session from the candidates", async () => {
+		const bridge = createServerBridge(makeResult());
+		const wsA = bridge.createSession();
+		const wsB = bridge.createSession();
+		// wsA is the newest; /continue from wsA must return wsB, not wsA
+		// itself, even though it's the most-recently-updated.
+		wsA.session.updatedAt = 500;
+		wsB.session.updatedAt = 100;
+
+		const result = await bridge.executeCommand(wsA.id, "/continue");
+		expect(result).toEqual({ ok: true, result: { sessionId: wsB.id } });
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
