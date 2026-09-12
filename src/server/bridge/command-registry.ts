@@ -18,6 +18,7 @@ const ARG_WHITESPACE_SPLIT = /\s+/;
 
 import type { AppConfig } from "../../core/config.ts";
 import type { Message } from "../../core/llm.ts";
+import type { Persona } from "../../core/personas.ts";
 import { listHooksForCwdSettings } from "../../core/project.ts";
 import type { SessionState } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
@@ -88,6 +89,30 @@ export interface CommandContext {
 	 *  the next submit() picks up the new value without a server restart —
 	 *  permissionMode is read fresh inside the agent loop. */
 	setPermissionMode: (mode: PermissionMode) => void;
+	/** Mutate the closure-local subagent model slot (read by the agent loop
+	 *  fresh per run, like permissionMode). */
+	setSubagentModel: (model: string | undefined) => void;
+	/** Mutate the closure-local subagent provider slot. */
+	setSubagentModelProvider: (provider: string | undefined) => void;
+	/** Mutate the closure-local plan model slot. */
+	setPlanModel: (model: string | undefined) => void;
+	/** Mutate the closure-local plan provider slot. */
+	setPlanModelProvider: (provider: string | undefined) => void;
+	/** Mutate the closure-local quick-session persona slot — read by
+	 *  `getConfig()` so the web sidebar reflects the latest choice.
+	 *  Closure is seeded with DEFAULT_PERSONA so the slot is never
+	 *  `undefined`; the setter accepts a string only. */
+	setQuickSessionPersona: (name: string) => void;
+	/** Current value of the closure-local quick-session persona slot
+	 *  (always a string — the closure seeds it with DEFAULT_PERSONA when
+	 *  loadSettings().quickSessionPersona is undefined). The no-arg
+	 *  /quick-session-persona returns this verbatim. */
+	quickSessionPersona: string;
+	/** Current snapshot of the closure's persona list, used by
+	 *  /quick-session-persona to list "Available: a, b, c" on an unknown
+	 *  name. Captured at dispatch time so a /reload-driven refresh is
+	 *  visible on the next command. */
+	personas: Persona[];
 }
 
 /** Synchronous handlers — async work happens before this entry point. */
@@ -420,6 +445,86 @@ const commandHandlers: Record<string, CommandHandler> = {
 		const next = !(loadSettings().showReasoning ?? true);
 		updateSettings({ showReasoning: next });
 		return { ok: true, result: { showReasoning: next } };
+	},
+	"/quick-session-persona": ({ arg, personas, setQuickSessionPersona, quickSessionPersona }) => {
+		if (!arg) return { ok: true, result: { quickSessionPersona } };
+		const persona = personas.find((p) => p.name === arg);
+		if (!persona) {
+			return {
+				ok: false,
+				error: `Unknown persona: ${arg}. Available: ${personas.map((p) => p.name).join(", ")}`,
+			};
+		}
+		setQuickSessionPersona(persona.name);
+		updateSettings({ quickSessionPersona: persona.name });
+		return { ok: true, result: { quickSessionPersona: persona.name } };
+	},
+	"/subagent-model": ({ arg, setSubagentModel, subagentModel }) => {
+		if (!arg) return { ok: true, result: { subagentModel: subagentModel ?? null } };
+		if (arg === "off" || arg === "reset") {
+			setSubagentModel(undefined);
+			if (arg === "reset") {
+				updateSettings({
+					subagentModel: undefined,
+					subagentModelProvider: undefined,
+				});
+			} else {
+				updateSettings({ subagentModel: undefined });
+			}
+			return {
+				ok: true,
+				result: {
+					subagentModel: null,
+					...(arg === "reset" ? { subagentModelProvider: null } : {}),
+				},
+			};
+		}
+		setSubagentModel(arg);
+		updateSettings({ subagentModel: arg });
+		return { ok: true, result: { subagentModel: arg } };
+	},
+	"/subagent-model-provider": ({ arg, setSubagentModelProvider, subagentModelProvider }) => {
+		if (!arg) return { ok: true, result: { subagentModelProvider: subagentModelProvider ?? null } };
+		if (arg === "off" || arg === "reset") {
+			setSubagentModelProvider(undefined);
+			updateSettings({ subagentModelProvider: undefined });
+			return { ok: true, result: { subagentModelProvider: null } };
+		}
+		setSubagentModelProvider(arg);
+		updateSettings({ subagentModelProvider: arg });
+		return { ok: true, result: { subagentModelProvider: arg } };
+	},
+	"/plan-model": ({ arg, setPlanModel, planModel }) => {
+		if (!arg) return { ok: true, result: { planModel: planModel ?? null } };
+		if (arg === "off" || arg === "reset") {
+			setPlanModel(undefined);
+			if (arg === "reset") {
+				updateSettings({
+					planModel: undefined,
+					planModelProvider: undefined,
+				});
+			} else {
+				updateSettings({ planModel: undefined });
+			}
+			return {
+				ok: true,
+				result: { planModel: null, ...(arg === "reset" ? { planModelProvider: null } : {}) },
+			};
+		}
+		setPlanModel(arg);
+		updateSettings({ planModel: arg });
+		return { ok: true, result: { planModel: arg } };
+	},
+	"/plan-model-provider": ({ arg, setPlanModelProvider, planModelProvider }) => {
+		if (!arg) return { ok: true, result: { planModelProvider: planModelProvider ?? null } };
+		if (arg === "off" || arg === "reset") {
+			setPlanModelProvider(undefined);
+			updateSettings({ planModelProvider: undefined });
+			return { ok: true, result: { planModelProvider: null } };
+		}
+		setPlanModelProvider(arg);
+		updateSettings({ planModelProvider: arg });
+		return { ok: true, result: { planModelProvider: arg } };
 	},
 };
 

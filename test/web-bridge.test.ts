@@ -1182,6 +1182,89 @@ describe("web bridge", () => {
 		expect((readBack.result as { permissionMode: string }).permissionMode).toBe("default");
 	});
 
+	// Slice 6 characterization — model-slot commands before the registry
+	// gains five closure setters (setSubagentModel, setSubagentModelProvider,
+	// setPlanModel, setPlanModelProvider, setQuickSessionPersona) plus the
+	// current `personas` snapshot for /quick-session-persona's
+	// "Unknown persona" error. Existing tests cover /subagent-model reset,
+	// /plan-model reset, and all three /quick-session-persona shapes —
+	// slice 6 focuses on the *-provider slots and the setter/back mutation
+	// contract for the non-reset paths.
+
+	it("/subagent-model <name> sets the slot and the next read returns it", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const set = await bridge.executeCommand(ws.id, "/subagent-model hy3-worker");
+		expect(set.ok).toBe(true);
+		expect((set.result as { subagentModel: string }).subagentModel).toBe("hy3-worker");
+		const readBack = await bridge.executeCommand(ws.id, "/subagent-model");
+		expect((readBack.result as { subagentModel: string }).subagentModel).toBe("hy3-worker");
+	});
+
+	it("/subagent-model off clears the slot without touching the provider slot", async () => {
+		// Pre-seed settings — createSession's syncActiveProviderFromSettings
+		// would otherwise re-read empty settings and zero the provider slot
+		// back to undefined before our read-back assertion runs.
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ subagentModel: "hy3-worker", subagentModelProvider: "worker-provider" });
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const off = await bridge.executeCommand(ws.id, "/subagent-model off");
+		expect(off.ok).toBe(true);
+		expect(off.result).toEqual({ subagentModel: null });
+		// The provider slot must survive — /subagent-model reset (below) is the
+		// command that clears both, /off only touches the model slot.
+		const readProvider = await bridge.executeCommand(ws.id, "/subagent-model-provider");
+		expect((readProvider.result as { subagentModelProvider: string }).subagentModelProvider).toBe("worker-provider");
+	});
+
+	it("/subagent-model-provider <name> sets the slot and the next read returns it", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const set = await bridge.executeCommand(ws.id, "/subagent-model-provider worker-provider");
+		expect(set.ok).toBe(true);
+		expect((set.result as { subagentModelProvider: string }).subagentModelProvider).toBe("worker-provider");
+		const readBack = await bridge.executeCommand(ws.id, "/subagent-model-provider");
+		expect((readBack.result as { subagentModelProvider: string }).subagentModelProvider).toBe("worker-provider");
+	});
+
+	it("/subagent-model-provider reset clears the slot to null", async () => {
+		// Pre-seed settings (see /subagent-model off for the rationale).
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ subagentModel: "hy3-worker", subagentModelProvider: "worker-provider" });
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const reset = await bridge.executeCommand(ws.id, "/subagent-model-provider reset");
+		expect(reset.ok).toBe(true);
+		expect((reset.result as { subagentModelProvider: string }).subagentModelProvider).toBeNull();
+		// /subagent-model-provider reset only touches the provider slot, not the model.
+		const readModel = await bridge.executeCommand(ws.id, "/subagent-model");
+		expect((readModel.result as { subagentModel: string }).subagentModel).toBe("hy3-worker");
+	});
+
+	it("/plan-model-provider <name> sets the slot and the next read returns it", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const set = await bridge.executeCommand(ws.id, "/plan-model-provider planner-provider");
+		expect(set.ok).toBe(true);
+		expect((set.result as { planModelProvider: string }).planModelProvider).toBe("planner-provider");
+		const readBack = await bridge.executeCommand(ws.id, "/plan-model-provider");
+		expect((readBack.result as { planModelProvider: string }).planModelProvider).toBe("planner-provider");
+	});
+
+	it("/plan-model-provider reset clears the slot to null", async () => {
+		// Pre-seed settings (see /subagent-model off for the rationale).
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ planModel: "planner", planModelProvider: "planner-provider" });
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const reset = await bridge.executeCommand(ws.id, "/plan-model-provider reset");
+		expect(reset.ok).toBe(true);
+		expect((reset.result as { planModelProvider: string }).planModelProvider).toBeNull();
+		const readModel = await bridge.executeCommand(ws.id, "/plan-model");
+		expect((readModel.result as { planModel: string }).planModel).toBe("planner");
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
