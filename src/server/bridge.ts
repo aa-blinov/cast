@@ -105,7 +105,6 @@ import {
 	type Skill,
 	uninstallUserSkill,
 } from "../core/skills.ts";
-import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
@@ -2886,6 +2885,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			rulesForSessionCwd,
 			fireUserPromptExpansion,
 			getHistoryPage,
+			refreshSkillsFromSkillsSh: async () => {
+				const skillsResult = await resolveSkillsForCwd(projectDeps, cwd, projectTrusted);
+				skills = skillsResult.skills;
+				recomputeAllSystemPrompts();
+			},
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/evolve") {
@@ -3139,37 +3143,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				return { ok: true, result: `Uninstalled skill "${rest}"` };
 			}
 			return { ok: false, error: `Unknown /skills subcommand: ${sub}` };
-		}
-		if (name === "/skills-sh") {
-			const sessionCwd = ws.session.cwd ?? cwd;
-			const [sub, ...restParts] = arg ? arg.split(WHITESPACE_SPLIT) : [""];
-			const rest = restParts.join(" ");
-			const refreshSkills = async (): Promise<void> => {
-				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				skills = skillsResult.skills;
-				recomputeAllSystemPrompts();
-			};
-			try {
-				if (sub === "install") {
-					const out = await skillsShInstall(rest);
-					await refreshSkills();
-					return { ok: true, result: out || "Installed." };
-				}
-				if (sub === "list-available") return { ok: true, result: await skillsShListAvailable(rest) };
-				if (sub === "search") return { ok: true, result: await skillsShSearch(rest) };
-				if (sub === "uninstall") {
-					const out = await skillsShUninstall(rest);
-					await refreshSkills();
-					return { ok: true, result: out || "Uninstalled." };
-				}
-				return {
-					ok: false,
-					error: `Unknown /skills-sh subcommand: "${sub}". Try: install, list-available, search, uninstall.`,
-				};
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				return { ok: false, error: message };
-			}
 		}
 		if (name === "/provider") {
 			const [sub, rest] = splitArg(arg);
