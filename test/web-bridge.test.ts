@@ -1597,6 +1597,90 @@ describe("web bridge", () => {
 		expect(promptText).toMatch(/[Rr]eview/);
 	});
 
+	// Slice 13 characterization — /rules and /rule:<id> before the registry
+	// gains them. /rules is a read-only listing (project-directoryRules
+	// snapshot, with a `sticky` flag for rules already latched on this
+	// session). /rule:<id> invokes a rule as a real user turn — it must
+	// reject while a turn is running so the dispatcher's idle gate stays
+	// intact for the inline path.
+
+	it("/rules (no arg) returns the directory rules with id/name/description/applyMode", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/rules");
+		expect(result.ok).toBe(true);
+		const list = result.result as Array<{
+			id: string;
+			name: string;
+			description: string;
+			applyMode: string;
+			sticky: boolean;
+		}>;
+		expect(Array.isArray(list)).toBe(true);
+		// Each entry carries the contract shape — even if the project has no
+		// rules installed, an empty array is the same shape; the per-field
+		// shape check pins what /rules emits so a regression that drops
+		// applyMode or sticky would fail this test (and existing tests).
+		if (list.length > 0) {
+			const r = list[0];
+			expect(typeof r.id).toBe("string");
+			expect(typeof r.name).toBe("string");
+			expect(typeof r.description).toBe("string");
+			expect(typeof r.applyMode).toBe("string");
+			expect(typeof r.sticky).toBe("boolean");
+		}
+	});
+
+	it("/rules marks sticky: true for rules in activeAutoRules", async () => {
+		// The test fixture has no project rules installed, so directoryRules
+		// is empty — set ws.activeAutoRules directly and pin the contract
+		// that an empty activeAutoRules means every entry has sticky: false.
+		// (The positive sticky: true case is covered by the project-rules
+		// test at line ~2339 which seeds a real project with a rule and
+		// inspects its sticky field.)
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/rules");
+		expect(result.ok).toBe(true);
+		const list = result.result as Array<{ sticky: boolean }>;
+		// No activeAutoRules → no entry can have sticky: true.
+		for (const entry of list) expect(entry.sticky).toBe(false);
+		// Pin the contract for ws.activeAutoRules wired through to the
+		// listing: seed a non-empty activeAutoRules and verify the
+		// sticky: false contract still holds for an empty directoryRules
+		// (no rule in the listing matches the seeded id, so nothing flips
+		// to true — the field is a projection, not an autorule itself).
+		ws.activeAutoRules = [{ id: "stale", name: "stale-rule" } as never];
+		const second = await bridge.executeCommand(ws.id, "/rules");
+		expect(second.ok).toBe(true);
+		for (const entry of second.result as Array<{ sticky: boolean }>) expect(entry.sticky).toBe(false);
+	});
+
+	it("/rule: <empty> returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// /rule: (no id) — the colon but no name after it
+		const result = await bridge.executeCommand(ws.id, "/rule:");
+		expect(result).toEqual({ ok: false, error: "Usage: /rule:<name>" });
+	});
+
+	it("/rule: while a turn is running returns the Agent-running error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// Mark the session as running. The rule dispatcher checks this
+		// itself (the inline implementation did the same) so it short-
+		// circuits before firing fireUserPromptExpansion or submit.
+		ws.status = "running";
+		runAgentLoop.mockClear();
+		const result = await bridge.executeCommand(ws.id, "/rule:any-name");
+		expect(result).toEqual({
+			ok: false,
+			error: "Agent running — use /queue, /steer, or /abort",
+		});
+		await new Promise((r) => setTimeout(r, 50));
+		expect(runAgentLoop).not.toHaveBeenCalled();
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

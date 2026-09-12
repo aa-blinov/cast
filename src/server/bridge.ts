@@ -59,7 +59,6 @@ import {
 import { clearProjectRootCache } from "../core/project-root.ts";
 import { getModelsCache, setModelsCache } from "../core/readline.ts";
 import {
-	formatRuleInvocation,
 	formatRulesForTurn,
 	matchAutoRules,
 	type Rule,
@@ -2827,6 +2826,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const registered = await dispatchRegisteredCommand(name, {
 			ws,
 			arg,
+			cmd: name,
 			cwd,
 			config,
 			loadSettings,
@@ -2883,42 +2883,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			syncFsWatcher: (target) => {
 				fsWatcher.syncFsWatcher(target);
 			},
+			rulesForSessionCwd,
+			fireUserPromptExpansion,
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/evolve") {
 			return await evolveSkills(ws);
-		}
-		if (name === "/rules") {
-			// `sticky` is what the *daemon* has latched this session. The agent
-			// loop runs here, so a TUI attached as a thin client has no idea which
-			// auto rules already attached — it was reporting every one of them as
-			// still waiting for a match, for the whole session.
-			const stickyIds = new Set((ws.activeAutoRules ?? []).map((r) => r.id));
-			return {
-				ok: true,
-				result: rulesForSessionCwd(ws.session.cwd ?? cwd).directoryRules.map((r) => ({
-					id: r.id,
-					name: r.name,
-					description: r.description,
-					applyMode: r.applyMode,
-					sticky: stickyIds.has(r.id),
-				})),
-			};
-		}
-		if (name.startsWith("/rule:")) {
-			const ruleId = name.slice("/rule:".length);
-			if (!ruleId) return { ok: false, error: "Usage: /rule:<name>" };
-			// Submits the rule body as a real user turn (matches the TUI's
-			// agent.submit(formatRuleInvocation(rule)) — it's not a silent system-
-			// prompt injection), so it needs the same idle gate a plain message
-			// submit would get if the composer weren't already disabled while running.
-			if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
-			const sessionRules = rulesForSessionCwd(ws.session.cwd ?? cwd).directoryRules;
-			const rule = sessionRules.find((r) => r.id === ruleId) ?? sessionRules.find((r) => r.name === ruleId);
-			if (!rule) return { ok: false, error: `Unknown rule: ${ruleId}. See /rules for the list.` };
-			fireUserPromptExpansion(ws.session.cwd ?? cwd, rule.name);
-			submit(sessionId, formatRuleInvocation(rule));
-			return { ok: true, result: `Invoked rule: ${rule.name}` };
 		}
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
 		if (name === "/model-selection") {
