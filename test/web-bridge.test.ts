@@ -1788,6 +1788,61 @@ describe("web bridge", () => {
 		expect(result.error).toMatch(/Usage: \/skills-sh install/);
 	});
 
+	// Slice 16 characterization — /ssh before the registry gains it.
+	// Three subcommands (list, add, remove). Tests pin the deterministic
+	// contracts only — the round-trip via saveSshConfig requires a real
+	// home-dir setup, which the existing suggestCommand test fixture
+	// already covers; we don't duplicate it here.
+
+	it("/ssh (no arg) and /ssh list both return the host list with the expected shape", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const noArg = await bridge.executeCommand(ws.id, "/ssh");
+		const explicitList = await bridge.executeCommand(ws.id, "/ssh list");
+		expect(noArg.ok).toBe(true);
+		expect(explicitList.ok).toBe(true);
+		expect(Array.isArray(noArg.result)).toBe(true);
+		expect(noArg.result).toEqual(explicitList.result);
+	});
+
+	it("/ssh add <name> <host> returns Added host", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/ssh add staging staging.example.com");
+		expect(result).toEqual({ ok: true, result: 'Added host "staging"' });
+	});
+
+	it("/ssh add (missing host) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/ssh add staging-only");
+		expect(result).toEqual({
+			ok: false,
+			error: "Usage: /ssh add <name> <host> [username] [port] [keyPath] [password]",
+		});
+	});
+
+	it("/ssh remove (missing name) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/ssh remove");
+		expect(result).toEqual({ ok: false, error: "Usage: /ssh remove <name>" });
+	});
+
+	it("/ssh remove <unknown> returns the Unknown host error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/ssh remove never-added");
+		expect(result).toEqual({ ok: false, error: "Unknown host: never-added" });
+	});
+
+	it("/ssh <unknown subcommand> returns the inline usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/ssh frobnicate");
+		expect(result).toEqual({ ok: false, error: "Unknown /ssh subcommand: frobnicate" });
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

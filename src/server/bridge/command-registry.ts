@@ -57,6 +57,7 @@ import {
 	updateSettings,
 } from "../../core/settings.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../../core/skills-sh.ts";
+import type { SshHost, saveSshConfig } from "../../core/ssh.ts";
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
 import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { ALL_THEMES } from "../../ui/themes/index.ts";
@@ -212,6 +213,16 @@ export interface CommandContext {
 	 *  system prompt. /skills-sh install and /skills-sh uninstall
 	 *  need this so the next turn sees the new skill set. */
 	refreshSkillsFromSkillsSh: () => Promise<void>;
+	/** Mutate the closure-local sshHosts slot (read fresh by sshForCwd
+	 *  via the bridge dispatcher when a session picks its host).
+	 *  /ssh add and /ssh remove write it. */
+	setSshHosts: (hosts: SshHost[]) => void;
+	/** Read the current sshHosts snapshot for /ssh list and remove. */
+	sshHosts: SshHost[];
+	/** Persist the sshHosts slot to ~/.cast/ssh.json after add/remove.
+	 *  Closure re-export of the core helper so the registry stays
+	 *  self-contained for tests. */
+	saveSshConfig: typeof saveSshConfig;
 }
 
 /** Handlers may be sync or async — async ones let /compact, /new, and any
@@ -1060,6 +1071,50 @@ const commandHandlers: Record<string, CommandHandler> = {
 		} catch (error) {
 			return { ok: false, error: error instanceof Error ? error.message : String(error) };
 		}
+	},
+	"/ssh": ({ arg, sshHosts, setSshHosts, saveSshConfig }) => {
+		const i = arg.indexOf(" ");
+		const [sub, rest] = i === -1 ? [arg, ""] : [arg.slice(0, i), arg.slice(i + 1).trim()];
+		if (!sub || sub === "list") {
+			return {
+				ok: true,
+				result: sshHosts.map((h) => ({
+					name: h.name,
+					host: h.host,
+					username: h.username,
+					port: h.port,
+					keyPath: h.keyPath,
+					password: !!h.password,
+				})),
+			};
+		}
+		if (sub === "remove") {
+			if (!rest) return { ok: false, error: "Usage: /ssh remove <name>" };
+			const remaining = sshHosts.filter((h) => h.name !== rest);
+			if (remaining.length === sshHosts.length) return { ok: false, error: `Unknown host: ${rest}` };
+			setSshHosts(remaining);
+			saveSshConfig(remaining);
+			return { ok: true, result: `Removed host "${rest}"` };
+		}
+		if (sub === "add") {
+			// Flat form (no wizard): /ssh add <name> <host> [username] [port] [keyPath] [password]
+			// "-" is an explicit placeholder for a skipped optional field (so a
+			// later positional arg, e.g. port, can be given without the earlier
+			// one) — it never means a literal username/key path of "-".
+			const parts = rest.split(ARG_WHITESPACE_SPLIT).map((p) => (p === "-" ? undefined : p));
+			const [hname, host, username, portStr, keyPath, password] = parts;
+			if (!hname || !host)
+				return { ok: false, error: "Usage: /ssh add <name> <host> [username] [port] [keyPath] [password]" };
+			const port = portStr ? Number.parseInt(portStr, 10) : undefined;
+			const updated = [
+				...sshHosts.filter((h) => h.name !== hname),
+				{ name: hname, host, username, port, keyPath, password },
+			];
+			setSshHosts(updated);
+			saveSshConfig(updated);
+			return { ok: true, result: `Added host "${hname}"` };
+		}
+		return { ok: false, error: `Unknown /ssh subcommand: ${sub}` };
 	},
 };
 

@@ -2890,6 +2890,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				skills = skillsResult.skills;
 				recomputeAllSystemPrompts();
 			},
+			sshHosts,
+			setSshHosts: (hosts) => {
+				sshHosts = hosts;
+			},
+			saveSshConfig,
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/evolve") {
@@ -3315,48 +3320,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			});
 			saveSession(ws.session);
 			return { ok: true, result: `Switched to provider "${sub}" — pick a model with /model` };
-		}
-		if (name === "/ssh") {
-			const [sub, rest] = splitArg(arg);
-			if (!sub || sub === "list") {
-				return {
-					ok: true,
-					result: sshHosts.map((h) => ({
-						name: h.name,
-						host: h.host,
-						username: h.username,
-						port: h.port,
-						keyPath: h.keyPath,
-						password: !!h.password,
-					})),
-				};
-			}
-			if (sub === "remove") {
-				if (!rest) return { ok: false, error: "Usage: /ssh remove <name>" };
-				const remaining = sshHosts.filter((h) => h.name !== rest);
-				if (remaining.length === sshHosts.length) return { ok: false, error: `Unknown host: ${rest}` };
-				sshHosts = remaining;
-				saveSshConfig(sshHosts);
-				return { ok: true, result: `Removed host "${rest}"` };
-			}
-			if (sub === "add") {
-				// Flat form (no wizard): /ssh add <name> <host> [username] [port] [keyPath] [password]
-				// "-" is an explicit placeholder for a skipped optional field (so a
-				// later positional arg, e.g. port, can be given without the earlier
-				// one) — it never means a literal username/key path of "-".
-				const parts = rest.split(WHITESPACE_SPLIT).map((p) => (p === "-" ? undefined : p));
-				const [hname, host, username, portStr, keyPath, password] = parts;
-				if (!hname || !host)
-					return { ok: false, error: "Usage: /ssh add <name> <host> [username] [port] [keyPath] [password]" };
-				const port = portStr ? Number.parseInt(portStr, 10) : undefined;
-				sshHosts = [
-					...sshHosts.filter((h) => h.name !== hname),
-					{ name: hname, host, username, port, keyPath, password },
-				];
-				saveSshConfig(sshHosts);
-				return { ok: true, result: `Added host "${hname}"` };
-			}
-			return { ok: false, error: `Unknown /ssh subcommand: ${sub}` };
 		}
 
 		if (name === "/undo") {
