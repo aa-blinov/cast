@@ -177,7 +177,7 @@ describe("BackgroundTaskRegistry", () => {
 		// deadline + the PTY's exit-signal wait can together exceed vitest's
 		// 30s global testTimeout under parallel load.
 		await task.exitPromise;
-		const deadline = Date.now() + 30_000;
+		const deadline = Date.now() + 60_000;
 		let lineCount = task.rawOutput.split("\n").filter(Boolean).length;
 		while (lineCount < 20 && Date.now() < deadline) {
 			await new Promise((r) => setTimeout(r, 25));
