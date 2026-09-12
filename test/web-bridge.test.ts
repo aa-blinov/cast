@@ -1932,6 +1932,102 @@ describe("web bridge", () => {
 		expect(result).toEqual({ ok: false, error: "Unknown /mcp subcommand: frobnicate" });
 	});
 
+	// Slice 18 characterization — /skills before the registry gains it.
+	// Five subcommands (list / help / enable / disable / uninstall) plus
+	// the unknown-subcommand fallback. The list path is exercised by an
+	// existing fakeHome install block; slice 18 pins the contracts that
+	// don't need that setup (usage errors + help text + unknown-subcmd).
+	// The /skills list + /skills uninstall paths need a projectDeps with
+	// cliSkillPaths=[] (else discoverSkillsForCwd throws on undefined
+	// extraPaths) — same override as the existing fakeHome list test.
+
+	const emptySkillsDeps = {
+		noSkills: false,
+		noMcp: false,
+		cliSkillPaths: [],
+		cliMcpPaths: [],
+	} as StartupResult["projectDeps"];
+
+	it("/skills list returns the skill list with name/source/filePath/description/enabled/uninstallable", async () => {
+		const bridge = createServerBridge(makeResult({ projectDeps: emptySkillsDeps }));
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills list");
+		expect(result.ok).toBe(true);
+		const list = result.result as Array<{
+			name: string;
+			source: string;
+			filePath: string;
+			description: string;
+			enabled: boolean;
+			uninstallable: boolean;
+		}>;
+		expect(Array.isArray(list)).toBe(true);
+		if (list.length > 0) {
+			const entry = list[0];
+			expect(typeof entry.name).toBe("string");
+			expect(typeof entry.source).toBe("string");
+			expect(typeof entry.filePath).toBe("string");
+			expect(typeof entry.description).toBe("string");
+			expect(typeof entry.enabled).toBe("boolean");
+			expect(typeof entry.uninstallable).toBe("boolean");
+		}
+	});
+
+	it("/skills (no arg) is an alias for /skills list and returns the same shape", async () => {
+		const bridge = createServerBridge(makeResult({ projectDeps: emptySkillsDeps }));
+		const ws = bridge.createSession();
+		const noArg = await bridge.executeCommand(ws.id, "/skills");
+		const list = await bridge.executeCommand(ws.id, "/skills list");
+		expect(noArg.ok).toBe(true);
+		expect(list.ok).toBe(true);
+		expect(noArg.result).toEqual(list.result);
+	});
+
+	it("/skills help returns the help-text with the four subcommands", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills help");
+		expect(result).toEqual({
+			ok: true,
+			result: "/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name>",
+		});
+	});
+
+	it("/skills enable (no name) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills enable");
+		expect(result).toEqual({ ok: false, error: "Usage: /skills enable <name>" });
+	});
+
+	it("/skills disable (no name) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills disable");
+		expect(result).toEqual({ ok: false, error: "Usage: /skills disable <name>" });
+	});
+
+	it("/skills uninstall (no name) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills uninstall");
+		expect(result).toEqual({ ok: false, error: "Usage: /skills uninstall <name>" });
+	});
+
+	it("/skills uninstall <unknown> returns the Unknown skill error", async () => {
+		const bridge = createServerBridge(makeResult({ projectDeps: emptySkillsDeps }));
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills uninstall never-installed");
+		expect(result).toEqual({ ok: false, error: "Unknown skill: never-installed" });
+	});
+
+	it("/skills <unknown subcommand> returns the inline usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills frobnicate");
+		expect(result).toEqual({ ok: false, error: "Unknown /skills subcommand: frobnicate" });
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

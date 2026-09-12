@@ -47,7 +47,6 @@ import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
 	projectMcpPath,
-	readSkillsShSources,
 	resolveHooksForCwd,
 	resolveMcpForCwd,
 	resolvePersonasForCwd,
@@ -97,13 +96,7 @@ import {
 	turnIterationCap,
 	updateSettings,
 } from "../core/settings.ts";
-import {
-	formatSkillsForPrompt,
-	isUninstallableSkill,
-	renderSkillInvocation,
-	type Skill,
-	uninstallUserSkill,
-} from "../core/skills.ts";
+import { formatSkillsForPrompt, isUninstallableSkill, renderSkillInvocation, type Skill } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
@@ -2889,6 +2882,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				skills = skillsResult.skills;
 				recomputeAllSystemPrompts();
 			},
+			refreshSkillsFromSkills: async () => {
+				const skillsResult = await resolveSkillsForCwd(projectDeps, cwd, projectTrusted);
+				skills = skillsResult.skills;
+				recomputeAllSystemPrompts();
+			},
 			sshHosts,
 			setSshHosts: (hosts) => {
 				sshHosts = hosts;
@@ -2999,69 +2997,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			} catch (err) {
 				return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
 			}
-		}
-		if (name === "/skills") {
-			const [sub, rest] = splitArg(arg);
-			const sessionCwd = ws.session.cwd ?? cwd;
-			if (!sub || sub === "list") {
-				const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				const disabled = new Set(loadSettings().disabledSkills ?? []);
-				// `npx skills add` installs flat (`~/.agents/skills/<name>/SKILL.md`,
-				// no repo-named subdirectory), so the source repo can only come
-				// from its lockfile, keyed by skill name — never from the path.
-				const skillsShSources = readSkillsShSources();
-				return {
-					ok: true,
-					result: discovered.map((s) => {
-						const skillsShSource = s.source === "agents" ? skillsShSources[s.name] : undefined;
-						return {
-							name: s.name,
-							source: s.source,
-							filePath: s.filePath,
-							description: s.description,
-							enabled: !disabled.has(s.name),
-							uninstallable: isUninstallableSkill(s),
-							// Agent directories are shared with other tools (Amp, Codex,
-							// etc.). Only Skills.sh's lockfile establishes its provenance.
-							skillssh: skillsShSource !== undefined,
-							skillsshSource: skillsShSource,
-						};
-					}),
-				};
-			}
-			if (sub === "help") {
-				return {
-					ok: true,
-					result: "/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name>",
-				};
-			}
-			if (sub === "enable" || sub === "disable") {
-				if (!rest) return { ok: false, error: `Usage: /skills ${sub} <name>` };
-				updateSettings((current) => {
-					const disabled = new Set(current.disabledSkills ?? []);
-					if (sub === "disable") disabled.add(rest);
-					else disabled.delete(rest);
-					return { disabledSkills: [...disabled] };
-				});
-				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				skills = skillsResult.skills;
-				recomputeAllSystemPrompts();
-				return { ok: true, result: `Skill "${rest}" ${sub}d` };
-			}
-			if (sub === "uninstall") {
-				if (!rest) return { ok: false, error: "Usage: /skills uninstall <name>" };
-				const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				const skill = discovered.find((s) => s.name === rest);
-				if (!skill) return { ok: false, error: `Unknown skill: ${rest}` };
-				if (!isUninstallableSkill(skill))
-					return { ok: false, error: `"${rest}" isn't a removable skill (builtin or --skill path)` };
-				uninstallUserSkill(skill);
-				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				skills = skillsResult.skills;
-				recomputeAllSystemPrompts();
-				return { ok: true, result: `Uninstalled skill "${rest}"` };
-			}
-			return { ok: false, error: `Unknown /skills subcommand: ${sub}` };
 		}
 		if (name === "/provider") {
 			const [sub, rest] = splitArg(arg);
