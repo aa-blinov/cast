@@ -48,7 +48,6 @@ import {
 	discoverSkillsForCwd,
 	projectMcpPath,
 	readSkillsShSources,
-	removeMcpServerFromDisk,
 	resolveHooksForCwd,
 	resolveMcpForCwd,
 	resolvePersonasForCwd,
@@ -2895,6 +2894,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				sshHosts = hosts;
 			},
 			saveSshConfig,
+			mcpForSessionCwd,
+			withMcpLock,
+			setMcpResult: (next) => {
+				mcpResult = next;
+			},
+			mcpResult,
+			projectDeps,
+			projectTrusted,
+			recomputeAllSystemPrompts,
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/evolve") {
@@ -2991,100 +2999,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			} catch (err) {
 				return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
 			}
-		}
-		if (name === "/mcp") {
-			const [sub, rest] = splitArg(arg);
-			const sessionCwd = ws.session.cwd ?? cwd;
-			if (!sub || sub === "list") {
-				// The session's set, not the daemon's: a project's own servers are
-				// connected for its directory, and a listing that omitted them
-				// disagreed with the tools the model actually has.
-				const sessionMcp = mcpForSessionCwd(sessionCwd);
-				return {
-					ok: true,
-					result: sessionMcp.allServerNames.map((n) => ({
-						name: n,
-						source: sessionMcp.serverSources[n] ?? "global",
-						// alive, not merely present: a server whose transport died is
-						// still in `connections` (nothing prunes it), and reporting it
-						// as connected sent the user looking for a problem elsewhere.
-						connected: sessionMcp.connections.some((c) => c.serverName === n && c.alive !== false),
-						disabled: (loadSettings().disabledMcpServers ?? []).includes(n),
-					})),
-				};
-			}
-			if (sub === "help") {
-				return {
-					ok: true,
-					result:
-						"/mcp list – /mcp enable <name> – /mcp disable <name> – /mcp reconnect <name> – /mcp uninstall <name>",
-				};
-			}
-			if (sub === "reconnect") {
-				if (!rest) return { ok: false, error: "Usage: /mcp reconnect <name>" };
-				if (!mcpResult.allServerNames.includes(rest)) return { ok: false, error: `Unknown MCP server: ${rest}` };
-				try {
-					const connected = await withMcpLock(async () => {
-						await closeMcpConnections(mcpResult.connections);
-						mcpResult = await resolveMcpForCwd(
-							projectDeps,
-							sessionCwd,
-							projectTrusted,
-							loadSettings().disabledMcpServers ?? [],
-						);
-						recomputeAllSystemPrompts();
-						return mcpResult.connections.some((c) => c.serverName === rest);
-					});
-					return { ok: true, result: `MCP server "${rest}" ${connected ? "reconnected" : "reconnect failed"}` };
-				} catch (err) {
-					return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
-				}
-			}
-			if (sub === "enable" || sub === "disable") {
-				if (!rest) return { ok: false, error: `Usage: /mcp ${sub} <name>` };
-				updateSettings((current) => {
-					const disabled = new Set(current.disabledMcpServers ?? []);
-					if (sub === "disable") disabled.add(rest);
-					else disabled.delete(rest);
-					return { disabledMcpServers: [...disabled] };
-				});
-				try {
-					await withMcpLock(async () => {
-						await closeMcpConnections(mcpResult.connections);
-						mcpResult = await resolveMcpForCwd(
-							projectDeps,
-							sessionCwd,
-							projectTrusted,
-							loadSettings().disabledMcpServers ?? [],
-						);
-						recomputeAllSystemPrompts();
-					});
-					return { ok: true, result: `MCP server "${rest}" ${sub}d` };
-				} catch (err) {
-					return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
-				}
-			}
-			if (sub === "uninstall") {
-				if (!rest) return { ok: false, error: "Usage: /mcp uninstall <name>" };
-				const removed = removeMcpServerFromDisk(rest, sessionCwd, projectTrusted);
-				if (!removed) return { ok: false, error: `Unknown or already-removed MCP server: ${rest}` };
-				try {
-					await withMcpLock(async () => {
-						await closeMcpConnections(mcpResult.connections);
-						mcpResult = await resolveMcpForCwd(
-							projectDeps,
-							sessionCwd,
-							projectTrusted,
-							loadSettings().disabledMcpServers ?? [],
-						);
-						recomputeAllSystemPrompts();
-					});
-					return { ok: true, result: `Uninstalled MCP server "${rest}" (${removed.origin})` };
-				} catch (err) {
-					return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
-				}
-			}
-			return { ok: false, error: `Unknown /mcp subcommand: ${sub}` };
 		}
 		if (name === "/skills") {
 			const [sub, rest] = splitArg(arg);
