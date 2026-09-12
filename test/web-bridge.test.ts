@@ -618,6 +618,74 @@ describe("web bridge", () => {
 		});
 	});
 
+	it("/model-selection with no args fails with usage", async () => {
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/model-selection");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Usage: \/model-selection/);
+	});
+
+	it("/model-selection with unknown provider fails without mutating config", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey }],
+			modelProvider: "local",
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+		const before = ws.session.model;
+		const result = await bridge.executeCommand(ws.id, "/model-selection nope hy3");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Unknown provider: nope/);
+		expect(ws.session.model).toBe(before);
+	});
+
+	it("/model-selection with unknown model fails without mutating config", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [{ name: "local", url: testConfig.baseURL, apiKey: testConfig.apiKey }],
+			modelProvider: "local",
+			providerUrl: testConfig.baseURL,
+			apiKey: testConfig.apiKey,
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+		const before = ws.session.model;
+		const result = await bridge.executeCommand(ws.id, "/model-selection local does-not-exist");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/not available/);
+		expect(ws.session.model).toBe(before);
+	});
+
+	it("/model-selection resets slot models when the provider changes and the slots have no override", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "alpha", url: testConfig.baseURL, apiKey: "alpha-key" },
+				{ name: "beta", url: "https://beta.example/v1", apiKey: "beta-key" },
+			],
+			modelProvider: "alpha",
+			providerUrl: testConfig.baseURL,
+			apiKey: "alpha-key",
+			subagentModelProvider: undefined,
+			planModelProvider: undefined,
+			subagentModel: "alpha-sub",
+			planModel: "alpha-plan",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+
+		await bridge.executeCommand(ws.id, "/model-selection beta hy3");
+
+		const settings = loadSettings();
+		expect(settings.modelProvider).toBe("beta");
+		expect(settings.subagentModel).toBeUndefined();
+		expect(settings.planModel).toBeUndefined();
+	});
+
 	it("/provider edit updates the active provider in place, keeping the model and the slots", async () => {
 		// The web form used to delete + re-add, and deleting the active provider
 		// switched to a fallback, cleared the model and dropped the slots.

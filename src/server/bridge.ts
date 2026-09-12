@@ -2896,54 +2896,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return await evolveSkills(ws);
 		}
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
-		if (name === "/model-selection") {
-			const [providerName, model] = arg.split(WHITESPACE_SPLIT).filter(Boolean);
-			if (!providerName || !model) return { ok: false, error: "Usage: /model-selection <provider> <model>" };
-			const provider = (loadSettings().providers ?? []).find((p) => p.name === providerName);
-			if (!provider) return { ok: false, error: `Unknown provider: ${providerName}` };
-			const target = { ...config, baseURL: provider.url, apiKey: provider.apiKey };
-			const models = await fetchModels(target);
-			if (!models.ok || !models.models?.some((entry) => entry.id === model)) {
-				return {
-					ok: false,
-					error: models.error ?? `Model "${model}" is not available from provider "${providerName}"`,
-				};
-			}
-
-			const providerChanged = config.baseURL !== provider.url || config.apiKey !== provider.apiKey;
-			config.baseURL = provider.url;
-			config.apiKey = provider.apiKey;
-			config.reasoningFormat = resolveReasoningFormat(provider.url, provider.reasoningFormat);
-			setModelsCache(models.models);
-			const selected = models.models.find((entry) => entry.id === model);
-			reasoningMeta = selected?.reasoning;
-			config.reasoningLevel = reasoningLevelForModel(model, config.reasoningFormat);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
-			ws.session.model = model;
-			ws.session.providerUrl = provider.url;
-			ws.session.providerName = provider.name;
-			ws.systemPrompt = computeSystemPrompt(
-				resolvePersona(ws.session.persona ?? "") ?? currentPersona,
-				model,
-				ws.session.cwd ?? cwd,
-				ws.session.mode,
-			);
-			defaultModel = model;
-			if (providerChanged && !subagentModelProvider) subagentModel = undefined;
-			if (providerChanged && !planModelProvider) planModel = undefined;
-			updateSettings({
-				providerUrl: provider.url,
-				apiKey: provider.apiKey,
-				modelProvider: provider.name,
-				model,
-				reasoningLevel: config.reasoningLevel,
-				...(providerChanged && !subagentModelProvider ? { subagentModel: undefined } : {}),
-				...(providerChanged && !planModelProvider ? { planModel: undefined } : {}),
-			});
-			saveSession(ws.session);
-			broadcaster.broadcastSessionUpdate(ws);
-			return { ok: true, result: { model, provider: provider.name } };
-		}
 		if (name === "/reload") {
 			const sessionCwd = ws.session.cwd ?? cwd;
 			try {
