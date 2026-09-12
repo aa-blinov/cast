@@ -285,6 +285,14 @@ export interface CommandContext {
 	 *  delegates the in-use check to the closure that owns the
 	 *  sessions Map. */
 	sessionUsingCwd: (path: string) => { id: string; status: WebAgentStatus } | undefined;
+	/** Analyze the session's transcript + project's typical tasks and
+	 *  propose reusable project skills via the existing plan-decision
+	 *  picker. /evolve is a thin wrapper — the closure's evolveSkills
+	 *  uses broadcaster.persistDecisionState, projectTypicalTasks (a
+	 *  closure-internal filesystem walker), and a small LLM call, so
+	 *  the registry delegates the whole body instead of trying to
+	 *  unpack the closure state. */
+	evolveSkills: (ws: WebAgentSession) => Promise<CommandResult>;
 }
 
 /** Handlers may be sync or async — async ones let /compact, /new, and any
@@ -1577,6 +1585,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 		return { ok: true, result: { model, provider: provider.name } };
 	},
 	"/reload": ({ ws, cwd, reloadBridgeState }) => reloadBridgeState(ws.session.cwd ?? cwd),
+	"/evolve": ({ ws, evolveSkills }) => evolveSkills(ws),
 	"/undo": ({ ws, arg, saveSession, broadcaster }) => {
 		const checkpoints = ws.session.checkpoints || [];
 		if (checkpoints.length === 0) return { ok: false, error: "No checkpoint available to undo" };
