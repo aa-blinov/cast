@@ -106,8 +106,6 @@ import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,
 	getReasoningOptionsForFormat,
-	REASONING_FORMAT_OPTIONS,
-	type ReasoningFormat,
 	resolveReasoningFormat,
 } from "../core/vendors.ts";
 import { createSessionWorktree, listWorktrees, removeSessionWorktree, type SessionWorktree } from "../core/worktree.ts";
@@ -2613,15 +2611,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		mcpResult = result;
 	}
 
-	/** Splits "sub rest of args" into its first word and everything after —
-	 * used by every command with sub-verbs (/mcp enable <name>,
-	 * <name> ...) since the outer name/arg split in
-	 * executeCommand only peels off the top-level command name. */
-	function splitArg(s: string): [string, string] {
-		const i = s.indexOf(" ");
-		return i === -1 ? [s, ""] : [s.slice(0, i), s.slice(i + 1).trim()];
-	}
-
 	/** Same fallback chain the TUI's /reasoning uses: the meta captured at
 	 * startup only matches the model cast launched with — a session that's
 	 * since switched models (`/model`) falls back to whatever the provider's
@@ -2998,181 +2987,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
 			}
 		}
-		if (name === "/provider") {
-			const [sub, rest] = splitArg(arg);
-			const settings = loadSettings();
-			const providers = settings.providers ?? [];
-			if (!sub || sub === "list") {
-				// Active = the saved provider (matched by name, falling back to url+key
-				// for legacy settings that pre-date modelProvider). Two providers can
-				// share a URL, so URL-only matching silently mislabels the second one
-				// as "active" and the chat footer / model picker then show the wrong name.
-				const savedSettings = loadSettings();
-				const savedName = savedSettings.modelProvider;
-				const activeByName = savedName ? providers.find((p) => p.name === savedName) : undefined;
-				const activeByCreds = providers.find((p) => p.url === config.baseURL && p.apiKey === config.apiKey);
-				const active = activeByName ?? activeByCreds;
-				return {
-					ok: true,
-					result: providers.map((p) => ({ name: p.name, url: p.url, active: p === active })),
-				};
-			}
-			if (sub === "delete") {
-				if (!rest) return { ok: false, error: "Usage: /provider delete <name>" };
-				const removed = providers.find((p) => p.name === rest);
-				const remaining = providers.filter((p) => p.name !== rest);
-				if (remaining.length === providers.length) return { ok: false, error: `Unknown provider: ${rest}` };
-				const deletingActive = removed?.url === config.baseURL && removed?.apiKey === config.apiKey;
-				const deletingMain = settings.modelProvider === rest;
-				if (deletingActive && remaining.length > 0) {
-					const fallback = remaining[0]!;
-					config.baseURL = fallback.url;
-					config.apiKey = fallback.apiKey;
-					ws.session.providerUrl = fallback.url;
-					ws.session.providerName = fallback.name;
-					config.reasoningFormat = resolveReasoningFormat(fallback.url, fallback.reasoningFormat);
-					config.reasoningParams = buildReasoningParams(
-						config.reasoningLevel,
-						config.reasoningFormat,
-						ws.session.model,
-					);
-					ws.session.model = "";
-					updateSettings({
-						providers: remaining,
-						providerUrl: fallback.url,
-						apiKey: fallback.apiKey,
-						modelProvider: fallback.name,
-						model: "",
-					});
-					saveSession(ws.session);
-					return { ok: true, result: `Deleted provider "${rest}" — switched to "${fallback.name}"` };
-				}
-				updateSettings({
-					providers: remaining,
-					...(deletingMain ? { modelProvider: undefined } : {}),
-					...(deletingActive ? { providerUrl: "", apiKey: "", modelProvider: undefined, model: "" } : {}),
-				});
-				if (deletingActive) {
-					config.baseURL = "";
-					config.apiKey = "";
-					ws.session.providerUrl = undefined;
-					ws.session.providerName = undefined;
-					ws.session.model = "";
-					saveSession(ws.session);
-				}
-				return { ok: true, result: `Deleted provider "${rest}"` };
-			}
-			if (sub === "add") {
-				// Flat form since there's no wizard on the web: /provider add <name> <url> <apiKey>
-				const parts = rest.split(WHITESPACE_SPLIT);
-				const [pname, url, apiKey] = parts;
-				if (!pname || !url || !apiKey) return { ok: false, error: "Usage: /provider add <name> <url> <apiKey>" };
-				const next = [
-					...providers.filter((p) => p.name !== pname),
-					{ name: pname, url, apiKey, reasoningFormat: "auto" as const },
-				];
-				// No active provider yet (e.g. first add) → make this the default
-				// so the main model has a working endpoint. Selection of a
-				// different provider for any slot happens in the Model tab.
-				if (!config.baseURL) {
-					config.baseURL = url;
-					config.apiKey = apiKey;
-					ws.session.providerUrl = url;
-					ws.session.providerName = pname;
-					updateSettings({ providers: next, providerUrl: url, apiKey, modelProvider: pname });
-					return { ok: true, result: `Added provider "${pname}" and set it active (default)` };
-				}
-				updateSettings({ providers: next });
-				return { ok: true, result: `Added provider "${pname}" — pick it in the Model tab to use it` };
-			}
-			if (sub === "edit") {
-				// In-place update for the web form. The delete+add the form used
-				// to do dropped the model and every slot pointing at the provider
-				// whenever the edited one was active.
-				const [pname, url, apiKey] = rest.split(WHITESPACE_SPLIT);
-				if (!pname || !url || !apiKey) return { ok: false, error: "Usage: /provider edit <name> <url> <apiKey>" };
-				const current = providers.find((p) => p.name === pname);
-				if (!current) return { ok: false, error: `Unknown provider: ${pname}` };
-				const next = providers.map((p) => (p === current ? { ...p, url, apiKey } : p));
-				const isActive =
-					settings.modelProvider === pname || (current.url === config.baseURL && current.apiKey === config.apiKey);
-				if (!isActive) {
-					updateSettings({ providers: next });
-					return { ok: true, result: `Updated provider "${pname}"` };
-				}
-				config.baseURL = url;
-				config.apiKey = apiKey;
-				ws.session.providerUrl = url;
-				config.reasoningFormat = resolveReasoningFormat(url, current.reasoningFormat);
-				config.reasoningParams = buildReasoningParams(
-					config.reasoningLevel,
-					config.reasoningFormat,
-					ws.session.model,
-				);
-				updateSettings({ providers: next, providerUrl: url, apiKey });
-				saveSession(ws.session);
-				return { ok: true, result: `Updated provider "${pname}"` };
-			}
-			// Bare name — switch to it (or override its reasoning protocol).
-			const target = providers.find((p) => p.name === sub);
-			if (!target) return { ok: false, error: `Unknown provider: ${sub}. See /provider for the list.` };
-			if (rest.startsWith("reasoning")) {
-				// /provider <name> reasoning <format> — override the auto-detected
-				// reasoning protocol for a provider whose endpoint isn't recognized
-				// by URL (proxies, aggregators). Auto-detection via
-				// resolveReasoningFormat is the default; this is the escape hatch.
-				const fmt = rest.slice("reasoning".length).trim();
-				if (!fmt) return { ok: false, error: "Usage: /provider <name> reasoning <format>" };
-				const accepted = [...new Set(["auto", "generic", ...REASONING_FORMAT_OPTIONS.map((o) => o.value)])];
-				if (!accepted.includes(fmt)) {
-					return {
-						ok: false,
-						error: `Unknown reasoning format "${fmt}". Use: ${accepted.join(", ")}`,
-					};
-				}
-				const next = providers.map((p) => (p.name === sub ? { ...p, reasoningFormat: fmt as ReasoningFormat } : p));
-				updateSettings({ providers: next });
-				if (settings.modelProvider === sub) {
-					config.reasoningFormat = resolveReasoningFormat(target.url, fmt as ReasoningFormat);
-					config.reasoningParams = buildReasoningParams(
-						config.reasoningLevel,
-						config.reasoningFormat,
-						ws.session.model,
-					);
-				}
-				return { ok: true, result: `Provider "${sub}" reasoning protocol: ${fmt}` };
-			}
-			const probe = await probeProvider({ ...config, baseURL: target.url, apiKey: target.apiKey });
-			if (probe !== "ok" && probe !== "unknown") {
-				return { ok: false, error: `Provider "${sub}" isn't reachable (${probe}) — not switched` };
-			}
-			config.baseURL = target.url;
-			config.apiKey = target.apiKey;
-			ws.session.providerUrl = target.url;
-			ws.session.providerName = target.name;
-			config.reasoningFormat = resolveReasoningFormat(target.url, target.reasoningFormat);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, ws.session.model);
-			// Switching the active provider invalidates every model id that was
-			// chosen against the old endpoint, so reset them — the user re-picks on
-			// the new provider. Slots with their own provider override keep their
-			// model (it isn't tied to the active provider).
-			ws.session.model = "";
-			if (!subagentModelProvider) subagentModel = undefined;
-			if (!planModelProvider) planModel = undefined;
-			updateSettings({
-				providerUrl: target.url,
-				apiKey: target.apiKey,
-				modelProvider: target.name,
-				model: "",
-				...(subagentModelProvider ? {} : { subagentModel: undefined }),
-				...(planModelProvider ? {} : { planModel: undefined }),
-			});
-			saveSession(ws.session);
-			return { ok: true, result: `Switched to provider "${sub}" — pick a model with /model` };
-		}
-
 		if (name === "/undo") {
-			if (running) return { ok: false, error: "Agent running — finish the run or /abort before /undo" };
 			const checkpoints = ws.session.checkpoints || [];
 			if (checkpoints.length === 0) return { ok: false, error: "No checkpoint available to undo" };
 			const lastCheckpoint = checkpoints[checkpoints.length - 1]!;
