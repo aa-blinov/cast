@@ -102,7 +102,7 @@ import {
 	getReasoningOptionsForFormat,
 	resolveReasoningFormat,
 } from "../core/vendors.ts";
-import { createSessionWorktree, listWorktrees, removeSessionWorktree, type SessionWorktree } from "../core/worktree.ts";
+import type { SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 // Broadcast primitives (noteActivity, broadcast, broadcastSessionUpdate,
@@ -156,9 +156,6 @@ export { type EvolveSkillSuggestion, parseEvolveJson, parseSuggestionJson } from
 import { isSafeSessionId, sessionInputsDir } from "./inputs.ts";
 
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
-const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
-const WORKTREE_FORCE_FLAG_RE = /(^|\s)(--force|-f)(\s|$)/;
-const WORKTREE_FORCE_STRIP_RE = /(^|\s)(--force|-f)(?=\s|$)/g;
 const EVOLVE_SYSTEM_PROMPT =
 	"You analyze a coding-agent session and propose reusable project skills (SKILL.md) worth creating, grouped by the typical tasks this project keeps doing. Reply with valid JSON only.";
 const EVOLVE_PROMPT = `Below is a transcript of the current session (assistant messages and tool results, newest last), plus the project's typical tasks.
@@ -2964,154 +2961,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// daemon returns an equivalent result so a `cast run --interactive`
 		// consumer can round-trip every slash command instead of hitting
 		// "Unknown command".
-		if (name === "/worktree") {
-			const sessionCwd = ws.session.cwd ?? cwd;
-			if (!arg) {
-				return { ok: false, error: "Usage: /worktree <name> | /worktree list | /worktree remove <name>" };
-			}
-			if (arg === "list") {
-				const wts = listWorktrees(sessionCwd);
-				if (wts.length === 0) return { ok: true, result: "No active git worktrees found for this repository" };
-				return { ok: true, result: wts.map((w) => `${w.name} (${w.branch})`).join(", ") };
-			}
-			const rmMatch = WORKTREE_REMOVE_PREFIX_RE.exec(arg);
-			if (rmMatch) {
-				const removeArg = rmMatch[1]!.trim();
-				// See the TUI's /worktree remove: --force is opt-in because it
-				// discards uncommitted work and unmerged commits.
-				const force = WORKTREE_FORCE_FLAG_RE.test(removeArg);
-				const targetName = removeArg.replace(WORKTREE_FORCE_STRIP_RE, "").trim();
-				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name> [--force]" };
-				const target = listWorktrees(sessionCwd).find((worktree) => worktree.name === targetName);
-				// removeWorktreeBySlug runs `git worktree remove --force`, which
-				// bypasses git's own uncommitted-changes guard — nothing else
-				// stops it from deleting the directory a live session (this one or
-				// another tab/session) still has as its cwd, including mid-turn
-				// while a tool is actively reading/writing inside it.
-				const inUseBy = target
-					? [...sessions.values()].find((other) => other.session.cwd === target.path)
-					: undefined;
-				if (inUseBy) {
-					return {
-						ok: false,
-						error: `Worktree "${targetName}" is still in use by another session${inUseBy.status === "running" ? " (currently running)" : ""} — close or switch that session away from it first`,
-					};
-				}
-				const res = await removeSessionWorktree(targetName, sessionCwd, {
-					sessionId: ws.id,
-					projectTrusted,
-					worktreePath: target?.path,
-					force,
-				});
-				return { ok: true, result: res.message };
-			}
-			if (running)
-				return { ok: false, error: "Agent running — finish the run or /abort before switching worktrees" };
-			try {
-				// The WorktreeCreate hook now lives inside createSessionWorktree, so
-				// every path that makes a worktree honours it — this one used to be
-				// the only one that did.
-				const wt = await createSessionWorktree(arg, sessionCwd, { sessionId: ws.id, projectTrusted });
-				const previousCwd = ws.session.cwd;
-				ws.session.cwd = wt.path;
-				saveSession(ws.session);
-				// Rebuild the system prompt against the worktree's context (skills,
-				// rules, MCP, trust) so the next turn sees the worktree's world.
-				ws.systemPrompt = computeSystemPrompt(
-					resolvePersona(ws.session.persona ?? "") ?? currentPersona,
-					ws.session.model,
-					wt.path,
-					ws.session.mode,
-				);
-				void runHooksForEvent(resolveHooksForCwd(wt.path, projectTrusted), {
-					event: "CwdChanged",
-					cwd: wt.path,
-					sessionId: ws.id,
-					payload: { old_cwd: previousCwd, cwd: wt.path },
-				});
-				broadcaster.broadcastSessionUpdate(ws);
-				return { ok: true, result: `Worktree ready: ${wt.path}` };
-			} catch (err) {
-				return { ok: false, error: err instanceof Error ? err.message : String(err) };
-			}
-		}
-
-		// Headless/JSONL parity commands — the TUI handles these client-side
-		// (clipboard, display settings, keybindings, worktree switching), but the
-		// daemon returns an equivalent result so a `cast run --interactive`
-		// consumer can round-trip every slash command instead of hitting
-		// "Unknown command".
-		if (name === "/worktree") {
-			const sessionCwd = ws.session.cwd ?? cwd;
-			if (!arg) {
-				return { ok: false, error: "Usage: /worktree <name> | /worktree list | /worktree remove <name>" };
-			}
-			if (arg === "list") {
-				const wts = listWorktrees(sessionCwd);
-				if (wts.length === 0) return { ok: true, result: "No active git worktrees found for this repository" };
-				return { ok: true, result: wts.map((w) => `${w.name} (${w.branch})`).join(", ") };
-			}
-			const rmMatch = WORKTREE_REMOVE_PREFIX_RE.exec(arg);
-			if (rmMatch) {
-				const removeArg = rmMatch[1]!.trim();
-				// See the TUI's /worktree remove: --force is opt-in because it
-				// discards uncommitted work and unmerged commits.
-				const force = WORKTREE_FORCE_FLAG_RE.test(removeArg);
-				const targetName = removeArg.replace(WORKTREE_FORCE_STRIP_RE, "").trim();
-				if (!targetName) return { ok: false, error: "Usage: /worktree remove <name> [--force]" };
-				const target = listWorktrees(sessionCwd).find((worktree) => worktree.name === targetName);
-				// removeWorktreeBySlug runs `git worktree remove --force`, which
-				// bypasses git's own uncommitted-changes guard — nothing else
-				// stops it from deleting the directory a live session (this one or
-				// another tab/session) still has as its cwd, including mid-turn
-				// while a tool is actively reading/writing inside it.
-				const inUseBy = target
-					? [...sessions.values()].find((other) => other.session.cwd === target.path)
-					: undefined;
-				if (inUseBy) {
-					return {
-						ok: false,
-						error: `Worktree "${targetName}" is still in use by another session${inUseBy.status === "running" ? " (currently running)" : ""} — close or switch that session away from it first`,
-					};
-				}
-				const res = await removeSessionWorktree(targetName, sessionCwd, {
-					sessionId: ws.id,
-					projectTrusted,
-					worktreePath: target?.path,
-					force,
-				});
-				return { ok: true, result: res.message };
-			}
-			if (running)
-				return { ok: false, error: "Agent running — finish the run or /abort before switching worktrees" };
-			try {
-				// The WorktreeCreate hook now lives inside createSessionWorktree, so
-				// every path that makes a worktree honours it — this one used to be
-				// the only one that did.
-				const wt = await createSessionWorktree(arg, sessionCwd, { sessionId: ws.id, projectTrusted });
-				const previousCwd = ws.session.cwd;
-				ws.session.cwd = wt.path;
-				saveSession(ws.session);
-				// Rebuild the system prompt against the worktree's context (skills,
-				// rules, MCP, trust) so the next turn sees the worktree's world.
-				ws.systemPrompt = computeSystemPrompt(
-					resolvePersona(ws.session.persona ?? "") ?? currentPersona,
-					ws.session.model,
-					wt.path,
-					ws.session.mode,
-				);
-				void runHooksForEvent(resolveHooksForCwd(wt.path, projectTrusted), {
-					event: "CwdChanged",
-					cwd: wt.path,
-					sessionId: ws.id,
-					payload: { old_cwd: previousCwd, cwd: wt.path },
-				});
-				broadcaster.broadcastSessionUpdate(ws);
-				return { ok: true, result: `Worktree ready: ${wt.path}` };
-			} catch (err) {
-				return { ok: false, error: err instanceof Error ? err.message : String(err) };
-			}
-		}
 
 		return { ok: false, error: `Unknown command: ${cmd}` };
 	}
