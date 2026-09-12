@@ -2876,6 +2876,48 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				skills = skillsResult.skills;
 				recomputeAllSystemPrompts();
 			},
+			reloadBridgeState: async (sessionCwd) => {
+				try {
+					projectTrusted = await resolveProjectTrustForCwd(projectDeps, sessionCwd);
+					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+					skills = skillsResult.skills;
+					rulesByCwd.clear();
+					skillsByCwd.clear();
+					contextFilesByCwd.clear();
+					sshHostsByCwd.clear();
+					// The project root is read off the filesystem, so `git init` (or
+					// a new `.cast/`) during a session changes which directory every
+					// other resolver above answers from.
+					clearProjectRootCache();
+					const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
+					rulesSuffix = rules.alwaysApplySuffix;
+					rulesLazySuffix = rules.lazySuffix;
+					directoryRules = rules.directoryRules;
+					ruleDiagnostics = rules.diagnostics;
+					personas = resolvePersonasForCwd(sessionCwd, trustForSessionCwd(sessionCwd)).personas;
+					// Only reconnect MCP if the config actually changed on disk.
+					const prevNames = mcpResult.allServerNames.slice().sort().join(",");
+					const disabledMcp = loadSettings().disabledMcpServers ?? [];
+					const freshMcp = await resolveMcpForCwd(
+						projectDeps,
+						sessionCwd,
+						projectTrusted,
+						disabledMcp,
+						/*skipConnect=*/ true,
+					);
+					const newNames = freshMcp.allServerNames.slice().sort().join(",");
+					if (prevNames !== newNames) {
+						await withMcpLock(async () => {
+							await closeMcpConnections(mcpResult.connections);
+							mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, disabledMcp);
+						});
+					}
+					recomputeAllSystemPrompts();
+					return { ok: true, result: "Reloaded skills, rules, MCP, and personas" };
+				} catch (err) {
+					return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
+				}
+			},
 			sshHosts,
 			setSshHosts: (hosts) => {
 				sshHosts = hosts;
@@ -2896,49 +2938,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return await evolveSkills(ws);
 		}
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
-		if (name === "/reload") {
-			const sessionCwd = ws.session.cwd ?? cwd;
-			try {
-				projectTrusted = await resolveProjectTrustForCwd(projectDeps, sessionCwd);
-				const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-				skills = skillsResult.skills;
-				rulesByCwd.clear();
-				skillsByCwd.clear();
-				contextFilesByCwd.clear();
-				sshHostsByCwd.clear();
-				// The project root is read off the filesystem, so `git init` (or
-				// a new `.cast/`) during a session changes which directory every
-				// other resolver above answers from.
-				clearProjectRootCache();
-				const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
-				rulesSuffix = rules.alwaysApplySuffix;
-				rulesLazySuffix = rules.lazySuffix;
-				directoryRules = rules.directoryRules;
-				ruleDiagnostics = rules.diagnostics;
-				personas = resolvePersonasForCwd(sessionCwd, trustForSessionCwd(sessionCwd)).personas;
-				// Only reconnect MCP if the config actually changed on disk.
-				const prevNames = mcpResult.allServerNames.slice().sort().join(",");
-				const disabledMcp = loadSettings().disabledMcpServers ?? [];
-				const freshMcp = await resolveMcpForCwd(
-					projectDeps,
-					sessionCwd,
-					projectTrusted,
-					disabledMcp,
-					/*skipConnect=*/ true,
-				);
-				const newNames = freshMcp.allServerNames.slice().sort().join(",");
-				if (prevNames !== newNames) {
-					await withMcpLock(async () => {
-						await closeMcpConnections(mcpResult.connections);
-						mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, disabledMcp);
-					});
-				}
-				recomputeAllSystemPrompts();
-				return { ok: true, result: "Reloaded skills, rules, MCP, and personas" };
-			} catch (err) {
-				return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
-			}
-		}
 		if (name === "/undo") {
 			const checkpoints = ws.session.checkpoints || [];
 			if (checkpoints.length === 0) return { ok: false, error: "No checkpoint available to undo" };
