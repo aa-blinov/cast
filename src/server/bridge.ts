@@ -25,7 +25,7 @@ import {
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
-import { type AgentEvent, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
+import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import {
 	closeMcpConnections,
 	connectMcpServers,
@@ -33,12 +33,7 @@ import {
 	loadMcpConfig,
 	type McpSetupResult,
 } from "../core/mcp.ts";
-import {
-	cancelAutomaticMemoryRun,
-	distillProjectMemory,
-	dreamProjectMemory,
-	listAutomaticMemoryRuns,
-} from "../core/memory.ts";
+
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
 import {
 	createPlanState,
@@ -98,13 +93,8 @@ import {
 	updateLastCheckpoint,
 } from "../core/session.ts";
 import {
-	checkpointFork,
 	getProjectTrust,
 	loadSettings,
-	memoryDistillAuto,
-	memoryDistillIntervalDays,
-	memoryDreamAuto,
-	memoryDreamIntervalDays,
 	type PermissionMode,
 	turnIterationCap,
 	updateSettings,
@@ -187,17 +177,6 @@ const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
 const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
 const WORKTREE_FORCE_FLAG_RE = /(^|\s)(--force|-f)(\s|$)/;
 const WORKTREE_FORCE_STRIP_RE = /(^|\s)(--force|-f)(?=\s|$)/g;
-const MEMORY_WRITE_COMMAND_RE = /^write(?:\s+(on|off))?$/;
-const MEMORY_BUDGET_COMMAND_RE = /^budget\s+(\d+)$/;
-const MEMORY_FLOOR_COMMAND_RE = /^floor\s+(0(?:\.\d+)?|1(?:\.0)?)$/;
-const MEMORY_RECONCILE_COMMAND_RE = /^reconcile\s+(on|off)$/;
-const MEMORY_CHECKPOINT_FORK_COMMAND_RE = /^checkpoint\s+fork\s+(on|off)$/;
-const MEMORY_CHECKPOINT_THRESHOLDS_COMMAND_RE = /^checkpoint\s+thresholds\s+(.+)$/;
-const MEMORY_CHECKPOINT_RESERVED_COMMAND_RE = /^checkpoint\s+reserved\s+(\d+)$/;
-const MEMORY_CHECKPOINT_CAPS_COMMAND_RE = /^checkpoint\s+caps\s+(.+)$/;
-const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
-const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
-const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
 const EVOLVE_SYSTEM_PROMPT =
 	"You analyze a coding-agent session and propose reusable project skills (SKILL.md) worth creating, grouped by the typical tasks this project keeps doing. Reply with valid JSON only.";
 const EVOLVE_PROMPT = `Below is a transcript of the current session (assistant messages and tool results, newest last), plus the project's typical tasks.
@@ -2961,173 +2940,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			fireUserPromptExpansion(ws.session.cwd ?? cwd, rule.name);
 			submit(sessionId, formatRuleInvocation(rule));
 			return { ok: true, result: `Invoked rule: ${rule.name}` };
-		}
-		if (name === "/memory") {
-			const settings = loadSettings();
-			if (!arg)
-				return {
-					ok: true,
-					result: {
-						memoryEnabled: settings.memoryEnabled !== false,
-						memoryWriteEnabled: settings.memoryWriteEnabled !== false,
-						checkpointFork: checkpointFork(settings),
-						memoryPromptBudget: settings.memoryPromptBudget ?? 4096,
-						memorySearchScoreFloor: settings.memorySearchScoreFloor ?? 0.15,
-						memoryReconcileOnSearch: settings.memoryReconcileOnSearch !== false,
-						memoryDreamAuto: memoryDreamAuto(settings),
-						memoryDreamIntervalDays: memoryDreamIntervalDays(settings),
-						memoryDistillAuto: memoryDistillAuto(settings),
-						memoryDistillIntervalDays: memoryDistillIntervalDays(settings),
-						checkpointThresholds: settings.checkpointThresholds ?? null,
-						checkpointReserved: settings.checkpointReserved ?? null,
-						checkpointPushCaps: settings.checkpointPushCaps ?? null,
-					},
-				};
-			if (arg === "on" || arg === "off") {
-				const memoryEnabled = arg === "on";
-				updateSettings({ memoryEnabled });
-				return { ok: true, result: { memoryEnabled } };
-			}
-			const writeMatch = arg.match(MEMORY_WRITE_COMMAND_RE);
-			if (writeMatch) {
-				const memoryWriteEnabled = writeMatch[1]
-					? writeMatch[1] === "on"
-					: !(settings.memoryWriteEnabled !== false);
-				updateSettings({ memoryWriteEnabled });
-				return { ok: true, result: { memoryWriteEnabled } };
-			}
-			const budgetMatch = arg.match(MEMORY_BUDGET_COMMAND_RE);
-			if (budgetMatch) {
-				const memoryPromptBudget = Math.max(256, Math.min(Number(budgetMatch[1]), 16_384));
-				updateSettings({ memoryPromptBudget });
-				return { ok: true, result: { memoryPromptBudget } };
-			}
-			const floorMatch = arg.match(MEMORY_FLOOR_COMMAND_RE);
-			if (floorMatch) {
-				const memorySearchScoreFloor = Number(floorMatch[1]);
-				updateSettings({ memorySearchScoreFloor });
-				return { ok: true, result: { memorySearchScoreFloor } };
-			}
-			const reconcileMatch = arg.match(MEMORY_RECONCILE_COMMAND_RE);
-			if (reconcileMatch) {
-				const memoryReconcileOnSearch = reconcileMatch[1] === "on";
-				updateSettings({ memoryReconcileOnSearch });
-				return { ok: true, result: { memoryReconcileOnSearch } };
-			}
-			const checkpointForkMatch = arg.match(MEMORY_CHECKPOINT_FORK_COMMAND_RE);
-			if (checkpointForkMatch) {
-				const checkpointFork = checkpointForkMatch[1] === "on";
-				updateSettings({ checkpointFork });
-				return { ok: true, result: { checkpointFork } };
-			}
-			const checkpointThresholdsMatch = arg.match(MEMORY_CHECKPOINT_THRESHOLDS_COMMAND_RE);
-			if (checkpointThresholdsMatch) {
-				const raw = checkpointThresholdsMatch[1]!;
-				if (raw.trim() === "default") {
-					updateSettings({ checkpointThresholds: undefined });
-					return { ok: true, result: { checkpointThresholds: undefined } };
-				}
-				const values = raw
-					.split(",")
-					.map((part) => Number(part.trim()))
-					.filter((value) => Number.isFinite(value));
-				if (values.length === 0 || values.some((value) => value <= 0 || value > 100)) {
-					return { ok: false, error: "Checkpoint thresholds must be percentages like 20,40,60,80 or 'default'" };
-				}
-				updateSettings({ checkpointThresholds: values });
-				return { ok: true, result: { checkpointThresholds: values } };
-			}
-			const checkpointReservedMatch = arg.match(MEMORY_CHECKPOINT_RESERVED_COMMAND_RE);
-			if (checkpointReservedMatch) {
-				const checkpointReserved = Number(checkpointReservedMatch[1]);
-				if (!Number.isInteger(checkpointReserved) || checkpointReserved < 0) {
-					return { ok: false, error: "Checkpoint reserved must be a non-negative token count" };
-				}
-				updateSettings({ checkpointReserved });
-				return { ok: true, result: { checkpointReserved } };
-			}
-			const checkpointCapsMatch = arg.match(MEMORY_CHECKPOINT_CAPS_COMMAND_RE);
-			if (checkpointCapsMatch) {
-				const raw = checkpointCapsMatch[1]!;
-				if (raw.trim() === "default") {
-					updateSettings({ checkpointPushCaps: undefined });
-					return { ok: true, result: { checkpointPushCaps: undefined } };
-				}
-				const caps: Record<string, number> = {};
-				let invalid = false;
-				for (const pair of raw.split(",")) {
-					const [key, valueText] = pair.split("=");
-					const keyTrimmed = key?.trim() ?? "";
-					const value = Number(valueText?.trim());
-					if (
-						!["checkpoint", "memory", "notes", "global", "tasks"].includes(keyTrimmed) ||
-						!Number.isFinite(value) ||
-						value <= 0
-					) {
-						invalid = true;
-						break;
-					}
-					caps[keyTrimmed] = Math.floor(value);
-				}
-				if (invalid || Object.keys(caps).length === 0) {
-					return {
-						ok: false,
-						error: "Checkpoint caps must be like checkpoint=11000,memory=10000,notes=6000,global=6000,tasks=2000 or 'default'",
-					};
-				}
-				updateSettings({ checkpointPushCaps: caps });
-				return { ok: true, result: { checkpointPushCaps: caps } };
-			}
-			const autoToggleMatch = arg.match(MEMORY_AUTO_TOGGLE_COMMAND_RE);
-			if (autoToggleMatch) {
-				const enabled = autoToggleMatch[2] === "on";
-				const update =
-					autoToggleMatch[1] === "dream" ? { memoryDreamAuto: enabled } : { memoryDistillAuto: enabled };
-				updateSettings(update);
-				return { ok: true, result: update };
-			}
-			const autoIntervalMatch = arg.match(MEMORY_AUTO_INTERVAL_COMMAND_RE);
-			if (autoIntervalMatch) {
-				const days = Math.max(0, Math.min(Number(autoIntervalMatch[2]), 3_650));
-				const update =
-					autoIntervalMatch[1] === "dream"
-						? { memoryDreamIntervalDays: days }
-						: { memoryDistillIntervalDays: days };
-				updateSettings(update);
-				return { ok: true, result: update };
-			}
-			if (arg === "runs") return { ok: true, result: { runs: listAutomaticMemoryRuns(ws.session.id) } };
-			const cancelRunMatch = arg.match(MEMORY_CANCEL_RUN_COMMAND_RE);
-			if (cancelRunMatch) {
-				return { ok: true, result: { cancelled: cancelAutomaticMemoryRun(cancelRunMatch[1]!) } };
-			}
-			return {
-				ok: false,
-				error: "Usage: /memory on|off|write on|write off|checkpoint fork on|off|checkpoint thresholds <pct,..|default>|checkpoint reserved <tokens>|checkpoint caps <k=v,..|default>|budget <tokens>|dream on|off|dream interval <days>|distill on|off|distill interval <days>|runs|cancel <run-id>|floor <0..1>|reconcile on|off",
-			};
-		}
-		if (name === "/dream" || name === "/distill") {
-			if (loadSettings().memoryEnabled === false) return { ok: false, error: "Project memory is disabled" };
-			if (loadSettings().memoryWriteEnabled === false)
-				return { ok: false, error: "Project memory writing is disabled" };
-			try {
-				const input = {
-					cwd: ws.session.cwd ?? cwd,
-					sessionId: ws.session.id,
-					model: ws.session.model,
-					config,
-					messages: ws.session.messages,
-					runAgent: runMemoryMaintenanceAgent,
-				};
-				if (name === "/dream") {
-					const result = await dreamProjectMemory(input);
-					return { ok: true, result: { removed: result.removed, stored: result.stored } };
-				}
-				const result = await distillProjectMemory(input);
-				return { ok: true, result: { artifacts: result.artifacts } };
-			} catch (error) {
-				return { ok: false, error: error instanceof Error ? error.message : String(error) };
-			}
 		}
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
 		if (name === "/model-selection") {
