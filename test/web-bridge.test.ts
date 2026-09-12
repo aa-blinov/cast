@@ -686,6 +686,28 @@ describe("web bridge", () => {
 		expect(settings.planModel).toBeUndefined();
 	});
 
+	it("/reload re-resolves skills/rules/MCP/personas and returns the success message", async () => {
+		const emptyDeps = {
+			noSkills: false,
+			noMcp: false,
+			cliSkillPaths: [],
+			cliMcpPaths: [],
+		} as StartupResult["projectDeps"];
+		const bridge = createServerBridge(makeResult({ projectDeps: emptyDeps }));
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/reload");
+		expect(result).toEqual({ ok: true, result: "Reloaded skills, rules, MCP, and personas" });
+	});
+
+	it("/reload while the agent is running fails with the idle-required error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.status = "running";
+		const result = await bridge.executeCommand(ws.id, "/reload");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Agent running/);
+	});
+
 	it("/provider edit updates the active provider in place, keeping the model and the slots", async () => {
 		// The web form used to delete + re-add, and deleting the active provider
 		// switched to a fallback, cleared the model and dropped the slots.

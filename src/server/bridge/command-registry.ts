@@ -261,6 +261,14 @@ export interface CommandContext {
 	 *  slot. /skills enable + /skills disable + /skills uninstall
 	 *  use this so the next turn sees the new skill set. */
 	refreshSkillsFromSkills: () => Promise<void>;
+	/** Re-resolve the closure's bridge-level state (project trust,
+	 *  skills, rules, personas, MCP) for the given cwd and rebuild
+	 *  every live session's system prompt. Used by /reload — the
+	 *  state lives across too many closure slots to expose setters
+	 *  for each individually, so the closure bundles them behind one
+	 *  callback. Returns the command result directly so the handler
+	 *  stays a one-liner. */
+	reloadBridgeState: (sessionCwd: string) => Promise<CommandResult>;
 }
 
 /** Handlers may be sync or async — async ones let /compact, /new, and any
@@ -1552,6 +1560,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 		broadcaster.broadcastSessionUpdate(ws);
 		return { ok: true, result: { model, provider: provider.name } };
 	},
+	"/reload": ({ ws, cwd, reloadBridgeState }) => reloadBridgeState(ws.session.cwd ?? cwd),
 };
 
 /** Tiny inline helper used by /mcp — splits "sub rest" into [sub, rest].
