@@ -25,7 +25,7 @@ import {
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
-import { type AgentEvent, compactSessionMessages, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
+import { type AgentEvent, runAgentLoop, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import {
 	closeMcpConnections,
 	connectMcpServers,
@@ -78,7 +78,6 @@ import {
 	appendMessage,
 	appendSessionEvent,
 	type SessionSummary as CoreSessionSummary,
-	clearSessionMessages,
 	countTurnMessages,
 	createSession,
 	deleteSession,
@@ -2846,7 +2845,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// `string | undefined` for unset defaults; the registry context
 		// insists on `string | null` (matching what /current serialised in
 		// its inline form) so we coalesce here.
-		const registered = dispatchRegisteredCommand(name, {
+		const registered = await dispatchRegisteredCommand(name, {
 			ws,
 			arg,
 			cwd,
@@ -2900,6 +2899,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			},
 			setReasoningMeta: (meta) => {
 				reasoningMeta = meta;
+			},
+			createSessionInstance,
+			syncFsWatcher: (target) => {
+				fsWatcher.syncFsWatcher(target);
 			},
 		});
 		if (registered !== undefined) return registered;
@@ -3127,68 +3130,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 		}
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
-		if (name === "/clear") {
-			clearSessionMessages(ws.session);
-			saveSession(ws.session);
-			return { ok: true, result: "Context cleared" };
-		}
-		if (name === "/compact") {
-			if (ws.session.messages.length === 0) return { ok: true, result: "Nothing to compact yet" };
-			const compactHooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
-			const preCompact = await runHooksForEvent(compactHooks, {
-				event: "PreCompact",
-				cwd: ws.session.cwd ?? cwd,
-				sessionId: ws.id,
-				payload: { trigger: "manual" },
-			});
-			if (preCompact.blocked) return { ok: false, error: preCompact.reason ?? "Compaction blocked by hook" };
-			// Runs the same async summarization call `submit()` uses for the agent
-			// loop itself — returns immediately (matching submit()'s own
-			// fire-and-forget shape) and reports the outcome over SSE via the
-			// existing "compaction" event, which the client already renders as a
-			// system-message row (see runAgentLoop's own auto-compaction, which
-			// broadcasts the identical event shape).
-			ws.status = "running";
-			fsWatcher.syncFsWatcher(ws);
-			broadcaster.broadcast(ws, { type: "status", status: "running" });
-			compactSessionMessages(ws.session.messages, config, ws.session.model, undefined, undefined, (usage) =>
-				addUsage(ws.session, usage),
-			)
-				.then((result) => {
-					ws.status = "idle";
-					fsWatcher.syncFsWatcher(ws);
-					if (result.compacted) {
-						recordCompaction(ws.session, ws.session.messages, result.messages);
-						ws.session.messages = result.messages;
-						broadcaster.broadcast(ws, {
-							type: "compaction",
-							messagesCompacted: result.messagesCompacted,
-							tokensBefore: result.tokensBefore,
-						});
-						void runHooksForEvent(compactHooks, {
-							event: "PostCompact",
-							cwd: ws.session.cwd ?? cwd,
-							sessionId: ws.id,
-							payload: { trigger: "manual", messagesCompacted: result.messagesCompacted },
-						});
-					} else if (result.error) {
-						broadcaster.broadcast(ws, { type: "error", message: `Compaction failed: ${result.error}` });
-					}
-					saveSession(ws.session);
-					broadcaster.broadcast(ws, { type: "status", status: "idle" });
-				})
-				.catch((err: unknown) => {
-					ws.status = "error";
-					ws.error = err instanceof Error ? err.message : String(err);
-					broadcaster.broadcast(ws, { type: "error", message: ws.error });
-					broadcaster.broadcast(ws, { type: "status", status: "error" });
-				});
-			return { ok: true, result: "Compacting…" };
-		}
-		if (name === "/new") {
-			const newWs = await createSessionInstance(ws.session.persona ?? undefined, undefined, ws.session.cwd);
-			return { ok: true, result: { sessionId: newWs.id } };
-		}
 		if (name === "/model-selection") {
 			const [providerName, model] = arg.split(WHITESPACE_SPLIT).filter(Boolean);
 			if (!providerName || !model) return { ok: false, error: "Usage: /model-selection <provider> <model>" };
