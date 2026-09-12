@@ -42,7 +42,9 @@ import {
 	listAutomaticMemoryRuns,
 } from "../../core/memory.ts";
 import type { Persona } from "../../core/personas.ts";
+import type { resolveRulesForCwd } from "../../core/project.ts";
 import { listHooksForCwdSettings, resolveHooksForCwd } from "../../core/project.ts";
+import { formatRuleInvocation } from "../../core/rules.ts";
 import type { SessionState } from "../../core/session.ts";
 import { addUsage, clearSessionMessages, recordCompaction } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
@@ -84,6 +86,11 @@ export interface CommandResult {
 export interface CommandContext {
 	ws: WebAgentSession;
 	arg: string;
+	/** Full command string the bridge was given (e.g. "/rule:foo"). For
+	 *  most commands this equals the registry key; for commands whose
+	 *  first token carries data — `/rule:<id>` — it's the only way the
+	 *  handler can read what came after the colon. */
+	cmd: string;
 	/** Bridge's cwd fallback when a session has no cwd of its own. */
 	cwd: string;
 	config: AppConfig;
@@ -188,6 +195,14 @@ export interface CommandContext {
 	 *  it toggles ws.status to "running" and back). Closure-bound to
 	 *  fsWatcher.syncFsWatcher. */
 	syncFsWatcher: (ws: WebAgentSession) => void;
+	/** Look up project rules (auto + always-apply) for the session's cwd.
+	 *  Closure-bound to bridge.rulesForSessionCwd. /rules and /rule:<id>
+	 *  use it; future rule-related commands can share. */
+	rulesForSessionCwd: (sessionCwd: string) => ReturnType<typeof resolveRulesForCwd>;
+	/** Side-effect: mark an auto-rule as "in flight" for the session,
+	 *  so the next turn's system prompt re-injects it. /rule:<id> calls
+	 *  this before submit() so the rule body survives the dispatch. */
+	fireUserPromptExpansion: (sessionCwd: string, name: string) => void;
 }
 
 /** Handlers may be sync or async — async ones let /compact, /new, and any
@@ -946,6 +961,40 @@ const commandHandlers: Record<string, CommandHandler> = {
 		});
 		return { ok: true, result: "Reviewing the session's work…" };
 	},
+	"/rules": ({ ws, cwd, rulesForSessionCwd }) => {
+		// `sticky` is what the *daemon* has latched this session. The agent
+		// loop runs here, so a TUI attached as a thin client has no idea which
+		// auto rules already attached — it was reporting every one of them as
+		// still waiting for a match, for the whole session.
+		const stickyIds = new Set((ws.activeAutoRules ?? []).map((r) => r.id));
+		return {
+			ok: true,
+			result: rulesForSessionCwd(ws.session.cwd ?? cwd).directoryRules.map((r) => ({
+				id: r.id,
+				name: r.name,
+				description: r.description,
+				applyMode: r.applyMode,
+				sticky: stickyIds.has(r.id),
+			})),
+		};
+	},
+	"/rule:": ({ ws, cwd, cmd, rulesForSessionCwd, fireUserPromptExpansion, submit }) => {
+		const ruleId = cmd.slice("/rule:".length);
+		if (!ruleId) return { ok: false, error: "Usage: /rule:<name>" };
+		// Submits the rule body as a real user turn (matches the TUI's
+		// agent.submit(formatRuleInvocation(rule)) — it's not a silent system-
+		// prompt injection), so it needs the same idle gate a plain message
+		// submit would get if the composer weren't already disabled while running.
+		if (ws.status === "running") {
+			return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
+		}
+		const sessionRules = rulesForSessionCwd(ws.session.cwd ?? cwd).directoryRules;
+		const rule = sessionRules.find((r) => r.id === ruleId) ?? sessionRules.find((r) => r.name === ruleId);
+		if (!rule) return { ok: false, error: `Unknown rule: ${ruleId}. See /rules for the list.` };
+		fireUserPromptExpansion(ws.session.cwd ?? cwd, rule.name);
+		submit(ws.id, formatRuleInvocation(rule));
+		return { ok: true, result: `Invoked rule: ${rule.name}` };
+	},
 };
 
 /** Shared body of /dream and /distill — they differ only in which core
@@ -1018,6 +1067,11 @@ export const commandRegistry: Record<string, CommandHandler> = commandHandlers;
  * CommandResult.
  */
 export async function dispatchRegisteredCommand(name: string, ctx: CommandContext): Promise<CommandResult | undefined> {
+	// /rule:NAME is one token (no space before the rule id) — the bridge
+	// handles it before this gate and checks `running` internally.
+	if (name.startsWith("/rule:")) {
+		return await commandRegistry["/rule:"]?.(ctx);
+	}
 	const handler = commandRegistry[name];
 	if (!handler) return undefined;
 	return await handler(ctx);
