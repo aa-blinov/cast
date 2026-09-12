@@ -45,7 +45,9 @@ import {
 import type { Persona } from "../../core/personas.ts";
 import type { ProjectResolverDeps, resolveRulesForCwd } from "../../core/project.ts";
 import {
+	discoverSkillsForCwd,
 	listHooksForCwdSettings,
+	readSkillsShSources,
 	removeMcpServerFromDisk,
 	resolveHooksForCwd,
 	resolveMcpForCwd,
@@ -62,6 +64,7 @@ import {
 	memoryDreamIntervalDays,
 	updateSettings,
 } from "../../core/settings.ts";
+import { isUninstallableSkill, uninstallUserSkill } from "../../core/skills.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../../core/skills-sh.ts";
 import type { SshHost, saveSshConfig } from "../../core/ssh.ts";
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
@@ -252,6 +255,10 @@ export interface CommandContext {
 	 *  call this after swapping mcpResult so the new tool list is
 	 *  reflected in what the model sees on the next turn. */
 	recomputeAllSystemPrompts: () => void;
+	/** Re-resolve skills from disk and write the closure-local skills
+	 *  slot. /skills enable + /skills disable + /skills uninstall
+	 *  use this so the next turn sees the new skill set. */
+	refreshSkillsFromSkills: () => Promise<void>;
 }
 
 /** Handlers may be sync or async — async ones let /compact, /new, and any
@@ -1249,6 +1256,66 @@ const commandHandlers: Record<string, CommandHandler> = {
 			}
 		}
 		return { ok: false, error: `Unknown /mcp subcommand: ${sub}` };
+	},
+	"/skills": async (ctx) => {
+		const { arg, ws, cwd, loadSettings, projectDeps, projectTrusted, refreshSkillsFromSkills } = ctx;
+		const [sub, rest] = arg ? splitArgInline(arg) : ["", ""];
+		const sessionCwd = ws.session.cwd ?? cwd;
+		if (!sub || sub === "list") {
+			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+			const disabled = new Set(loadSettings().disabledSkills ?? []);
+			// `npx skills add` installs flat (`~/.agents/skills/<name>/SKILL.md`,
+			// no repo-named subdirectory), so the source repo can only come
+			// from its lockfile, keyed by skill name — never from the path.
+			const skillsShSources = readSkillsShSources();
+			return {
+				ok: true,
+				result: discovered.map((s) => {
+					const skillsShSource = s.source === "agents" ? skillsShSources[s.name] : undefined;
+					return {
+						name: s.name,
+						source: s.source,
+						filePath: s.filePath,
+						description: s.description,
+						enabled: !disabled.has(s.name),
+						uninstallable: isUninstallableSkill(s),
+						// Agent directories are shared with other tools (Amp, Codex,
+						// etc.). Only Skills.sh's lockfile establishes its provenance.
+						skillssh: skillsShSource !== undefined,
+						skillsshSource: skillsShSource,
+					};
+				}),
+			};
+		}
+		if (sub === "help") {
+			return {
+				ok: true,
+				result: "/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name>",
+			};
+		}
+		if (sub === "enable" || sub === "disable") {
+			if (!rest) return { ok: false, error: `Usage: /skills ${sub} <name>` };
+			updateSettings((current) => {
+				const disabled = new Set(current.disabledSkills ?? []);
+				if (sub === "disable") disabled.add(rest);
+				else disabled.delete(rest);
+				return { disabledSkills: [...disabled] };
+			});
+			await refreshSkillsFromSkills();
+			return { ok: true, result: `Skill "${rest}" ${sub}d` };
+		}
+		if (sub === "uninstall") {
+			if (!rest) return { ok: false, error: "Usage: /skills uninstall <name>" };
+			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+			const skill = discovered.find((s: { name: string }) => s.name === rest);
+			if (!skill) return { ok: false, error: `Unknown skill: ${rest}` };
+			if (!isUninstallableSkill(skill))
+				return { ok: false, error: `"${rest}" isn't a removable skill (builtin or --skill path)` };
+			uninstallUserSkill(skill);
+			await refreshSkillsFromSkills();
+			return { ok: true, result: `Uninstalled skill "${rest}"` };
+		}
+		return { ok: false, error: `Unknown /skills subcommand: ${sub}` };
 	},
 };
 
