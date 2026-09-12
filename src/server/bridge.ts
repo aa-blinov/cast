@@ -2885,6 +2885,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			},
 			rulesForSessionCwd,
 			fireUserPromptExpansion,
+			getHistoryPage,
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/evolve") {
@@ -3450,32 +3451,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// daemon returns an equivalent result so a `cast run --interactive`
 		// consumer can round-trip every slash command instead of hitting
 		// "Unknown command".
-		if (name === "/quit" || name === "/exit") {
-			// Alias of /abort for the running case; idle sessions just report ok.
-			if (running) {
-				ws.runner.abort();
-				return { ok: true, result: "quit requested" };
-			}
-			return { ok: true, result: "idle" };
-		}
-		if (name === "/copy") {
-			const last = [...ws.session.messages].reverse().find((m) => m.role === "assistant" && m.content);
-			return {
-				ok: true,
-				result: last ? (typeof last.content === "string" ? last.content : "assistant message") : "",
-			};
-		}
-		if (name === "/older") {
-			// In the TUI /older prepends the previous history page to the
-			// scrollback. Headless has no scrollback; report whether older
-			// turns exist (the web client pages them via GET
-			// /api/sessions/:id/history?before=<seq>).
-			const page = getHistoryPage(ws.session.id, undefined, 1);
-			return { ok: true, result: { hasMoreHistory: page.hasMore, oldestSeq: page.oldestSeq ?? null } };
-		}
-		if (name === "/keys") {
-			return { ok: true, result: "keybindings are a TUI concept; see docs or /help for commands" };
-		}
 		if (name === "/worktree") {
 			const sessionCwd = ws.session.cwd ?? cwd;
 			if (!arg) {

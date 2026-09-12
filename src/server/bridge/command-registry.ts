@@ -45,7 +45,7 @@ import type { Persona } from "../../core/personas.ts";
 import type { resolveRulesForCwd } from "../../core/project.ts";
 import { listHooksForCwdSettings, resolveHooksForCwd } from "../../core/project.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
-import type { SessionState } from "../../core/session.ts";
+import type { getHistoryPage, SessionState } from "../../core/session.ts";
 import { addUsage, clearSessionMessages, recordCompaction } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import {
@@ -203,6 +203,10 @@ export interface CommandContext {
 	 *  so the next turn's system prompt re-injects it. /rule:<id> calls
 	 *  this before submit() so the rule body survives the dispatch. */
 	fireUserPromptExpansion: (sessionCwd: string, name: string) => void;
+	/** Page through a session's stored history. /older uses this to
+	 *  report whether older turns exist (the web client pages them
+	 *  via GET /api/sessions/:id/history?before=<seq>). */
+	getHistoryPage: typeof getHistoryPage;
 }
 
 /** Handlers may be sync or async — async ones let /compact, /new, and any
@@ -994,6 +998,39 @@ const commandHandlers: Record<string, CommandHandler> = {
 		fireUserPromptExpansion(ws.session.cwd ?? cwd, rule.name);
 		submit(ws.id, formatRuleInvocation(rule));
 		return { ok: true, result: `Invoked rule: ${rule.name}` };
+	},
+	"/quit": ({ ws }) => {
+		// Alias of /abort for the running case; idle sessions just report ok.
+		if (ws.status === "running") {
+			ws.runner.abort();
+			return { ok: true, result: "quit requested" };
+		}
+		return { ok: true, result: "idle" };
+	},
+	"/exit": ({ ws }) => {
+		if (ws.status === "running") {
+			ws.runner.abort();
+			return { ok: true, result: "quit requested" };
+		}
+		return { ok: true, result: "idle" };
+	},
+	"/copy": ({ ws }) => {
+		const last = [...ws.session.messages].reverse().find((m) => m.role === "assistant" && m.content);
+		return {
+			ok: true,
+			result: last ? (typeof last.content === "string" ? last.content : "assistant message") : "",
+		};
+	},
+	"/older": ({ ws, getHistoryPage }) => {
+		// In the TUI /older prepends the previous history page to the
+		// scrollback. Headless has no scrollback; report whether older
+		// turns exist (the web client pages them via GET
+		// /api/sessions/:id/history?before=<seq>).
+		const page = getHistoryPage(ws.session.id, undefined, 1);
+		return { ok: true, result: { hasMoreHistory: page.hasMore, oldestSeq: page.oldestSeq ?? null } };
+	},
+	"/keys": () => {
+		return { ok: true, result: "keybindings are a TUI concept; see docs or /help for commands" };
 	},
 };
 
