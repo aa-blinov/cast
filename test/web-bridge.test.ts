@@ -1030,6 +1030,158 @@ describe("web bridge", () => {
 		expect(result.error).toBe("Unknown /hooks frobnicate");
 	});
 
+	// Slice 5 characterization — settings toggles before the registry gains
+	// loadSettings + updateSettings as deps (plus a tiny setPermissionMode
+	// callback for /permissions to mutate the closure-local mode). These
+	// commands all share the same shape: read current setting, branch on
+	// arg, persist via updateSettings (and a callback mutation for
+	// /permissions). Existing tests for /turn-cap and the default
+	// /permissions "runs without a session" path already cover the
+	// obvious happy paths — slice 5 focuses on the commands that had no
+	// characterization at all and on the mutation contract of /permissions.
+
+	it("/theme (no arg) returns the current theme", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/theme");
+		expect(result.ok).toBe(true);
+		// Default cast theme — the test fixture never overrides it.
+		expect(result.result).toMatchObject({ theme: expect.any(String) });
+	});
+
+	it("/theme <id> sets the theme and returns its label and colors", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/theme cast");
+		expect(result.ok).toBe(true);
+		const r = result.result as { theme: string; label: string; colors: unknown };
+		expect(r.theme).toBe("cast");
+		expect(typeof r.label).toBe("string");
+		expect(r.colors).toBeDefined();
+	});
+
+	it("/theme <invalid> returns an error naming the unknown theme", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/theme nope-not-a-theme");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Unknown theme: nope-not-a-theme/);
+	});
+
+	it("/web (no arg) returns the current webTools boolean", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/web");
+		expect(result.ok).toBe(true);
+		// Default false (off) — the test fixture never enables webTools.
+		expect(result.result).toEqual({ webTools: false });
+	});
+
+	it("/web on/off toggle persists and round-trips through /web", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const setOn = await bridge.executeCommand(ws.id, "/web on");
+		expect(setOn.ok).toBe(true);
+		expect((setOn.result as { webTools: boolean }).webTools).toBe(true);
+		const readBack = await bridge.executeCommand(ws.id, "/web");
+		expect((readBack.result as { webTools: boolean }).webTools).toBe(true);
+		const setOff = await bridge.executeCommand(ws.id, "/web off");
+		expect(setOff.ok).toBe(true);
+		expect((setOff.result as { webTools: boolean }).webTools).toBe(false);
+	});
+
+	it("/web <invalid> returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/web sometimes");
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe("Usage: /web on|off");
+	});
+
+	it("/web-fetch-provider (no arg) returns the default jina provider", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/web-fetch-provider");
+		expect(result.ok).toBe(true);
+		expect(result.result).toEqual({ webFetchProvider: "jina" });
+	});
+
+	it("/web-fetch-provider local sets the provider and round-trips", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const set = await bridge.executeCommand(ws.id, "/web-fetch-provider local");
+		expect(set.ok).toBe(true);
+		expect((set.result as { webFetchProvider: string }).webFetchProvider).toBe("local");
+		const readBack = await bridge.executeCommand(ws.id, "/web-fetch-provider");
+		expect((readBack.result as { webFetchProvider: string }).webFetchProvider).toBe("local");
+	});
+
+	it("/web-fetch-provider <bad> returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/web-fetch-provider firefox");
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe("Usage: /web-fetch-provider jina | local");
+	});
+
+	it("/statusbar returns the statusBar setting object", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/statusbar");
+		expect(result.ok).toBe(true);
+		const r = result.result as { visible: unknown; order: unknown; sides: unknown };
+		expect(Array.isArray(r.visible)).toBe(true);
+		expect(Array.isArray(r.order)).toBe(true);
+		expect(typeof r.sides).toBe("object");
+	});
+
+	it("/reasoning-display toggles showReasoning and the next read reflects it", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const first = await bridge.executeCommand(ws.id, "/reasoning-display");
+		expect(first.ok).toBe(true);
+		const firstState = (first.result as { showReasoning: boolean }).showReasoning;
+		// Defaults to true (showReasoning ?? true inside bridge.ts); the
+		// toggle flips it. We don't pin the absolute value here because
+		// future settings.json migrations might — the contract is "toggle".
+		const second = await bridge.executeCommand(ws.id, "/reasoning-display");
+		expect((second.result as { showReasoning: boolean }).showReasoning).toBe(!firstState);
+	});
+
+	it("/rd is an alias of /reasoning-display and also toggles", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// Take one reading from the long-form, then call /rd and confirm
+		// it flipped the same flag (i.e. /rd isn't a no-op that returned
+		// the current value back unchanged).
+		const baseline = (await bridge.executeCommand(ws.id, "/reasoning-display")).result as { showReasoning: boolean };
+		const afterAlias = await bridge.executeCommand(ws.id, "/rd");
+		expect((afterAlias.result as { showReasoning: boolean }).showReasoning).toBe(!baseline.showReasoning);
+	});
+
+	it("/permissions bypass mutates the closure so the next read returns bypass", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// Default is "default"; set bypass and confirm the closure-local
+		// value (not just settings.json) flipped — this is what
+		// submit() reads on the next turn.
+		const set = await bridge.executeCommand(ws.id, "/permissions bypass");
+		expect(set.ok).toBe(true);
+		expect((set.result as { permissionMode: string }).permissionMode).toBe("bypass");
+		const readBack = await bridge.executeCommand(ws.id, "/permissions");
+		expect((readBack.result as { permissionMode: string }).permissionMode).toBe("bypass");
+	});
+
+	it("/permissions <invalid> returns the usage error without mutating state", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/permissions readonly");
+		expect(result.ok).toBe(false);
+		expect(result.error).toBe("Usage: /permissions default|bypass");
+		const readBack = await bridge.executeCommand(ws.id, "/permissions");
+		expect((readBack.result as { permissionMode: string }).permissionMode).toBe("default");
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

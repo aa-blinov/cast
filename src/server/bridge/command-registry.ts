@@ -22,6 +22,7 @@ import { listHooksForCwdSettings } from "../../core/project.ts";
 import type { SessionState } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import { updateSettings } from "../../core/settings.ts";
+import { ALL_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession } from "../bridge.ts";
 import { SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
@@ -83,6 +84,10 @@ export interface CommandContext {
 	 *  — same gate fs-watcher uses. /hooks needs it to call
 	 *  listHooksForCwdSettings. */
 	trustForSessionCwd: (sessionCwd: string) => boolean;
+	/** Mutate the bridge-local permission mode. /permissions needs this so
+	 *  the next submit() picks up the new value without a server restart —
+	 *  permissionMode is read fresh inside the agent loop. */
+	setPermissionMode: (mode: PermissionMode) => void;
 }
 
 /** Synchronous handlers — async work happens before this entry point. */
@@ -301,6 +306,120 @@ const commandHandlers: Record<string, CommandHandler> = {
 			return { ok: true, result: `Hook ${id} ${verb}d` };
 		}
 		return { ok: false, error: `Unknown /hooks ${verb}` };
+	},
+	"/turn-cap": ({ arg, loadSettings, turnIterationCap }) => {
+		const settings = loadSettings();
+		if (!arg)
+			return {
+				ok: true,
+				result: `Turn iteration safety cap: ${turnIterationCap(settings)} (applies on the next turn)`,
+			};
+		if (arg === "reset" || arg === "off") {
+			updateSettings({ maxTurnIterations: undefined });
+			return { ok: true, result: "Turn iteration safety cap reset to default (500)." };
+		}
+		const n = Number(arg);
+		if (!Number.isInteger(n) || n < 10 || n > 10_000) {
+			return { ok: false, error: "Usage: /turn-cap <10-10000> | reset" };
+		}
+		updateSettings({ maxTurnIterations: n });
+		return { ok: true, result: `Turn iteration safety cap set to ${n} (applies on the next turn).` };
+	},
+	"/permissions": ({ arg, permissionMode, setPermissionMode }) => {
+		// Global, like /reasoning and /web — `permissionMode` is bridge-level
+		// mutable state read fresh by submit() on the next run.
+		if (!arg) return { ok: true, result: { permissionMode } };
+		if (arg !== "default" && arg !== "bypass") return { ok: false, error: "Usage: /permissions default|bypass" };
+		setPermissionMode(arg);
+		updateSettings({ permissionMode: arg });
+		return { ok: true, result: { permissionMode: arg } };
+	},
+	"/web": ({ arg, loadSettings }) => {
+		// A global setting (matches the TUI/`cast run`'s own /web and
+		// core/run.ts) — takes effect on the NEXT turn in every session, since
+		// submit() reads `loadSettings().webTools` fresh each run rather than
+		// caching it, same as headless mode does.
+		if (!arg) return { ok: true, result: { webTools: loadSettings().webTools === true } };
+		if (arg !== "on" && arg !== "off") return { ok: false, error: "Usage: /web on|off" };
+		updateSettings({ webTools: arg === "on" });
+		return { ok: true, result: { webTools: arg === "on" } };
+	},
+	"/web-search-provider": ({ arg, loadSettings }) => {
+		// Same fresh-read pattern as /web — the next web_search call picks
+		// this up via loadSettings() inside execWebSearch, no restart needed.
+		if (!arg) {
+			const s = loadSettings();
+			return {
+				ok: true,
+				// Only whether a key is saved — the key itself never goes to the browser.
+				result: {
+					searchProvider: s.searchProvider ?? "ddg",
+					hasTavilyApiKey: !!s.tavilyApiKey,
+					hasBraveApiKey: !!s.braveApiKey,
+				},
+			};
+		}
+		const [provider, ...rest] = arg.split(ARG_WHITESPACE_SPLIT);
+		if (provider === "ddg") {
+			updateSettings({ searchProvider: "ddg" });
+			return { ok: true, result: { searchProvider: "ddg" } };
+		}
+		if (provider === "tavily") {
+			const key = rest.join(" ").trim() || loadSettings().tavilyApiKey;
+			if (!key) return { ok: false, error: "Usage: /web-search-provider tavily <api-key>" };
+			updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
+			return { ok: true, result: { searchProvider: "tavily", hasTavilyApiKey: true } };
+		}
+		if (provider === "brave") {
+			const key = rest.join(" ").trim() || loadSettings().braveApiKey;
+			if (!key) return { ok: false, error: "Usage: /web-search-provider brave <api-key>" };
+			updateSettings({ searchProvider: "brave", braveApiKey: key });
+			return { ok: true, result: { searchProvider: "brave", hasBraveApiKey: true } };
+		}
+		return { ok: false, error: "Usage: /web-search-provider ddg | tavily <api-key> | brave <api-key>" };
+	},
+	"/web-fetch-provider": ({ arg, loadSettings }) => {
+		// Same fresh-read pattern as /web-search-provider — the next
+		// web_fetch call picks this up via loadSettings() inside
+		// execWebFetch, no restart needed.
+		if (!arg) {
+			return { ok: true, result: { webFetchProvider: loadSettings().webFetchProvider ?? "jina" } };
+		}
+		if (arg !== "jina" && arg !== "local") {
+			return { ok: false, error: "Usage: /web-fetch-provider jina | local" };
+		}
+		updateSettings({ webFetchProvider: arg });
+		return { ok: true, result: { webFetchProvider: arg } };
+	},
+	"/theme": ({ arg, loadSettings }) => {
+		// A UI preference, not agent state — shared with the TUI's settings.json
+		// `theme` field so picking one here also changes what `cast` shows next.
+		if (!arg) {
+			const current = loadSettings().theme ?? "cast";
+			return { ok: true, result: { theme: current } };
+		}
+		const found = ALL_THEMES.find((t) => t.id === arg);
+		if (!found) {
+			return {
+				ok: false,
+				error: `Unknown theme: ${arg}. Available: ${ALL_THEMES.map((t) => t.id).join(", ")}`,
+			};
+		}
+		updateSettings({ theme: found.id });
+		return { ok: true, result: { theme: found.id, label: found.label, colors: found.colors } };
+	},
+	"/statusbar": ({ loadSettings }) => {
+		return { ok: true, result: loadSettings().statusBar ?? { visible: [], order: [], sides: {} } };
+	},
+	"/reasoning-display": ({ loadSettings }) => {
+		const next = !(loadSettings().showReasoning ?? true);
+		updateSettings({ showReasoning: next });
+		return { ok: true, result: { showReasoning: next } };
+	},
+	"/rd": ({ loadSettings }) => {
+		const next = !(loadSettings().showReasoning ?? true);
+		updateSettings({ showReasoning: next });
+		return { ok: true, result: { showReasoning: next } };
 	},
 };
 
