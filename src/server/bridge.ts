@@ -137,6 +137,13 @@ import {
 import { createSessionWorktree, listWorktrees, removeSessionWorktree, type SessionWorktree } from "../core/worktree.ts";
 import { ALL_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
+// Broadcast primitives (noteActivity, broadcast, broadcastSessionUpdate,
+// fireNotificationHook, persistDecisionState) live in ./bridge/broadcaster.ts
+// — see that file for the dep contract. The factory takes the bridge's
+// shared state as deps and returns the five methods as an object; bridge.ts
+// calls them through `broadcaster.X(...)` instead of as closure-local
+// functions.
+import { createBroadcaster } from "./bridge/broadcaster.ts";
 // DisplayMessage / DisplayStreamBlock and the three display-side helpers
 // (appendActiveText, reconcileActiveStream, toDisplayMessages) live in
 // ./bridge/display.ts — bridge.ts re-exports the public functions below
@@ -517,7 +524,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (!actor.parentSessionId) return;
 		const ws = sessions.get(actor.parentSessionId);
 		if (!ws) return;
-		broadcast(ws, { type: "agent_actor", actor });
+		broadcaster.broadcast(ws, { type: "agent_actor", actor });
 	});
 
 	const { config, cwd, persona: currentPersona, reasoningMeta: initialReasoningMeta, projectDeps } = result;
@@ -860,7 +867,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.session.cwd ?? cwd,
 			ws.session.mode,
 		);
-		broadcastSessionUpdate(ws);
+		broadcaster.broadcastSessionUpdate(ws);
 		return true;
 	}
 
@@ -888,11 +895,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.session.mode,
 		);
 		saveSession(ws.session);
-		broadcast(ws, {
+		broadcaster.broadcast(ws, {
 			type: "notice",
 			message: `Active provider changed — model "${current}" isn't available there, this session switched to "${defaultModel}".`,
 		});
-		broadcastSessionUpdate(ws);
+		broadcaster.broadcastSessionUpdate(ws);
 	}
 
 	/**
@@ -1075,7 +1082,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		sessions.set(session.id, ws);
 		ensureProjectMcpForCwd(session.cwd ?? cwd);
 		syncFsWatcher(ws);
-		broadcastSessionUpdate(ws);
+		broadcaster.broadcastSessionUpdate(ws);
 		return ws;
 	}
 
@@ -1115,7 +1122,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				resolve(allow);
 			};
 			ws.pendingBashConfirm = { id, command, reason, settle };
-			broadcast(ws, { type: "bash_confirm", id, command, reason });
+			broadcaster.broadcast(ws, { type: "bash_confirm", id, command, reason });
 		});
 	}
 
@@ -1143,72 +1150,24 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * with a 1s tick, a short turn in the middle of the quiet window went
 	 * unnoticed and the window was never reset. A watermark cannot miss it.
 	 */
-	let lastActivityAt = Date.now();
-	function noteActivity(): void {
-		lastActivityAt = Date.now();
-	}
-
-	function broadcast(ws: WebAgentSession, event: WebEvent): void {
-		noteActivity();
-		for (const listener of ws.listeners) {
-			try {
-				listener(event);
-			} catch {
-				// Listener threw — remove it to avoid poisoning the set.
-			}
-		}
-	}
-
-	/** Fires the `Notification` hook — the "the agent wants your attention"
-	 *  event. It was declared and matcher-aware but dispatched from nowhere, so
-	 *  a hook written to ring a bell, post to Slack or flash a window never ran.
-	 *  Deliberately only the two moments that actually warrant interrupting
-	 *  someone: a turn finished, or the agent is blocked on the user. */
-	function fireNotificationHook(ws: WebAgentSession, type: "turn_complete" | "input_needed", message: string): void {
-		const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
-		if (!hooks.Notification?.length) return;
-		void runHooksForEvent(hooks, {
-			event: "Notification",
-			cwd: ws.session.cwd ?? cwd,
-			sessionId: ws.id,
-			payload: { notification_type: type, message, title: ws.session.title ?? "" },
-		});
-	}
-
-	function persistDecisionState(
-		ws: WebAgentSession,
-		question: PlanQuestion | undefined,
-		planTransition: { kind: "done" } | undefined,
-	): void {
-		ws.session.planQuestion = question;
-		ws.session.planTransition = planTransition;
-		saveSession(ws.session);
-		broadcast(ws, { type: "decision_state", question, planTransition });
-		// Only when something new is being asked — clearing a resolved
-		// question calls this too, and that is not a notification.
-		if (question) fireNotificationHook(ws, "input_needed", question.questions[0]?.question ?? "Input needed");
-		else if (planTransition) fireNotificationHook(ws, "input_needed", "A plan is waiting for approval");
-	}
-
-	/** Pushes a sidebar-friendly snapshot so every connected client (including
-	 *  tabs that didn't initiate the turn) can update their session list
-	 *  without a full refetch. */
-	function broadcastSessionUpdate(ws: WebAgentSession): void {
-		try {
-			const event: WebEvent = { type: "session_update", session: summaryFor(ws.session, ws.status) };
-			broadcast(ws, event);
-			for (const listener of sessionListListeners) {
-				try {
-					listener(event);
-				} catch {
-					// Listener threw — remove it to avoid poisoning the set.
-				}
-			}
-		} catch {
-			// Defensive: summaryFor reads session.messages.length — if the run
-			// left messages in an unexpected state, don't crash the broadcast.
-		}
-	}
+	// Mutable container — broadcaster.noteActivity updates it; the public
+	// ServerBridge.lastActivityAt() getter (further below) reads its value.
+	// Promoted to an object so the broadcaster factory can hold a reference
+	// without resorting to a closure-side setter callback.
+	const lastActivityAtRef = { value: Date.now() };
+	// summaryFor and trustForSessionCwd are hoisted in createServerBridge's
+	// function scope, so passing them here is safe even though they're
+	// declared further down in the source — broadcaster's returned methods
+	// only resolve them at call time, and the first broadcast fires well
+	// after both are bound.
+	const broadcaster = createBroadcaster({
+		sessions,
+		sessionListListeners,
+		lastActivityAtRef,
+		cwd,
+		trustForSessionCwd,
+		summaryFor,
+	});
 
 	/** Idle-period cwd watcher. Fires `fs_change` SSE events so the UI's
 	 *  Changes tab and Files tree pick up edits that happened outside of an
@@ -1232,7 +1191,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					fsDebounceTimers.delete(sessionId);
 					const ws = sessions.get(sessionId);
 					if (!ws || ws.status !== "idle") return;
-					broadcast(ws, { type: "fs_change" });
+					broadcaster.broadcast(ws, { type: "fs_change" });
 					const hookEvent = eventName === "addDir" ? "DirectoryAdded" : "FileChanged";
 					const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
 					void runHooksForEvent(hooks, {
@@ -1399,7 +1358,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				.filter(Boolean)
 				.join("\n\n");
 			if (!text.trim()) return;
-			broadcast(ws, { type: "steering_injected", messages: stranded });
+			broadcaster.broadcast(ws, { type: "steering_injected", messages: stranded });
 			startDeferredSubmit(sessionId, ws, text, stranded);
 		});
 	}
@@ -1418,7 +1377,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		void submit(sessionId, text, undefined, undefined, queued).catch((err) => {
 			console.error("[cast server] deferred submit failed:", err);
 			if (sessions.get(sessionId) === ws) {
-				broadcast(ws, {
+				broadcaster.broadcast(ws, {
 					type: "notice",
 					message: `A queued message could not be delivered: ${err instanceof Error ? err.message : String(err)}`,
 				});
@@ -1436,7 +1395,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			.map((message) => (typeof message.content === "string" ? message.content : ""))
 			.filter(Boolean)
 			.join("\n\n");
-		broadcast(ws, { type: "followup_injected", messages: queued });
+		broadcaster.broadcast(ws, { type: "followup_injected", messages: queued });
 		startDeferredSubmit(sessionId, ws, text, queued);
 	}
 
@@ -1480,7 +1439,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// racing a turn would have steered in with the default cap and no
 			// hint that its budget was ignored. Say so instead.
 			if (opts?.maxOuterIterations !== undefined) {
-				broadcast(ws, {
+				broadcaster.broadcast(ws, {
 					type: "notice",
 					message: `A turn is already running — your message was steered into it, and the requested iteration budget (${opts.maxOuterIterations}) applies to a new turn, not this one.`,
 				});
@@ -1505,8 +1464,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		ws.error = null;
 		ws.turnStartedAt = Date.now();
 		syncFsWatcher(ws);
-		broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
-		broadcastSessionUpdate(ws);
+		broadcaster.broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
+		broadcaster.broadcastSessionUpdate(ws);
 		let chk: ReturnType<typeof createCheckpoint>;
 		const failSetup = (error: unknown): void => {
 			ws.status = "error";
@@ -1520,9 +1479,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// delivered on the next attempt (the message was never persisted).
 			if (clientMessageId) ws.acceptedClientMessageIds.delete(clientMessageId);
 			syncFsWatcher(ws);
-			broadcast(ws, { type: "error", message: ws.error });
-			broadcast(ws, { type: "status", status: "error" });
-			broadcastSessionUpdate(ws);
+			broadcaster.broadcast(ws, { type: "error", message: ws.error });
+			broadcaster.broadcast(ws, { type: "status", status: "error" });
+			broadcaster.broadcastSessionUpdate(ws);
 		};
 		// A provider/model switch made outside this daemon (the TUI process, or
 		// a manual settings.json edit) must take effect on this turn — otherwise
@@ -1589,9 +1548,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.runner.abort();
 				ws.runner.endRun(lease);
 				syncFsWatcher(ws);
-				broadcast(ws, { type: "status", status: "idle" });
-				broadcastSessionUpdate(ws);
-				broadcast(ws, {
+				broadcaster.broadcast(ws, { type: "status", status: "idle" });
+				broadcaster.broadcastSessionUpdate(ws);
+				broadcaster.broadcast(ws, {
 					type: "error",
 					message: `Prompt blocked by hook: ${submitResult.reason ?? "no reason given"}`,
 				});
@@ -1606,7 +1565,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// — and used to do so in silence, leaving the user to wonder why the
 		// model didn't use a server they had configured.
 		if (mcpResult.connectPending && mcpResult.allServerNames.length > 0) {
-			broadcast(ws, {
+			broadcaster.broadcast(ws, {
 				type: "notice",
 				message: `MCP servers are still connecting (${mcpResult.allServerNames.join(", ")}) — this turn runs without their tools.`,
 			});
@@ -1650,7 +1609,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const userMsg = ws.session.messages[ws.session.messages.length - 1] as Message & {
 				castClientMessageId?: string;
 			};
-			broadcast(ws, {
+			broadcaster.broadcast(ws, {
 				type: "user_message",
 				message: {
 					role: "user",
@@ -1683,7 +1642,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			question: ws.session.planQuestion,
 			transition: ws.session.planTransition,
 			onChange: (question, transition) => {
-				persistDecisionState(ws, question, transition);
+				broadcaster.persistDecisionState(ws, question, transition);
 			},
 		});
 		planState.enabled = planMode;
@@ -1889,7 +1848,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// Non-fatal warnings from the loop (e.g. "Model doesn't support
 			// images — sending file path only") must reach the browser like any
 			// other notice, or the vision fallback looks like a silent failure.
-			onWarning: (message) => broadcast(ws, { type: "notice", message }),
+			onWarning: (message) => broadcaster.broadcast(ws, { type: "notice", message }),
 			onMessagesChanged: (messages) => {
 				ws.session.messages = messages;
 				try {
@@ -2089,7 +2048,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					});
 					if (event.background) {
 						saveSession(ws.session);
-						broadcastSessionUpdate(ws);
+						broadcaster.broadcastSessionUpdate(ws);
 					}
 					if (!event.subagent && !event.background) {
 						ws.lastTurn = {
@@ -2104,7 +2063,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						};
 					}
 				}
-				broadcast(ws, event);
+				broadcaster.broadcast(ws, event);
 			},
 		})
 			.then((finalMessages) => {
@@ -2154,14 +2113,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				}
 				saveSession(ws.session);
 				ws.turnStartedAt = undefined;
-				broadcast(ws, { type: "status", status: "idle" });
-				broadcast(ws, {
+				broadcaster.broadcast(ws, { type: "status", status: "idle" });
+				broadcaster.broadcast(ws, {
 					type: "turn_meta",
 					model: runModel,
 					provider: runProviderName,
 					totalMs: Date.now() - turnStart,
 				});
-				broadcast(ws, {
+				broadcaster.broadcast(ws, {
 					type: "session_end",
 					usage: ws.session.usage,
 					// NOT a user-facing counter — this is compared against the web
@@ -2173,8 +2132,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					// shown elsewhere in the UI.
 					messageCount: ws.session.messages.filter((m) => m.role === "user" || m.role === "assistant").length,
 				});
-				broadcastSessionUpdate(ws);
-				fireNotificationHook(ws, "turn_complete", "The agent finished its turn");
+				broadcaster.broadcastSessionUpdate(ws);
+				broadcaster.fireNotificationHook(ws, "turn_complete", "The agent finished its turn");
 				startQueuedFollowUps(sessionId, ws);
 			})
 			.catch((err: unknown) => {
@@ -2184,12 +2143,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.activeStream = undefined;
 				saveSession(ws.session);
 				ws.turnStartedAt = undefined;
-				broadcast(ws, { type: "error", message: ws.error });
-				broadcast(ws, { type: "status", status: "error" });
-				broadcastSessionUpdate(ws);
+				broadcaster.broadcast(ws, { type: "error", message: ws.error });
+				broadcaster.broadcast(ws, { type: "status", status: "error" });
+				broadcaster.broadcastSessionUpdate(ws);
 				// A failed turn also ends the wait — someone watching for the
 				// bell wants it either way.
-				fireNotificationHook(ws, "turn_complete", `The turn ended with an error: ${ws.error}`);
+				broadcaster.fireNotificationHook(ws, "turn_complete", `The turn ended with an error: ${ws.error}`);
 				// A turn that failed still has to hand back whatever the user
 				// queued while it ran. Only the success path did this, so a
 				// provider error swallowed the steer or follow-up typed during
@@ -2304,7 +2263,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				},
 			],
 		};
-		persistDecisionState(ws, confirm, ws.session.planTransition);
+		broadcaster.persistDecisionState(ws, confirm, ws.session.planTransition);
 		return { ok: true };
 	}
 
@@ -2394,7 +2353,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			question: ws.session.planQuestion,
 			transition: ws.session.planTransition,
 			onChange: (question, nextTransition) => {
-				persistDecisionState(ws, question, nextTransition);
+				broadcaster.persistDecisionState(ws, question, nextTransition);
 			},
 		});
 		const transition = ws.session.planTransition;
@@ -2419,7 +2378,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			"build",
 		);
 		saveSession(ws.session);
-		broadcastSessionUpdate(ws);
+		broadcaster.broadcastSessionUpdate(ws);
 		return { ok: true };
 	}
 
@@ -2435,7 +2394,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			question: ws.session.planQuestion,
 			transition: ws.session.planTransition,
 			onChange: (nextQuestion, transition) => {
-				persistDecisionState(ws, nextQuestion, transition);
+				broadcaster.persistDecisionState(ws, nextQuestion, transition);
 			},
 		});
 		const question = ws.session.planQuestion;
@@ -2470,12 +2429,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			);
 			const created = createdResults.filter((name): name is string => name !== null);
 			if (created.length > 0) {
-				broadcast(ws, {
+				broadcaster.broadcast(ws, {
 					type: "notice",
 					message: `Created ${created.length} skill${created.length > 1 ? "s" : ""}: ${created.map((n) => `/${n}`).join(", ")}.`,
 				});
 			} else {
-				broadcast(ws, { type: "notice", message: "No skills created." });
+				broadcaster.broadcast(ws, { type: "notice", message: "No skills created." });
 			}
 			return { ok: true };
 		}
@@ -2526,11 +2485,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// already in build mode. persistDecisionState both clears it and
 		// broadcasts, so an open approval card actually closes.
 		if (ws.session.planQuestion || ws.session.planTransition) {
-			persistDecisionState(ws, undefined, undefined);
+			broadcaster.persistDecisionState(ws, undefined, undefined);
 		} else {
 			saveSession(ws.session);
 		}
-		broadcastSessionUpdate(ws);
+		broadcaster.broadcastSessionUpdate(ws);
 		return { ok: true };
 	}
 
@@ -2568,7 +2527,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// The reason rides along: a daemon shutting down closes every session
 		// it holds, and the browser must not report that as "this session was
 		// closed" — the session is on disk and comes back with the daemon.
-		broadcast(ws, { type: "session_closed", ...(reason ? { reason } : {}) });
+		broadcaster.broadcast(ws, { type: "session_closed", ...(reason ? { reason } : {}) });
 		ws.listeners.clear();
 		const eviction = idleSessionEvictions.get(sessionId);
 		if (eviction) clearTimeout(eviction);
@@ -2594,7 +2553,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.backgroundBash.registry.killAll();
 			stopFsWatcher(sessionId);
 			// No saveSession here — it's about to be deleted from disk anyway.
-			broadcast(ws, { type: "session_closed" });
+			broadcaster.broadcast(ws, { type: "session_closed" });
 			ws.listeners.clear();
 			sessions.delete(sessionId);
 			releaseProjectMcpForCwd(ws.session.cwd ?? cwd);
@@ -2619,7 +2578,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	function subscribe(sessionId: string, callback: (event: WebEvent) => void): void {
-		noteActivity();
+		broadcaster.noteActivity();
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.add(callback);
@@ -2627,7 +2586,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	function unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void {
-		noteActivity();
+		broadcaster.noteActivity();
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.delete(callback);
@@ -2995,8 +2954,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			const content = `<system-reminder>${arg}</system-reminder>`;
 			appendMessage(ws.session, { role: "user", content });
 			saveSession(ws.session);
-			broadcast(ws, { type: "plan_decision", content: arg });
-			broadcastSessionUpdate(ws);
+			broadcaster.broadcast(ws, { type: "plan_decision", content: arg });
+			broadcaster.broadcastSessionUpdate(ws);
 			return { ok: true, result: "Recorded" };
 		}
 		if (name === "/current") {
@@ -3509,7 +3468,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// broadcasts the identical event shape).
 			ws.status = "running";
 			syncFsWatcher(ws);
-			broadcast(ws, { type: "status", status: "running" });
+			broadcaster.broadcast(ws, { type: "status", status: "running" });
 			compactSessionMessages(ws.session.messages, config, ws.session.model, undefined, undefined, (usage) =>
 				addUsage(ws.session, usage),
 			)
@@ -3519,7 +3478,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					if (result.compacted) {
 						recordCompaction(ws.session, ws.session.messages, result.messages);
 						ws.session.messages = result.messages;
-						broadcast(ws, {
+						broadcaster.broadcast(ws, {
 							type: "compaction",
 							messagesCompacted: result.messagesCompacted,
 							tokensBefore: result.tokensBefore,
@@ -3531,16 +3490,16 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 							payload: { trigger: "manual", messagesCompacted: result.messagesCompacted },
 						});
 					} else if (result.error) {
-						broadcast(ws, { type: "error", message: `Compaction failed: ${result.error}` });
+						broadcaster.broadcast(ws, { type: "error", message: `Compaction failed: ${result.error}` });
 					}
 					saveSession(ws.session);
-					broadcast(ws, { type: "status", status: "idle" });
+					broadcaster.broadcast(ws, { type: "status", status: "idle" });
 				})
 				.catch((err: unknown) => {
 					ws.status = "error";
 					ws.error = err instanceof Error ? err.message : String(err);
-					broadcast(ws, { type: "error", message: ws.error });
-					broadcast(ws, { type: "status", status: "error" });
+					broadcaster.broadcast(ws, { type: "error", message: ws.error });
+					broadcaster.broadcast(ws, { type: "status", status: "error" });
 				});
 			return { ok: true, result: "Compacting…" };
 		}
@@ -3593,7 +3552,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				...(providerChanged && !planModelProvider ? { planModel: undefined } : {}),
 			});
 			saveSession(ws.session);
-			broadcastSessionUpdate(ws);
+			broadcaster.broadcastSessionUpdate(ws);
 			return { ok: true, result: { model, provider: provider.name } };
 		}
 		if (name === "/model") {
@@ -3623,7 +3582,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// Sidebar footer reads the model off the session-list summary, not the
 			// open session's live state — without this it kept showing the old
 			// model until the turn ended (which resends it) or the page reloaded.
-			broadcastSessionUpdate(ws);
+			broadcaster.broadcastSessionUpdate(ws);
 			return { ok: true, result: { model: arg } };
 		}
 		if (name === "/reasoning") {
@@ -3757,7 +3716,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// left over from before this mode switch must not survive it — see
 			// that function's comment for the full failure mode.
 			if (ws.session.planQuestion || ws.session.planTransition) {
-				persistDecisionState(ws, undefined, undefined);
+				broadcaster.persistDecisionState(ws, undefined, undefined);
 			} else {
 				saveSession(ws.session);
 			}
@@ -4259,7 +4218,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			}
 			ws.session.checkpoints = checkpoints;
 			saveSession(ws.session);
-			broadcastSessionUpdate(ws);
+			broadcaster.broadcastSessionUpdate(ws);
 			return { ok: true, result: `Undone: ${res.message}` };
 		}
 
@@ -4406,7 +4365,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					sessionId: ws.id,
 					payload: { old_cwd: previousCwd, cwd: wt.path },
 				});
-				broadcastSessionUpdate(ws);
+				broadcaster.broadcastSessionUpdate(ws);
 				return { ok: true, result: `Worktree ready: ${wt.path}` };
 			} catch (err) {
 				return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -4711,7 +4670,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		forkSession: forkSessionInstance,
 		getSession,
 		isFullyIdle,
-		lastActivityAt: () => lastActivityAt,
+		lastActivityAt: () => lastActivityAtRef.value,
 		listSessions,
 		searchSessions,
 		applyMcpResult,
