@@ -1265,6 +1265,75 @@ describe("web bridge", () => {
 		expect((readModel.result as { planModel: string }).planModel).toBe("planner");
 	});
 
+	// Slice 7 characterization — /reasoning and the missing /reasoning-format
+	// read/invalid paths before the registry gains setDefaultModel,
+	// setReasoningMeta, and a computeSystemPrompt callback (the last one is
+	// needed because it reads the closure's `skills`, `rulesForSessionCwd`,
+	// and `mcpResult` — not safe to import as a top-level helper). Existing
+	// tests already cover /model and /persona end-to-end; slice 7 fills the
+	// reasoning holes.
+
+	it("/reasoning (no arg) returns the current level plus the available options", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/reasoning");
+		expect(result.ok).toBe(true);
+		const r = result.result as { reasoningLevel: string; options: string[] };
+		expect(typeof r.reasoningLevel).toBe("string");
+		expect(Array.isArray(r.options)).toBe(true);
+		// testConfig sets reasoningLevel: "off"; gpt-4o (the default
+		// session model from makeResult) has at least the "off" option, so
+		// the array must include it.
+		expect(r.options).toContain("off");
+	});
+
+	it("/reasoning <level> sets the level and the next read returns it", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// `off` is always a valid option (it's the universal default), so
+		// using it here keeps the test independent of which reasoning
+		// options the test stub model actually exposes.
+		const set = await bridge.executeCommand(ws.id, "/reasoning off");
+		expect(set.ok).toBe(true);
+		expect((set.result as { reasoningLevel: string }).reasoningLevel).toBe("off");
+		const readBack = await bridge.executeCommand(ws.id, "/reasoning");
+		expect((readBack.result as { reasoningLevel: string }).reasoningLevel).toBe("off");
+	});
+
+	it("/reasoning <invalid> returns the usage error and does not mutate config", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/reasoning turbo-mega");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Unknown reasoning level: turbo-mega/);
+		const readBack = await bridge.executeCommand(ws.id, "/reasoning");
+		// Mutating config.reasoningLevel on the error path would silently
+		// change every subsequent turn; the inline implementation only
+		// assigns after the option check passes.
+		expect((readBack.result as { reasoningLevel: string }).reasoningLevel).toBe("off");
+	});
+
+	it("/reasoning-format (no arg) returns the current format plus the available options", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/reasoning-format");
+		expect(result.ok).toBe(true);
+		const r = result.result as { reasoningFormat: string; options: string[] };
+		// testConfig doesn't set reasoningFormat, so the field can be
+		// undefined at boot — pin the contract to "options always returned,
+		// contains 'auto'", which is what every caller actually depends on.
+		expect(Array.isArray(r.options)).toBe(true);
+		expect(r.options).toContain("auto");
+	});
+
+	it("/reasoning-format <invalid> returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/reasoning-format hamster");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Unknown reasoning format: hamster/);
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

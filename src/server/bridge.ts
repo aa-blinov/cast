@@ -2890,6 +2890,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				quickSessionPersona = name;
 			},
 			personas,
+			currentPersona,
+			computeSystemPrompt,
+			modelInfoFor,
+			reasoningOptionsFor,
+			reasoningLevelForModel,
+			setDefaultModel: (model) => {
+				defaultModel = model;
+			},
+			setReasoningMeta: (meta) => {
+				reasoningMeta = meta;
+			},
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/goal") {
@@ -3225,80 +3236,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			saveSession(ws.session);
 			broadcaster.broadcastSessionUpdate(ws);
 			return { ok: true, result: { model, provider: provider.name } };
-		}
-		if (name === "/model") {
-			if (!arg) return { ok: true, result: { model: ws.session.model } };
-			ws.session.model = arg;
-			ws.session.providerUrl = config.baseURL;
-			// Not resolved against a specific saved provider — this switches the
-			// model on whatever's currently active, so any provider pin this
-			// session had is no longer meaningful and must not be trusted stale.
-			ws.session.providerName = undefined;
-			reasoningMeta = modelInfoFor(arg)?.reasoning;
-			config.reasoningLevel = reasoningLevelForModel(arg, config.reasoningFormat);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, arg);
-			ws.systemPrompt = computeSystemPrompt(
-				resolvePersona(ws.session.persona ?? "") ?? currentPersona,
-				arg,
-				ws.session.cwd ?? cwd,
-				ws.session.mode,
-			);
-			saveSession(ws.session);
-			// Persist as the default for future sessions too — otherwise a model
-			// switch only ever applied to the session it was issued on, and every
-			// new session kept starting on whatever was active when the server
-			// started (confirmed: switching M2 -> M3 then /new still opened M2).
-			defaultModel = arg;
-			updateSettings({ model: arg, reasoningLevel: config.reasoningLevel });
-			// Sidebar footer reads the model off the session-list summary, not the
-			// open session's live state — without this it kept showing the old
-			// model until the turn ended (which resends it) or the page reloaded.
-			broadcaster.broadcastSessionUpdate(ws);
-			return { ok: true, result: { model: arg } };
-		}
-		if (name === "/reasoning") {
-			const options = reasoningOptionsFor(ws.session.model);
-			if (options.length === 0) {
-				return {
-					ok: true,
-					result: {
-						reasoningLevel: config.reasoningLevel,
-						options: [],
-						note: "This provider exposes no reasoning controls for this model.",
-					},
-				};
-			}
-			if (!arg)
-				return {
-					ok: true,
-					result: { reasoningLevel: config.reasoningLevel, options: options.map((o) => o.value) },
-				};
-			if (!options.some((o) => o.value === arg)) {
-				return {
-					ok: false,
-					error: `Unknown reasoning level: ${arg}. Options: ${options.map((o) => o.value).join(", ")}`,
-				};
-			}
-			// Global, same as the TUI — `config` is a shared mutable object, so this
-			// takes effect on the next turn in every session, not just this one.
-			config.reasoningLevel = arg;
-			config.reasoningParams = buildReasoningParams(arg, config.reasoningFormat, ws.session.model);
-			updateSettings({ reasoningLevel: arg });
-			return { ok: true, result: { reasoningLevel: arg } };
-		}
-		if (name === "/persona") {
-			if (!arg) return { ok: true, result: { persona: ws.session.persona } };
-			const persona = resolvePersona(arg);
-			if (!persona) {
-				return {
-					ok: false,
-					error: `Unknown persona: ${arg}. Available: ${personas.map((p) => p.name).join(", ")}`,
-				};
-			}
-			ws.session.persona = persona.name;
-			ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, ws.session.cwd ?? cwd, ws.session.mode);
-			saveSession(ws.session);
-			return { ok: true, result: { persona: persona.name, label: persona.label } };
 		}
 		if (name === "/plan" || name === "/build") {
 			const mode = name === "/plan" ? "plan" : "build";
@@ -3868,26 +3805,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 		if (name === "/keys") {
 			return { ok: true, result: "keybindings are a TUI concept; see docs or /help for commands" };
-		}
-		if (name === "/reasoning-format") {
-			const current = config.reasoningFormat;
-			const options = REASONING_FORMAT_OPTIONS.map((o) => o.value);
-			if (!arg) return { ok: true, result: { reasoningFormat: current, options } };
-			if (!options.includes(arg as (typeof options)[number])) {
-				return { ok: false, error: `Unknown reasoning format: ${arg}. Options: ${options.join(", ")}` };
-			}
-			config.reasoningFormat = resolveReasoningFormat(config.baseURL, arg as (typeof options)[number]);
-			const selected = arg as (typeof options)[number];
-			config.reasoningLevel = reasoningLevelForModel(ws.session.model, config.reasoningFormat);
-			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, ws.session.model);
-			const settings = loadSettings();
-			const providers = settings.providers?.map((provider) =>
-				provider.url === config.baseURL && provider.apiKey === config.apiKey
-					? { ...provider, reasoningFormat: selected }
-					: provider,
-			);
-			updateSettings({ providers, reasoningLevel: config.reasoningLevel });
-			return { ok: true, result: { reasoningFormat: config.reasoningFormat } };
 		}
 		if (name === "/worktree") {
 			const sessionCwd = ws.session.cwd ?? cwd;
