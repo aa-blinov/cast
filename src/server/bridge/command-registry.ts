@@ -56,6 +56,7 @@ import {
 	memoryDreamIntervalDays,
 	updateSettings,
 } from "../../core/settings.ts";
+import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../../core/skills-sh.ts";
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
 import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { ALL_THEMES } from "../../ui/themes/index.ts";
@@ -207,6 +208,10 @@ export interface CommandContext {
 	 *  report whether older turns exist (the web client pages them
 	 *  via GET /api/sessions/:id/history?before=<seq>). */
 	getHistoryPage: typeof getHistoryPage;
+	/** Re-resolve skills from disk and rebuild every live session's
+	 *  system prompt. /skills-sh install and /skills-sh uninstall
+	 *  need this so the next turn sees the new skill set. */
+	refreshSkillsFromSkillsSh: () => Promise<void>;
 }
 
 /** Handlers may be sync or async — async ones let /compact, /new, and any
@@ -1031,6 +1036,30 @@ const commandHandlers: Record<string, CommandHandler> = {
 	},
 	"/keys": () => {
 		return { ok: true, result: "keybindings are a TUI concept; see docs or /help for commands" };
+	},
+	"/skills-sh": async ({ arg, refreshSkillsFromSkillsSh }) => {
+		const [sub, ...restParts] = arg ? arg.split(ARG_WHITESPACE_SPLIT) : [""];
+		const rest = restParts.join(" ");
+		try {
+			if (sub === "install") {
+				const out = await skillsShInstall(rest);
+				await refreshSkillsFromSkillsSh();
+				return { ok: true, result: out || "Installed." };
+			}
+			if (sub === "list-available") return { ok: true, result: await skillsShListAvailable(rest) };
+			if (sub === "search") return { ok: true, result: await skillsShSearch(rest) };
+			if (sub === "uninstall") {
+				const out = await skillsShUninstall(rest);
+				await refreshSkillsFromSkillsSh();
+				return { ok: true, result: out || "Uninstalled." };
+			}
+			return {
+				ok: false,
+				error: `Unknown /skills-sh subcommand: "${sub}". Try: install, list-available, search, uninstall.`,
+			};
+		} catch (error) {
+			return { ok: false, error: error instanceof Error ? error.message : String(error) };
+		}
 	},
 };
 

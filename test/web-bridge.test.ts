@@ -1741,6 +1741,53 @@ describe("web bridge", () => {
 		});
 	});
 
+	// Slice 15 characterization — /skills-sh before the registry gains it.
+	// The 4 subcommands (install / list-available / search / uninstall)
+	// all funnel into skillsSh* helpers from core/skills-sh which require
+	// either the skills-sh CLI on PATH or network access — neither is
+	// present in the test fixture. We pin only the contracts that are
+	// deterministically observable without the CLI:
+	//
+	//   /skills-sh <unknown-subcommand> returns the inline-defined
+	//   'Unknown /skills-sh subcommand' error (no external state);
+	//   /skills-sh install (no args) returns the 'Usage: install
+	//   <owner/repo> --skill <name>' error from skillsShInstall's own
+	//   arg validation, proving the registry hands off to the helper;
+	//   /skills-sh (empty arg) returns the same unknown-subcommand
+	//   error since "" is not in the recognised set.
+
+	it("/skills-sh <unknown subcommand> returns the inline usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills-sh frobnicate");
+		expect(result).toEqual({
+			ok: false,
+			error: `Unknown /skills-sh subcommand: "frobnicate". Try: install, list-available, search, uninstall.`,
+		});
+	});
+
+	it("/skills-sh (empty arg) returns the unknown-subcommand error for ''", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills-sh");
+		expect(result).toEqual({
+			ok: false,
+			error: `Unknown /skills-sh subcommand: "". Try: install, list-available, search, uninstall.`,
+		});
+	});
+
+	it("/skills-sh install (no args) hands off to skillsShInstall which returns its own usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/skills-sh install");
+		expect(result.ok).toBe(false);
+		// The skillsShInstall helper validates its own arg shape and
+		// throws a 'Usage: install <owner/repo> --skill <name>' error
+		// — proves the registry forwards the call instead of swallowing
+		// the subcommand.
+		expect(result.error).toMatch(/Usage: \/skills-sh install/);
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
