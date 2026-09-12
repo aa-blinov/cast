@@ -58,7 +58,7 @@ import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts"
 import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { ALL_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession } from "../bridge.ts";
-import { SLASH_COMMANDS } from "../commands.ts";
+import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
 
 /**
@@ -107,7 +107,14 @@ export interface CommandContext {
 	 *  session and need to kick off a normal turn. Matches the original
 	 *  inline behaviour: the call returns immediately; the turn runs in
 	 *  the background. */
-	submit: (sessionId: string, text: string) => void;
+	submit: (
+		sessionId: string,
+		text: string,
+		images?: string[],
+		clientMessageId?: string,
+		queuedMessages?: Message[],
+		opts?: { maxOuterIterations?: number },
+	) => Promise<void>;
 	/** Abort the running turn on the given session. */
 	abort: (sessionId: string) => void;
 	/** Create a new idle copy of the given session (used by /fork). */
@@ -916,6 +923,28 @@ const commandHandlers: Record<string, CommandHandler> = {
 			.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 		if (others.length === 0) return { ok: false, error: "No other sessions to continue" };
 		return { ok: true, result: { sessionId: others[0]!.id } };
+	},
+	"/goal": ({ ws, arg, submit }) => {
+		const { goal, maxIterations } = parseGoalInput(arg);
+		if (!goal) return { ok: false, error: "Usage: /goal [N] <what to achieve>  (or /goal --steps N <desc>)" };
+		// /goal is blocking (isCommandBlocking), so this only runs idle.
+		// Kick off the autonomous run with the chosen iteration budget and
+		// let the SSE stream carry the work.
+		void submit(ws.id, buildGoalPrompt(goal, maxIterations), undefined, undefined, undefined, {
+			maxOuterIterations: maxIterations,
+		}).catch((error) => {
+			console.error(`[cast server] /goal submit failed:`, error);
+		});
+		return { ok: true, result: `Working toward the goal autonomously (budget: ${maxIterations})…` };
+	},
+	"/review": ({ ws, submit }) => {
+		// /review is blocking (isCommandBlocking), so this only runs idle.
+		// Start the review turn without awaiting it — the SSE stream carries
+		// the agent's work; the command just acknowledges the kick-off.
+		void submit(ws.id, REVIEW_PROMPT).catch((error) => {
+			console.error(`[cast server] /review submit failed:`, error);
+		});
+		return { ok: true, result: "Reviewing the session's work…" };
 	},
 };
 
