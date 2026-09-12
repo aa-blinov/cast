@@ -740,6 +740,35 @@ describe("web bridge", () => {
 		expect(result.error).toBe("Agent running");
 	});
 
+	it("/<unknown-name> falls through to the Unknown command error", async () => {
+		const emptyDeps = {
+			noSkills: false,
+			noMcp: false,
+			cliSkillPaths: [],
+			cliMcpPaths: [],
+		} as StartupResult["projectDeps"];
+		const bridge = createServerBridge(makeResult({ projectDeps: emptyDeps }));
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/not-a-real-skill-or-command");
+		expect(result).toEqual({ ok: false, error: `Unknown command: /not-a-real-skill-or-command` });
+	});
+
+	it("/<empty-name> falls through to the Unknown command error", async () => {
+		const emptyDeps = {
+			noSkills: false,
+			noMcp: false,
+			cliSkillPaths: [],
+			cliMcpPaths: [],
+		} as StartupResult["projectDeps"];
+		const bridge = createServerBridge(makeResult({ projectDeps: emptyDeps }));
+		const ws = bridge.createSession();
+		// The fallback path runs after every named command miss. A name that
+		// doesn't start with "/" or is empty after the slash falls through.
+		const result = await bridge.executeCommand(ws.id, "/no-such-skill-name-anywhere");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Unknown command/);
+	});
+
 	it("/provider edit updates the active provider in place, keeping the model and the slots", async () => {
 		// The web form used to delete + re-add, and deleting the active provider
 		// switched to a fallback, cleared the model and dropped the slots.

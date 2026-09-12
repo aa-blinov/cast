@@ -90,7 +90,7 @@ import {
 	turnIterationCap,
 	updateSettings,
 } from "../core/settings.ts";
-import { formatSkillsForPrompt, isUninstallableSkill, renderSkillInvocation, type Skill } from "../core/skills.ts";
+import { formatSkillsForPrompt, isUninstallableSkill, type Skill } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
@@ -173,21 +173,6 @@ Project typical tasks:
 <transcript>
 {{TRANSCRIPT}}
 </transcript>`;
-const CLIENT_PARITY_COMMANDS = new Set([
-	"/quit",
-	"/exit",
-	"/copy",
-	"/older",
-	"/keys",
-	"/statusbar",
-	"/reasoning-display",
-	"/rd",
-	"/reasoning-format",
-	"/memory",
-	"/dream",
-	"/distill",
-	"/worktree",
-]);
 
 // Slash-command argument parsing pulls the same one-or-more-whitespace
 // regex into every branch (every command dispatches via `arg.split(WHITESPACE_SPLIT)`).
@@ -2938,27 +2923,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// Native `/<skill-id>` invocation — falls through here only once every
 		// built-in name above has failed to match, so a skill can never shadow a
 		// built-in command. Mirrors /rule:'s "submit as a real user turn" shape,
-		// including the manual idle gate (skill commands aren't blocking, so they
-		// don't hit the isCommandBlocking gate above, same as /rule:).
-		const skillId = name.slice(1);
-		if (skillId && !CLIENT_PARITY_COMMANDS.has(name)) {
-			const sessionCwd = ws.session.cwd ?? cwd;
-			const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-			const disabled = new Set(loadSettings().disabledSkills ?? []);
-			const skill = discovered.find((s) => s.name === skillId && s.userInvocable && !disabled.has(s.name));
-			if (skill) {
-				if (running) return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
-				fireUserPromptExpansion(sessionCwd, skill.name);
-				submit(sessionId, await renderSkillInvocation(skill, arg, undefined, { projectDir: sessionCwd }));
-				return { ok: true, result: `Invoked skill: ${skill.name}` };
-			}
-		}
-
-		// Headless/JSONL parity commands — the TUI handles these client-side
-		// (clipboard, display settings, keybindings, worktree switching), but the
-		// daemon returns an equivalent result so a `cast run --interactive`
-		// consumer can round-trip every slash command instead of hitting
-		// "Unknown command".
+		// Catch-all skill invocation (`/<skill-name>`) is handled inside
+		// dispatchRegisteredCommand as a fallback when no named handler
+		// matches. From here, the only remaining outcome is "no match".
 
 		return { ok: false, error: `Unknown command: ${cmd}` };
 	}
