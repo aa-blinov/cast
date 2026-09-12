@@ -2990,13 +2990,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			broadcaster.broadcastSessionUpdate(ws);
 			return { ok: true, result: { model, provider: provider.name } };
 		}
-		if (name === "/continue") {
-			const others = listSessions()
-				.filter((s) => s.id !== sessionId)
-				.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-			if (others.length === 0) return { ok: false, error: "No other sessions to continue" };
-			return { ok: true, result: { sessionId: others[0]!.id } };
-		}
 		if (name === "/reload") {
 			const sessionCwd = ws.session.cwd ?? cwd;
 			try {

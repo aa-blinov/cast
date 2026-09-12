@@ -910,6 +910,13 @@ const commandHandlers: Record<string, CommandHandler> = {
 	},
 	"/dream": async (ctx) => runMemoryMaintenance(ctx, "dream"),
 	"/distill": async (ctx) => runMemoryMaintenance(ctx, "distill"),
+	"/continue": ({ ws, listSessions }) => {
+		const others = listSessions()
+			.filter((s) => s.id !== ws.id)
+			.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+		if (others.length === 0) return { ok: false, error: "No other sessions to continue" };
+		return { ok: true, result: { sessionId: others[0]!.id } };
+	},
 };
 
 /** Shared body of /dream and /distill — they differ only in which core
