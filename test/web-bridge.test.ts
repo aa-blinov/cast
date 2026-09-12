@@ -3835,6 +3835,28 @@ describe("web bridge", () => {
 		expect(owner.session.cwd).toBe(worktreePath);
 	});
 
+	it("/worktree with no arg fails with the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/worktree");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Usage: \/worktree/);
+	});
+
+	it("/worktree list reports an empty repository when no worktrees exist", async () => {
+		execFileSync("git", ["init", "-b", "main"], { cwd, stdio: "ignore" });
+		execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
+		execFileSync("git", ["config", "user.name", "Cast Test"], { cwd });
+		writeFileSync(join(cwd, "README.md"), "test\n");
+		execFileSync("git", ["add", "README.md"], { cwd });
+		execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/worktree list");
+		expect(result.ok).toBe(true);
+		expect(result.result).toMatch(/No active git worktrees/);
+	});
+
 	it("blocks manual compaction before starting a model request", async () => {
 		mkdirSync(join(cwd, ".cast"));
 		writeFileSync(
