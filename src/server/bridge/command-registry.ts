@@ -74,7 +74,7 @@ import {
 	memoryDreamIntervalDays,
 	updateSettings,
 } from "../../core/settings.ts";
-import { isUninstallableSkill, uninstallUserSkill } from "../../core/skills.ts";
+import { isUninstallableSkill, renderSkillInvocation, uninstallUserSkill } from "../../core/skills.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../../core/skills-sh.ts";
 import type { SshHost, saveSshConfig } from "../../core/ssh.ts";
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
@@ -1790,6 +1790,38 @@ export async function dispatchRegisteredCommand(name: string, ctx: CommandContex
 		return await commandRegistry["/rule:"]?.(ctx);
 	}
 	const handler = commandRegistry[name];
-	if (!handler) return undefined;
-	return await handler(ctx);
+	if (handler) return await handler(ctx);
+	// Catch-all: any `/<name>` not handled above is a user-invocable
+	// project/global skill invocation. Returning `undefined` means "no
+	// skill matched" and the bridge falls through to its Unknown command
+	// error.
+	return await dispatchSkillInvocation(name, ctx);
+}
+
+/** Fallback used by dispatchRegisteredCommand when no named handler is
+ *  registered for `/<name>`. Looks up user-invocable, non-disabled skills
+ *  in the session's cwd and, on a match, fires the prompt-expansion
+ *  expansion signal and submits the rendered skill invocation as a real
+ *  turn (fire-and-forget, same shape as /rule:<id>).
+ *
+ *  Returns `undefined` when no skill matches — the bridge then returns
+ *  its "Unknown command" error. Skills aren't blocking commands, so
+ *  they're allowed while the agent is running, but a running turn
+ *  shouldn't accept another turn at the same time (it'd race the
+ *  prompt queue). */
+async function dispatchSkillInvocation(name: string, ctx: CommandContext): Promise<CommandResult | undefined> {
+	const skillId = name.slice(1);
+	if (!skillId) return undefined;
+	const { ws, arg, cwd, loadSettings, projectDeps, projectTrusted, fireUserPromptExpansion, submit } = ctx;
+	const sessionCwd = ws.session.cwd ?? cwd;
+	const discovered = discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
+	const disabled = new Set(loadSettings().disabledSkills ?? []);
+	const skill = discovered.find((s) => s.name === skillId && s.userInvocable && !disabled.has(s.name));
+	if (!skill) return undefined;
+	if (ws.status === "running") {
+		return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
+	}
+	fireUserPromptExpansion(sessionCwd, skill.name);
+	submit(ws.id, await renderSkillInvocation(skill, arg, undefined, { projectDir: sessionCwd }));
+	return { ok: true, result: `Invoked skill: ${skill.name}` };
 }
