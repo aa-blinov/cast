@@ -739,7 +739,40 @@ const commandHandlers: Record<string, CommandHandler> = {
 		const newWs = await createSessionInstance(ws.session.persona ?? undefined, undefined, ws.session.cwd);
 		return { ok: true, result: { sessionId: newWs.id } };
 	},
+	"/plan": (ctx) => switchMode(ctx, "plan"),
+	"/build": (ctx) => switchMode(ctx, "build"),
 };
+
+/** Shared body of /plan and /build — the only difference is the mode and
+ *  the human-readable confirmation string. Pulled out as a top-level
+ *  helper so both registry entries stay one-liners. */
+function switchMode(
+	{ ws, cwd, personas, currentPersona, computeSystemPrompt, saveSession, broadcaster }: CommandContext,
+	mode: "plan" | "build",
+): CommandResult {
+	ws.session.mode = mode;
+	ws.systemPrompt = computeSystemPrompt(
+		personas.find((p) => p.name === (ws.session.persona ?? "")) ?? currentPersona,
+		ws.session.model,
+		ws.session.cwd ?? cwd,
+		mode,
+	);
+	// Same reasoning as setSessionMode: a stale plan question/transition
+	// left over from before this mode switch must not survive it — see
+	// that function's comment for the full failure mode.
+	if (ws.session.planQuestion || ws.session.planTransition) {
+		broadcaster.persistDecisionState(ws, undefined, undefined);
+	} else {
+		saveSession(ws.session);
+	}
+	return {
+		ok: true,
+		result:
+			mode === "plan"
+				? "Plan mode — read-only exploration and planning; /build to exit"
+				: "Build mode — full toolset",
+	};
+}
 
 export const commandRegistry: Record<string, CommandHandler> = commandHandlers;
 

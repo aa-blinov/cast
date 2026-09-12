@@ -3178,31 +3178,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			broadcaster.broadcastSessionUpdate(ws);
 			return { ok: true, result: { model, provider: provider.name } };
 		}
-		if (name === "/plan" || name === "/build") {
-			const mode = name === "/plan" ? "plan" : "build";
-			ws.session.mode = mode;
-			ws.systemPrompt = computeSystemPrompt(
-				resolvePersona(ws.session.persona ?? "") ?? currentPersona,
-				ws.session.model,
-				ws.session.cwd ?? cwd,
-				mode,
-			);
-			// Same reasoning as setSessionMode: a stale plan question/transition
-			// left over from before this mode switch must not survive it — see
-			// that function's comment for the full failure mode.
-			if (ws.session.planQuestion || ws.session.planTransition) {
-				broadcaster.persistDecisionState(ws, undefined, undefined);
-			} else {
-				saveSession(ws.session);
-			}
-			return {
-				ok: true,
-				result:
-					mode === "plan"
-						? "Plan mode — read-only exploration and planning; /build to exit"
-						: "Build mode — full toolset",
-			};
-		}
 		if (name === "/continue") {
 			const others = listSessions()
 				.filter((s) => s.id !== sessionId)
