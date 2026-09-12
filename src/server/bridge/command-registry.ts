@@ -13,11 +13,16 @@
  */
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+
+const ARG_WHITESPACE_SPLIT = /\s+/;
+
 import type { AppConfig } from "../../core/config.ts";
 import type { Message } from "../../core/llm.ts";
+import { listHooksForCwdSettings } from "../../core/project.ts";
 import type { SessionState } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
-import type { WebAgentSession } from "../bridge.ts";
+import { updateSettings } from "../../core/settings.ts";
+import type { SessionSummary, WebAgentSession } from "../bridge.ts";
 import { SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
 
@@ -72,6 +77,12 @@ export interface CommandContext {
 	abort: (sessionId: string) => void;
 	/** Create a new idle copy of the given session (used by /fork). */
 	forkSessionInstance: (sessionId: string) => WebAgentSession | undefined;
+	/** List every session summary the daemon knows about (used by /sessions). */
+	listSessions: () => SessionSummary[];
+	/** Whether the user has trusted the cwd's project to load its hooks file
+	 *  — same gate fs-watcher uses. /hooks needs it to call
+	 *  listHooksForCwdSettings. */
+	trustForSessionCwd: (sessionCwd: string) => boolean;
 }
 
 /** Synchronous handlers — async work happens before this entry point. */
@@ -262,6 +273,34 @@ const commandHandlers: Record<string, CommandHandler> = {
 	"/qr": ({ ws }) => {
 		ws.runner.followUpQueue.clear();
 		return { ok: true, result: "Queue cleared" };
+	},
+	"/sessions": ({ listSessions }) => ({ ok: true, result: listSessions() }),
+	"/hooks": ({ ws, arg, cwd, trustForSessionCwd }) => {
+		const sessionCwd = ws.session.cwd ?? cwd;
+		const [verb, ...rest] = arg.split(ARG_WHITESPACE_SPLIT).filter(Boolean);
+		if (verb === "help") {
+			return {
+				ok: true,
+				result: "/hooks – /hooks enable <id> – /hooks disable <id> — see docs/hooks.md",
+			};
+		}
+		const { entries, diagnostics } = listHooksForCwdSettings(sessionCwd, trustForSessionCwd(sessionCwd));
+		if (!verb) {
+			return { ok: true, result: { entries, diagnostics } };
+		}
+		if (verb === "enable" || verb === "disable") {
+			const id = rest.join(" ").trim();
+			if (!id) return { ok: false, error: `Usage: /hooks ${verb} <id>` };
+			if (!entries.some((e) => e.id === id)) return { ok: false, error: `No hook with id "${id}"` };
+			updateSettings((current) => {
+				const disabled = new Set(current.disabledHooks ?? []);
+				if (verb === "disable") disabled.add(id);
+				else disabled.delete(id);
+				return { disabledHooks: [...disabled] };
+			});
+			return { ok: true, result: `Hook ${id} ${verb}d` };
+		}
+		return { ok: false, error: `Unknown /hooks ${verb}` };
 	},
 };
 
