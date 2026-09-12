@@ -1445,6 +1445,47 @@ describe("web bridge", () => {
 		expect(ws.session.planQuestion).toBeUndefined();
 	});
 
+	// Slice 10 characterization — /memory, /dream, /distill before the
+	// registry gains them. Existing tests already exercise most of
+	// /memory's subcommands (on/off, write, checkpoint fork/thresholds/
+	// reserved/caps, dream/distill auto toggle + interval, runs, the
+	// "Project memory is disabled" error); slice 10 fills the smaller
+	// contracts that don't yet have direct coverage.
+
+	it("/memory <unknown> returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/memory frobnicate");
+		expect(result.ok).toBe(false);
+		expect(result.error).toMatch(/Usage: \/memory on\|off/);
+	});
+
+	it("/memory budget <n> clamps to the supported 256..16384 range", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// Below floor -> clamped up to 256
+		const tooSmall = await bridge.executeCommand(ws.id, "/memory budget 64");
+		expect(tooSmall).toEqual({ ok: true, result: { memoryPromptBudget: 256 } });
+		// Above ceiling -> clamped down to 16384
+		const tooBig = await bridge.executeCommand(ws.id, "/memory budget 99999");
+		expect(tooBig).toEqual({ ok: true, result: { memoryPromptBudget: 16_384 } });
+	});
+
+	it("/dream and /distill reject with a different error when only writing is disabled", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// /memory write off disables the writing switch while leaving the
+		// global switch on — /dream and /distill must reject with a
+		// memory-WRITING error, not the memory-DISABLED error from the
+		// earlier test. This pins the distinction so a regression that
+		// collapses them into one branch is caught.
+		await bridge.executeCommand(ws.id, "/memory write off");
+		const dream = await bridge.executeCommand(ws.id, "/dream");
+		expect(dream).toEqual({ ok: false, error: "Project memory writing is disabled" });
+		const distill = await bridge.executeCommand(ws.id, "/distill");
+		expect(distill).toEqual({ ok: false, error: "Project memory writing is disabled" });
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
