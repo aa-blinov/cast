@@ -656,6 +656,146 @@ describe("web bridge", () => {
 		expect((await bridge.executeSettingsCommand("/provider edit nope http://x/v1 k")).ok).toBe(false);
 	});
 
+	it("/provider (no arg) returns the providers list with the active one flagged", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "alpha", url: testConfig.baseURL, apiKey: "alpha-key" },
+				{ name: "beta", url: "https://beta.example/v1", apiKey: "beta-key" },
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: "alpha-key",
+			modelProvider: "alpha",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+
+		const res = await bridge.executeCommand(ws.id, "/provider");
+		expect(res.ok).toBe(true);
+		expect(res.result).toEqual([
+			{ name: "alpha", url: testConfig.baseURL, active: true },
+			{ name: "beta", url: "https://beta.example/v1", active: false },
+		]);
+	});
+
+	it("/provider add <name> <url> <key> becomes the active provider when none is configured", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [],
+			providerUrl: "",
+			apiKey: "",
+			modelProvider: undefined,
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig, baseURL: "", apiKey: "" } }));
+		const ws = bridge.createSession();
+
+		const res = await bridge.executeCommand(ws.id, "/provider add minimax https://api.minimax.io/v1 k1");
+		expect(res.ok).toBe(true);
+		const settings = loadSettings();
+		expect(settings.providers?.[0]).toMatchObject({
+			name: "minimax",
+			url: "https://api.minimax.io/v1",
+			apiKey: "k1",
+		});
+		expect(settings.modelProvider).toBe("minimax");
+		expect(bridge.getConfig().baseURL).toBe("https://api.minimax.io/v1");
+		expect(ws.session.providerUrl).toBe("https://api.minimax.io/v1");
+	});
+
+	it("/provider add <name> <url> <key> when an active provider exists adds but doesn't switch", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [{ name: "alpha", url: testConfig.baseURL, apiKey: "alpha-key" }],
+			providerUrl: testConfig.baseURL,
+			apiKey: "alpha-key",
+			modelProvider: "alpha",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+
+		const res = await bridge.executeCommand(ws.id, "/provider add beta https://beta.example/v1 bk");
+		expect(res.ok).toBe(true);
+		const settings = loadSettings();
+		expect(settings.providers?.map((p) => p.name)).toEqual(["alpha", "beta"]);
+		expect(settings.modelProvider).toBe("alpha");
+	});
+
+	it("/provider delete <non-active> removes it without touching the active one", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "alpha", url: testConfig.baseURL, apiKey: "alpha-key" },
+				{ name: "beta", url: "https://beta.example/v1", apiKey: "beta-key" },
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: "alpha-key",
+			modelProvider: "alpha",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+
+		const res = await bridge.executeCommand(ws.id, "/provider delete beta");
+		expect(res.ok).toBe(true);
+		const settings = loadSettings();
+		expect(settings.providers?.map((p) => p.name)).toEqual(["alpha"]);
+		expect(settings.modelProvider).toBe("alpha");
+	});
+
+	it("/provider delete <active> falls back to the first remaining provider and clears the model", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [
+				{ name: "alpha", url: testConfig.baseURL, apiKey: "alpha-key" },
+				{ name: "beta", url: "https://beta.example/v1", apiKey: "beta-key" },
+			],
+			providerUrl: testConfig.baseURL,
+			apiKey: "alpha-key",
+			modelProvider: "alpha",
+			model: "gpt-4o",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig, model: "gpt-4o" } }));
+		const ws = bridge.createSession();
+
+		const res = await bridge.executeCommand(ws.id, "/provider delete alpha");
+		expect(res.ok).toBe(true);
+		const settings = loadSettings();
+		expect(settings.modelProvider).toBe("beta");
+		expect(settings.model).toBe("");
+		expect(ws.session.model).toBe("");
+		expect(ws.session.providerUrl).toBe("https://beta.example/v1");
+	});
+
+	it("/provider <name> reasoning <fmt> overrides the auto-detected reasoning protocol", async () => {
+		const { loadSettings, updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [{ name: "alpha", url: testConfig.baseURL, apiKey: "alpha-key", reasoningFormat: "auto" }],
+			providerUrl: testConfig.baseURL,
+			apiKey: "alpha-key",
+			modelProvider: "alpha",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+
+		const res = await bridge.executeCommand(ws.id, "/provider alpha reasoning generic");
+		expect(res.ok).toBe(true);
+		expect(loadSettings().providers?.[0]?.reasoningFormat).toBe("generic");
+	});
+
+	it("/provider <unknown-name> errors with a list pointer instead of switching", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({
+			providers: [{ name: "alpha", url: testConfig.baseURL, apiKey: "alpha-key" }],
+			modelProvider: "alpha",
+			providerUrl: testConfig.baseURL,
+			apiKey: "alpha-key",
+		});
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
+		const ws = bridge.createSession();
+		const res = await bridge.executeCommand(ws.id, "/provider nope");
+		expect(res.ok).toBe(false);
+		expect(res.error).toMatch(/Unknown provider: nope/);
+	});
+
 	it("/web-search-provider reports whether a key is saved, never the key", async () => {
 		const bridge = createServerBridge(makeResult());
 		await bridge.executeSettingsCommand("/web-search-provider tavily tvly-secret");
