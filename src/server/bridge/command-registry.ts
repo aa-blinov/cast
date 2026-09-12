@@ -32,7 +32,7 @@ const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
 
 import type { AppConfig, ModelInfo } from "../../core/config.ts";
-import { probeProvider } from "../../core/config.ts";
+import { fetchModels, probeProvider } from "../../core/config.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
 import type { Message } from "../../core/llm.ts";
 import { compactSessionMessages, runMemoryMaintenanceAgent } from "../../core/loop.ts";
@@ -53,6 +53,7 @@ import {
 	resolveHooksForCwd,
 	resolveMcpForCwd,
 } from "../../core/project.ts";
+import { setModelsCache } from "../../core/readline.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
 import { addUsage, clearSessionMessages, recordCompaction } from "../../core/session.ts";
@@ -1484,6 +1485,72 @@ const commandHandlers: Record<string, CommandHandler> = {
 		});
 		ctx.saveSession(ws.session);
 		return { ok: true, result: `Switched to provider "${sub}" — pick a model with /model` };
+	},
+	"/model-selection": async (ctx) => {
+		const {
+			ws,
+			arg,
+			cwd,
+			config,
+			loadSettings,
+			reasoningLevelForModel,
+			setReasoningMeta,
+			setDefaultModel,
+			subagentModelProvider,
+			planModelProvider,
+			setSubagentModel,
+			setPlanModel,
+			currentPersona,
+			computeSystemPrompt,
+			saveSession,
+			broadcaster,
+		} = ctx;
+		const [providerName, model] = arg.split(ARG_WHITESPACE_SPLIT).filter(Boolean);
+		if (!providerName || !model) return { ok: false, error: "Usage: /model-selection <provider> <model>" };
+		const provider = (loadSettings().providers ?? []).find((p) => p.name === providerName);
+		if (!provider) return { ok: false, error: `Unknown provider: ${providerName}` };
+		const target = { ...config, baseURL: provider.url, apiKey: provider.apiKey };
+		const models = await fetchModels(target);
+		if (!models.ok || !models.models?.some((entry) => entry.id === model)) {
+			return {
+				ok: false,
+				error: models.error ?? `Model "${model}" is not available from provider "${providerName}"`,
+			};
+		}
+
+		const providerChanged = config.baseURL !== provider.url || config.apiKey !== provider.apiKey;
+		config.baseURL = provider.url;
+		config.apiKey = provider.apiKey;
+		config.reasoningFormat = resolveReasoningFormat(provider.url, provider.reasoningFormat);
+		setModelsCache(models.models);
+		const selected = models.models.find((entry) => entry.id === model);
+		setReasoningMeta(selected?.reasoning);
+		config.reasoningLevel = reasoningLevelForModel(model, config.reasoningFormat);
+		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
+		ws.session.model = model;
+		ws.session.providerUrl = provider.url;
+		ws.session.providerName = provider.name;
+		ws.systemPrompt = computeSystemPrompt(
+			ctx.personas.find((p) => p.name === (ws.session.persona ?? "")) ?? currentPersona,
+			model,
+			ws.session.cwd ?? cwd,
+			ws.session.mode,
+		);
+		setDefaultModel(model);
+		if (providerChanged && !subagentModelProvider) setSubagentModel(undefined);
+		if (providerChanged && !planModelProvider) setPlanModel(undefined);
+		updateSettings({
+			providerUrl: provider.url,
+			apiKey: provider.apiKey,
+			modelProvider: provider.name,
+			model,
+			reasoningLevel: config.reasoningLevel,
+			...(providerChanged && !subagentModelProvider ? { subagentModel: undefined } : {}),
+			...(providerChanged && !planModelProvider ? { planModel: undefined } : {}),
+		});
+		saveSession(ws.session);
+		broadcaster.broadcastSessionUpdate(ws);
+		return { ok: true, result: { model, provider: provider.name } };
 	},
 };
 
