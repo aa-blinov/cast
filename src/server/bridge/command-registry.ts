@@ -17,10 +17,13 @@ import { join } from "node:path";
 const ARG_WHITESPACE_SPLIT = /\s+/;
 
 import type { AppConfig, ModelInfo } from "../../core/config.ts";
+import { runHooksForEvent } from "../../core/hooks.ts";
 import type { Message } from "../../core/llm.ts";
+import { compactSessionMessages } from "../../core/loop.ts";
 import type { Persona } from "../../core/personas.ts";
-import { listHooksForCwdSettings } from "../../core/project.ts";
+import { listHooksForCwdSettings, resolveHooksForCwd } from "../../core/project.ts";
 import type { SessionState } from "../../core/session.ts";
+import { addUsage, clearSessionMessages, recordCompaction } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import { updateSettings } from "../../core/settings.ts";
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
@@ -137,10 +140,26 @@ export interface CommandContext {
 	/** Mutate the closure-local reasoningMeta. /model writes it so the next
 	 *  /current and /reasoning read sees the new model's metadata. */
 	setReasoningMeta: (meta: ModelReasoningMeta | undefined) => void;
+	/** Spawn a fresh session — used by /new to hand back a sessionId the
+	 *  client can switch to. Same shape as createSessionInstance inside
+	 *  the bridge closure. */
+	createSessionInstance: (
+		personaName?: string,
+		modelOverride?: string,
+		cwdOverride?: string,
+		runSessionStartHook?: boolean,
+	) => WebAgentSession;
+	/** Re-sync the FS watcher's per-session set (called by /compact when
+	 *  it toggles ws.status to "running" and back). Closure-bound to
+	 *  fsWatcher.syncFsWatcher. */
+	syncFsWatcher: (ws: WebAgentSession) => void;
 }
 
-/** Synchronous handlers — async work happens before this entry point. */
-export type CommandHandler = (ctx: CommandContext) => CommandResult;
+/** Handlers may be sync or async — async ones let /compact, /new, and any
+ *  future command use await without each dispatch site having to special-
+ *  case the return type. dispatchRegisteredCommand awaits the result so
+ *  the bridge dispatcher sees a plain CommandResult either way. */
+export type CommandHandler = (ctx: CommandContext) => CommandResult | Promise<CommandResult>;
 
 /**
  * Renders the visible-command list as a markdown block — same output the
@@ -658,6 +677,68 @@ const commandHandlers: Record<string, CommandHandler> = {
 		updateSettings({ providers, reasoningLevel: config.reasoningLevel });
 		return { ok: true, result: { reasoningFormat: config.reasoningFormat } };
 	},
+	"/clear": ({ ws, saveSession }) => {
+		clearSessionMessages(ws.session);
+		saveSession(ws.session);
+		return { ok: true, result: "Context cleared" };
+	},
+	"/compact": async ({ ws, cwd, config, trustForSessionCwd, broadcaster, saveSession, syncFsWatcher }) => {
+		if (ws.session.messages.length === 0) return { ok: true, result: "Nothing to compact yet" };
+		const compactHooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
+		const preCompact = await runHooksForEvent(compactHooks, {
+			event: "PreCompact",
+			cwd: ws.session.cwd ?? cwd,
+			sessionId: ws.id,
+			payload: { trigger: "manual" },
+		});
+		if (preCompact.blocked) return { ok: false, error: preCompact.reason ?? "Compaction blocked by hook" };
+		// Runs the same async summarization call `submit()` uses for the agent
+		// loop itself — returns immediately (matching submit()'s own
+		// fire-and-forget shape) and reports the outcome over SSE via the
+		// existing "compaction" event, which the client already renders as a
+		// system-message row (see runAgentLoop's own auto-compaction, which
+		// broadcasts the identical event shape).
+		ws.status = "running";
+		syncFsWatcher(ws);
+		broadcaster.broadcast(ws, { type: "status", status: "running" });
+		compactSessionMessages(ws.session.messages, config, ws.session.model, undefined, undefined, (usage) =>
+			addUsage(ws.session, usage),
+		)
+			.then((result) => {
+				ws.status = "idle";
+				syncFsWatcher(ws);
+				if (result.compacted) {
+					recordCompaction(ws.session, ws.session.messages, result.messages);
+					ws.session.messages = result.messages;
+					broadcaster.broadcast(ws, {
+						type: "compaction",
+						messagesCompacted: result.messagesCompacted,
+						tokensBefore: result.tokensBefore,
+					});
+					void runHooksForEvent(compactHooks, {
+						event: "PostCompact",
+						cwd: ws.session.cwd ?? cwd,
+						sessionId: ws.id,
+						payload: { trigger: "manual", messagesCompacted: result.messagesCompacted },
+					});
+				} else if (result.error) {
+					broadcaster.broadcast(ws, { type: "error", message: `Compaction failed: ${result.error}` });
+				}
+				saveSession(ws.session);
+				broadcaster.broadcast(ws, { type: "status", status: "idle" });
+			})
+			.catch((err: unknown) => {
+				ws.status = "error";
+				ws.error = err instanceof Error ? err.message : String(err);
+				broadcaster.broadcast(ws, { type: "error", message: ws.error });
+				broadcaster.broadcast(ws, { type: "status", status: "error" });
+			});
+		return { ok: true, result: "Compacting…" };
+	},
+	"/new": async ({ ws, createSessionInstance }) => {
+		const newWs = await createSessionInstance(ws.session.persona ?? undefined, undefined, ws.session.cwd);
+		return { ok: true, result: { sessionId: newWs.id } };
+	},
 };
 
 export const commandRegistry: Record<string, CommandHandler> = commandHandlers;
@@ -666,9 +747,11 @@ export const commandRegistry: Record<string, CommandHandler> = commandHandlers;
  * Dispatch a command by name through the registry. Returns the handler's
  * result, or `undefined` if no handler is registered for this name —
  * `bridge.executeCommand` falls through to its inline logic in that case.
+ * Async handlers are awaited so the bridge dispatcher always sees a plain
+ * CommandResult.
  */
-export function dispatchRegisteredCommand(name: string, ctx: CommandContext): CommandResult | undefined {
+export async function dispatchRegisteredCommand(name: string, ctx: CommandContext): Promise<CommandResult | undefined> {
 	const handler = commandRegistry[name];
 	if (!handler) return undefined;
-	return handler(ctx);
+	return await handler(ctx);
 }

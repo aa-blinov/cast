@@ -1334,6 +1334,59 @@ describe("web bridge", () => {
 		expect(result.error).toMatch(/Unknown reasoning format: hamster/);
 	});
 
+	// Slice 8 characterization — session-lifecycle commands (/clear, /compact,
+	// /new) before the registry gains the closure callbacks createSessionInstance
+	// and syncFsWatcher. Most of /compact's dep set (compactSessionMessages,
+	// recordCompaction, resolveHooksForCwd, runHooksForEvent, addUsage) is
+	// imported directly from core. /clear and /new are trivial — the
+	// characterization just pins the return shape so a regression in the
+	// fast path surfaces.
+
+	it("/clear empties the session messages and returns Context cleared", async () => {
+		const { appendMessage } = await import("../src/core/session.ts");
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		appendMessage(ws.session, { role: "user", content: "hello" });
+		appendMessage(ws.session, { role: "assistant", content: "world" });
+		expect(ws.session.messages.length).toBe(2);
+
+		const result = await bridge.executeCommand(ws.id, "/clear");
+		expect(result).toEqual({ ok: true, result: "Context cleared" });
+		expect(ws.session.messages.length).toBe(0);
+	});
+
+	it("/new returns a fresh sessionId distinct from the source session", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/new");
+		expect(result.ok).toBe(true);
+		const r = result.result as { sessionId: string };
+		expect(typeof r.sessionId).toBe("string");
+		expect(r.sessionId).not.toBe(ws.id);
+		// The new session is registered — bridge.getSession must find it.
+		expect(bridge.getSession(r.sessionId)).toBeDefined();
+	});
+
+	it("/compact on an empty session returns Nothing to compact yet without running hooks", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(ws.session.messages.length).toBe(0);
+		const result = await bridge.executeCommand(ws.id, "/compact");
+		expect(result).toEqual({ ok: true, result: "Nothing to compact yet" });
+	});
+
+	it("/compact on a populated session returns Compacting… immediately (work happens async)", async () => {
+		const { appendMessage } = await import("../src/core/session.ts");
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		appendMessage(ws.session, { role: "user", content: "hello" });
+		const result = await bridge.executeCommand(ws.id, "/compact");
+		// The command returns immediately — the actual compaction runs in
+		// the background and reports back over SSE. /compact is fire-and-
+		// forget, matching the inline implementation's contract.
+		expect(result).toEqual({ ok: true, result: "Compacting…" });
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
