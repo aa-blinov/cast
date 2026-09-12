@@ -2870,6 +2870,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			forkSessionInstance,
 			listSessions,
 			trustForSessionCwd,
+			setPermissionMode: (mode) => {
+				permissionMode = mode;
+			},
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/goal") {
@@ -2892,24 +2895,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				console.error(`[cast server] /review submit failed:`, error);
 			});
 			return { ok: true, result: "Reviewing the session's work…" };
-		}
-		if (name === "/turn-cap") {
-			const settings = loadSettings();
-			if (!arg)
-				return {
-					ok: true,
-					result: `Turn iteration safety cap: ${turnIterationCap(settings)} (applies on the next turn)`,
-				};
-			if (arg === "reset" || arg === "off") {
-				updateSettings({ maxTurnIterations: undefined });
-				return { ok: true, result: "Turn iteration safety cap reset to default (500)." };
-			}
-			const n = Number(arg);
-			if (!Number.isInteger(n) || n < 10 || n > 10_000) {
-				return { ok: false, error: "Usage: /turn-cap <10-10000> | reset" };
-			}
-			updateSettings({ maxTurnIterations: n });
-			return { ok: true, result: `Turn iteration safety cap set to ${n} (applies on the next turn).` };
 		}
 		if (name === "/evolve") {
 			return await evolveSkills(ws);
@@ -2945,25 +2930,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			fireUserPromptExpansion(ws.session.cwd ?? cwd, rule.name);
 			submit(sessionId, formatRuleInvocation(rule));
 			return { ok: true, result: `Invoked rule: ${rule.name}` };
-		}
-		if (name === "/permissions") {
-			// Global, like /reasoning and /web — `permissionMode` is bridge-level
-			// mutable state read fresh by submit() on the next run.
-			if (!arg) return { ok: true, result: { permissionMode } };
-			if (arg !== "default" && arg !== "bypass") return { ok: false, error: "Usage: /permissions default|bypass" };
-			permissionMode = arg;
-			updateSettings({ permissionMode: arg });
-			return { ok: true, result: { permissionMode: arg } };
-		}
-		if (name === "/web") {
-			// A global setting (matches the TUI/`cast run`'s own /web and
-			// core/run.ts) — takes effect on the NEXT turn in every session, since
-			// submit() reads `loadSettings().webTools` fresh each run rather than
-			// caching it, same as headless mode does.
-			if (!arg) return { ok: true, result: { webTools: loadSettings().webTools === true } };
-			if (arg !== "on" && arg !== "off") return { ok: false, error: "Usage: /web on|off" };
-			updateSettings({ webTools: arg === "on" });
-			return { ok: true, result: { webTools: arg === "on" } };
 		}
 		if (name === "/memory") {
 			const settings = loadSettings();
@@ -3131,70 +3097,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			} catch (error) {
 				return { ok: false, error: error instanceof Error ? error.message : String(error) };
 			}
-		}
-		if (name === "/web-search-provider") {
-			// Same fresh-read pattern as /web — the next web_search call picks
-			// this up via loadSettings() inside execWebSearch, no restart needed.
-			if (!arg) {
-				const s = loadSettings();
-				return {
-					ok: true,
-					// Only whether a key is saved — the key itself never goes to the browser.
-					result: {
-						searchProvider: s.searchProvider ?? "ddg",
-						hasTavilyApiKey: !!s.tavilyApiKey,
-						hasBraveApiKey: !!s.braveApiKey,
-					},
-				};
-			}
-			const [provider, ...rest] = arg.split(" ");
-			if (provider === "ddg") {
-				updateSettings({ searchProvider: "ddg" });
-				return { ok: true, result: { searchProvider: "ddg" } };
-			}
-			if (provider === "tavily") {
-				const key = rest.join(" ").trim() || loadSettings().tavilyApiKey;
-				if (!key) return { ok: false, error: "Usage: /web-search-provider tavily <api-key>" };
-				updateSettings({ searchProvider: "tavily", tavilyApiKey: key });
-				return { ok: true, result: { searchProvider: "tavily", hasTavilyApiKey: true } };
-			}
-			if (provider === "brave") {
-				const key = rest.join(" ").trim() || loadSettings().braveApiKey;
-				if (!key) return { ok: false, error: "Usage: /web-search-provider brave <api-key>" };
-				updateSettings({ searchProvider: "brave", braveApiKey: key });
-				return { ok: true, result: { searchProvider: "brave", hasBraveApiKey: true } };
-			}
-			return { ok: false, error: "Usage: /web-search-provider ddg | tavily <api-key> | brave <api-key>" };
-		}
-		if (name === "/web-fetch-provider") {
-			// Same fresh-read pattern as /web-search-provider — the next
-			// web_fetch call picks this up via loadSettings() inside
-			// execWebFetch, no restart needed.
-			if (!arg) {
-				return { ok: true, result: { webFetchProvider: loadSettings().webFetchProvider ?? "jina" } };
-			}
-			if (arg !== "jina" && arg !== "local") {
-				return { ok: false, error: "Usage: /web-fetch-provider jina | local" };
-			}
-			updateSettings({ webFetchProvider: arg });
-			return { ok: true, result: { webFetchProvider: arg } };
-		}
-		if (name === "/theme") {
-			// A UI preference, not agent state — shared with the TUI's settings.json
-			// `theme` field so picking one here also changes what `cast` shows next.
-			if (!arg) {
-				const current = loadSettings().theme ?? "cast";
-				return { ok: true, result: { theme: current } };
-			}
-			const found = ALL_THEMES.find((t) => t.id === arg);
-			if (!found) {
-				return {
-					ok: false,
-					error: `Unknown theme: ${arg}. Available: ${ALL_THEMES.map((t) => t.id).join(", ")}`,
-				};
-			}
-			updateSettings({ theme: found.id });
-			return { ok: true, result: { theme: found.id, label: found.label, colors: found.colors } };
 		}
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
 		if (name === "/clear") {
@@ -4023,14 +3925,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 		if (name === "/keys") {
 			return { ok: true, result: "keybindings are a TUI concept; see docs or /help for commands" };
-		}
-		if (name === "/statusbar") {
-			return { ok: true, result: loadSettings().statusBar ?? { visible: [], order: [], sides: {} } };
-		}
-		if (name === "/reasoning-display" || name === "/rd") {
-			const next = !(loadSettings().showReasoning ?? true);
-			updateSettings({ showReasoning: next });
-			return { ok: true, result: { showReasoning: next } };
 		}
 		if (name === "/reasoning-format") {
 			const current = config.reasoningFormat;
