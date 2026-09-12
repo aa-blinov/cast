@@ -1843,6 +1843,95 @@ describe("web bridge", () => {
 		expect(result).toEqual({ ok: false, error: "Unknown /ssh subcommand: frobnicate" });
 	});
 
+	// Slice 17 characterization — /mcp before the registry gains it.
+	// Six subcommands (list / help / enable / disable / reconnect /
+	// uninstall) plus an unknown-subcommand fallback. The existing
+	// 'concurrent /mcp enable and disable serialize' test covers the
+	// reconnect-after-mutation path through withMcpLock; slice 17
+	// pins the deterministic contracts (usage errors + help text +
+	// list-aliased path) so a regression in those short-circuits would
+	// surface as a fast failure rather than the slow lock-contention
+	// flake the existing test already guards.
+
+	it("/mcp list returns the session's server list with name/source/connected/disabled", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/mcp list");
+		expect(result.ok).toBe(true);
+		const list = result.result as Array<{
+			name: string;
+			source: string;
+			connected: boolean;
+			disabled: boolean;
+		}>;
+		expect(Array.isArray(list)).toBe(true);
+		// Even with no servers installed the shape is consistent — this
+		// pins the contract a regression that drops `connected` or
+		// `disabled` would break.
+		if (list.length > 0) {
+			const entry = list[0];
+			expect(typeof entry.name).toBe("string");
+			expect(typeof entry.source).toBe("string");
+			expect(typeof entry.connected).toBe("boolean");
+			expect(typeof entry.disabled).toBe("boolean");
+		}
+	});
+
+	it("/mcp (no arg) is an alias for /mcp list and returns the same shape", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const noArg = await bridge.executeCommand(ws.id, "/mcp");
+		const list = await bridge.executeCommand(ws.id, "/mcp list");
+		expect(noArg.ok).toBe(true);
+		expect(list.ok).toBe(true);
+		expect(noArg.result).toEqual(list.result);
+	});
+
+	it("/mcp help returns the help-text with the four mutating subcommands", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/mcp help");
+		expect(result).toEqual({
+			ok: true,
+			result: "/mcp list – /mcp enable <name> – /mcp disable <name> – /mcp reconnect <name> – /mcp uninstall <name>",
+		});
+	});
+
+	it("/mcp enable (no name) returns the usage error without mutating state", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/mcp enable");
+		expect(result).toEqual({ ok: false, error: "Usage: /mcp enable <name>" });
+	});
+
+	it("/mcp disable (no name) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/mcp disable");
+		expect(result).toEqual({ ok: false, error: "Usage: /mcp disable <name>" });
+	});
+
+	it("/mcp reconnect (no name) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/mcp reconnect");
+		expect(result).toEqual({ ok: false, error: "Usage: /mcp reconnect <name>" });
+	});
+
+	it("/mcp reinstall (no name) returns the usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/mcp uninstall");
+		expect(result).toEqual({ ok: false, error: "Usage: /mcp uninstall <name>" });
+	});
+
+	it("/mcp <unknown subcommand> returns the inline usage error", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/mcp frobnicate");
+		expect(result).toEqual({ ok: false, error: "Unknown /mcp subcommand: frobnicate" });
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({

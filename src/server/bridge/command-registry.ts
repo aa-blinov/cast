@@ -35,6 +35,7 @@ import type { AppConfig, ModelInfo } from "../../core/config.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
 import type { Message } from "../../core/llm.ts";
 import { compactSessionMessages, runMemoryMaintenanceAgent } from "../../core/loop.ts";
+import { closeMcpConnections, type McpSetupResult } from "../../core/mcp.ts";
 import {
 	cancelAutomaticMemoryRun,
 	distillProjectMemory,
@@ -42,8 +43,13 @@ import {
 	listAutomaticMemoryRuns,
 } from "../../core/memory.ts";
 import type { Persona } from "../../core/personas.ts";
-import type { resolveRulesForCwd } from "../../core/project.ts";
-import { listHooksForCwdSettings, resolveHooksForCwd } from "../../core/project.ts";
+import type { ProjectResolverDeps, resolveRulesForCwd } from "../../core/project.ts";
+import {
+	listHooksForCwdSettings,
+	removeMcpServerFromDisk,
+	resolveHooksForCwd,
+	resolveMcpForCwd,
+} from "../../core/project.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
 import { addUsage, clearSessionMessages, recordCompaction } from "../../core/session.ts";
@@ -223,6 +229,29 @@ export interface CommandContext {
 	 *  Closure re-export of the core helper so the registry stays
 	 *  self-contained for tests. */
 	saveSshConfig: typeof saveSshConfig;
+	/** Read the per-session MCP setup for /mcp list. Closure-bound
+	 *  to bridge.mcpForSessionCwd. */
+	mcpForSessionCwd: (sessionCwd: string) => McpSetupResult;
+	/** Serialize concurrent /mcp mutations so they don't race the
+	 *  close-then-resolve sequence. Closure-bound to withMcpLock. */
+	withMcpLock: <T>(fn: () => Promise<T>) => Promise<T>;
+	/** Mutate the closure-local mcpResult slot after reconnect-style
+	 *  operations (enable/disable/reconnect/uninstall all close the
+	 *  existing connections and resolve a fresh mcpResult). */
+	setMcpResult: (next: McpSetupResult) => void;
+	/** Current mcpResult snapshot, read by /mcp reconnect to gate the
+	 *  'Unknown MCP server' error before doing any reconnect work. */
+	mcpResult: McpSetupResult;
+	/** Project-level deps (path helpers, filesystem handles) needed
+	 *  by resolveMcpForCwd. Closure-bound to result.projectDeps. */
+	projectDeps: ProjectResolverDeps;
+	/** Whether the current cwd is trusted enough to load its project
+	 *  MCP config. Closure-bound to projectTrusted. */
+	projectTrusted: boolean;
+	/** Rebuild every live session's system prompt. /mcp and /reload
+	 *  call this after swapping mcpResult so the new tool list is
+	 *  reflected in what the model sees on the next turn. */
+	recomputeAllSystemPrompts: () => void;
 }
 
 /** Handlers may be sync or async — async ones let /compact, /new, and any
@@ -1116,7 +1145,119 @@ const commandHandlers: Record<string, CommandHandler> = {
 		}
 		return { ok: false, error: `Unknown /ssh subcommand: ${sub}` };
 	},
+	"/mcp": async (ctx) => {
+		const { arg, ws, cwd, loadSettings, mcpForSessionCwd, withMcpLock, setMcpResult, recomputeAllSystemPrompts } =
+			ctx;
+		const [sub, rest] = arg ? splitArgInline(arg) : ["", ""];
+		const sessionCwd = ws.session.cwd ?? cwd;
+		if (!sub || sub === "list") {
+			// The session's set, not the daemon's: a project's own servers are
+			// connected for its directory, and a listing that omitted them
+			// disagreed with the tools the model actually has.
+			const sessionMcp = mcpForSessionCwd(sessionCwd);
+			return {
+				ok: true,
+				result: sessionMcp.allServerNames.map((n) => ({
+					name: n,
+					source: sessionMcp.serverSources[n] ?? "global",
+					// alive, not merely present: a server whose transport died is
+					// still in `connections` (nothing prunes it), and reporting it
+					// as connected sent the user looking for a problem elsewhere.
+					connected: sessionMcp.connections.some((c) => c.serverName === n && c.alive !== false),
+					disabled: (loadSettings().disabledMcpServers ?? []).includes(n),
+				})),
+			};
+		}
+		if (sub === "help") {
+			return {
+				ok: true,
+				result:
+					"/mcp list – /mcp enable <name> – /mcp disable <name> – /mcp reconnect <name> – /mcp uninstall <name>",
+			};
+		}
+		if (sub === "reconnect") {
+			if (!rest) return { ok: false, error: "Usage: /mcp reconnect <name>" };
+			// Note: we read the current mcpResult snapshot from the closure;
+			// the dispatcher passes it via `mcpResultForReconnect` so the
+			// allServerNames check matches what the inline path used.
+			const mcpResult = ctx.mcpResult;
+			if (!mcpResult.allServerNames.includes(rest)) return { ok: false, error: `Unknown MCP server: ${rest}` };
+			try {
+				const connected = await withMcpLock(async () => {
+					await closeMcpConnections(mcpResult.connections);
+					const next = await resolveMcpForCwd(
+						ctx.projectDeps,
+						sessionCwd,
+						ctx.projectTrusted,
+						loadSettings().disabledMcpServers ?? [],
+					);
+					setMcpResult(next);
+					recomputeAllSystemPrompts();
+					return next.connections.some((c) => c.serverName === rest);
+				});
+				return { ok: true, result: `MCP server "${rest}" ${connected ? "reconnected" : "reconnect failed"}` };
+			} catch (err) {
+				return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
+			}
+		}
+		if (sub === "enable" || sub === "disable") {
+			if (!rest) return { ok: false, error: `Usage: /mcp ${sub} <name>` };
+			updateSettings((current) => {
+				const disabled = new Set(current.disabledMcpServers ?? []);
+				if (sub === "disable") disabled.add(rest);
+				else disabled.delete(rest);
+				return { disabledMcpServers: [...disabled] };
+			});
+			try {
+				const mcpResult = ctx.mcpResult;
+				await withMcpLock(async () => {
+					await closeMcpConnections(mcpResult.connections);
+					const next = await resolveMcpForCwd(
+						ctx.projectDeps,
+						sessionCwd,
+						ctx.projectTrusted,
+						loadSettings().disabledMcpServers ?? [],
+					);
+					setMcpResult(next);
+					recomputeAllSystemPrompts();
+				});
+				return { ok: true, result: `MCP server "${rest}" ${sub}d` };
+			} catch (err) {
+				return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
+			}
+		}
+		if (sub === "uninstall") {
+			if (!rest) return { ok: false, error: "Usage: /mcp uninstall <name>" };
+			const mcpResult = ctx.mcpResult;
+			const removed = removeMcpServerFromDisk(rest, sessionCwd, ctx.projectTrusted);
+			if (!removed) return { ok: false, error: `Unknown or already-removed MCP server: ${rest}` };
+			try {
+				await withMcpLock(async () => {
+					await closeMcpConnections(mcpResult.connections);
+					const next = await resolveMcpForCwd(
+						ctx.projectDeps,
+						sessionCwd,
+						ctx.projectTrusted,
+						loadSettings().disabledMcpServers ?? [],
+					);
+					setMcpResult(next);
+					recomputeAllSystemPrompts();
+				});
+				return { ok: true, result: `Uninstalled MCP server "${rest}" (${removed.origin})` };
+			} catch (err) {
+				return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
+			}
+		}
+		return { ok: false, error: `Unknown /mcp subcommand: ${sub}` };
+	},
 };
+
+/** Tiny inline helper used by /mcp — splits "sub rest" into [sub, rest].
+ *  Three lines; inlined to avoid a context callback for one call site. */
+function splitArgInline(s: string): [string, string] {
+	const i = s.indexOf(" ");
+	return i === -1 ? [s, ""] : [s.slice(0, i), s.slice(i + 1).trim()];
+}
 
 /** Shared body of /dream and /distill — they differ only in which core
  *  function to call. Pulled out so both registry entries stay
