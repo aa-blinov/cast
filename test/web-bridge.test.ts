@@ -91,6 +91,21 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
 	} as Persona;
 }
 
+/**
+ * Poll `cond` until it returns truthy, or up to 5s. Replaces fixed
+ * `setTimeout` waits that flake when parallel test files load the event
+ * loop — the side effect is real (background task finished, queue has
+ * items), we just have to wait for it.
+ */
+async function waitFor(cond: () => boolean, timeoutMs = 5000): Promise<void> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (cond()) return;
+		await new Promise((r) => setTimeout(r, 10));
+	}
+	throw new Error(`waitFor: condition not met within ${timeoutMs}ms`);
+}
+
 describe("web bridge", () => {
 	let fakeHome: string;
 	let realHome: string | undefined;
@@ -3377,7 +3392,10 @@ describe("web bridge", () => {
 			runAgentLoop.mockClear();
 			runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
 			ws.backgroundBash.registry.start("echo bg-wake-marker", cwd, testConfig, 5, ws.backgroundBash);
-			await new Promise((r) => setTimeout(r, 500));
+			// Poll up to 5s — the inline `setTimeout(500)` wait was flaky under
+			// parallel-test load (background tasks schedule on the event loop,
+			// not a wall clock). Polling waits on the actual side effect.
+			await waitFor(() => runAgentLoop.mock.calls.length >= 1);
 
 			expect(runAgentLoop).toHaveBeenCalledTimes(1);
 			const lastMessage = ws.session.messages.at(-1);
@@ -3392,7 +3410,7 @@ describe("web bridge", () => {
 			ws.runner.startRun(new AbortController());
 
 			ws.backgroundBash.registry.start("echo bg-followup-marker", cwd, testConfig, 5, ws.backgroundBash);
-			await new Promise((r) => setTimeout(r, 500));
+			await waitFor(() => ws.runner.followUpQueue.hasItems());
 
 			expect(runAgentLoop).not.toHaveBeenCalled();
 			expect(ws.runner.followUpQueue.hasItems()).toBe(true);
