@@ -9,7 +9,6 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import chokidar from "chokidar";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import { type AgentActorNotification, agentActorRegistry } from "../core/actors.ts";
 import {
@@ -152,6 +151,18 @@ import { createBroadcaster } from "./bridge/broadcaster.ts";
 // imports the types back for the WebAgentSession interface, the
 // shared-view sanitiser, and a couple of return-type annotations.
 import { appendActiveText, type DisplayMessage, type DisplayStreamBlock, toDisplayMessages } from "./bridge/display.ts";
+// FS watcher (startFsWatcher / stopFsWatcher / syncFsWatcher / makeFsCallback
+// internals) lives in ./bridge/fs-watcher.ts. Takes the broadcaster's
+// `broadcast` as a dep so the debounced handler can deliver fs_change events
+// to the same listener set. idle.ts (planned next) will take fsWatcher's
+// `stopFsWatcher` as a dep for its eviction timer.
+import { createFsWatcher } from "./bridge/fs-watcher.ts";
+// Idle-session eviction timer (syncIdleSessionEviction) lives in
+// ./bridge/idle.ts. Takes fsWatcher.stopFsWatcher as a dep so a fired
+// eviction can release the chokidar handle. fsWatcher takes
+// idleEvictor.syncIdleSessionEviction back via a setter to keep the
+// original "every session-state transition triggers both" semantics.
+import { createIdleEvictor } from "./bridge/idle.ts";
 // parseSuggestionJson / parseEvolveJson (and the three code-fence regexes
 // they share with generateSkillBody) live in ./bridge/parsers.ts — bridge.ts
 // re-exports the public names below so existing imports keep working, and
@@ -1032,7 +1043,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			});
 		}
 		// Start the idle cwd watcher — agent isn't running yet so it's safe.
-		syncFsWatcher(ws);
+		fsWatcher.syncFsWatcher(ws);
 		return ws;
 	}
 
@@ -1081,7 +1092,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		};
 		sessions.set(session.id, ws);
 		ensureProjectMcpForCwd(session.cwd ?? cwd);
-		syncFsWatcher(ws);
+		fsWatcher.syncFsWatcher(ws);
 		broadcaster.broadcastSessionUpdate(ws);
 		return ws;
 	}
@@ -1169,145 +1180,32 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		summaryFor,
 	});
 
-	/** Idle-period cwd watcher. Fires `fs_change` SSE events so the UI's
-	 *  Changes tab and Files tree pick up edits that happened outside of an
-	 *  agent turn (manual editor, CI hook, etc). Suspended while a turn runs so
-	 *  it never races `tool_end`. */
-	const fsWatchers = new Map<string, { close: () => unknown; on: (...args: unknown[]) => unknown }[]>();
-	const fsDebounceTimers = new Map<string, NodeJS.Timeout>();
-	const FS_DEBOUNCE_MS = 500;
-	/** Debounce + broadcast handler shared by every recursive watcher. Looks
-	 * the session up on every event so we always operate on the live ws — the
-	 * Map entry is replaced by re-hydration under the same id (see the race in
-	 * `hydrateSession`), and a captured `ws` reference would point at a stale
-	 * object whose listeners set is empty. */
-	function makeFsCallback(sessionId: string): (eventName: string, filePath: string) => void {
-		return (eventName, filePath) => {
-			const existing = fsDebounceTimers.get(sessionId);
-			if (existing) clearTimeout(existing);
-			fsDebounceTimers.set(
-				sessionId,
-				setTimeout(() => {
-					fsDebounceTimers.delete(sessionId);
-					const ws = sessions.get(sessionId);
-					if (!ws || ws.status !== "idle") return;
-					broadcaster.broadcast(ws, { type: "fs_change" });
-					const hookEvent = eventName === "addDir" ? "DirectoryAdded" : "FileChanged";
-					const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
-					void runHooksForEvent(hooks, {
-						event: hookEvent,
-						cwd: ws.session.cwd ?? cwd,
-						sessionId: ws.id,
-						matchTarget: basename(filePath),
-						payload: { file_path: filePath, file_name: basename(filePath), change_type: eventName },
-					});
-				}, FS_DEBOUNCE_MS),
-			);
-		};
-	}
-	function startFsWatcher(ws: WebAgentSession): void {
-		if (fsWatchers.has(ws.id)) return;
-		const sessionCwd = ws.session.cwd;
-		if (!sessionCwd || !existsSync(sessionCwd)) return;
-		try {
-			// chokidar wraps native fs.watch with cross-platform polling and
-			// a sane ignore matcher — no more inotify max_user_watches limit
-			// on real cwds, no more top-level-only coverage. We exclude the
-			// usual noise (.git, node_modules, build outputs) so an `npm i`
-			// or git gc doesn't fire 100k events.
-			//
-			// chokidar v5's `string` matcher is a literal-equality check (it
-			// does not expand globs), so we use a function predicate against
-			// the absolute path of every event.
-			const ignoreSegments = new Set([
-				"node_modules",
-				".git",
-				"dist",
-				"build",
-				".next",
-				".cache",
-				"__pycache__",
-				".venv",
-				"venv",
-				".tox",
-				".mypy_cache",
-			]);
-			const watcher = chokidar.watch(sessionCwd, {
-				ignored: (path) => path.split("/").some((p) => ignoreSegments.has(p)),
-				ignoreInitial: true,
-				persistent: true,
-				awaitWriteFinish: false,
-			});
-			watcher.on("all", makeFsCallback(ws.id));
-			watcher.on("error", () => {
-				stopFsWatcher(ws.id);
-			});
-			fsWatchers.set(ws.id, [watcher as unknown as { close: () => unknown; on: (...args: unknown[]) => unknown }]);
-		} catch {
-			// cwd may not exist (e.g. sandbox removed); ignore silently.
-		}
-	}
-	function stopFsWatcher(sessionId: string): void {
-		const list = fsWatchers.get(sessionId);
-		if (list) {
-			for (const w of list) {
-				try {
-					// chokidar's close() returns a Promise — fire-and-forget is
-					// fine here, the inotify wd releases on process exit anyway.
-					const result = (w as unknown as { close: () => unknown }).close();
-					if (result && typeof (result as Promise<unknown>).catch === "function") {
-						(result as Promise<unknown>).catch(() => {});
-					}
-				} catch {
-					// already closed by error handler
-				}
-			}
-			fsWatchers.delete(sessionId);
-		}
-		const t = fsDebounceTimers.get(sessionId);
-		if (t) {
-			clearTimeout(t);
-			fsDebounceTimers.delete(sessionId);
-		}
-	}
+	// fsWatcher and idleEvictor have a circular dep: fsWatcher's eviction
+	// path needs to release chokidar handles (idleEvictor takes
+	// fsWatcher.stopFsWatcher as a dep), but fsWatcher.syncFsWatcher also
+	// re-triggers the eviction timer (fsWatcher takes
+	// idleEvictor.syncIdleSessionEviction as onIdle). Build fsWatcher first
+	// with a no-op onIdle, then idleEvictor with the real fsWatcher.stopFsWatcher,
+	// then wire the onIdle via setOnIdle.
+	const fsWatcher = createFsWatcher({
+		sessions,
+		cwd,
+		trustForSessionCwd,
+		broadcast: broadcaster.broadcast,
+		onIdle: () => {},
+	});
 
-	function syncIdleSessionEviction(ws: WebAgentSession): void {
-		const existing = idleSessionEvictions.get(ws.id);
-		const canEvict = ws.status === "idle" && ws.listeners.size === 0 && !ws.backgroundBash.registry.hasRunning();
-		if (!canEvict) {
-			if (existing) clearTimeout(existing);
-			idleSessionEvictions.delete(ws.id);
-			return;
-		}
-		if (existing) return;
-		const timer = setTimeout(() => {
-			idleSessionEvictions.delete(ws.id);
-			const live = sessions.get(ws.id);
-			if (
-				!live ||
-				live !== ws ||
-				live.status !== "idle" ||
-				live.listeners.size > 0 ||
-				live.backgroundBash.registry.hasRunning()
-			) {
-				return;
-			}
-			if (countTurnMessages(live.session.messages) > 0) saveSession(live.session);
-			stopFsWatcher(live.id);
-			sessions.delete(live.id);
-			releaseProjectMcpForCwd(live.session.cwd ?? cwd);
-		}, IDLE_SESSION_EVICTION_MS);
-		timer.unref();
-		idleSessionEvictions.set(ws.id, timer);
-	}
-	/** Toggles the idle watcher as the session enters/leaves a turn. */
-	function syncFsWatcher(ws: WebAgentSession): void {
-		const hooks = resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd));
-		const needsFileHooks = Boolean(hooks.FileChanged?.length || hooks.DirectoryAdded?.length);
-		if (ws.status === "idle" && (ws.listeners.size > 0 || needsFileHooks)) startFsWatcher(ws);
-		else stopFsWatcher(ws.id);
-		syncIdleSessionEviction(ws);
-	}
+	const idleEvictor = createIdleEvictor({
+		sessions,
+		idleSessionEvictions,
+		idleSessionEvictionMs: IDLE_SESSION_EVICTION_MS,
+		cwd,
+		countTurnMessages,
+		saveSession,
+		releaseProjectMcpForCwd,
+		stopFsWatcher: fsWatcher.stopFsWatcher,
+	});
+	fsWatcher.setOnIdle(idleEvictor.syncIdleSessionEviction);
 
 	/** Builds a real user turn's `content` — plain text when there are no
 	 * images (matches every existing persisted message and the tests that
@@ -1463,7 +1361,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		ws.status = "running";
 		ws.error = null;
 		ws.turnStartedAt = Date.now();
-		syncFsWatcher(ws);
+		fsWatcher.syncFsWatcher(ws);
 		broadcaster.broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
 		broadcaster.broadcastSessionUpdate(ws);
 		let chk: ReturnType<typeof createCheckpoint>;
@@ -1478,7 +1376,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// Undo the early id claim so a retry of the same message can be
 			// delivered on the next attempt (the message was never persisted).
 			if (clientMessageId) ws.acceptedClientMessageIds.delete(clientMessageId);
-			syncFsWatcher(ws);
+			fsWatcher.syncFsWatcher(ws);
 			broadcaster.broadcast(ws, { type: "error", message: ws.error });
 			broadcaster.broadcast(ws, { type: "status", status: "error" });
 			broadcaster.broadcastSessionUpdate(ws);
@@ -1547,7 +1445,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.turnStartedAt = undefined;
 				ws.runner.abort();
 				ws.runner.endRun(lease);
-				syncFsWatcher(ws);
+				fsWatcher.syncFsWatcher(ws);
 				broadcaster.broadcast(ws, { type: "status", status: "idle" });
 				broadcaster.broadcastSessionUpdate(ws);
 				broadcaster.broadcast(ws, {
@@ -2090,7 +1988,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.status = "idle";
 				ws.activeStream = undefined;
 				ws.runner.endRun(lease);
-				syncFsWatcher(ws);
+				fsWatcher.syncFsWatcher(ws);
 				if (ws.lastTurn) ws.lastTurn.totalMs = Date.now() - turnStart;
 				// Persisted per-turn (unlike ws.lastTurn above, which is the same
 				// data but ephemeral/in-memory-only) so every past reply in this
@@ -2551,7 +2449,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (ws) {
 			if (ws.status === "running") ws.runner.abort();
 			ws.backgroundBash.registry.killAll();
-			stopFsWatcher(sessionId);
+			fsWatcher.stopFsWatcher(sessionId);
 			// No saveSession here — it's about to be deleted from disk anyway.
 			broadcaster.broadcast(ws, { type: "session_closed" });
 			ws.listeners.clear();
@@ -2582,7 +2480,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.add(callback);
-		syncFsWatcher(ws);
+		fsWatcher.syncFsWatcher(ws);
 	}
 
 	function unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void {
@@ -2590,7 +2488,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.listeners.delete(callback);
-		syncFsWatcher(ws);
+		fsWatcher.syncFsWatcher(ws);
 	}
 
 	function subscribeAll(callback: (event: WebEvent) => void): void {
@@ -2644,7 +2542,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 		// Resumed sessions skip createSessionInstance — start the idle watcher
 		// here too so the diff refreshes on external edits, not just on tool_end.
-		syncFsWatcher(ws);
+		fsWatcher.syncFsWatcher(ws);
 		return ws;
 	}
 
@@ -3467,14 +3365,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// system-message row (see runAgentLoop's own auto-compaction, which
 			// broadcasts the identical event shape).
 			ws.status = "running";
-			syncFsWatcher(ws);
+			fsWatcher.syncFsWatcher(ws);
 			broadcaster.broadcast(ws, { type: "status", status: "running" });
 			compactSessionMessages(ws.session.messages, config, ws.session.model, undefined, undefined, (usage) =>
 				addUsage(ws.session, usage),
 			)
 				.then((result) => {
 					ws.status = "idle";
-					syncFsWatcher(ws);
+					fsWatcher.syncFsWatcher(ws);
 					if (result.compacted) {
 						recordCompaction(ws.session, ws.session.messages, result.messages);
 						ws.session.messages = result.messages;
