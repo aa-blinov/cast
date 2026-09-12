@@ -2859,6 +2859,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			subagentModelProvider: subagentModelProvider ?? null,
 			planModel: planModel ?? null,
 			planModelProvider: planModelProvider ?? null,
+			quickSessionPersona,
 			turnIterationCap,
 			appendMessage,
 			saveSession,
@@ -2873,6 +2874,22 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			setPermissionMode: (mode) => {
 				permissionMode = mode;
 			},
+			setSubagentModel: (model) => {
+				subagentModel = model;
+			},
+			setSubagentModelProvider: (provider) => {
+				subagentModelProvider = provider;
+			},
+			setPlanModel: (model) => {
+				planModel = model;
+			},
+			setPlanModelProvider: (provider) => {
+				planModelProvider = provider;
+			},
+			setQuickSessionPersona: (name) => {
+				quickSessionPersona = name;
+			},
+			personas,
 		});
 		if (registered !== undefined) return registered;
 		if (name === "/goal") {
@@ -3282,80 +3299,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, ws.session.cwd ?? cwd, ws.session.mode);
 			saveSession(ws.session);
 			return { ok: true, result: { persona: persona.name, label: persona.label } };
-		}
-		if (name === "/quick-session-persona") {
-			if (!arg) return { ok: true, result: { quickSessionPersona } };
-			const persona = resolvePersona(arg);
-			if (!persona) {
-				return {
-					ok: false,
-					error: `Unknown persona: ${arg}. Available: ${personas.map((p) => p.name).join(", ")}`,
-				};
-			}
-			quickSessionPersona = persona.name;
-			updateSettings({ quickSessionPersona: persona.name });
-			return { ok: true, result: { quickSessionPersona: persona.name } };
-		}
-		if (name === "/subagent-model") {
-			if (!arg) return { ok: true, result: { subagentModel: subagentModel ?? null } };
-			if (arg === "off" || arg === "reset") {
-				subagentModel = undefined;
-				if (arg === "reset") subagentModelProvider = undefined;
-				updateSettings({
-					subagentModel: undefined,
-					...(arg === "reset" ? { subagentModelProvider: undefined } : {}),
-				});
-				return {
-					ok: true,
-					result: {
-						subagentModel: null,
-						...(arg === "reset" ? { subagentModelProvider: null } : {}),
-					},
-				};
-			}
-			subagentModel = arg;
-			updateSettings({ subagentModel: arg });
-			return { ok: true, result: { subagentModel: arg } };
-		}
-		if (name === "/subagent-model-provider") {
-			if (!arg) return { ok: true, result: { subagentModelProvider: subagentModelProvider ?? null } };
-			if (arg === "off" || arg === "reset") {
-				subagentModelProvider = undefined;
-				updateSettings({ subagentModelProvider: undefined });
-				return { ok: true, result: { subagentModelProvider: null } };
-			}
-			subagentModelProvider = arg;
-			updateSettings({ subagentModelProvider: arg });
-			return { ok: true, result: { subagentModelProvider: arg } };
-		}
-		if (name === "/plan-model") {
-			if (!arg) return { ok: true, result: { planModel: planModel ?? null } };
-			if (arg === "off" || arg === "reset") {
-				planModel = undefined;
-				if (arg === "reset") planModelProvider = undefined;
-				updateSettings({
-					planModel: undefined,
-					...(arg === "reset" ? { planModelProvider: undefined } : {}),
-				});
-				return {
-					ok: true,
-					result: { planModel: null, ...(arg === "reset" ? { planModelProvider: null } : {}) },
-				};
-			}
-			planModel = arg;
-			updateSettings({ planModel: arg });
-			return { ok: true, result: { planModel: arg } };
-		}
-		if (name === "/plan-model-provider") {
-			if (!arg) return { ok: true, result: { planModelProvider: planModelProvider ?? null } };
-			if (arg === "off" || arg === "reset") {
-				planModelProvider = undefined;
-				updateSettings({ planModelProvider: undefined });
-				return { ok: true, result: { planModelProvider: null } };
-			}
-			planModelProvider = arg;
-			updateSettings({ planModelProvider: arg });
-			return { ok: true, result: { planModelProvider: arg } };
 		}
 		if (name === "/plan" || name === "/build") {
 			const mode = name === "/plan" ? "plan" : "build";
