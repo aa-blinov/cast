@@ -2861,22 +2861,16 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			planModel: planModel ?? null,
 			planModelProvider: planModelProvider ?? null,
 			turnIterationCap,
+			appendMessage,
+			saveSession,
+			broadcaster,
+			submit: (sessionId, text) => {
+				void submit(sessionId, text);
+			},
+			abort,
+			forkSessionInstance,
 		});
 		if (registered !== undefined) return registered;
-		if (name === "/fork") {
-			const fork = forkSessionInstance(sessionId);
-			if (!fork) return { ok: false, error: "Could not fork session" };
-			return { ok: true, result: { sessionId: fork.id } };
-		}
-		if (name === "/plan-note") {
-			if (!arg) return { ok: false, error: "Usage: /plan-note <decision>" };
-			const content = `<system-reminder>${arg}</system-reminder>`;
-			appendMessage(ws.session, { role: "user", content });
-			saveSession(ws.session);
-			broadcaster.broadcast(ws, { type: "plan_decision", content: arg });
-			broadcaster.broadcastSessionUpdate(ws);
-			return { ok: true, result: "Recorded" };
-		}
 		if (name === "/goal") {
 			const { goal, maxIterations } = parseGoalInput(arg);
 			if (!goal) return { ok: false, error: "Usage: /goal [N] <what to achieve>  (or /goal --steps N <desc>)" };
@@ -3201,34 +3195,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			updateSettings({ theme: found.id });
 			return { ok: true, result: { theme: found.id, label: found.label, colors: found.colors } };
 		}
-		if (name === "/abort" || name === "/stop") {
-			abort(sessionId);
-			return { ok: true, result: "Aborted" };
-		}
 		if (name === "/sessions") {
 			return { ok: true, result: listSessions() };
-		}
-		if (name === "/steer" || name === "/s") {
-			if (!arg) return { ok: false, error: "Usage: /steer <message> — injects it into the running turn" };
-			if (!running) {
-				submit(sessionId, arg);
-				return { ok: true, result: "Sent" };
-			}
-			ws.runner.steeringQueue.enqueue({ role: "user", content: arg });
-			return { ok: true, result: "Steered into the running turn" };
-		}
-		if (name === "/queue" || name === "/q") {
-			if (!arg) return { ok: false, error: "Usage: /queue <message> — runs after the current turn" };
-			if (!running) {
-				submit(sessionId, arg);
-				return { ok: true, result: "Sent" };
-			}
-			ws.runner.followUpQueue.enqueue({ role: "user", content: arg });
-			return { ok: true, result: "Queued for after this turn" };
-		}
-		if (name === "/queue-reset" || name === "/qr") {
-			ws.runner.followUpQueue.clear();
-			return { ok: true, result: "Queue cleared" };
 		}
 
 		if (name === "/hooks") {

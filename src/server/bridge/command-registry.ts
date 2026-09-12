@@ -15,9 +15,11 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import type { AppConfig } from "../../core/config.ts";
 import type { Message } from "../../core/llm.ts";
+import type { SessionState } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import type { WebAgentSession } from "../bridge.ts";
 import { SLASH_COMMANDS } from "../commands.ts";
+import type { Broadcaster } from "./broadcaster.ts";
 
 /**
  * Public result shape of `bridge.executeCommand`. Defined here (not imported
@@ -54,6 +56,22 @@ export interface CommandContext {
 	planModel: string | null;
 	planModelProvider: string | null;
 	turnIterationCap: (settings: Settings) => number;
+	/** Persist a freshly-built message into a session's transcript. */
+	appendMessage: (session: SessionState, message: Message) => void;
+	/** Flush a session to disk (called by handlers that mutate ws.session). */
+	saveSession: (session: SessionState) => void;
+	/** Broadcast primitives — plan-note and other session-mutating commands
+	 *  fire plan_decision / session_update events through this. */
+	broadcaster: Broadcaster;
+	/** Fire-and-forget submit — used when /steer or /queue hit an idle
+	 *  session and need to kick off a normal turn. Matches the original
+	 *  inline behaviour: the call returns immediately; the turn runs in
+	 *  the background. */
+	submit: (sessionId: string, text: string) => void;
+	/** Abort the running turn on the given session. */
+	abort: (sessionId: string) => void;
+	/** Create a new idle copy of the given session (used by /fork). */
+	forkSessionInstance: (sessionId: string) => WebAgentSession | undefined;
 }
 
 /** Synchronous handlers — async work happens before this entry point. */
@@ -178,6 +196,72 @@ const commandHandlers: Record<string, CommandHandler> = {
 			ok: true,
 			result: { cwd: sessionCwd, isGit: true, branch, dirty, worktree },
 		};
+	},
+	"/fork": ({ ws, forkSessionInstance }) => {
+		const fork = forkSessionInstance(ws.id);
+		if (!fork) return { ok: false, error: "Could not fork session" };
+		return { ok: true, result: { sessionId: fork.id } };
+	},
+	"/plan-note": ({ ws, arg, appendMessage, saveSession, broadcaster }) => {
+		if (!arg) return { ok: false, error: "Usage: /plan-note <decision>" };
+		const content = `<system-reminder>${arg}</system-reminder>`;
+		appendMessage(ws.session, { role: "user", content });
+		saveSession(ws.session);
+		broadcaster.broadcast(ws, { type: "plan_decision", content: arg });
+		broadcaster.broadcastSessionUpdate(ws);
+		return { ok: true, result: "Recorded" };
+	},
+	"/abort": ({ ws, abort }) => {
+		abort(ws.id);
+		return { ok: true, result: "Aborted" };
+	},
+	"/stop": ({ ws, abort }) => {
+		abort(ws.id);
+		return { ok: true, result: "Aborted" };
+	},
+	"/steer": ({ ws, arg, submit }) => {
+		if (!arg) return { ok: false, error: "Usage: /steer <message> — injects it into the running turn" };
+		if (ws.status !== "running") {
+			submit(ws.id, arg);
+			return { ok: true, result: "Sent" };
+		}
+		ws.runner.steeringQueue.enqueue({ role: "user", content: arg });
+		return { ok: true, result: "Steered into the running turn" };
+	},
+	"/s": ({ ws, arg, submit }) => {
+		if (!arg) return { ok: false, error: "Usage: /steer <message> — injects it into the running turn" };
+		if (ws.status !== "running") {
+			submit(ws.id, arg);
+			return { ok: true, result: "Sent" };
+		}
+		ws.runner.steeringQueue.enqueue({ role: "user", content: arg });
+		return { ok: true, result: "Steered into the running turn" };
+	},
+	"/queue": ({ ws, arg, submit }) => {
+		if (!arg) return { ok: false, error: "Usage: /queue <message> — runs after the current turn" };
+		if (ws.status !== "running") {
+			submit(ws.id, arg);
+			return { ok: true, result: "Sent" };
+		}
+		ws.runner.followUpQueue.enqueue({ role: "user", content: arg });
+		return { ok: true, result: "Queued for after this turn" };
+	},
+	"/q": ({ ws, arg, submit }) => {
+		if (!arg) return { ok: false, error: "Usage: /queue <message> — runs after the current turn" };
+		if (ws.status !== "running") {
+			submit(ws.id, arg);
+			return { ok: true, result: "Sent" };
+		}
+		ws.runner.followUpQueue.enqueue({ role: "user", content: arg });
+		return { ok: true, result: "Queued for after this turn" };
+	},
+	"/queue-reset": ({ ws }) => {
+		ws.runner.followUpQueue.clear();
+		return { ok: true, result: "Queue cleared" };
+	},
+	"/qr": ({ ws }) => {
+		ws.runner.followUpQueue.clear();
+		return { ok: true, result: "Queue cleared" };
 	},
 };
 
