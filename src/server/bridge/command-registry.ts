@@ -1,25 +1,21 @@
 /**
  * Command registry — a dispatch table for `bridge.executeCommand(name, args)`.
  *
- * Moved out of server/bridge.ts as the first slice of the executeCommand
- * refactor (per TDD discipline: small vertical slices, characterization tests
- * at the public seam before each move). Only the read-only "session info"
- * commands are registered here so far — `/help` and `/usage`. Future slices
- * will register `/current`, `/repo`, and the rest, with the context
- * interface growing to carry whatever deps those handlers need (cwd
- * fallback, config, loadSettings, etc).
- *
- * The dispatcher is intentionally tiny: `bridge.executeCommand` looks up the
- * name in the registry, hands the context to the handler, returns its
- * result. If no handler is registered, the dispatcher returns `undefined`
- * and `bridge.executeCommand` falls through to the existing inline logic —
- * so this file can land without breaking the 50+ commands still inside
- * bridge.ts.
+ * Moved out of server/bridge.ts in two TDD slices. Slice 1 registered the
+ * read-only "session info" commands (`/help`, `/usage`). Slice 2 added
+ * `/current` and `/repo`, which need a wider context (cwd fallback, config,
+ * loadSettings, etc) — see `CommandContext` below. The dispatcher in
+ * bridge.ts still falls through to the inline logic for commands not yet
+ * registered, so additional slices can land incrementally.
  *
  * The seam under test (web-bridge.test.ts) is `bridge.executeCommand(name)`;
  * these handlers are tested through it, not directly.
  */
-
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import type { AppConfig } from "../../core/config.ts";
+import type { Message } from "../../core/llm.ts";
+import type { PermissionMode, Settings } from "../../core/settings.ts";
 import type { WebAgentSession } from "../bridge.ts";
 import { SLASH_COMMANDS } from "../commands.ts";
 
@@ -36,14 +32,28 @@ export interface CommandResult {
 }
 
 /**
- * The minimal context slice 1 commands need: the session the command targets
- * and the argument string after the slash. Wider context (cwd fallback,
- * config, loadSettings, etc) will be added as later slices register
- * commands that need them.
+ * Context handed to every registered command handler. Slice 1 only used
+ * `ws` and `arg`; slice 2 grew it to the full set of helpers that
+ * `/current` and `/repo` needed. Future slices will keep adding fields
+ * rather than create a new context type per handler — keeping one
+ * context interface keeps the dispatcher signature stable and lets
+ * bridge.ts build it once.
  */
 export interface CommandContext {
 	ws: WebAgentSession;
 	arg: string;
+	/** Bridge's cwd fallback when a session has no cwd of its own. */
+	cwd: string;
+	config: AppConfig;
+	loadSettings: () => Settings;
+	sessionReasoningLevel: (ws: WebAgentSession) => string;
+	countTurnMessages: (messages: Message[]) => number;
+	permissionMode: PermissionMode;
+	subagentModel: string | null;
+	subagentModelProvider: string | null;
+	planModel: string | null;
+	planModelProvider: string | null;
+	turnIterationCap: (settings: Settings) => number;
 }
 
 /** Synchronous handlers — async work happens before this entry point. */
@@ -72,10 +82,106 @@ function getHelpText(): string {
 	].join("\n");
 }
 
-export const commandRegistry: Record<string, CommandHandler> = {
+const commandHandlers: Record<string, CommandHandler> = {
 	"/help": () => ({ ok: true, result: getHelpText() }),
 	"/usage": ({ ws }) => ({ ok: true, result: ws.session.usage }),
+	"/current": (ctx) => {
+		const {
+			ws,
+			config,
+			loadSettings,
+			sessionReasoningLevel,
+			countTurnMessages,
+			permissionMode,
+			subagentModel,
+			subagentModelProvider,
+			planModel,
+			planModelProvider,
+			turnIterationCap,
+		} = ctx;
+		return {
+			ok: true,
+			result: {
+				persona: ws.session.persona,
+				model: ws.session.model,
+				providerUrl: ws.session.providerUrl ?? config.baseURL,
+				providerName:
+					ws.session.providerName ??
+					(loadSettings().providers ?? []).find(
+						(provider) => provider.url === config.baseURL && provider.apiKey === config.apiKey,
+					)?.name ??
+					null,
+				reasoningLevel: sessionReasoningLevel(ws),
+				mode: ws.session.mode ?? "build",
+				status: ws.status,
+				messageCount: countTurnMessages(ws.session.messages),
+				usage: ws.session.usage,
+				lastTurn: ws.lastTurn,
+				permissionMode,
+				subagentModel: subagentModel ?? null,
+				subagentModelProvider: subagentModelProvider ?? null,
+				planModel: planModel ?? null,
+				planModelProvider: planModelProvider ?? null,
+				maxTurnIterations: turnIterationCap(loadSettings()),
+			},
+		};
+	},
+	"/repo": (ctx) => {
+		const { ws, cwd } = ctx;
+		const sessionCwd = ws.session.cwd ?? cwd;
+		const git = (args: string[]) =>
+			execFileSync("git", args, {
+				cwd: sessionCwd,
+				encoding: "utf-8",
+				timeout: 3000,
+				stdio: ["pipe", "pipe", "pipe"],
+			}).trim();
+		try {
+			git(["rev-parse", "--is-inside-work-tree"]);
+		} catch {
+			return { ok: true, result: { cwd: sessionCwd, isGit: false } };
+		}
+		let branch = "—";
+		let dirty = false;
+		try {
+			branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+		} catch {}
+		try {
+			dirty = git(["status", "--porcelain"]).length > 0;
+		} catch {}
+		let worktree: string | null = null;
+		try {
+			const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+			const mainRepoRoot = join(commonDir, "..");
+			const list = execFileSync("git", ["worktree", "list", "--porcelain"], {
+				cwd: mainRepoRoot,
+				encoding: "utf-8",
+				timeout: 3000,
+				stdio: ["pipe", "pipe", "pipe"],
+			}).trim();
+			const blocks = list.split("\n\n");
+			for (const block of blocks) {
+				const pathLine = block.split("\n").find((l) => l.startsWith("worktree "));
+				if (!pathLine) continue;
+				const path = pathLine.substring("worktree ".length);
+				if (path === sessionCwd && path !== mainRepoRoot) {
+					worktree = path;
+					break;
+				}
+			}
+		} catch {
+			// git worktree list is best-effort; standalone clones without
+			// registered worktrees leave worktree = null and the UI shows
+			// the em-dash placeholder.
+		}
+		return {
+			ok: true,
+			result: { cwd: sessionCwd, isGit: true, branch, dirty, worktree },
+		};
+	},
 };
+
+export const commandRegistry: Record<string, CommandHandler> = commandHandlers;
 
 /**
  * Dispatch a command by name through the registry. Returns the handler's

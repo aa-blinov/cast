@@ -829,6 +829,72 @@ describe("web bridge", () => {
 		expect(typeof (result.result as { cwd: string }).cwd).toBe("string");
 	});
 
+	// Slice 2 characterization — pinned below /current and /repo before the
+	// registry gains wider context (cwd / config / loadSettings). These pin
+	// the full result shape so the refactor can't quietly drop a field.
+
+	it("/current returns the full session state shape with persona/model/reasoningLevel/etc", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/current");
+		expect(result.ok).toBe(true);
+		const r = result.result as Record<string, unknown>;
+		// Every key the inline implementation must populate, by name only
+		// (values are tested elsewhere — providerName / reasoningLevel are
+		// tested in the pinned-session test above).
+		for (const key of [
+			"persona",
+			"model",
+			"providerUrl",
+			"providerName",
+			"reasoningLevel",
+			"mode",
+			"status",
+			"messageCount",
+			"usage",
+			"lastTurn",
+			"permissionMode",
+			"subagentModel",
+			"subagentModelProvider",
+			"planModel",
+			"planModelProvider",
+			"maxTurnIterations",
+		]) {
+			expect(key in r).toBe(true);
+		}
+		expect(r.mode).toBe("build");
+		expect(r.status).toBe("idle");
+	});
+
+	it("/repo for a freshly-initialised git repo returns branch and dirty state", async () => {
+		// Create the bridge and session first so we can read the session's cwd,
+		// then init git there and run /repo again. We use the session's own
+		// `ws.session.cwd` rather than the testEnvironment fixture because
+		// the latter is captured inside beforeEach and not re-exported.
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const sessionCwd = ws.session.cwd ?? "";
+		expect(sessionCwd).not.toBe("");
+		execFileSync("git", ["init", "-b", "main", sessionCwd], { stdio: "pipe" });
+		execFileSync("git", ["-C", sessionCwd, "config", "user.email", "test@cast"], {
+			stdio: "pipe",
+		});
+		execFileSync("git", ["-C", sessionCwd, "config", "user.name", "test"], { stdio: "pipe" });
+		// One commit on `main` so the rev-parse --abbrev-ref HEAD call has
+		// something to point at.
+		execFileSync("git", ["-C", sessionCwd, "commit", "--allow-empty", "-m", "init"], {
+			stdio: "pipe",
+		});
+
+		const result = await bridge.executeCommand(ws.id, "/repo");
+		expect(result.ok).toBe(true);
+		const r = result.result as { cwd: string; isGit: boolean; branch: string; dirty: boolean };
+		expect(r.isGit).toBe(true);
+		expect(r.cwd).toBe(sessionCwd);
+		expect(r.branch).toBe("main");
+		expect(r.dirty).toBe(false);
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
