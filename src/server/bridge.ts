@@ -2917,6 +2917,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				}
 				return undefined;
 			},
+			evolveSkills: (ws) => evolveSkills(ws),
 			sshHosts,
 			setSshHosts: (hosts) => {
 				sshHosts = hosts;
@@ -2933,9 +2934,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			recomputeAllSystemPrompts,
 		});
 		if (registered !== undefined) return registered;
-		if (name === "/evolve") {
-			return await evolveSkills(ws);
-		}
 		// Everything below requires idle (enforced by the isCommandBlocking gate above).
 		// Native `/<skill-id>` invocation — falls through here only once every
 		// built-in name above has failed to match, so a skill can never shadow a
