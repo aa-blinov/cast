@@ -1681,6 +1681,66 @@ describe("web bridge", () => {
 		expect(runAgentLoop).not.toHaveBeenCalled();
 	});
 
+	// Slice 14 characterization — the small headless-parity commands
+	// (/quit, /exit, /copy, /older, /keys). The TUI handles these
+	// client-side (clipboard, keybindings, history paging), but the
+	// daemon must still return an equivalent result so a `cast run
+	// --interactive` consumer can round-trip every slash command
+	// instead of hitting "Unknown command". No existing test coverage.
+
+	it("/quit and /exit on an idle session return the idle ack", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/quit")).toEqual({ ok: true, result: "idle" });
+		expect(await bridge.executeCommand(ws.id, "/exit")).toEqual({ ok: true, result: "idle" });
+	});
+
+	it("/quit on a running session aborts and returns the quit ack", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.status = "running";
+		const abortSpy = vi.spyOn(ws.runner, "abort");
+		const result = await bridge.executeCommand(ws.id, "/quit");
+		expect(result).toEqual({ ok: true, result: "quit requested" });
+		expect(abortSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("/copy on a session with no assistant message returns an empty string", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/copy")).toEqual({ ok: true, result: "" });
+	});
+
+	it("/copy returns the most recent assistant string content", async () => {
+		const { appendMessage } = await import("../src/core/session.ts");
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		appendMessage(ws.session, { role: "user", content: "say hello" });
+		appendMessage(ws.session, { role: "assistant", content: "world" });
+		appendMessage(ws.session, { role: "user", content: "and goodbye" });
+		appendMessage(ws.session, { role: "assistant", content: "see ya" });
+		expect(await bridge.executeCommand(ws.id, "/copy")).toEqual({ ok: true, result: "see ya" });
+	});
+
+	it("/older returns hasMoreHistory and oldestSeq for the current session", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/older");
+		expect(result.ok).toBe(true);
+		const r = result.result as { hasMoreHistory: boolean; oldestSeq: number | null };
+		expect(typeof r.hasMoreHistory).toBe("boolean");
+		expect(r.oldestSeq === null || typeof r.oldestSeq === "number").toBe(true);
+	});
+
+	it("/keys returns the TUI-keys informational message", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.executeCommand(ws.id, "/keys")).toEqual({
+			ok: true,
+			result: "keybindings are a TUI concept; see docs or /help for commands",
+		});
+	});
+
 	it("tells the model the reasoning level the turn actually runs with, not the global one", async () => {
 		const { updateSettings } = await import("../src/core/settings.ts");
 		updateSettings({
