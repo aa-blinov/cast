@@ -6,9 +6,9 @@ All notable user-facing changes to cast, newest first.
 
 ## 0.31.3
 
-### Added
+### Changed
 
-- **`presentation-builder` ships its dependency now.** `pptxgenjs` is a declared dependency of cast instead of something the agent had to `npm install` on first use of the skill.
+- **`pptxgenjs` is now a declared dependency in cast's own `package.json`**, tracked alongside cast's other dependencies instead of being an untracked package only `npm audit`/lockfile tooling couldn't see. The `presentation-builder` skill generates and runs its build script inside the *target project's* directory, so this does not remove the need for `npm install pptxgenjs` there — cast's own dependency list isn't on that script's module resolution path.
 
 ### Fixed
 
