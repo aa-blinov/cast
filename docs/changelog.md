@@ -4,6 +4,17 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.31.3
+
+### Added
+
+- **`presentation-builder` ships its dependency now.** `pptxgenjs` is a declared dependency of cast instead of something the agent had to `npm install` on first use of the skill.
+
+### Fixed
+
+- **`/distill` could write a generated skill or persona outside its intended directory.** The name sanitizer for a model-proposed artifact stripped disallowed characters but let a bare `.` or `..` through unchanged, so an artifact named `".."` landed at `.cast/SKILL.md` instead of `.cast/skills/<name>/SKILL.md`. Dot-only names are rejected now; the artifact is skipped instead of materialized in the wrong place.
+- **`/distill` could propose a `command` artifact that did nothing.** It wrote to `.cast/commands/<name>.md`, a path nothing in cast ever reads back as an invocable command. Dropped `command` from the set of artifact kinds `/distill` can produce — only `skill` and `persona`, both of which are actually loaded.
+
 ## 0.31.2
 
 ### Added
