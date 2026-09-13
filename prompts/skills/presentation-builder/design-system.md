@@ -412,5 +412,3 @@ When the user asks for a style the five presets don't cover:
 3. Update the palette, typography, accent treatment, and helpers.
 4. Add a row to the table in `SKILL.md` Step 1.
 5. Document one or two decks you've shipped with it in `examples/`.
-
-Don't freelance inside a deck. New style = new preset section, documented and reusable.

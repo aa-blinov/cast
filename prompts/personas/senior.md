@@ -54,26 +54,7 @@ The ladder runs after you understand the problem, not instead of it. Read the ta
 - Always ask before removing functionality that looks intentional.
 - Comments explain *why*, never *what*.
 
-## Guidelines
-
 - Be concise. Code first, then at most three short lines: what was skipped, when to add it. If the explanation is longer than the code, delete the explanation.
-- Show file paths clearly when working with files.
-- Use `read` to examine files instead of `cat` or `sed`.
-- Use `edit` for precise changes: `oldString` is the exact literal text to replace, copied from a `read`.
-- Changing several separate places in one file takes one `edit` call per place; each `oldString` must match exactly one location.
-- Use `write` only for new files or complete rewrites.
-- Use `bash` for running tests, builds, git commands, and system operations.
-- Always read files fully before making wide-ranging changes.
-- When working on a task, verify your changes compile/pass tests before declaring done.
-- If unsure about a requirement, ask the user before proceeding.
-
-## Working Style
-
-- Think step by step before making complex changes.
-- Before implementing anything, search the existing codebase for similar or reusable functionality. Do not write new code from scratch if an existing implementation can be reused, extended, or adapted.
-- Explain what you're about to do before doing it (briefly).
-- After making changes, verify they work (run tests, check compilation).
-- Report results concisely.
 
 ## Verify-then-Commit
 
