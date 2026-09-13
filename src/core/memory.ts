@@ -82,6 +82,7 @@ const MARKDOWN_BULLET_RE = /^[-*]\s+(.+)$/;
 const MARKDOWN_EMPTY_RE = /^(\(none|#)/;
 const MARKDOWN_BULLET_STRIP_RE = /^[-*]\s+/;
 const ARTIFACT_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
+const DOT_ONLY_NAME_RE = /^\.+$/;
 const ARTIFACT_DESCRIPTION_RE = /^description:\s*(.+)$/m;
 const MEMORY_DREAM_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-system.md");
 const MEMORY_DREAM_JSON_PROMPT = readRequiredPrompt(promptsDir, "memory-dream-json.md");
@@ -153,7 +154,7 @@ export interface MemoryCheckpointRecord extends MemoryCheckpoint {
 	updatedAt: string;
 }
 
-export type MemoryArtifactKind = "skill" | "subagent" | "command";
+export type MemoryArtifactKind = "skill" | "subagent";
 
 export interface MemoryArtifact {
 	id: number;
@@ -1468,7 +1469,6 @@ function formatExistingAssets(cwd: string): string {
 		join(cwd, ".agents", "skills"),
 		join(homedir(), ".cast", "personas"),
 		join(cwd, ".cast", "personas"),
-		join(cwd, ".cast", "commands"),
 	];
 	const lines: string[] = [];
 	for (const root of roots) {
@@ -1851,6 +1851,19 @@ export function dreamProjectMemory(input: MemoryMaintenanceInput): Promise<Memor
 	return queueMemoryOperation(input.cwd, () => runDreamProjectMemory(input), input.signal);
 }
 
+/** Collapse a model-supplied artifact name into a safe single path segment:
+ * strips anything but alphanumerics/dot/dash/underscore, trims edge dashes,
+ * and rejects a dot-only result ("." or "..") so it can never resolve above
+ * the intended directory when joined into a path. */
+function sanitizeArtifactName(raw: string, maxLen: number): string {
+	const cleaned = raw
+		.trim()
+		.replace(/[^a-zA-Z0-9._-]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, maxLen);
+	return DOT_ONLY_NAME_RE.test(cleaned) ? "" : cleaned;
+}
+
 function parseMemoryDistillOutput(raw: string): Array<{
 	kind: MemoryArtifactKind;
 	name: string;
@@ -1864,13 +1877,10 @@ function parseMemoryDistillOutput(raw: string): Array<{
 	for (const candidate of parsed.artifacts) {
 		if (!candidate || typeof candidate !== "object") continue;
 		const item = candidate as Record<string, unknown>;
-		if (item.kind !== "skill" && item.kind !== "subagent" && item.kind !== "command") continue;
+		if (item.kind !== "skill" && item.kind !== "subagent") continue;
 		if (typeof item.name !== "string" || typeof item.description !== "string" || typeof item.content !== "string")
 			continue;
-		const name = item.name
-			.trim()
-			.replace(/[^a-zA-Z0-9._-]+/g, "-")
-			.slice(0, 80);
+		const name = sanitizeArtifactName(item.name, 80);
 		const description = item.description.trim().slice(0, 240);
 		const content = item.content.trim().slice(0, 4000);
 		const key = `${item.kind}\n${name}`.toLowerCase();
@@ -1894,22 +1904,17 @@ function materializeDistilledArtifact(
 	cwd: string,
 	artifact: { kind: MemoryArtifactKind; name: string; description: string; content: string },
 ): void {
-	const safeName = artifact.name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+	const safeName = sanitizeArtifactName(artifact.name, 80);
 	if (!safeName) return;
 	if (artifact.kind === "skill") {
 		writeMemoryFile(
 			join(cwd, ".cast", "skills", safeName, "SKILL.md"),
 			`---\nname: ${safeName}\ndescription: ${artifact.description}\n---\n\n${artifact.content}\n`,
 		);
-	} else if (artifact.kind === "subagent") {
+	} else {
 		writeMemoryFile(
 			join(cwd, ".cast", "personas", `${safeName}.md`),
 			`---\nname: ${safeName}\nlabel: ${artifact.name}\ndescription: ${artifact.description}\n---\n\n${artifact.content}\n`,
-		);
-	} else {
-		writeMemoryFile(
-			join(cwd, ".cast", "commands", `${safeName}.md`),
-			`# ${artifact.name}\n\n${artifact.description}\n\n${artifact.content}\n`,
 		);
 	}
 }
@@ -1925,10 +1930,7 @@ function projectArtifactFiles(cwd: string): Array<{ kind: MemoryArtifactKind; na
 			if (existsSync(path)) result.push({ kind: "skill", name: entry.name, path });
 		}
 	}
-	for (const [kind, directory] of [
-		["subagent", "personas"],
-		["command", "commands"],
-	] as const) {
+	for (const [kind, directory] of [["subagent", "personas"]] as const) {
 		const dir = join(root, directory);
 		if (!existsSync(dir)) continue;
 		for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -2030,7 +2032,7 @@ function artifactFromRow(row: {
 	created_at: string;
 	updated_at: string;
 }): MemoryArtifact | undefined {
-	if (row.kind !== "skill" && row.kind !== "subagent" && row.kind !== "command") return undefined;
+	if (row.kind !== "skill" && row.kind !== "subagent") return undefined;
 	return {
 		id: row.id,
 		projectId: row.project_id,
