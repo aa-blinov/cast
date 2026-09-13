@@ -35,7 +35,7 @@ Artifacts:
 2. **Dream** (`/dream` or `memoryDreamAuto`) — consolidates: keeps durable
    facts, merges duplicates, drops stale entries. Default every 7 days.
 3. **Distill** (`/distill` or `memoryDistillAuto`) — packages repeated
-   workflows into reusable skills/personas/commands. Default every 30 days.
+   workflows into reusable skills/personas. Default every 30 days.
 
 Writing is best-effort and non-fatal. `memoryWriteEnabled off` keeps reading
 available and stops all background writing.

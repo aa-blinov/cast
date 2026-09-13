@@ -62,12 +62,13 @@ Segments separated by ` │ `, configurable via `/statusbar`:
 
 Core: `/abort`, `/build` (exit plan), `/clear`, `/compact`, `/continue`,
 `/copy`, `/current`, `/exit` (alias `/quit`), `/fork`, `/help`, `/new`,
-`/older`, `/plan`, `/quit`, `/undo`, `/reload`, `/repo`, `/rules`,
-`/rule:<name>`, `/sessions`, `/worktree`, `/theme`, `/keys`.
+`/older`, `/plan`, `/plan-note`, `/quit`, `/undo`, `/reload`, `/repo`, `/rules`,
+`/rule:<name>`, `/sessions`, `/worktree`, `/theme`, `/keys`, `/goal`,
+`/turn-cap`, `/review`, `/evolve`, `/usage`.
 
-Model/provider: `/model`, `/plan-model`, `/plan-model-provider`,
-`/subagent-model`, `/subagent-model-provider`, `/provider`, `/reasoning`,
-`/reasoning-format`, `/reasoning-display`, `/permissions`.
+Model/provider: `/model`, `/model-selection`, `/plan-model`, `/plan-model-provider`,
+`/subagent-model`, `/subagent-model-provider`, `/quick-session-persona`,
+`/provider`, `/reasoning`, `/reasoning-format`, `/reasoning-display`, `/permissions`.
 
 Run-time injection (allowed while a turn runs): `/queue` (+`/q`), `/queue-reset`
 (+`/qr`), `/steer` (+`/s`).

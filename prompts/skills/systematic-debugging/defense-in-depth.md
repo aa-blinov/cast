@@ -118,5 +118,3 @@ All four layers were necessary. During testing, each layer caught bugs the other
 - Mocks bypassed business logic checks
 - Edge cases on different platforms needed environment guards
 - Debug logging identified structural misuse
-
-**Don't stop at one validation point.** Add checks at every layer.

@@ -1,6 +1,6 @@
 ---
 name: presentation-builder
-description: Build professional slide decks (PPTX/PDF) via PptxGenJS with 5 style presets and PNG verify gate. Use when user asks for презентация, pitch deck, slides, slide deck, investor deck, tech overview, or conference talk. Supports Cyrillic and enforces spec → voice → build → verify workflow.
+description: Build professional slide decks (PPTX/PDF) via PptxGenJS with 5 style presets and PNG verify gate. Use when user asks for презентация, pitch deck, slides, investor deck, tech overview, or conference talk. Supports Cyrillic and enforces spec → voice → build → verify workflow.
 ---
 
 # Presentation builder
@@ -14,12 +14,6 @@ A slide deck is a visual document that has to **look right in the room where it'
 - **style** — pick the visual preset up front. Don't freelance inside a deck.
 
 ## When to use this skill
-
-Trigger on any of:
-- "сделай презентацию", "подготовь слайды", "presentation"
-- "pitch deck", "investor deck", "sales deck", "partner deck"
-- "tech overview", "product overview", "demo day slides"
-- "конференция", "доклад", "обучение"
 
 Skip if the user wants a one-pager, a Notion doc, or anything that is not PPTX / PDF.
 
@@ -82,7 +76,7 @@ Adjust for the actual content — this is a default, not a rule.
 
 ## Step 4 — Build with the style system
 
-Use [`design-system.md`](design-system.md). It is opinionated, but it ships **five style presets** instead of one. Pick one in Step 1 and stay inside it for the whole deck. Mixing presets slide-by-slide looks like a 2008 clip-art show.
+Use [`design-system.md`](design-system.md). It is opinionated, but it ships **five style presets** instead of one. Pick one in Step 1 and stay inside it for the whole deck (see Anti-patterns).
 
 Common to all presets:
 - 16:9 widescreen (`pptx.layout = "LAYOUT_WIDE"`, 13.333 × 7.5 in)
@@ -162,5 +156,3 @@ If the user asks for a style the five presets don't cover (e.g. "make it look li
 
 1. Pick the closest preset and customize the constants in `design-system.md`. Most "brand-specific" requests are 90% one of the existing presets with a different accent color and font.
 2. Add a new preset to `design-system.md` — give it a name, a palette, a typography stack, and an accent treatment, then use it. Update the table in Step 1 so future runs can pick it.
-
-Don't freelance inside a deck. If you change colors slide-by-slide, the deck looks assembled rather than designed.
