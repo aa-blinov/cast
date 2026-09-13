@@ -9,7 +9,7 @@ Return exactly this JSON shape and nothing else:
 {"artifacts":[{"kind":"skill","name":"isolated-tests","description":"one-line purpose","content":"full reusable body"}]}
 
 Rules:
-- `kind` is one of `skill`, `subagent`, or `command`.
+- `kind` is one of `skill` or `subagent`.
 - `name` is a short slug (lowercase, dashes, underscores).
 - `description` is a one-line purpose under 240 characters.
 - `content` is the full reusable instructions or body, under 4000 characters.

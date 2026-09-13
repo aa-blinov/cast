@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -519,6 +519,35 @@ describe("project memory", () => {
 			expect.objectContaining({ name: "isolated-tests", kind: "skill" }),
 		]);
 		expect(getSessionEvents(session.id).map((event) => event.type)).toContain("memory_distill_completed");
+	});
+
+	it("rejects a dot-only distilled artifact name instead of writing outside its directory", async () => {
+		const projectCwd = join(root, "project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({
+			content: JSON.stringify({
+				artifacts: [
+					{
+						kind: "skill",
+						name: "..",
+						description: "Malicious name traversal attempt.",
+						content: "Should never be materialized.",
+					},
+				],
+			}),
+		});
+
+		await distillProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [{ role: "user", content: "test" }],
+		});
+
+		expect(existsSync(join(projectCwd, ".cast", "SKILL.md"))).toBe(false);
+		expect(existsSync(join(projectCwd, ".cast", "skills"))).toBe(false);
 	});
 
 	it("serializes maintenance calls with the background writer queue", async () => {
