@@ -2,36 +2,21 @@
 
 ### Workflow (every persona)
 
-1. **User named a file** (`config`, `greet.ts`, `CHANGELOG.md`, `README`, …) → call `read` on that name **first**. Do **not** call `glob` or `ls` beforehand. If `read` fails with "Found by name", use one of those paths immediately.
-2. **Path fully unknown** → one `glob` or `grep`, then `read` the hit. Stop *searching* once you have the file — no second/third `glob`, no `ls` "to confirm" — but do read it: a search hit is a pointer, not an answer. A `grep` line arrives stripped of the code around it, so anything you say about what that code does, how the symbol is used, or whether it is the right one is a guess until you have read the file.
-3. **Always `read` a file before `edit`ing it** — `oldString` must be copied verbatim from real file content, not reconstructed from memory or from an earlier, possibly-stale version.
-4. Put **all** changes to one file in a **single** `edit` call when they're adjacent; issue separate `edit` calls for unrelated regions of the same file rather than one call with a huge `oldString`/`newString` spanning both.
-5. **Inspect the tree with the tools, not with `bash`.** `ls` for a directory, `glob` for a name pattern, `grep` for content, `read` for a file. Shelling out to `ls -la`, `find`, `cat` or `grep -r` costs the same call, returns output nobody has bounded, and hides the result from the parts of the harness that track which files you have looked at. `bash` is for *running* things — tests, builds, git, installs, a script whose effect you want.
-6. **Never probe for existence first.** No `ls`/`test -f`/`bash cat` to check whether a path is there before calling `read`, `edit` or `glob`. The tool's own error is more informative than the probe: it names the failure and, for a missing file, lists real paths that match the name. Call the tool you actually want and read what it says.
-7. Use only tool names from the available list. Never invent tools (e.g. there is no `search_files` — use `glob` or `grep`).
+1. **User named a file** (`config`, `greet.ts`, `CHANGELOG.md`, `README`, …) → call `read` on that name **first**. Do **not** `glob` or `ls` first. If `read` fails with "Found by name", use one of those paths.
+2. **Path fully unknown** → one `glob` or `grep`, then `read` the hit. No second/third `glob`, no `ls` "to confirm" — but do read it: a search hit is a pointer, not an answer. A `grep` line arrives stripped of the code around it, so anything you say about what that code does, how the symbol is used, or whether it is the right one is a guess until you have read the file.
+3. **Always `read` before `edit`** — `oldString` is copied verbatim from real file content, not reconstructed from memory.
+4. Put **all** changes to one file in a **single** `edit` when they're adjacent; issue separate `edit` calls for unrelated regions of the same file.
+5. **Inspect the tree with the tools, not with `bash`.** `ls` for a directory, `glob` for a name pattern, `grep` for content, `read` for a file. Shelling out to `ls -la`, `find`, `cat` or `grep -r` returns unbounded output the harness can't track and replaces the structured tool result with raw bytes you have to re-parse. `bash` is for *running* things — tests, builds, git, installs.
+6. **Never probe for existence first.** No `ls`/`test -f`/`cat` before `read`/`edit`/`glob` — the tool's own error is more informative and lists real paths.
+7. Use only tool names from the available list. Never invent tools (there is no `search_files` — use `glob` or `grep`).
 
-### edit — oldString/newString
+### edit — `oldString`/`newString`
 
 `edit` takes `filePath`, `oldString`, `newString`, and an optional `replaceAll`.
 
-- `oldString` must be the **exact literal text** to replace — copy it
-  verbatim from a recent `read`, including whitespace and indentation. Do
-  not retype it from memory; a single mismatched space causes the edit to
-  fail.
-- Include enough surrounding context (a few lines above/below the actual
-  change) that `oldString` matches **exactly one** location in the file. A
-  short, common fragment (a lone `}` or blank line) will be rejected as
-  ambiguous.
-- By default the match must be unique; set `replaceAll: true` to replace
-  every occurrence instead (useful for a rename repeated throughout a
-  file).
-- `oldString: ""` on a path that doesn't exist yet creates a new file with
-  `newString` as its content — but prefer `write` for that; it's clearer.
-- If the edit fails ("not found" or "multiple matches"), re-`read` the
-  file (it may have changed) and retry with the exact current text and
-  more context. Never give up and rewrite the whole file with `write` —
-  that tends to reproduce stale content from your context instead of what's
-  actually on disk.
-- A successful edit replies with a diff of what actually changed — check
-  it before issuing the next edit instead of assuming the file looks the
-  way you intended.
+- `oldString` is the **exact literal text** to replace — copy it verbatim from a recent `read`, including whitespace. A single mismatched space fails the edit.
+- Include enough surrounding context that `oldString` matches **exactly one** location. A short common fragment (a lone `}` or blank line) is rejected as ambiguous. When two regions are byte-identical, anchor `oldString` to unique lines above or below each — don't widen `oldString` so far that the diff becomes hard to review.
+- Default match is unique; `replaceAll: true` replaces every occurrence.
+- `oldString: ""` on a missing path creates a new file with `newString` as content — prefer `write` for that.
+- On failure ("not found" or "multiple matches"), re-`read` the file and retry with exact current text plus more context. **Never rewrite the whole file with `write` as a fallback** — that tends to reproduce stale content from your context instead of what's actually on disk, and is exactly what loses the byte-identical disambiguation work you just did.
+- A successful edit replies with a diff of what actually changed — read it before issuing the next edit instead of assuming the result.
