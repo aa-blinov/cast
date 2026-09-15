@@ -4,6 +4,13 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.31.4
+
+### Fixed
+
+- **`glob` reported "No files found" for an absolute pattern whose files were right there.** With a pattern like `/abs/dir/**/*.spec.ts` and no `path` argument, the search still ran from the current directory, while the `/` in the pattern switched on full-path matching and anchored it with a leading `**/` — so the pattern being matched was `**//abs/dir/**/*.spec.ts`, which can never match. An absolute pattern now takes its own directory prefix as the search root. The miss was silent: no error, just an empty result the model had no reason to distrust.
+- **Three prompt rules removed in the 0.31.3 prompt trim are back.** The trim described them as consolidated elsewhere, but nothing carried them: no colon before a tool call, short progress updates at key moments rather than silence between the opening preamble and the summary, and a preamble on every response that calls tools (not only the first of a turn).
+
 ## 0.31.3
 
 ### Changed
