@@ -2067,6 +2067,28 @@ describe("search path relativization", () => {
 		expect(grepLines[0]).toBe(`${join(sibling, "b.txt")}:1:hit here`);
 	});
 
+	// Regression: an absolute pattern with no `path` searched cwd while the
+	// "/" in it triggered the `**/` full-path anchoring, producing
+	// `**//abs/dir/...` — never a match. The tool reported "No files found"
+	// for files sitting right there, with no error to notice.
+	it("resolves an absolute pattern against its own directory prefix", async () => {
+		const outside = join(TEST_DIR, "abs-glob", "tests");
+		mkdirSync(outside, { recursive: true });
+		writeFileSync(join(outside, "alpha.spec.ts"), "export {}\n", "utf-8");
+		writeFileSync(join(outside, "ignored.txt"), "ignore\n", "utf-8");
+
+		const { execGlob } = await import("../src/core/tools/search.ts");
+		const cwd = join(TEST_DIR, "proj");
+		mkdirSync(cwd, { recursive: true });
+
+		const recursive = await execGlob({ pattern: join(outside, "**", "*.spec.ts") }, cwd, mockConfig);
+		expect(recursive.content).toContain("alpha.spec.ts");
+		expect(recursive.content).not.toContain("ignored.txt");
+
+		const flat = await execGlob({ pattern: join(outside, "*.spec.ts") }, cwd, mockConfig);
+		expect(flat.content).toContain("alpha.spec.ts");
+	});
+
 	it("still shortens a path that really is inside cwd", async () => {
 		const cwd = join(TEST_DIR, "proj");
 		mkdirSync(join(cwd, "src"), { recursive: true });

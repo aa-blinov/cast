@@ -18,6 +18,7 @@ const REGEX_ESCAPE_RE = /[.*+?^${}()|[\]\\]/g;
 const SEARCH_PATH_PREFIX_RE = /^\.\//gm;
 const RG_PATH_LINE_RE = /^([^:\n]+):/gm;
 const PERMISSION_DENIED_RE = /operation not permitted|permission denied/i;
+const GLOB_META_RE = /[*?[{]/;
 
 // execFile (not execFileSync) — the sync variant blocks the whole Node event
 // loop for as long as fd/rg run. Under concurrent tool execution (several
@@ -278,8 +279,8 @@ export async function execGlob(
 	signal?: AbortSignal,
 ): Promise<ToolResult> {
 	if (signal?.aborted) return abortedSearchResult();
-	const pattern = typeof args.pattern === "string" ? args.pattern : "";
-	if (!pattern.trim())
+	const rawPattern = typeof args.pattern === "string" ? args.pattern : "";
+	if (!rawPattern.trim())
 		return { content: 'Error: "pattern" is required. Retry with a glob such as "**/*.ts".', isError: true };
 	if (args.path !== undefined && (typeof args.path !== "string" || !args.path.trim())) {
 		return {
@@ -293,7 +294,25 @@ export async function execGlob(
 	) {
 		return { content: 'Error: "limit" must be a positive integer. Retry with limit: 1 or greater.', isError: true };
 	}
-	const searchPath = typeof args.path === "string" ? resolvePath(args.path, cwd) : cwd;
+	// An absolute pattern (`/abs/dir/**/*.spec.ts`, no `path`) carries its own
+	// search root. Without peeling it off, searchPath stays cwd and the `**/`
+	// anchoring below rewrites the pattern to `**//abs/dir/...`, which matches
+	// nothing — the caller gets a silent "No files found" for files that are
+	// right there. Split at the first segment holding a glob metacharacter;
+	// with none, the pattern is a literal path, so its dirname is the root.
+	let pattern = rawPattern;
+	let searchRoot = typeof args.path === "string" ? args.path : undefined;
+	if (searchRoot === undefined && isAbsolute(pattern)) {
+		const segments = pattern.split("/");
+		const firstGlob = segments.findIndex((segment) => GLOB_META_RE.test(segment));
+		const splitAt = firstGlob === -1 ? segments.length - 1 : firstGlob;
+		if (splitAt > 0) {
+			searchRoot = segments.slice(0, splitAt).join("/") || "/";
+			pattern = segments.slice(splitAt).join("/");
+		}
+	}
+
+	const searchPath = searchRoot !== undefined ? resolvePath(searchRoot, cwd) : cwd;
 	const limit = typeof args.limit === "number" ? args.limit : 1000;
 	let searchStats: Awaited<ReturnType<typeof stat>>;
 	try {
