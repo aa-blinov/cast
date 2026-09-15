@@ -56,8 +56,28 @@ function readOptionalShared(fileName: string): string {
 	}
 }
 
-/** Append error-handling + file-tool + agent-discipline guidance after a role prompt body. */
-export function withSharedToolPrompt(body: string): string {
+/**
+ * The `edit` argument contract, sliced off `tools-edit.md` at its own heading.
+ * A read-only agent (explore, review — allowlists without `edit`/`write`) was
+ * still carrying the whole oldString/newString section, ~320 tokens of rules
+ * for a tool it cannot call. The workflow above that heading stays: it governs
+ * `read`/`grep`/`glob`/`ls`, which every agent has.
+ */
+const EDIT_CONTRACT_HEADING = "### edit —";
+
+function toolsEditFor(tools: string[] | undefined): string {
+	const text = readOptionalShared("tools-edit.md");
+	if (!tools || tools.includes("edit") || tools.includes("write")) return text;
+	const cut = text.indexOf(EDIT_CONTRACT_HEADING);
+	return cut === -1 ? text : text.slice(0, cut).trimEnd();
+}
+
+/**
+ * Append error-handling + file-tool + agent-discipline guidance after a role
+ * prompt body. `tools` is the agent's allowlist when it has one (undefined
+ * means every tool), and trims sections the agent can't act on.
+ */
+export function withSharedToolPrompt(body: string, tools?: string[]): string {
 	return [
 		body.trimEnd(),
 		readOptionalShared("cast-context.md"),
@@ -65,7 +85,7 @@ export function withSharedToolPrompt(body: string): string {
 		readOptionalShared("executing-with-care.md"),
 		readOptionalShared("tone-and-style.md"),
 		readOptionalShared("error-handling.md"),
-		readOptionalShared("tools-edit.md"),
+		toolsEditFor(tools),
 		readOptionalShared("harness-discipline.md"),
 		readOptionalShared("verification-discipline.md"),
 	]
