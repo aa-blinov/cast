@@ -4,6 +4,13 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.31.5
+
+### Changed
+
+- **A `grep` result with three matches or fewer now says to read the file before describing the code.** A grep line carries the matched text, so it reads like a finished answer, and the model went on to report on code it had never opened. `glob` already gives the same nudge on a short hit list.
+- **The "inspect with the tools, not with `bash`" rule now covers verification too.** Reading back a file you just wrote goes through `read`, not `cat`/`wc`/`xxd`, and several inspections packed into one `bash` call are called out: the blocks of output then have to be matched back to the paths that produced them, and getting that backwards reports the opposite of what is on disk.
+
 ## 0.31.4
 
 ### Fixed
