@@ -19,6 +19,7 @@ const SEARCH_PATH_PREFIX_RE = /^\.\//gm;
 const RG_PATH_LINE_RE = /^([^:\n]+):/gm;
 const PERMISSION_DENIED_RE = /operation not permitted|permission denied/i;
 const GLOB_META_RE = /[*?[{]/;
+const GREP_READ_NOTE_LIMIT = 3;
 
 // execFile (not execFileSync) — the sync variant blocks the whole Node event
 // loop for as long as fd/rg run. Under concurrent tool execution (several
@@ -685,7 +686,18 @@ export async function execGrep(
 		};
 	}
 
-	return { content: output.trim() || "No matches found" };
+	const trimmed = output.trim();
+	if (!trimmed) return { content: "No matches found" };
+	// Same nudge `glob` gives on a short hit list: a grep line carries the
+	// matched text, which reads like an answer, and the model then reports on
+	// code it never opened. Only worth saying when the next step is obvious —
+	// a handful of hits, not a wall of them.
+	if (trimmed.split("\n").length <= GREP_READ_NOTE_LIMIT) {
+		return {
+			content: `${trimmed}\n[note: a match is a pointer — read the file before describing what this code does]`,
+		};
+	}
+	return { content: trimmed };
 }
 
 export async function execLs(args: Record<string, unknown>, cwd: string, _config: AppConfig): Promise<ToolResult> {
