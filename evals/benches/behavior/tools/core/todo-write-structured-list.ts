@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
-import { fixtureDir, fixturePath, writeFixture } from "../../../../lib/fixtures.ts";
+import { fixtureDir, writeFixture } from "../../../../lib/fixtures.ts";
 import type { EvalCase } from "../../../../lib/runner.ts";
+
+const FIXTURE_ID = "behavior-todo-list";
 
 export const todoWriteStructuredList: EvalCase = {
 	id: "todo-write-structured-list",
@@ -12,6 +13,18 @@ export const todoWriteStructuredList: EvalCase = {
 	// tracking abstract work, or asked what "the issue" was. Three concrete,
 	// self-contained tasks avoid that: nothing to investigate, nothing to
 	// ask about.
+	//
+	// The fixture is what those three tasks act on. Without it the case ran in
+	// an empty temp directory, and a model that opened it first found nothing
+	// to bump or test and asked which project was meant — a fair question, and
+	// a failure of the case rather than of the model.
+	setup: () =>
+		void writeFixture(FIXTURE_ID, {
+			"CHANGELOG.md": "# Changelog\n\n## Unreleased\n",
+			"package.json": '{\n\t"name": "fixture-app",\n\t"version": "1.4.2",\n\t"scripts": { "test": "echo ok" }\n}\n',
+			"test/smoke.test.js": "// smoke test\n",
+		}),
+	cwd: fixtureDir(FIXTURE_ID),
 	prompt:
 		"I need to update the changelog, bump the version number, and run the test suite before shipping this " +
 		"release. Track this as a checklist so progress is visible as I go.",
