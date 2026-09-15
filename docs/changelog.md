@@ -4,6 +4,14 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.31.6
+
+### Changed
+
+- **Read-only subagents no longer carry the `edit` argument contract.** `explore` and `review` declare tool allowlists without `edit` or `write`, but their system prompt still spelled out the whole `oldString`/`newString` contract — about 320 tokens of rules for a tool they cannot call. The shared appendix now takes the agent's allowlist into account. The file-tool workflow above that section is unchanged: it governs `read`/`grep`/`glob`/`ls`, which every agent has.
+- **The agent is told not to re-read a file whose content it already has**, unless it edited the file, something else may have changed it, or an error suggests its copy is stale.
+- **Five personas no longer repeat the `skill` tool bullet.** The skills instructions already explain the tool in full, and they are appended only when skills exist — with none installed, the bullet described a menu with nothing on it.
+
 ## 0.31.5
 
 ### Changed
