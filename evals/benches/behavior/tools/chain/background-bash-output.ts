@@ -7,13 +7,14 @@ export const backgroundBashOutput: EvalCase = {
 	description: "A background bash task is polled with its returned task id and output is observed.",
 	signals: ["background-lifecycle", "tool-result-integrity"],
 	timeout: 90_000,
-	// A few seconds of real delay, not an instant `printf`: the bash tool's
-	// own result text tells the model it doesn't need to poll because a
-	// completion reminder arrives automatically, so an instant command lets
-	// the model satisfy the prompt by just waiting for that reminder and
-	// never touching bash_output. The delay forces a genuine, observed poll.
+	// The bash tool's own result text tells the model a completion reminder
+	// arrives automatically, so "inspect its result when it finishes" is
+	// satisfiable by just waiting — the case then times out on a model that
+	// did nothing wrong. Ask for the poll explicitly: what's under test is
+	// that the poll carries the task id the start call returned, not whether
+	// the model invents the idea of polling against the tool's own advice.
 	prompt:
-		"Start the local check `sleep 5 && printf background-ready` without blocking the session, then inspect its result when it finishes.",
+		"Start the local check `sleep 5 && printf background-ready` without blocking the session, then poll it with bash_output and report the output it produced.",
 	expect: {
 		toolsCalled: ["bash", "bash_output"],
 		noErrors: true,
