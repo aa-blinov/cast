@@ -118,6 +118,20 @@ describe("loadSubagentPrompts", () => {
 		expect(verifIdx).toBeGreaterThan(discIdx);
 	});
 
+	// A read-only subagent used to carry the whole oldString/newString contract
+	// for tools its own allowlist denies it — ~320 tokens of rules it could
+	// never act on. The workflow above that heading still applies: it governs
+	// read/grep/glob/ls, which explore and review do have.
+	it("keeps the edit contract out of read-only subagents", () => {
+		const prompts = loadSubagentPrompts();
+		const explore = prompts.find((p) => p.name === "explore");
+		const worker = prompts.find((p) => p.name === "worker");
+		expect(explore!.tools).not.toContain("edit");
+		expect(explore!.systemPrompt).toContain("## File tools");
+		expect(explore!.systemPrompt).not.toContain("### edit —");
+		expect(worker!.systemPrompt).toContain("### edit —");
+	});
+
 	it("each prompt has name, label, description, systemPrompt", () => {
 		for (const p of loadSubagentPrompts()) {
 			expect(p.name).toBeTruthy();

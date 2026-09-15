@@ -52,8 +52,10 @@ function loadSubagentFromFile(filePath: string): SubagentPrompt | null {
 		label: typeof frontmatter.label === "string" && frontmatter.label ? frontmatter.label : name,
 		description: typeof frontmatter.description === "string" ? frontmatter.description : "",
 		// Same shared error-handling + file-tool contract as personas — workers
-		// use the same read/edit/find tools and must not invent a different workflow.
-		systemPrompt: withSharedToolPrompt(body),
+		// use the same read/edit/find tools and must not invent a different
+		// workflow. The allowlist goes in so a read-only subagent doesn't carry
+		// the edit contract.
+		systemPrompt: withSharedToolPrompt(body, parseToolsAllowlist(frontmatter)),
 		tools: parseToolsAllowlist(frontmatter),
 		agentsMd: parseAgentsMd(frontmatter),
 	};
