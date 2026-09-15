@@ -4,6 +4,7 @@ import { filesLostByRestore, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
+import { clearGoal, editGoalObjective, readGoal, startGoal } from "../core/goal.ts";
 import { runHooksForEvent } from "../core/hooks.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult, mcpServerToolBlurbs } from "../core/mcp.ts";
@@ -3233,13 +3234,47 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		},
 	},
 	{
+		// Its own route, ahead of `/goal <objective>`, because these two survive a
+		// running turn and starting a goal must not: a long autonomous run is
+		// exactly when you want to read the goal or call it off, and refusing
+		// both because they share a command word was the wrong trade.
+		match: (input) => input === "/goal status" || input === "/goal clear",
+		whileRunning: "submit",
+		run: ({ input, session, showNotice }) => {
+			if (input === "/goal clear") {
+				clearGoal(session.id);
+				showNotice("[Goal cleared]");
+				return;
+			}
+			const goal = readGoal(session.id);
+			showNotice(
+				goal
+					? `[Goal (${goal.status}, ${goal.turns} turn${goal.turns === 1 ? "" : "s"}, ${goal.continuations}/${goal.maxContinuations} continuations): ${goal.objective}${goal.note ? ` — ${goal.note}` : ""}]`
+					: "[No goal in this session]",
+			);
+		},
+	},
+	{
 		match: (input) => input === "/goal" || input.startsWith("/goal "),
-		run: async ({ input, images, deps, agent, showNotice }) => {
+		run: async ({ input, images, deps, agent, session, showNotice }) => {
 			const raw = input === "/goal" ? "" : input.slice("/goal ".length);
+			const trimmed = raw.trim();
+			// Rewording an objective must not reset its history: a plain /goal
+			// would start a fresh one and drop the turns and continuations spent
+			// getting here.
+			if (trimmed.startsWith("edit ")) {
+				const next = trimmed.slice("edit ".length).trim();
+				if (!next) {
+					showNotice("[Usage: /goal edit <new objective>]");
+					return;
+				}
+				showNotice(editGoalObjective(session.id, next) ? "[Goal objective updated]" : "[No goal to edit]");
+				return;
+			}
 			const { goal: goalText, maxIterations } = parseGoalInput(raw);
 			if (!goalText) {
 				showNotice(
-					"[Usage: /goal [N] <what to achieve> — works autonomously until done (or /goal --steps N <desc>)]",
+					"[Usage: /goal [N] <what to achieve> — persists until done (also: /goal status, /goal edit <text>, /goal clear)]",
 				);
 				return;
 			}
@@ -3248,8 +3283,11 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				return;
 			}
 			deps.agent.addDisplayMessage({ role: "user", content: input });
-			// goal=<number> tells the daemon to cap the turn's iterations so the
-			// autonomous run can't loop forever, and uses the requested budget.
+			// The goal outlives this turn: it lands in .cast/goals/<session>.json
+			// and rides along with every later turn until the agent closes it or
+			// the user clears it. maxIterations still caps *this* turn so the
+			// autonomous first pass can't loop forever.
+			startGoal(session.id, goalText);
 			await agent.submit(buildGoalPrompt(goalText, maxIterations), images, maxIterations);
 			return;
 		},

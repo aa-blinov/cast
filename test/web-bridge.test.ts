@@ -1835,7 +1835,7 @@ describe("web bridge", () => {
 		const result = await bridge.executeCommand(ws.id, "/goal");
 		expect(result).toEqual({
 			ok: false,
-			error: "Usage: /goal [N] <what to achieve>  (or /goal --steps N <desc>)",
+			error: "Usage: /goal [N] <what to achieve>  (also: /goal status, /goal edit <text>, /goal clear)",
 		});
 		// No submit was fired — the loop stays quiet for at least one tick.
 		await new Promise((r) => setTimeout(r, 50));

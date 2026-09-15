@@ -24,6 +24,20 @@ import { type AppConfig, inputTokenBudget, type ProviderCredentials, reservedRes
 import { type AnnouncedLocalDate, appendDateRolloverReminder } from "./date-rollover-reminder.ts";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import {
+	GOAL_BUDGET_PROMPT,
+	GOAL_CONTINUATION_PROMPT,
+	GOAL_NUDGE_PROMPT,
+	GOAL_RECOVERY_NOTE,
+	goalPromptBlock,
+	pauseGoalForAbort,
+	readGoal,
+	recordGoalContinuation,
+	recordGoalTurn,
+	reportGoalBlocked,
+	resumeGoalAfterPause,
+	updateGoal,
+} from "./goal.ts";
+import {
 	coerceHooksObject,
 	type HookEvent,
 	type HookMatcherGroup,
@@ -131,7 +145,14 @@ import {
 	getToolDefinitions,
 	type ToolResult,
 } from "./tools.ts";
-import { acquireTurnRunner, clearTurnRunner, markTurnRunner, releaseTurnRunner } from "./turn-runner-state.ts";
+import {
+	acquireTurnRunner,
+	clearTurnRunner,
+	HEARTBEAT_INTERVAL_MS,
+	heartbeatTurnRunner,
+	markTurnRunner,
+	releaseTurnRunner,
+} from "./turn-runner-state.ts";
 
 const IMAGE_VISION_RE = /image|vision/i;
 const MEMORY_EMPTY_LINE_RE = /^\(none/;
@@ -1731,9 +1752,20 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 		!runnerSessionId || loopConfig.skipTurnRunnerLock || acquireTurnRunner(runnerSessionId, process.pid);
 	if (!lockAcquired) throw new Error(`Session "${runnerSessionId}" is already running in another process`);
 	if (runnerSessionId) markTurnRunner(runnerSessionId, process.pid);
+	// The lock records when the turn started and nothing refreshed it, so any
+	// turn outliving STALE_THRESHOLD_MS — ordinary work, and every goal run —
+	// read as stale and could be taken from a live process, leaving two loops
+	// driving one session. Beat while we work; `unref` so a finished process
+	// never waits on the timer.
+	const heartbeat =
+		runnerSessionId && !loopConfig.skipTurnRunnerLock
+			? setInterval(() => heartbeatTurnRunner(runnerSessionId, process.pid), HEARTBEAT_INTERVAL_MS)
+			: undefined;
+	heartbeat?.unref?.();
 	try {
 		await runLoopInner(messages, loopConfig);
 	} finally {
+		if (heartbeat) clearInterval(heartbeat);
 		// clearTurnRunner checks the pid inside the file matches our own before
 		// unlinking, so a second TUI racing on the same session won't have its
 		// marker clobbered by us.
@@ -1788,6 +1820,31 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// todo projection as execution state.
 	const todoModeActive = !loopConfig.planState?.enabled;
 	let todos: TodoItem[] = todoModeActive ? (loopConfig.initialTodos ?? []) : [];
+	// Read once per run, like the plan snapshot above: a goal can only be
+	// started or closed between turns, so re-reading the file mid-run would
+	// only ever return what we already have.
+	// Nested runs share the parent's sessionId, so without this a subagent would
+	// inherit the goal block, be handed goal_update, and could close its
+	// parent's goal from inside a delegated task.
+	const ownsGoal = Boolean(loopConfig.sessionId) && !loopConfig.skipTurnRunnerLock;
+	// A goal paused by an interrupted turn resumes here, and the run says so in
+	// the prompt — the transcript it inherits may stop mid-tool.
+	const goalResumed = ownsGoal && loopConfig.sessionId ? resumeGoalAfterPause(loopConfig.sessionId) : false;
+	const activeGoal =
+		ownsGoal && loopConfig.sessionId && readGoal(loopConfig.sessionId)?.status === "active"
+			? readGoal(loopConfig.sessionId)
+			: undefined;
+	if (activeGoal && loopConfig.sessionId) recordGoalTurn(loopConfig.sessionId);
+	// Set by goal_update: the snapshot above stays stale on purpose (one file
+	// read per run), so the close has to be remembered here.
+	let goalClosed = false;
+	let goalContinuations = activeGoal?.continuations ?? 0;
+	let goalWrapUpSent = false;
+	// Signature of the tool calls made during the pass that just ended. An
+	// identical one next time round means the continuation bought nothing —
+	// the budget is spent the same either way, so this is the only thing that
+	// notices churn.
+	let goalLastPassSignature = "";
 	const builtinTools = getToolDefinitions(
 		subagentNames,
 		initialModel,
@@ -1797,6 +1854,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		todoModeActive,
 		allowedSkills?.some((skill) => !skill.disableModelInvocation) ?? false,
 		memoryEnabled,
+		Boolean(activeGoal),
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
@@ -2074,6 +2132,39 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			// access to this closure's `todos` — the list must be visible to
 			// syncSystemPrompt on the very next request, not round-tripped through
 			// a separate store.
+			if (name === "goal_update") {
+				// Validated, not defaulted: a missing or misspelled status used to
+				// fall through to "complete", so `goal_update({note:"still stuck"})`
+				// closed the goal as done — the exact outcome this tool exists to
+				// prevent.
+				const status = finalArgs.status;
+				if (status !== "complete" && status !== "blocked")
+					return {
+						content: `Error: status must be "complete" or "blocked", got ${JSON.stringify(status)}. The goal is unchanged — keep working, or call again with a valid status.`,
+						isError: true,
+					};
+				const note = String(finalArgs.note ?? "");
+				if (!loopConfig.sessionId) return { content: "Error: there is no active goal to close.", isError: true };
+				if (status === "blocked") {
+					const outcome = reportGoalBlocked(loopConfig.sessionId, note, finalArgs.terminal === true);
+					if (!outcome) return { content: "Error: there is no active goal to close.", isError: true };
+					if ("remaining" in outcome) {
+						return {
+							content: `Blocker recorded, but the goal stays active: the same blocker has to come back ${outcome.remaining} more time(s) before it counts as an impasse. Try another route, or ask the user the question that would unblock you — a question they can answer is not a blocker.`,
+						};
+					}
+					goalClosed = true;
+					return {
+						content: "Goal marked blocked. It stops driving this run and no longer rides along with later turns.",
+					};
+				}
+				if (!updateGoal(loopConfig.sessionId, status, note))
+					return { content: "Error: there is no active goal to close.", isError: true };
+				goalClosed = true;
+				return {
+					content: `Goal marked ${status}. It stops driving this run and no longer rides along with later turns; the user can start another with /goal.`,
+				};
+			}
 			if (name === "todo_write") {
 				const result = validateTodos(finalArgs.todos);
 				if (!result.ok) return { content: `Error: ${result.error}`, isError: true };
@@ -2203,6 +2294,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		if (loopConfig.rebuildSystemPrompt) {
 			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
 		}
+		if (activeGoal) {
+			prompt = goalResumed
+				? `${prompt}\n\n${goalPromptBlock(activeGoal)}\n\n${GOAL_RECOVERY_NOTE}`
+				: `${prompt}\n\n${goalPromptBlock(activeGoal)}`;
+		}
 		if (memoryService && isMemoryWriteEnabled() && loopConfig.memory?.sessionId) {
 			prompt = `${prompt}\n\n${memorySystemPrompt(cwd, loopConfig.memory.sessionId)}`;
 		}
@@ -2284,6 +2380,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 
 	/** Abort end: optional interrupt reminder for the next model turn, then settle. */
 	const endAborted = () => {
+		// An interrupted goal turn is not a finished one: park it so the next
+		// run knows to re-check the world instead of trusting the transcript.
+		if (activeGoal && !goalClosed && loopConfig.sessionId) pauseGoalForAbort(loopConfig.sessionId);
 		const shutdown = signal?.reason === "shutdown";
 		if (appendInterruptReminder(messages, shutdown ? "shutdown" : undefined)) {
 			onEvent({ type: "interrupt_reminder" });
@@ -2961,6 +3060,48 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						content: stopResult.reason || "A Stop hook requested more work before ending this turn.",
 					});
 					onEvent({ type: "followup_injected", messages: [messages[messages.length - 1]] });
+					continue;
+				}
+			}
+			// An open goal doesn't stop here: it pushes the run forward instead of
+			// waiting for the user. Bounded twice over — its own continuation
+			// budget, and the outer iteration cap above, which ends the run
+			// whatever the goal wants.
+			if (activeGoal && !goalClosed && !signal?.aborted && loopConfig.sessionId) {
+				if (goalContinuations < activeGoal.maxContinuations) {
+					// The snapshot is from run start; this write is what notices a
+					// goal cleared or closed from outside the run (another client,
+					// a second process). It returns undefined then, and continuing
+					// would drive a goal that no longer exists.
+					const recorded = recordGoalContinuation(loopConfig.sessionId);
+					if (!recorded) {
+						goalClosed = true;
+						onEvent({ type: "end", reason: "stop" });
+						break;
+					}
+					goalContinuations = recorded.continuations;
+					const signature = recentToolCalls.map((call) => `${call.name}:${call.argsKey}`).join("|");
+					const churning = signature !== "" && signature === goalLastPassSignature;
+					goalLastPassSignature = signature;
+					messages.push({ role: "user", content: churning ? GOAL_NUDGE_PROMPT : GOAL_CONTINUATION_PROMPT });
+					onEvent({ type: "followup_injected", messages: [messages[messages.length - 1]!] });
+					continue;
+				}
+				if (!goalWrapUpSent) {
+					goalWrapUpSent = true;
+					// Terminal, so later turns don't pay the wrap-up round trip
+					// again and `/goal status` stops reporting a healthy active
+					// goal that can never continue.
+					updateGoal(
+						loopConfig.sessionId,
+						"budget_limited",
+						`Used all ${activeGoal.maxContinuations} continuations without proving completion.`,
+					);
+					loopConfig.onWarning?.(
+						`Goal used its continuation budget (${activeGoal.maxContinuations}) — wrapping up. It stays active; send a message or /goal clear.`,
+					);
+					messages.push({ role: "user", content: GOAL_BUDGET_PROMPT });
+					onEvent({ type: "followup_injected", messages: [messages[messages.length - 1]!] });
 					continue;
 				}
 			}

@@ -55,6 +55,7 @@ export function getToolDefinitions(
 	includeTodoTool?: boolean,
 	includeSkillTool = true,
 	memoryEnabled = true,
+	goalActive = false,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -603,6 +604,42 @@ export function getToolDefinitions(
 									},
 								},
 								required: ["todos"],
+							},
+						},
+					},
+				]
+			: []),
+		...(goalActive
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "goal_update",
+							description:
+								'Close the active goal. Call with status "complete" only once you have checked the current state and every requirement of the objective is proven done — not because you finished the message the user last sent, and not because you are stopping work. ' +
+								"If the objective covers a set (every file, all tests, each module), enumerate that set from the current state and account for every member in `note`; closing after the first one is the failure this tool exists to prevent. " +
+								'Call with status "blocked" only at a real impasse you cannot move past without the user; a question the user could answer is not a blocker, so ask it and keep working. One report does not block the goal — the same blocker has to come back three times, so expect to be told to keep going. ' +
+								"While the goal stays active there is nothing to call: just keep making progress.",
+							parameters: {
+								type: "object",
+								properties: {
+									status: {
+										type: "string",
+										enum: ["complete", "blocked"],
+										description: "How the goal ended",
+									},
+									note: {
+										type: "string",
+										description:
+											'The evidence, item by item: for "complete", what you checked and what it showed for every requirement the objective names; for "blocked", what is in the way — word it the same way each time, since an unchanged blocker is what proves an impasse',
+									},
+									terminal: {
+										type: "boolean",
+										description:
+											'Only with "blocked", and only when pursuing the objective would cross a safety or policy line — that blocks at once, because retrying a refusal is pointless. An impasse you merely believe is final is NOT terminal: report it normally and let it repeat',
+									},
+								},
+								required: ["status", "note"],
 							},
 						},
 					},

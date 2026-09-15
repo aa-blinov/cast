@@ -13,6 +13,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { clearGoal, editGoalObjective, readGoal, startGoal } from "../../core/goal.ts";
 
 const ARG_WHITESPACE_SPLIT = /\s+/;
 
@@ -1030,8 +1031,30 @@ const commandHandlers: Record<string, CommandHandler> = {
 		return { ok: true, result: { sessionId: others[0]!.id } };
 	},
 	"/goal": ({ ws, arg, submit }) => {
+		const trimmed = arg.trim();
+		if (trimmed === "status") {
+			const current = readGoal(ws.session.id);
+			return { ok: true, result: current ?? { status: "none" } };
+		}
+		if (trimmed === "clear") {
+			clearGoal(ws.session.id);
+			return { ok: true, result: "Goal cleared" };
+		}
+		if (trimmed.startsWith("edit ")) {
+			const next = trimmed.slice("edit ".length).trim();
+			if (!next) return { ok: false, error: "Usage: /goal edit <new objective>" };
+			const edited = editGoalObjective(ws.session.id, next);
+			return edited ? { ok: true, result: edited } : { ok: false, error: "No active goal to edit" };
+		}
 		const { goal, maxIterations } = parseGoalInput(arg);
-		if (!goal) return { ok: false, error: "Usage: /goal [N] <what to achieve>  (or /goal --steps N <desc>)" };
+		if (!goal)
+			return {
+				ok: false,
+				error: "Usage: /goal [N] <what to achieve>  (also: /goal status, /goal edit <text>, /goal clear)",
+			};
+		// Durable: the objective lands in .cast/goals/<session>.json and is
+		// injected into every later turn until it is closed or cleared.
+		startGoal(ws.session.id, goal);
 		// /goal is blocking (isCommandBlocking), so this only runs idle.
 		// Kick off the autonomous run with the chosen iteration budget and
 		// let the SSE stream carry the work.
