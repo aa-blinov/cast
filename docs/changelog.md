@@ -4,6 +4,17 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.31.7
+
+### Fixed
+
+- **The `coder-with-subagents` persona demonstrated an `edit` call that doesn't exist.** Its Validate-then-Commit example passed `path` and an `edits` array; the tool takes `filePath`, `oldString` and `newString`. The example now matches the real signature.
+- **It also carried an instruction that contradicted the shared file-tool rules**, telling the agent to use one `edit` call per changed place while the shared workflow puts adjacent changes in a single call and splits only unrelated regions.
+
+### Changed
+
+- **`coder-with-subagents` no longer repeats the shared appendix.** Its Guidelines and Working Style sections restated the tone, file-tool, verification and preamble rules that every persona already receives. What stays is what those sections don't cover: reuse before writing new code, read a file fully before wide-ranging changes, ask when a requirement is unclear, and report which subagents were spawned. The persona goes from roughly 5100 to 4650 tokens.
+
 ## 0.31.6
 
 ### Changed
