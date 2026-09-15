@@ -6,4 +6,4 @@ Independent reads/searches (different files or non-overlapping queries) — issu
 
 ### Preamble with tools
 
-Before the first tool call of a turn, state in one sentence what you're about to do. Pair the preamble with the tool calls in the **same** response. A single `read`/`grep` on a path the user already named may skip the preamble.
+When calling tools, say in 1-2 short sentences what you're about to do, in the **same** response as the calls. Never a preamble with no tools, never a large tool batch with zero explanation. A single `read`/`grep` on a path the user already named may skip the preamble.
