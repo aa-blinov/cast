@@ -14,6 +14,7 @@ let effectiveStatusFromFile!: typeof import("../src/core/turn-runner-state.ts").
 let isProcessAlive!: typeof import("../src/core/turn-runner-state.ts").isProcessAlive;
 let acquireTurnRunner!: typeof import("../src/core/turn-runner-state.ts").acquireTurnRunner;
 let releaseTurnRunner!: typeof import("../src/core/turn-runner-state.ts").releaseTurnRunner;
+let heartbeatTurnRunner!: typeof import("../src/core/turn-runner-state.ts").heartbeatTurnRunner;
 
 beforeEach(async () => {
 	realHome = process.env.HOME;
@@ -24,8 +25,15 @@ beforeEach(async () => {
 	// the temp HOME so the module writes where these tests read.
 	vi.resetModules();
 	const mod = await import("../src/core/turn-runner-state.ts");
-	({ markTurnRunner, clearTurnRunner, effectiveStatusFromFile, isProcessAlive, acquireTurnRunner, releaseTurnRunner } =
-		mod);
+	({
+		markTurnRunner,
+		clearTurnRunner,
+		effectiveStatusFromFile,
+		isProcessAlive,
+		acquireTurnRunner,
+		releaseTurnRunner,
+		heartbeatTurnRunner,
+	} = mod);
 });
 afterEach(() => {
 	process.env.HOME = realHome;
@@ -35,6 +43,15 @@ afterEach(() => {
 /** Path helper — the module writes to `${homedir()}/.cast/sessions/.running-${id}.json`. */
 function pathFor(id: string): string {
 	return join(homedir(), ".cast", "sessions", `.running-${id}.json`);
+}
+
+function lockPathFor(id: string): string {
+	return join(homedir(), ".cast", "sessions", `.lock-${id}.json`);
+}
+
+/** Backdate a lock so it looks older than the 60s staleness threshold. */
+function ageLock(id: string, pid: number, ageMs: number): void {
+	writeFileSync(lockPathFor(id), JSON.stringify({ pid, startedAt: Date.now() - ageMs }), "utf-8");
 }
 
 const TEST_ID = "abc-123-def";
@@ -127,6 +144,62 @@ describe("turn-runner-state", () => {
 		}
 		expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(true);
 		releaseTurnRunner(TEST_ID, process.pid);
+	});
+
+	// The bug this heartbeat exists for: `startedAt` was written once at
+	// acquire time, so a turn outliving the staleness threshold — ordinary
+	// work, and every goal run — was stealable from a live, working process,
+	// leaving two agent loops driving one session.
+	it("keeps a long live turn's lock from being stolen once it beats", () => {
+		expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(true);
+		try {
+			ageLock(TEST_ID, process.pid, 90_000);
+			expect(heartbeatTurnRunner(TEST_ID, process.pid)).toBe(true);
+			// Refreshed, so the second process must not get in.
+			expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(false);
+		} finally {
+			releaseTurnRunner(TEST_ID, process.pid);
+		}
+	});
+
+	it("still hands the lock over when the owner stops beating", () => {
+		expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(true);
+		ageLock(TEST_ID, process.pid, 90_000);
+		// No heartbeat — a wedged or dead owner must not hold the session forever.
+		expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(true);
+		releaseTurnRunner(TEST_ID, process.pid);
+	});
+
+	it("does not let a heartbeat reclaim a lock someone else owns", () => {
+		expect(acquireTurnRunner(TEST_ID, process.pid)).toBe(true);
+		try {
+			// Someone else now owns it: beating must report the loss, not overwrite.
+			writeFileSync(lockPathFor(TEST_ID), JSON.stringify({ pid: 999_999, startedAt: Date.now() }), "utf-8");
+			expect(heartbeatTurnRunner(TEST_ID, process.pid)).toBe(false);
+			const owner = JSON.parse(readFileSync(lockPathFor(TEST_ID), "utf-8")) as { pid: number };
+			expect(owner.pid).toBe(999_999);
+		} finally {
+			rmSync(lockPathFor(TEST_ID), { force: true });
+		}
+	});
+
+	it("beating with no lock at all is a no-op", () => {
+		expect(heartbeatTurnRunner("no-such-session", process.pid)).toBe(false);
+	});
+
+	// The same staleness made a healthy long turn read as idle in the web UI.
+	it("keeps a beating turn visible as running", () => {
+		markTurnRunner(TEST_ID, process.pid);
+		acquireTurnRunner(TEST_ID, process.pid);
+		try {
+			writeFileSync(pathFor(TEST_ID), JSON.stringify({ pid: process.pid, startedAt: Date.now() - 90_000 }), "utf-8");
+			expect(effectiveStatusFromFile(TEST_ID)).toBe("idle");
+			heartbeatTurnRunner(TEST_ID, process.pid);
+			expect(effectiveStatusFromFile(TEST_ID)).toBe("running");
+		} finally {
+			clearTurnRunner(TEST_ID, process.pid);
+			releaseTurnRunner(TEST_ID, process.pid);
+		}
 	});
 });
 

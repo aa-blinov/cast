@@ -44,9 +44,15 @@ function ensureDir(): void {
 	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
-/** Past this age, even a live PID is treated as stale — protects against
- *  OS PID reuse after a process's death. */
+/** Past this age *without a heartbeat*, even a live PID is treated as stale —
+ *  protects against OS PID reuse after a process's death, and against a live
+ *  process that is wedged rather than working. */
 const STALE_THRESHOLD_MS = 60_000;
+
+/** How often a running turn refreshes its lock and sentinel. Comfortably under
+ *  STALE_THRESHOLD_MS so a missed tick (a blocked event loop, a slow disk)
+ *  doesn't hand the session to someone else. */
+export const HEARTBEAT_INTERVAL_MS = 15_000;
 
 export interface TurnRunnerState {
 	pid: number;
@@ -104,6 +110,43 @@ export function acquireTurnRunner(sessionId: string, pid: number): boolean {
 		}
 	}
 	return false;
+}
+
+/**
+ * Refresh the timestamps on the lock and sentinel we own.
+ *
+ * Without this, `startedAt` was written once at acquire time, so every turn
+ * lasting over a minute — which is ordinary, and guaranteed under a goal —
+ * looked stale to `acquireTurnRunner`: a second process would steal the lock
+ * from a live, working one and both would drive the same session. The same
+ * staleness made `effectiveStatusFromFile` report a long, healthy turn as
+ * idle. With a heartbeat, "stale" means what it was meant to mean — the owner
+ * stopped reporting, because it died or wedged.
+ *
+ * Returns false when the lock is gone or now belongs to someone else. It does
+ * NOT reclaim it: two processes both writing their own pid is the very race
+ * this guards against, so a loser stays a loser and the caller decides.
+ */
+export function heartbeatTurnRunner(sessionId: string, pid: number): boolean {
+	let owned = false;
+	try {
+		const state = JSON.parse(readFileSync(lockPath(sessionId), "utf-8")) as TurnRunnerState;
+		if (state.pid !== pid) return false;
+		writeFileSync(lockPath(sessionId), JSON.stringify({ pid, startedAt: Date.now() }), "utf-8");
+		owned = true;
+	} catch {
+		// No lock file at all: nothing to refresh. A caller that skipped the
+		// lock (a nested run) is the normal case here.
+		return false;
+	}
+	try {
+		const raw = readFileSync(statePath(sessionId), "utf-8");
+		const { pid: writerPid } = JSON.parse(raw) as TurnRunnerState;
+		if (writerPid === pid) markTurnRunner(sessionId, pid);
+	} catch {
+		/* sentinel missing or malformed — the lock is the part that matters */
+	}
+	return owned;
 }
 
 /** Releases only the lock owned by this pid. */
