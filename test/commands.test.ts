@@ -1590,6 +1590,55 @@ describe("/rules", () => {
 	});
 });
 
+describe("/goal", () => {
+	// The goal is session state under ~/.cast/goals, so /goal must write it,
+	// not just build a prompt — that was the whole point of making it durable.
+	it("records the objective, reports it, and clears it", async () => {
+		const { deps, calls } = createFakeDeps();
+		const { readGoal } = await import("../src/core/goal.ts");
+
+		await handleInput("/goal ship the importer", undefined, deps);
+		expect(readGoal("test-session")?.objective).toBe("ship the importer");
+		expect(readGoal("test-session")?.status).toBe("active");
+		// The turn still starts — the goal rides along with it.
+		expect(calls["agent.submit"]?.length).toBe(1);
+
+		await handleInput("/goal status", undefined, deps);
+		expect(noticeText(calls)).toContain("ship the importer");
+
+		await handleInput("/goal clear", undefined, deps);
+		expect(readGoal("test-session")).toBeUndefined();
+	});
+
+	it("rewords an objective without resetting its history", async () => {
+		const { deps } = createFakeDeps();
+		const { readGoal, recordGoalTurn } = await import("../src/core/goal.ts");
+
+		await handleInput("/goal make it fast", undefined, deps);
+		recordGoalTurn("test-session");
+		await handleInput("/goal edit make the import path fast, p95 under 200ms", undefined, deps);
+
+		const goal = readGoal("test-session");
+		expect(goal?.objective).toBe("make the import path fast, p95 under 200ms");
+		expect(goal?.turns).toBe(1);
+	});
+
+	it("refuses to start a goal mid-run but still answers status", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		const { readGoal } = await import("../src/core/goal.ts");
+
+		await handleInput("/goal ship it", undefined, deps);
+		expect(readGoal("test-session")).toBeUndefined();
+
+		// status survives a running turn — a long autonomous run is when you
+		// most want to read it. (noticeText reads the first notice; the busy
+		// refusal above is that one, so check the latest instead.)
+		await handleInput("/goal status", undefined, deps);
+		const latest = String(calls.showNotice?.at(-1)?.[0] ?? "");
+		expect(latest).toContain("No goal in this session");
+	});
+});
+
 describe("every routed command dispatches", () => {
 	const COMMANDS = [
 		"/abort",
