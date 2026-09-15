@@ -4,6 +4,17 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.32.0
+
+### Added
+
+- **`/goal` now outlives the turn that started it.** The objective is recorded for the session and rides along with every later turn until it is closed, instead of living inside a single submitted message. Where a turn would end, an open goal continues the run on its own — bounded by a continuation budget and by the turn's existing iteration cap — and a pass that changed nothing gets told so rather than repeating. The agent closes the goal with a new `goal_update` tool, which requires the evidence for every requirement the objective names; a blocker only ends the goal once it has come back three times, and a safety or policy refusal ends it at once.
+- **`/goal status`, `/goal edit <text>` and `/goal clear`.** Status and clear work while a turn is running, which is when a long autonomous run most needs them. Editing rewords the objective without resetting the history behind it.
+
+### Fixed
+
+- **A session lock could be taken from a live, working process.** The turn-runner lock recorded when the turn began and nothing refreshed it, while anything older than 60 seconds counted as stale — so an ordinary long turn was stealable and two agent loops could drive one session. The lock now heartbeats while the turn runs, so "stale" means the owner died or wedged. The same staleness also made a long, healthy turn show up as idle in the web UI.
+
 ## 0.31.7
 
 ### Fixed
