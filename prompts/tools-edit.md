@@ -8,7 +8,8 @@
 4. Put **all** changes to one file in a **single** `edit` when they're adjacent; issue separate `edit` calls for unrelated regions of the same file.
 5. **Inspect and verify files with the tools, not with `bash`.** `ls` for a directory, `glob` for a name pattern, `grep` for content, `read` for a file — reading back a file you just wrote included (`read`, never `cat`/`wc`/`xxd`). Shelling out to `ls -la`, `find`, `cat` or `grep -r` returns unbounded output the harness can't track and replaces the structured tool result with raw bytes you have to re-parse. Packing several inspections into one command (`ls a; ls b` in one call) is worse still: you then have to reattach each block of output to the path that produced it, and reading those blocks in the wrong order reports the opposite of what is on disk. `bash` is for *running* things — tests, builds, git, installs.
 6. **Never probe for existence first.** No `ls`/`test -f`/`cat` before `read`/`edit`/`glob` — the tool's own error is more informative and lists real paths.
-7. Use only tool names from the available list. Never invent tools (there is no `search_files` — use `glob` or `grep`).
+7. **Don't re-read what you already have.** A file whose content is already in this conversation doesn't need reading again — re-read only when you edited it, when something else may have changed it, or when an error suggests your copy is stale.
+8. Use only tool names from the available list. Never invent tools (there is no `search_files` — use `glob` or `grep`).
 
 ### edit — `oldString`/`newString`
 
