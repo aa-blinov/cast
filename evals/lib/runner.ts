@@ -10,20 +10,14 @@
  * - Timeout
  */
 
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AppConfig } from "../../src/core/config.ts";
 import { loadConfig } from "../../src/core/config.ts";
-import { buildReasoningParams } from "../../src/core/vendors.ts";
-import { BackgroundTaskRegistry } from "../../src/core/tools/bash-background.ts";
+import { clearGoal, readGoal, startGoal } from "../../src/core/goal.ts";
 import { type AgentEvent, MessageQueue, runAgentLoop } from "../../src/core/loop.ts";
-import { findPersona } from "../../src/core/personas.ts";
-import { createPlanState, modeDisabledTools } from "../../src/core/plan.ts";
-import { buildSystemPrompt, personaOptionsForCwd, resolvePersonasForCwd } from "../../src/core/project.ts";
-import { loadSubagentPrompts } from "../../src/core/subagents.ts";
-import { builtinSkillsDir, formatSkillsForPrompt, loadSkills } from "../../src/core/skills.ts";
-import type { TodoItem } from "../../src/core/todo.ts";
 import {
 	closeMcpConnections,
 	connectMcpServers,
@@ -31,6 +25,14 @@ import {
 	type McpServerConfig,
 	type McpSetupResult,
 } from "../../src/core/mcp.ts";
+import { findPersona } from "../../src/core/personas.ts";
+import { createPlanState, modeDisabledTools } from "../../src/core/plan.ts";
+import { buildSystemPrompt, personaOptionsForCwd, resolvePersonasForCwd } from "../../src/core/project.ts";
+import { builtinSkillsDir, formatSkillsForPrompt, loadSkills } from "../../src/core/skills.ts";
+import { loadSubagentPrompts } from "../../src/core/subagents.ts";
+import type { TodoItem } from "../../src/core/todo.ts";
+import { BackgroundTaskRegistry } from "../../src/core/tools/bash-background.ts";
+import { buildReasoningParams } from "../../src/core/vendors.ts";
 
 // ============================================================================
 // Case definition
@@ -63,6 +65,8 @@ export interface VerifyContext {
 	turns: number;
 	/** Full trace, including which calls were grouped in the same tool turn. */
 	trace: TraceTurn[];
+	/** Final state of the case's durable goal, when `EvalCase.goal` was set. */
+	goal?: { status: string; continuations: number; note?: string };
 }
 
 export interface EvalCase {
@@ -94,6 +98,9 @@ export interface EvalCase {
 	 * case exercise the same fresh-context contract as an approved `/plan`
 	 * transition without relying on a live client picker. */
 	initialTodos?: TodoItem[];
+	/** Start the case under a durable goal: the loop then continues on its own
+	 * where a turn would have stopped, up to `maxContinuations`. */
+	goal?: { objective: string; maxContinuations?: number };
 	/**
 	 * Working directory override — defaults to `RunnerOptions.cwd` (the real
 	 * project repo). Set this to an isolated empty directory (e.g.
@@ -310,7 +317,12 @@ interface AttemptResult {
  *  not infra noise, and retrying it would risk masking an actual regression. */
 const MAX_INFRA_RETRIES = 2;
 
-async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: AppConfig, model: string): Promise<AttemptResult> {
+async function runAttempt(
+	evalCase: EvalCase,
+	options: RunnerOptions,
+	config: AppConfig,
+	model: string,
+): Promise<AttemptResult> {
 	const temporaryCwd = evalCase.cwd ? undefined : mkdtempSync(join(tmpdir(), `cast-eval-${evalCase.id}-`));
 	const cwd = evalCase.cwd ?? temporaryCwd!;
 	// 60s was cutting real attempts off mid-turn: across the saved runs, 31
@@ -351,6 +363,8 @@ async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: Ap
 
 	let planState: ReturnType<typeof createPlanState> | undefined;
 	let mcpSetup: McpSetupResult | undefined;
+	// runCase (verify, cleanup) needs this too, so it rides back in the return.
+	let goalSessionId: string | undefined;
 
 	try {
 		await evalCase.setup?.();
@@ -392,10 +406,17 @@ async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: Ap
 			reasoningLevel: config.reasoningLevel,
 			mode: evalCase.mode,
 		});
+		// A goal is session state, so the case needs a session id to hang it on.
+		// Unique per attempt: repeated runs must not inherit each other's goal.
+		goalSessionId = evalCase.goal ? `eval-goal-${evalCase.id}-${Date.now()}-${randomUUID().slice(0, 8)}` : undefined;
+		if (evalCase.goal && goalSessionId) {
+			startGoal(goalSessionId, evalCase.goal.objective, evalCase.goal.maxContinuations ?? 2);
+		}
 		await runAgentLoop([{ role: "user", content: evalCase.prompt }], {
 			config,
 			model,
 			cwd,
+			sessionId: goalSessionId,
 			systemPrompt,
 			disabledTools: planState ? new Set(modeDisabledTools(planState.enabled)) : undefined,
 			personas,
@@ -495,7 +516,7 @@ async function runAttempt(evalCase: EvalCase, options: RunnerOptions, config: Ap
 	if (temporaryCwd) rmSync(temporaryCwd, { recursive: true, force: true });
 
 	clearTimeout(timer);
-	return { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage };
+	return { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage, goalSessionId };
 }
 
 export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promise<RunResult> {
@@ -518,7 +539,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		retries++;
 		attempt = await runAttempt(evalCase, options, config, model);
 	}
-	const { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage } = attempt;
+	const { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage, goalSessionId } = attempt;
 
 	const duration = Date.now() - startTime;
 
@@ -621,12 +642,22 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 	// verify — grounded check against real state (disk, execution output)
 	if (expect.verify) {
 		try {
-			const verifyError = await expect.verify({ response, cwd: evalCase.cwd ?? options.cwd, toolCalls, turns, trace });
+			const verifyError = await expect.verify({
+				response,
+				cwd: evalCase.cwd ?? options.cwd,
+				toolCalls,
+				turns,
+				trace,
+				goal: goalSessionId ? readGoal(goalSessionId) : undefined,
+			});
 			if (verifyError) failedChecks.push(`Verify failed: ${verifyError}`);
 		} catch (error) {
 			failedChecks.push(`Verify threw: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
+
+	// The goal file lives in ~/.cast/goals and would otherwise outlive the run.
+	if (goalSessionId) clearGoal(goalSessionId);
 
 	const passed = failedChecks.length === 0;
 
