@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { fixtureDir, fixturePath, writeFixture } from "../../../../lib/fixtures.ts";
+import { join } from "node:path";
+import { fixturePath, writeFixture } from "../../../../lib/fixtures.ts";
 import type { EvalCase } from "../../../../lib/runner.ts";
 
 export const globArgumentIsGrounded: EvalCase = {
@@ -20,21 +20,19 @@ export const globArgumentIsGrounded: EvalCase = {
 		toolsNotCalled: ["bash", "write", "edit"],
 		noErrors: true,
 		// The contract is a search scoped to the fixture directory and narrowed
-		// to TypeScript specs. Matching the pattern string literally against
-		// `*.spec.ts` graded the spelling instead: a brace form
-		// (`**/*.{spec,test}.ts`) is just as scoped and was failed for it.
-		// Likewise the scope is grounded whether it arrives as `path` or baked
-		// into an absolute pattern.
+		// to TypeScript specs. Grading the argument *shape* instead kept failing
+		// calls that answered the question correctly: a brace pattern
+		// (`**/*.{spec,test}.ts`), an absolute pattern carrying its own scope,
+		// and `path` on the fixture root with `tests/` in the pattern. What
+		// matters is where the two arguments point once joined.
 		verify: ({ toolCalls }) => {
 			const dir = fixturePath("behavior-glob-args", "tests");
-			return toolCalls.some(
-				(call) =>
-					call.name === "glob" &&
-					typeof call.args.pattern === "string" &&
-					call.args.pattern.includes("spec") &&
-					call.args.pattern.endsWith(".ts") &&
-					(call.args.path === dir || call.args.pattern.startsWith(dir)),
-			)
+			return toolCalls.some((call) => {
+				if (call.name !== "glob" || typeof call.args.pattern !== "string") return false;
+				const pattern = call.args.pattern;
+				const scope = typeof call.args.path === "string" ? join(call.args.path, pattern) : pattern;
+				return scope.startsWith(dir) && pattern.includes("spec") && pattern.endsWith(".ts");
+			})
 				? undefined
 				: "glob did not use a scoped TypeScript spec pattern";
 		},
