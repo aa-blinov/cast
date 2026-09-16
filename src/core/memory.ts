@@ -1582,7 +1582,7 @@ function memoryMaintenanceRecoveryConfig(config: AppConfig): Omit<AppConfig, "ap
 		compactionThreshold: config.compactionThreshold,
 		maxToolOutputLines: config.maxToolOutputLines,
 		maxToolOutputBytes: config.maxToolOutputBytes,
-		defaultBashTimeout: config.defaultBashTimeout,
+		defaultBashTimeoutMs: config.defaultBashTimeoutMs,
 		reasoningLevel: config.reasoningLevel,
 		reasoningParams: config.reasoningParams,
 		reasoningFormat: config.reasoningFormat,

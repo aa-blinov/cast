@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { AppConfig } from "./config.ts";
+import { type AppConfig, DEFAULT_BASH_TIMEOUT_MS, MAX_BASH_TIMEOUT_MS } from "./config.ts";
 import type { Tool } from "./llm.ts";
 import { execMemorySearch, MEMORY_TOOL_DESCRIPTION } from "./memory.ts";
 import type { PlanState } from "./plan.ts";
@@ -113,10 +113,14 @@ export function getToolDefinitions(
 						command: { type: "string", description: "Bash command to execute" },
 						timeout: {
 							type: "number",
+							minimum: 1,
+							maximum: MAX_BASH_TIMEOUT_MS,
 							description: backgroundBashEnabled
-								? "Timeout in seconds. A foreground command that outlives its grace period is promoted to background rather than killed. " +
+								? `Timeout in MILLISECONDS — 120000 is two minutes; default ${DEFAULT_BASH_TIMEOUT_MS}, maximum ${MAX_BASH_TIMEOUT_MS}. A value under 1000 is read as seconds and converted, since nothing needs a sub-second deadline. ` +
+									"A foreground command that outlives its grace period is promoted to background rather than killed. " +
 									"With run_in_background:true, this is the task's kill timeout; omit it for an open-ended server or watcher."
-								: "Timeout in seconds. Default 180. Increase for long-running commands (e.g. 600 for docker build)",
+								: `Timeout in MILLISECONDS — 120000 is two minutes; default ${DEFAULT_BASH_TIMEOUT_MS}, maximum ${MAX_BASH_TIMEOUT_MS}. A value under 1000 is read as seconds and converted, since nothing needs a sub-second deadline. ` +
+									"Increase for long-running commands (e.g. 600000 for docker build).",
 						},
 						...(backgroundBashEnabled
 							? {
@@ -459,8 +463,9 @@ export function getToolDefinitions(
 									wait: {
 										type: "number",
 										description:
-											"Optional: block up to this many seconds (max 60) for the task to finish before " +
-											"returning, instead of returning the current status immediately.",
+											"Optional: block up to this many MILLISECONDS (max 60000) for the task to finish " +
+											"before returning, instead of returning the current status immediately. A value " +
+											"under 1000 is read as seconds, the same way bash's timeout is.",
 									},
 								},
 								required: ["task_id"],

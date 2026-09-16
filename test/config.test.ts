@@ -15,7 +15,7 @@ describe("loadConfig", () => {
 		expect(config.apiKey).toBe("sk-test");
 		expect(config.contextWindow).toBe(128_000);
 		expect(config.maxResponseTokens).toBe(32_000);
-		expect(config.defaultBashTimeout).toBe(180);
+		expect(config.defaultBashTimeoutMs).toBe(180_000);
 	});
 
 	it("uses an explicit connection over env vars", () => {

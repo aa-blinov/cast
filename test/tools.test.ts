@@ -30,7 +30,7 @@ const mockConfig: AppConfig = {
 	compactionThreshold: 0.75,
 	maxToolOutputLines: 2000,
 	maxToolOutputBytes: 64 * 1024,
-	defaultBashTimeout: 10,
+	defaultBashTimeoutMs: 10_000,
 };
 
 beforeEach(() => {
@@ -140,6 +140,35 @@ describe("bash", () => {
 		).toBe(true);
 	});
 
+	// Harnesses disagree on the unit — Claude Code's bash timeout is
+	// milliseconds, mcode's is seconds — and a model brings whichever it
+	// learned. Ours is milliseconds; a seconds-convention value taken
+	// literally would be a sub-second deadline that kills the command at once
+	// and reads, to the model, as the command failing.
+	it("reads a sub-second timeout as seconds and says so", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("bash", { command: "sleep 1 && echo done", timeout: 600 });
+		// 600 meant ten minutes, so the command gets to finish.
+		expect(result.content).toContain("done");
+		expect(result.content).toContain("read as seconds and used as 600000ms");
+		expect(result.content).toContain("This tool takes MILLISECONDS");
+	});
+
+	it("leaves an ordinary millisecond timeout alone", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("bash", { command: "echo fine", timeout: 5_000 });
+		expect(result.content).toContain("fine");
+		expect(result.content).not.toContain("[warning]");
+	});
+
+	it("caps a timeout above the maximum and points at the background", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("bash", { command: "echo fine", timeout: 7_200_000 });
+		expect(result.content).toContain("fine");
+		expect(result.content).toContain("above the 3600000ms maximum and was capped");
+		expect(result.content).toContain("belongs in the background");
+	});
+
 	it("kills an in-flight command as soon as the AbortSignal fires, not just the next request", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const controller = new AbortController();
@@ -242,7 +271,7 @@ describe("bash — run_in_background", () => {
 		const { deps } = makeBackgroundDeps();
 		const exec = createToolExecutor(
 			TEST_DIR,
-			{ ...mockConfig, defaultBashTimeout: 0.1 },
+			{ ...mockConfig, defaultBashTimeoutMs: 100 },
 			undefined,
 			undefined,
 			undefined,

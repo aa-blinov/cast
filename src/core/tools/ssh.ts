@@ -8,7 +8,7 @@ import {
 	type SshHost,
 	validateKeyPermissions,
 } from "../ssh.ts";
-import { stripAnsi } from "./bash.ts";
+import { readBashTimeout, stripAnsi } from "./bash.ts";
 import { BoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
 
 export async function execSsh(
@@ -28,7 +28,11 @@ export async function execSsh(
 			isError: true,
 		};
 	}
-	const timeout = typeof args.timeout === "number" && args.timeout > 0 ? args.timeout : config.defaultBashTimeout;
+	// Same unit and same reading as bash: ssh runs remote commands, and a model
+	// does not switch conventions between the two tools.
+	const timeoutMs =
+		readBashTimeout(typeof args.timeout === "number" && args.timeout > 0 ? args.timeout : undefined)?.ms ??
+		config.defaultBashTimeoutMs;
 
 	// Validate host exists
 	const hostMap = new Map(hosts.map((h) => [h.name, h]));
@@ -122,7 +126,7 @@ export async function execSsh(
 			} catch {
 				// already dead
 			}
-		}, timeout * 1000);
+		}, timeoutMs);
 
 		const onAbort = () => {
 			aborted = true;
@@ -168,7 +172,7 @@ export async function execSsh(
 			const prefix = aborted
 				? "[ABORTED] Command was interrupted by user.\n\n"
 				: timedOut
-					? `[TIMED OUT] after ${timeout} seconds. If this command needs more time, retry with a larger timeout.\n\n`
+					? `[TIMED OUT] after ${timeoutMs}ms. If this command needs more time, retry with a larger timeout.\n\n`
 					: "";
 			if (exitCode !== 0 && !aborted && !timedOut) {
 				text += `\n\nProcess exited with code ${exitCode}`;

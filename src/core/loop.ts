@@ -176,7 +176,17 @@ const MEMORY_RECALL_HINT = [
 	"</system-reminder>",
 ].join("\n");
 const MEMORY_SYSTEM_PROMPT = readRequiredPrompt(promptsDir, "memory-system.md");
-const CHECKPOINT_REPAIR_ATTEMPTS = 2;
+/**
+ * Passes the writer gets: the first write plus repairs.
+ *
+ * Two meant exactly one repair, and one pass is not enough when the validator
+ * comes back with several kinds of problem at once — an oversize document,
+ * three sections over budget, a duplicate title and two entries missing their
+ * "Why:" line was a real failure, and every bit of the work was rolled back
+ * for it. Each extra pass is one more small background call, only on a run
+ * that has already failed once.
+ */
+const CHECKPOINT_REPAIR_ATTEMPTS = 3;
 const CHECKPOINT_WRITER_TIMEOUT_MS = 5 * 60_000;
 const CHECKPOINT_REBUILD_WAIT_MS = 30_000;
 const CHECKPOINT_FIRST_REBUILD_WAIT_MS = 5 * 60_000;
@@ -1117,7 +1127,7 @@ function checkpointWriterRecoverySpec(input: MemoryCheckpointWriterInput): Agent
 			compactionThreshold: input.config.compactionThreshold,
 			maxToolOutputLines: input.config.maxToolOutputLines,
 			maxToolOutputBytes: input.config.maxToolOutputBytes,
-			defaultBashTimeout: input.config.defaultBashTimeout,
+			defaultBashTimeoutMs: input.config.defaultBashTimeoutMs,
 			reasoningLevel: input.config.reasoningLevel,
 			reasoningParams: input.config.reasoningParams,
 			reasoningFormat: input.config.reasoningFormat,
@@ -1415,10 +1425,26 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 					writeMemoryFile(`${path}${invalidSuffix}`, current);
 				writeMemoryFile(path, previousArtifacts[name as keyof typeof previousArtifacts]);
 			}
+			// The full list used to be the error message, and the error message
+			// is what the user sees as a notice: a dozen validator lines about
+			// section budgets and missing "Why:" lines landed in the transcript,
+			// none of it addressed to them or actionable by them. It goes next to
+			// the rejected files instead, where whoever debugs the writer looks.
+			const issuesPath = `${artifactPaths.checkpoint}${invalidSuffix}.issues.txt`;
+			writeMemoryFile(
+				issuesPath,
+				`${validationIssues.map((issue) => `[${issue.severity}] ${issue.file}: ${issue.detail}`).join("\n")}\n`,
+			);
+			// Quote a blocking issue, not merely the first one: warnings ride
+			// along in the same list and never caused the failure, so naming one
+			// sends whoever reads the notice after the wrong thing — a missing
+			// "Why:" line, when what actually failed was a document over its
+			// size limit.
+			const blocking = validationIssues.filter((issue) => issue.severity !== "warn");
 			throw new Error(
-				`Checkpoint writer output failed validation after ${CHECKPOINT_REPAIR_ATTEMPTS} attempts: ${validationIssues
-					.map((issue) => `${issue.file}: ${issue.detail}`)
-					.join("; ")}`,
+				`Checkpoint writer output failed validation after ${CHECKPOINT_REPAIR_ATTEMPTS} attempts ` +
+					`(${blocking.length} blocking of ${validationIssues.length}, first: ${blocking[0]?.file}: ${blocking[0]?.detail ?? "unknown"}). ` +
+					`The checkpoint on disk is unchanged; the rejected draft and the full list are at ${issuesPath}.`,
 			);
 		} finally {
 			clearTimeout(timeout);

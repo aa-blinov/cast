@@ -108,7 +108,7 @@ function createFakeDeps(opts: { cwd: string; running?: boolean }): {
 			apiKey: "sk-test",
 			contextWindow: 128_000,
 			maxResponseTokens: 8192,
-			defaultBashTimeout: 120,
+			defaultBashTimeoutMs: 120_000,
 			compactionThreshold: 0.8,
 			reasoningLevel: "off",
 			reasoningParams: { body: {}, enabled: false },

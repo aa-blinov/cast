@@ -16,7 +16,7 @@ const mockConfig: AppConfig = {
 	compactionThreshold: 0.75,
 	maxToolOutputLines: 2000,
 	maxToolOutputBytes: 64 * 1024,
-	defaultBashTimeout: 10,
+	defaultBashTimeoutMs: 10_000,
 };
 
 beforeEach(() => {
@@ -283,7 +283,7 @@ describe("SSH tool executor", () => {
 		try {
 			const exec = createToolExecutor(
 				TEST_DIR,
-				{ ...mockConfig, defaultBashTimeout: 0.05 },
+				{ ...mockConfig, defaultBashTimeoutMs: 50 },
 				undefined,
 				undefined,
 				undefined,
@@ -291,7 +291,7 @@ describe("SSH tool executor", () => {
 			);
 			const result = await exec("ssh", { host: "h", command: "sleep", timeout: 0 });
 			expect(result.isError).toBe(true);
-			expect(result.content).toContain("[TIMED OUT] after 0.05 seconds");
+			expect(result.content).toContain("[TIMED OUT] after 50ms");
 		} finally {
 			process.env.PATH = originalPath;
 		}

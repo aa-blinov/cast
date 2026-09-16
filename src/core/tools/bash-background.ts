@@ -45,7 +45,7 @@ function loadPty(): typeof import("node-pty") | null {
 	return ptyModule;
 }
 
-import type { AppConfig } from "../config.ts";
+import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD } from "../config.ts";
 import type { Message } from "../llm.ts";
 import type { MessageQueue } from "../loop.ts";
 import { escapeSystemReminderTags } from "../system-reminder.ts";
@@ -94,7 +94,7 @@ export interface BackgroundTask {
 	outputTruncated: boolean;
 	timedOut: boolean;
 	/** The kill-timer duration, when one was set — only meaningful once `timedOut` is true. */
-	timeoutSeconds?: number;
+	timeoutMs?: number;
 	/** Set only when status is "error" (the process failed to even start). */
 	errorMessage?: string;
 	/** False while a task is being observed as a foreground call; true after explicit or automatic promotion. */
@@ -157,7 +157,7 @@ function buildCompletionReminder(task: BackgroundTask, config: AppConfig): strin
 					exitCode: task.exitCode,
 					timedOut: task.timedOut,
 					outputTruncated: task.outputTruncated,
-					timeoutSeconds: task.timeoutSeconds,
+					timeoutMs: task.timeoutMs,
 				}).content;
 	// The command and its output are data: text that closes this envelope and
 	// opens its own block would reach the model as an instruction from cast,
@@ -220,7 +220,7 @@ export class BackgroundTaskRegistry {
 		/** Undefined means no kill timer — background tasks are open-ended by
 		 *  default (dev servers, long builds); the foreground default timeout
 		 *  only applies here if the model explicitly passed one. */
-		timeoutSeconds: number | undefined,
+		timeoutMs: number | undefined,
 		deps: BashBackgroundDeps,
 		options: BackgroundTaskStartOptions = {},
 	): BackgroundTask {
@@ -243,7 +243,7 @@ export class BackgroundTaskRegistry {
 			rawOutput: "",
 			outputTruncated: false,
 			timedOut: false,
-			timeoutSeconds,
+			timeoutMs,
 			notifyOnCompletion: options.notifyOnCompletion ?? true,
 		};
 		this.tasks.set(id, task);
@@ -281,12 +281,12 @@ export class BackgroundTaskRegistry {
 			});
 
 			const timer =
-				timeoutSeconds === undefined
+				timeoutMs === undefined
 					? undefined
 					: setTimeout(() => {
 							task.timedOut = true;
 							this.killPty(pty);
-						}, timeoutSeconds * 1000);
+						}, timeoutMs);
 
 			pty.onExit(({ exitCode }) => {
 				clearTimeout(timer);
@@ -378,10 +378,18 @@ export class BackgroundTaskRegistry {
 	}
 }
 
-/** Clamp an optional `wait` (seconds) arg to a sane range — 0 to 60s. */
+/**
+ * `wait` is milliseconds, like every other duration a tool takes here. A value
+ * under 1000 is read as seconds the same way `bash`'s timeout is: the two
+ * arguments sit in the same tool family, and a model that gets one convention
+ * wrong gets both wrong.
+ */
+const MAX_BASH_OUTPUT_WAIT_MS = 60_000;
+
 function clampWait(v: unknown): number {
-	if (typeof v !== "number" || !Number.isFinite(v)) return 0;
-	return Math.max(0, Math.min(60, v));
+	if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return 0;
+	const ms = v < BASH_TIMEOUT_SECONDS_THRESHOLD ? v * 1000 : v;
+	return Math.max(0, Math.min(MAX_BASH_OUTPUT_WAIT_MS, ms));
 }
 
 export async function execBashOutput(
@@ -406,7 +414,7 @@ export async function execBashOutput(
 				signal?.removeEventListener("abort", done);
 				resolve();
 			};
-			const timer = setTimeout(done, wait * 1000);
+			const timer = setTimeout(done, wait);
 			task.exitPromise.then(done);
 			// Waiting is purely observational — an abort here must not kill the
 			// task, only stop waiting on it (matches the "never tied to a
@@ -430,7 +438,7 @@ export async function execBashOutput(
 		exitCode: task.exitCode,
 		timedOut: task.timedOut,
 		outputTruncated: task.outputTruncated,
-		timeoutSeconds: task.timeoutSeconds,
+		timeoutMs: task.timeoutMs,
 	});
 	return { content: `${header}\n\n${formatted.content}`, isError: formatted.isError };
 }

@@ -9,7 +9,7 @@ export const backgroundBashExplicitTimeout: EvalCase = {
 	// guards the opposite direction: a model-supplied timeout must still be
 	// honored for a background task, not silently ignored.
 	prompt:
-		"Start `sleep 30` in the background, and on that same tool call pass a 2-second timeout argument so the tool " +
+		"Start `sleep 30` in the background, and on that same tool call pass a two-second timeout argument so the tool " +
 		"itself force-stops the process automatically — don't wrap it in a shell `timeout` command, and don't wait " +
 		"around to kill it yourself. Then confirm what actually happened to it.",
 	expect: {
@@ -17,7 +17,10 @@ export const backgroundBashExplicitTimeout: EvalCase = {
 		noErrors: true,
 		verify: ({ toolCalls }) => {
 			const start = toolCalls.find((call) => call.name === "bash" && call.args.run_in_background === true);
-			const explicitTimeout = typeof start?.args.timeout === "number" && start.args.timeout <= 5;
+			// The unit is milliseconds now, and a value under 1000 is read as
+			// seconds — so both 2000 and 2 express the same two seconds, and
+			// either is a correct answer to the prompt.
+			const explicitTimeout = typeof start?.args.timeout === "number" && start.args.timeout <= 5000;
 			const output = toolCalls.find(
 				(call) => call.name === "bash_output" && call.result?.content.includes("TIMED OUT"),
 			);

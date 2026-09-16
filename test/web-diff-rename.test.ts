@@ -22,7 +22,7 @@ const testConfig: AppConfig = {
 	compactionThreshold: 0.75,
 	maxToolOutputLines: 2000,
 	maxToolOutputBytes: 64 * 1024,
-	defaultBashTimeout: 120,
+	defaultBashTimeoutMs: 120_000,
 	reasoningLevel: "off",
 	reasoningParams: { body: {} },
 };
