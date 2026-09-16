@@ -420,8 +420,10 @@ function BlockView({
 	truncated?: boolean;
 	/** Live streaming region — keep tool rows short for the viewport clamp. */
 	compact?: boolean;
-	/** When false, drop `thinking` blocks entirely. Defaults to true so the
-	 *  pure-BlockView test surface and any external callers stay unchanged. */
+	/** When false, drop `thinking` blocks entirely. Omitting it shows them:
+	 *  every real caller threads the user's setting through, and the default
+	 *  exists for the pure-BlockView test surface. The user-facing default is
+	 *  off and lives with the setting, not here. */
 	showReasoning?: boolean;
 	/** Terminal columns; the body is rendered to fit them. */
 	width?: number;

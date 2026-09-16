@@ -1447,11 +1447,22 @@ describe("web bridge", () => {
 		const first = await bridge.executeCommand(ws.id, "/reasoning-display");
 		expect(first.ok).toBe(true);
 		const firstState = (first.result as { showReasoning: boolean }).showReasoning;
-		// Defaults to true (showReasoning ?? true inside bridge.ts); the
-		// toggle flips it. We don't pin the absolute value here because
-		// future settings.json migrations might — the contract is "toggle".
+		// The contract checked here is "toggle", not the starting value —
+		// settings.json may already carry a choice. The default itself is
+		// pinned by its own test below.
 		const second = await bridge.executeCommand(ws.id, "/reasoning-display");
 		expect((second.result as { showReasoning: boolean }).showReasoning).toBe(!firstState);
+	});
+
+	// The default is off: thinking is the model talking to itself, and on a
+	// reasoning model it buries the answer. Nothing else pins this, so a
+	// stray `?? true` would flip the product's default unnoticed.
+	it("reports reasoning display off when nothing has chosen", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const first = await bridge.executeCommand(ws.id, "/reasoning-display");
+		// One toggle from the unset default, so this read is the inverse of it.
+		expect((first.result as { showReasoning: boolean }).showReasoning).toBe(true);
 	});
 
 	it("/rd is an alias of /reasoning-display and also toggles", async () => {

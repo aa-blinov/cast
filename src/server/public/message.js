@@ -10,7 +10,7 @@ import { TurnMetaLine } from "./turn-meta.js";
 
 const html = htm.bind(h);
 
-export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = true }) {
+export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = false }) {
 	const role = msg.role || "assistant";
 	// Only used by the legacy floating image-result branch below (pre
 	// castToolCallId sessions) — declared unconditionally so hook order stays

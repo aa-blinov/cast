@@ -41,7 +41,7 @@ function StreamingMarkdown({ text, renderMarkdown }) {
 	return html`<div ref=${setRef} class="message-content md-body"></div>`;
 }
 
-export function BlockView({ block, streaming = false, renderMarkdown, showReasoning = true }) {
+export function BlockView({ block, streaming = false, renderMarkdown, showReasoning = false }) {
 	if (block.kind === "tool") {
 		// Key on the tool-call id (not position): when a second tool call
 		// streams in, Preact must NOT reuse this ToolCard's DOM node for
@@ -79,7 +79,7 @@ export function BlockView({ block, streaming = false, renderMarkdown, showReason
 	`;
 }
 
-export function StreamingBlocks({ blocks, renderMarkdown, showReasoning = true }) {
+export function StreamingBlocks({ blocks, renderMarkdown, showReasoning = false }) {
 	if (!blocks || blocks.length === 0) return null;
 	const collapsed = collapseMidWordBoundaries(blocks);
 	return html`
@@ -98,7 +98,7 @@ export function StreamingBlocks({ blocks, renderMarkdown, showReasoning = true }
 	`;
 }
 
-export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown, showReasoning = true }) {
+export function LiveStreamingBlocks({ controllerRef, onFrame, renderMarkdown, showReasoning = false }) {
 	const [stream, setStream] = useState({ blocks: [] });
 	const streamRef = useRef({ blocks: [] });
 	// { kind: "raf" | "timeout", id } — the throttled path below schedules a

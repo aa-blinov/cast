@@ -621,12 +621,12 @@ const commandHandlers: Record<string, CommandHandler> = {
 		return { ok: true, result: loadSettings().statusBar ?? { visible: [], order: [], sides: {} } };
 	},
 	"/reasoning-display": ({ loadSettings }) => {
-		const next = !(loadSettings().showReasoning ?? true);
+		const next = !(loadSettings().showReasoning ?? false);
 		updateSettings({ showReasoning: next });
 		return { ok: true, result: { showReasoning: next } };
 	},
 	"/rd": ({ loadSettings }) => {
-		const next = !(loadSettings().showReasoning ?? true);
+		const next = !(loadSettings().showReasoning ?? false);
 		updateSettings({ showReasoning: next });
 		return { ok: true, result: { showReasoning: next } };
 	},
