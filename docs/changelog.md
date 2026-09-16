@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.32.1
+
+No behaviour changes — this release exists so the published version matches the tree CI validates. 0.32.0 shipped with the durable-goal paths in `loop.ts` and `commands.ts` untested, which the per-file coverage floor caught after the tag was cut, and with `search.ts` coverage that depended on whether `fd` was installed on the machine measuring it. Both are covered now.
+
 ## 0.32.0
 
 ### Added
