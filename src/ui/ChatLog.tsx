@@ -1,5 +1,6 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
+import { DEFAULT_BASH_TIMEOUT_SECONDS } from "../core/config.ts";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
 import {
 	type OpenFence,
@@ -36,6 +37,10 @@ interface ChatLogProps {
 
 type ToolSummaryModel =
 	| { kind: "edit"; path: string; added: number; removed: number }
+	/** `timeout` is the one that will actually apply: the call's own, or the
+	 *  foreground default. Undefined means nothing will stop it — a background
+	 *  task that asked for no timer. */
+	| { kind: "bash"; command: string; timeout?: number }
 	| { kind: "read"; path: string; range: string }
 	| { kind: "write"; path: string; lines: number }
 	| { kind: "task"; text: string }
@@ -100,6 +105,21 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 		return { kind: "generic", text: `${done}/${todos.length} done${suffix}` };
 	}
 
+	// A bash row carries its deadline: the reason a command is about to be cut
+	// off is worth seeing before it happens, not in the [TIMED OUT] afterwards.
+	// Same rules the tool applies — an explicit `timeout` wins; 0 or negative
+	// counts as not asking, so the foreground default still applies; and a
+	// background task that asked for nothing runs open-ended.
+	if (parsed && name === "bash" && typeof parsed.command === "string") {
+		const explicit = typeof parsed.timeout === "number" && parsed.timeout > 0 ? parsed.timeout : undefined;
+		const background = parsed.run_in_background === true;
+		return {
+			kind: "bash",
+			command: parsed.command,
+			timeout: explicit ?? (background ? undefined : DEFAULT_BASH_TIMEOUT_SECONDS),
+		};
+	}
+
 	// `command="ls -la /tmp"` spent a third of the row on the key and the
 	// quotes. A command, a pattern or a path is self-describing: print the
 	// value. Several arguments still get the `k=v` list, which is the only
@@ -138,6 +158,17 @@ export function oneLineSummary(text: string): string {
 	return text.replace(NEWLINE_RUN_RE, " ");
 }
 
+/** Seconds as the shortest thing that still reads as a duration: 90s, 3m, 1h. */
+function formatTimeout(seconds: number): string {
+	if (seconds < 60) return `${seconds}s`;
+	if (seconds < 3600) {
+		const minutes = seconds / 60;
+		return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)}m`;
+	}
+	const hours = seconds / 3600;
+	return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
+}
+
 /**
  * One-line summary for a tool call. Only the parse is memoized — the JSX is
  * rebuilt every render so theme() colors stay live: memoizing the whole
@@ -164,6 +195,14 @@ function ToolSummary({
 			<Text wrap="truncate" {...tone}>
 				{model.path} <Text color={theme().success}>+{model.added}</Text>{" "}
 				<Text color={theme().error}>−{model.removed}</Text>
+			</Text>
+		);
+	}
+	if (model.kind === "bash") {
+		return (
+			<Text wrap="truncate" {...tone}>
+				{compact ? oneLineSummary(model.command) : model.command}
+				{model.timeout !== undefined && <Text dimColor> · {formatTimeout(model.timeout)}</Text>}
 			</Text>
 		);
 	}

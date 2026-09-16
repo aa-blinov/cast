@@ -137,12 +137,19 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 		compactionThreshold: compactionThresholdSetting(settings),
 		maxToolOutputLines: maxToolOutputLinesSetting(settings),
 		maxToolOutputBytes: maxToolOutputBytesSetting(settings),
-		defaultBashTimeout: 180,
+		defaultBashTimeout: DEFAULT_BASH_TIMEOUT_SECONDS,
 		reasoningLevel: "off",
 		reasoningParams: { body: {}, enabled: false },
 		reasoningFormat: resolveReasoningFormat(baseURL),
 	};
 }
+
+/**
+ * Seconds a foreground `bash` call gets when it passes no `timeout` of its own.
+ * Exported because the TUI prints the effective timeout next to the command,
+ * and a second copy of the number there would drift from this one.
+ */
+export const DEFAULT_BASH_TIMEOUT_SECONDS = 180;
 
 // ============================================================================
 // Model info (from OpenRouter /v1/models)
