@@ -162,7 +162,7 @@ describe("BackgroundTaskRegistry", () => {
 		const { deps } = makeDeps(true);
 		deps.registry = registry;
 		const smallConfig: AppConfig = { ...mockConfig, maxToolOutputLines: 5 };
-		const task = registry.start("for i in $(seq 1 20); do echo line-$i; done", process.cwd(), smallConfig, 10, deps);
+		const task = registry.start("for i in $(seq 1 20); do echo line-$i; done", process.cwd(), smallConfig, 10_000, deps);
 
 		// Two separate races, and both have to be waited out rather than timed.
 		// A PTY's "exit" fires from the child's wait() status, which is not
