@@ -2342,7 +2342,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 
 	route("GET", "/api/settings/appearance", (_req, res) => {
 		const { showReasoning } = loadSettings();
-		json(res, { showReasoning: showReasoning ?? true });
+		json(res, { showReasoning: showReasoning ?? false });
 	});
 	route("POST", "/api/settings/appearance", async (req, res) => {
 		let parsed: { showReasoning?: unknown };

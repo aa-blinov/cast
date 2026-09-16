@@ -183,10 +183,10 @@ export interface Settings {
 	 */
 	quickSessionPersona?: string;
 	/**
-	 * Whether to show reasoning blocks in the transcript. Defaults to true
-	 * (parity with TUI streaming — reasoning models stream thinking live).
-	 * Toggled via /reasoning-display (/rd) and persisted so the
-	 * preference survives restarts.
+	 * Whether to show reasoning blocks in the transcript. Defaults to false:
+	 * thinking is the model talking to itself, and on a reasoning model it
+	 * buries the answer under text nobody asked for. Turn it on with
+	 * /reasoning-display (/rd) — the choice persists across restarts.
 	 */
 	showReasoning?: boolean;
 	/** Whether durable project memory is active across TUI and Web UI. */

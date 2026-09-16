@@ -569,13 +569,14 @@ function App() {
 	// lot of auxiliary thinking that just clutters the chat. Persisted to
 	// localStorage so the choice survives reloads; the web UI opens a single
 	// chat at a time, so this toggle spans whichever session is active. The
-	// default is on — parity with TUI streaming (was off). Explicit opt-out via toggle.
+	// default is off, same as the TUI: thinking is the model talking to
+	// itself, and it buries the answer. Explicit opt-in via the toggle.
 	const [showReasoning, setShowReasoning] = useState(() => {
 		try {
 			const v = localStorage.getItem("cast:showReasoning");
-			return v === null ? true : v === "1";
+			return v === null ? false : v === "1";
 		} catch {
-			return true;
+			return false;
 		}
 	});
 	// Sync the initial value from settings.json (written by /rd in TUI). The
