@@ -87,13 +87,16 @@ describe("ChatLog tool rows", () => {
 		// No timeout given, foreground: the default is what will fire.
 		expect(row({ command: "npm test" })).toContain("· 3m");
 		// The call's own timeout wins over the default.
-		expect(row({ command: "npm test", timeout: 45 })).toContain("· 45s");
+		expect(row({ command: "npm test", timeout: 45_000 })).toContain("· 45s");
 		// 0 reads as "didn't ask", the same way the tool reads it, so the
 		// foreground default still applies.
 		expect(row({ command: "npm test", timeout: 0 })).toContain("· 3m");
 		// A background task is open-ended unless it asked for a timer.
 		expect(row({ command: "npm run dev", run_in_background: true })).not.toContain("·");
-		expect(row({ command: "npm run dev", run_in_background: true, timeout: 7200 })).toContain("· 2h");
+		expect(row({ command: "npm run dev", run_in_background: true, timeout: 7_200_000 })).toContain("· 1h");
+		// A seconds-convention value: the row shows the deadline the tool will
+		// really use — ten minutes — not the 0.6s it says literally.
+		expect(row({ command: "npm test", timeout: 600 })).toContain("· 10m");
 		// The command itself still reads as before.
 		expect(row({ command: "npm test" })).toContain("npm test");
 	});

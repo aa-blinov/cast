@@ -1,7 +1,8 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
-import { DEFAULT_BASH_TIMEOUT_SECONDS } from "../core/config.ts";
+import { DEFAULT_BASH_TIMEOUT_MS } from "../core/config.ts";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
+import { readBashTimeout } from "../core/tools/bash.ts";
 import {
 	type OpenFence,
 	type RenderedLine,
@@ -40,7 +41,7 @@ type ToolSummaryModel =
 	/** `timeout` is the one that will actually apply: the call's own, or the
 	 *  foreground default. Undefined means nothing will stop it — a background
 	 *  task that asked for no timer. */
-	| { kind: "bash"; command: string; timeout?: number }
+	| { kind: "bash"; command: string; timeoutMs?: number }
 	| { kind: "read"; path: string; range: string }
 	| { kind: "write"; path: string; lines: number }
 	| { kind: "task"; text: string }
@@ -111,12 +112,16 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 	// counts as not asking, so the foreground default still applies; and a
 	// background task that asked for nothing runs open-ended.
 	if (parsed && name === "bash" && typeof parsed.command === "string") {
-		const explicit = typeof parsed.timeout === "number" && parsed.timeout > 0 ? parsed.timeout : undefined;
+		const requested = typeof parsed.timeout === "number" && parsed.timeout > 0 ? parsed.timeout : undefined;
+		// Read the same way the tool reads it — milliseconds converted, cap
+		// applied — so the row shows the deadline that will actually fire
+		// rather than the number that was asked for.
+		const explicitMs = readBashTimeout(requested)?.ms;
 		const background = parsed.run_in_background === true;
 		return {
 			kind: "bash",
 			command: parsed.command,
-			timeout: explicit ?? (background ? undefined : DEFAULT_BASH_TIMEOUT_SECONDS),
+			timeoutMs: explicitMs ?? (background ? undefined : DEFAULT_BASH_TIMEOUT_MS),
 		};
 	}
 
@@ -158,9 +163,10 @@ export function oneLineSummary(text: string): string {
 	return text.replace(NEWLINE_RUN_RE, " ");
 }
 
-/** Seconds as the shortest thing that still reads as a duration: 90s, 3m, 1h. */
-function formatTimeout(seconds: number): string {
-	if (seconds < 60) return `${seconds}s`;
+/** Milliseconds as the shortest thing that still reads as a duration: 90s, 3m, 1h. */
+function formatTimeout(ms: number): string {
+	const seconds = ms / 1000;
+	if (seconds < 60) return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
 	if (seconds < 3600) {
 		const minutes = seconds / 60;
 		return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)}m`;
@@ -202,7 +208,7 @@ function ToolSummary({
 		return (
 			<Text wrap="truncate" {...tone}>
 				{compact ? oneLineSummary(model.command) : model.command}
-				{model.timeout !== undefined && <Text dimColor> · {formatTimeout(model.timeout)}</Text>}
+				{model.timeoutMs !== undefined && <Text dimColor> · {formatTimeout(model.timeoutMs)}</Text>}
 			</Text>
 		);
 	}
