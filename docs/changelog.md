@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.34.1
+
+### Fixed
+
+- **The `bash_output` `wait` argument was still being written in seconds.** Both duration arguments advertised that a value under 1000 would be read as seconds, which reads as permission rather than a warning — so a model that had just written `timeout: 120000` correctly went on to write `wait: 2` for two seconds. The leniency stays in the runtime; the schema now teaches by example instead ("for ten minutes pass 600000", "for two seconds pass 2000"). Measured on MiniMax-M3 before and after: `wait` now arrives as 2000, and a half-hour timeout as 1800000 rather than 1800 — the value that is legal milliseconds and would have silently become 1.8 seconds.
+
 ## 0.34.0
 
 ### Changed
