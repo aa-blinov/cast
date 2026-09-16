@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.33.0
+
+### Changed
+
+- **Reasoning blocks are hidden by default, in the TUI and the web UI alike.** Thinking is the model talking to itself, and on a reasoning model it arrives in bulk and buries the answer. Turn it on with `/reasoning-display` (`/rd`) or the web Settings > Appearance switch; the choice persists. A `showReasoning` already written in `settings.json` is left alone — this changes only what happens when nothing has chosen.
+
 ## 0.32.1
 
 No behaviour changes — this release exists so the published version matches the tree CI validates. 0.32.0 shipped with the durable-goal paths in `loop.ts` and `commands.ts` untested, which the per-file coverage floor caught after the tag was cut, and with `search.ts` coverage that depended on whether `fd` was installed on the machine measuring it. Both are covered now.
