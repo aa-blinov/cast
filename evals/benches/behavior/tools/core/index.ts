@@ -9,6 +9,7 @@ import { knownPathSkipsSearch } from "./known-path-skips-search.ts";
 import { lsDirectoryArgument } from "./ls-directory-argument.ts";
 import { todoWriteStructuredList } from "./todo-write-structured-list.ts";
 import { bashArgumentGrounding } from "./bash-argument-grounding.ts";
+import { bashTimeoutUnit } from "./bash-timeout-unit.ts";
 import { grepFlagsAreGrounded } from "./grep-flags-are-grounded.ts";
 import { writeOverwritesExistingFile } from "./write-overwrites-existing-file.ts";
 
@@ -23,6 +24,7 @@ export const coreCases: EvalCase[] = [
 	lsDirectoryArgument,
 	todoWriteStructuredList,
 	bashArgumentGrounding,
+	bashTimeoutUnit,
 	grepFlagsAreGrounded,
 	writeOverwritesExistingFile,
 ];
