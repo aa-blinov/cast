@@ -116,10 +116,10 @@ export function getToolDefinitions(
 							minimum: 1,
 							maximum: MAX_BASH_TIMEOUT_MS,
 							description: backgroundBashEnabled
-								? `Timeout in MILLISECONDS — 120000 is two minutes; default ${DEFAULT_BASH_TIMEOUT_MS}, maximum ${MAX_BASH_TIMEOUT_MS}. A value under 1000 is read as seconds and converted, since nothing needs a sub-second deadline. ` +
+								? `Timeout in MILLISECONDS — 120000 is two minutes; default ${DEFAULT_BASH_TIMEOUT_MS}, maximum ${MAX_BASH_TIMEOUT_MS}. For ten minutes pass 600000. ` +
 									"A foreground command that outlives its grace period is promoted to background rather than killed. " +
 									"With run_in_background:true, this is the task's kill timeout; omit it for an open-ended server or watcher."
-								: `Timeout in MILLISECONDS — 120000 is two minutes; default ${DEFAULT_BASH_TIMEOUT_MS}, maximum ${MAX_BASH_TIMEOUT_MS}. A value under 1000 is read as seconds and converted, since nothing needs a sub-second deadline. ` +
+								: `Timeout in MILLISECONDS — 120000 is two minutes; default ${DEFAULT_BASH_TIMEOUT_MS}, maximum ${MAX_BASH_TIMEOUT_MS}. For ten minutes pass 600000. ` +
 									"Increase for long-running commands (e.g. 600000 for docker build).",
 						},
 						...(backgroundBashEnabled
@@ -464,8 +464,8 @@ export function getToolDefinitions(
 										type: "number",
 										description:
 											"Optional: block up to this many MILLISECONDS (max 60000) for the task to finish " +
-											"before returning, instead of returning the current status immediately. A value " +
-											"under 1000 is read as seconds, the same way bash's timeout is.",
+											"before returning, instead of returning the current status immediately. For two " +
+											"seconds pass 2000, the same unit bash's timeout takes.",
 									},
 								},
 								required: ["task_id"],
