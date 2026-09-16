@@ -4,6 +4,17 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.34.0
+
+### Changed
+
+- **`bash` and `ssh` timeouts, and `bash_output`'s `wait`, are now in milliseconds** (default `180000`, max `3600000`). The unit was seconds, and a model that had learned the other convention sent `timeout: 120000` meaning two minutes — read as 33 hours, which is not a long timeout but no timeout at all, leaving a hung command to hold the turn. Milliseconds is the more common convention across harnesses, so that is what the tools take. A value under 1000 is read as seconds and converted, with a warning naming the unit, so the opposite mistake can't turn `timeout: 600` into a 0.6-second deadline. Above the maximum the value is capped, with a note that longer work belongs in the background. **This is breaking for callers that passed 1000 or more meaning seconds:** `timeout: 1800` now means 1.8 seconds, not half an hour.
+- **A `bash` row in the TUI shows the timeout that will apply to it** — `bash npm test · 3m` — so the deadline is visible while the command runs rather than only in the `[TIMED OUT]` result afterwards. It is the effective value, read through the same code the tool uses, so a converted or capped timeout displays as what will really fire; a background task that asked for no timer shows nothing.
+
+### Fixed
+
+- **A failed checkpoint write no longer dumps the validator's report into the transcript.** The whole issue list was the error message and the error message is the user's notice, so a dozen lines about section budgets and missing `Why:` entries landed mid-turn. The notice is one line now — what blocked it, that the checkpoint on disk is untouched, and where the full list is written beside the rejected draft. It quotes a blocking issue rather than the first one, since warnings ride along in the same list and never caused the failure. The writer also gets three passes instead of two, because one repair pass rarely fixes an oversize document and several over-budget sections at once.
+
 ## 0.33.1
 
 ### Added
