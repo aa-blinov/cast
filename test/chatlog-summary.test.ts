@@ -58,6 +58,46 @@ describe("ChatLog tool rows", () => {
 		expect(output).not.toContain("MCP_ERROR_PAYLOAD_MUST_NOT_RENDER");
 	});
 
+	// The reason a command is about to be cut off is worth seeing before it
+	// happens, not in the [TIMED OUT] afterwards.
+	it("prints the timeout that will actually apply to a bash command", () => {
+		const row = (args: Record<string, unknown>) =>
+			renderToString(
+				createElement(ChatLog, {
+					messages: [
+						{
+							role: "assistant",
+							content: "",
+							blocks: [
+								{
+									kind: "tool",
+									call: { id: "b-1", name: "bash", args: JSON.stringify(args), status: "running" },
+								},
+							],
+						},
+					],
+					streaming: null,
+					error: null,
+					retry: null,
+					columns: 120,
+				}),
+				{ columns: 120 },
+			);
+
+		// No timeout given, foreground: the default is what will fire.
+		expect(row({ command: "npm test" })).toContain("· 3m");
+		// The call's own timeout wins over the default.
+		expect(row({ command: "npm test", timeout: 45 })).toContain("· 45s");
+		// 0 reads as "didn't ask", the same way the tool reads it, so the
+		// foreground default still applies.
+		expect(row({ command: "npm test", timeout: 0 })).toContain("· 3m");
+		// A background task is open-ended unless it asked for a timer.
+		expect(row({ command: "npm run dev", run_in_background: true })).not.toContain("·");
+		expect(row({ command: "npm run dev", run_in_background: true, timeout: 7200 })).toContain("· 2h");
+		// The command itself still reads as before.
+		expect(row({ command: "npm test" })).toContain("npm test");
+	});
+
 	it("keeps the loader visible while hidden reasoning is the only live output", () => {
 		const output = renderToString(
 			createElement(ChatLog, {
