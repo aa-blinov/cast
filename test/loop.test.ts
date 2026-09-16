@@ -228,7 +228,7 @@ const testConfig: AppConfig = {
 	compactionThreshold: 0.75,
 	maxToolOutputLines: 2000,
 	maxToolOutputBytes: 64 * 1024,
-	defaultBashTimeout: 120,
+	defaultBashTimeoutMs: 120_000,
 	reasoningLevel: "off",
 	reasoningParams: { body: {} },
 };
@@ -684,6 +684,76 @@ describe("runAgentLoop — abort vs. error", () => {
 			expect(readFileSync(checkpointFile, "utf8")).toBe(CHECKPOINT_TEMPLATE);
 			expect(readFileSync(projectMemoryPath(projectIdForCwd(projectCwd)), "utf8")).toContain("# Project memory");
 			expect(readFileSync(notesPath(sessionId), "utf8")).toContain("# Session notes");
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(fakeHome, { recursive: true, force: true });
+			rmSync(projectCwd, { recursive: true, force: true });
+		}
+	});
+
+	// The validator's output is for whoever debugs the writer, not for the user
+	// watching a turn: a dozen lines about section budgets and missing "Why:"
+	// lines used to land in the transcript as a notice.
+	it("keeps the validator's report out of the notice and beside the rejected draft", async () => {
+		const realHome = process.env.HOME;
+		const fakeHome = mkdtempSync(join(tmpdir(), "cast-checkpoint-report-home-"));
+		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-report-project-"));
+		process.env.HOME = fakeHome;
+		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
+		updateSettings({ checkpointFork: true });
+		const sessionId = "report-session";
+		const checkpointFile = checkpointPath(sessionId);
+		const warnings: string[] = [];
+		let invocation = 0;
+		vi.mocked(streamAndCollect).mockImplementation(async () => {
+			invocation += 1;
+			if (invocation === 1) return { content: "main answer", finishReason: "stop" };
+			// Never valid, so every repair pass fails and the run gives up.
+			writeFileSync(checkpointFile, "# malformed checkpoint\n");
+			return { content: "checkpoint saved", finishReason: "stop" };
+		});
+
+		try {
+			saveSession(createSession("test-model", projectCwd, { id: sessionId }));
+			await runAgentLoop(
+				[
+					{ role: "system", content: "system" },
+					{ role: "user", content: "checkpoint this" },
+				],
+				{
+					config: { ...testConfig, contextWindow: 1000, maxResponseTokens: 100 },
+					checkpointThresholds: [1],
+					model: "test-model",
+					modelProvider: { baseURL: "https://openrouter.ai/api/v1", apiKey: "test" },
+					cwd: projectCwd,
+					systemPrompt: "test",
+					memory: { sessionId },
+					checkpointBoundary: -1,
+					lastPromptTokens: 1_000,
+					onEvent: () => {},
+					onWarning: (message) => warnings.push(message),
+				},
+			);
+			const deadline = Date.now() + 5_000;
+			while (!warnings.some((w) => w.includes("failed validation")) && Date.now() < deadline)
+				await new Promise((resolve) => setTimeout(resolve, 10));
+
+			const notice = warnings.find((w) => w.includes("failed validation"));
+			expect(notice).toBeDefined();
+			// One line the user can act on: what happened, that nothing was lost,
+			// and where the detail is.
+			expect(notice!.split("\n")).toHaveLength(1);
+			expect(notice).toContain("The checkpoint on disk is unchanged");
+			expect(notice).toContain(".issues.txt");
+			// Named by what actually blocked it. Warnings ("missing Why:") ride
+			// along in the list and never caused the failure, so quoting one
+			// would send the reader after the wrong thing.
+			expect(notice).toContain("blocking of");
+
+			const issuesPath = notice!.slice(notice!.indexOf(join(fakeHome, "memory"))).replace(/\.$/, "");
+			expect(existsSync(issuesPath)).toBe(true);
+			expect(readFileSync(issuesPath, "utf8").length).toBeGreaterThan(0);
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;
