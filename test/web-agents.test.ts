@@ -29,7 +29,7 @@ beforeEach(async () => {
 			compactionThreshold: 0.75,
 			maxToolOutputLines: 2000,
 			maxToolOutputBytes: 65_536,
-			defaultBashTimeout: 120,
+			defaultBashTimeoutMs: 120_000,
 			reasoningLevel: "off",
 			reasoningParams: { body: {} },
 		},

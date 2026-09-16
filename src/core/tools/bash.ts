@@ -10,7 +10,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { AppConfig } from "../config.ts";
+import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD, MAX_BASH_TIMEOUT_MS } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
 import { type BackgroundTask, type BashBackgroundDeps, isPtyAvailable } from "./bash-background.ts";
 import { looksLongRunningCommand } from "./long-running.ts";
@@ -180,7 +180,7 @@ export interface FormatBashResultOptions {
 	aborted?: boolean;
 	timedOut?: boolean;
 	outputTruncated?: boolean;
-	timeoutSeconds?: number;
+	timeoutMs?: number;
 	warnPrefix?: string;
 }
 
@@ -191,19 +191,12 @@ export interface FormatBashResultOptions {
  * from different call sites (a `Promise` resolve vs. a completion callback).
  */
 export function formatBashResult(rawOutput: string, config: AppConfig, opts: FormatBashResultOptions): ToolResult {
-	const {
-		exitCode,
-		aborted = false,
-		timedOut = false,
-		outputTruncated = false,
-		timeoutSeconds,
-		warnPrefix = "",
-	} = opts;
+	const { exitCode, aborted = false, timedOut = false, outputTruncated = false, timeoutMs, warnPrefix = "" } = opts;
 	let output = stripAnsi(rawOutput).replace(CRLF_RE, "\n").replace(CR_RE, "\n");
 	const prefix = aborted
 		? "[ABORTED] Command was interrupted by user.\n\n"
 		: timedOut
-			? `[TIMED OUT] after ${timeoutSeconds} seconds. If this command needs more time, retry with a larger timeout.\n\n`
+			? `[TIMED OUT] after ${timeoutMs}ms. If this command needs more time, retry with a larger timeout.\n\n`
 			: "";
 	if (exitCode !== 0 && !aborted && !timedOut) {
 		output += `\n\nProcess exited with code ${exitCode}`;
@@ -226,7 +219,7 @@ function formatManagedTaskResult(
 	task: BackgroundTask,
 	config: AppConfig,
 	warnPrefix: string,
-	timeoutSeconds: number,
+	timeoutMs: number,
 ): ToolResult {
 	if (task.status === "error") {
 		return { content: `${warnPrefix}${task.errorMessage ?? "Failed to start bash."}`, isError: true };
@@ -234,7 +227,7 @@ function formatManagedTaskResult(
 	return formatBashResult(task.rawOutput, config, {
 		exitCode: task.exitCode,
 		outputTruncated: task.outputTruncated,
-		timeoutSeconds,
+		timeoutMs,
 		warnPrefix,
 	});
 }
@@ -244,7 +237,7 @@ function formatBackgroundStart(task: BackgroundTask, warnPrefix: string, automat
 	return {
 		content:
 			`${warnPrefix}${prefix} as ${task.id}. The result will be delivered automatically when it finishes. ` +
-			`Call bash_output({task_id:"${task.id}",wait:5}) for progress or bash_kill({task_id:"${task.id}"}) to stop it.`,
+			`Call bash_output({task_id:"${task.id}",wait:5000}) for progress or bash_kill({task_id:"${task.id}"}) to stop it.`,
 	};
 }
 
@@ -269,6 +262,32 @@ async function waitForManagedTask(
 	});
 }
 
+/**
+ * Resolve an explicit `timeout` argument to milliseconds, and say so when the
+ * value had to be reinterpreted or cut down. Returns undefined when nothing
+ * was asked for. See BASH_TIMEOUT_SECONDS_THRESHOLD for why the dividing line
+ * sits where it does.
+ */
+export function readBashTimeout(requested: number | undefined): { ms: number; note?: string } | undefined {
+	if (requested === undefined) return undefined;
+	if (requested < BASH_TIMEOUT_SECONDS_THRESHOLD) {
+		const ms = Math.min(requested * 1000, MAX_BASH_TIMEOUT_MS);
+		return {
+			ms,
+			note:
+				`timeout=${requested} is below one second, so it was read as seconds and used as ${ms}ms. ` +
+				"This tool takes MILLISECONDS: pass 120000 for two minutes, not 120.",
+		};
+	}
+	if (requested > MAX_BASH_TIMEOUT_MS) {
+		return {
+			ms: MAX_BASH_TIMEOUT_MS,
+			note: `timeout=${requested}ms is above the ${MAX_BASH_TIMEOUT_MS}ms maximum and was capped. A command that needs longer belongs in the background, where it runs without a deadline.`,
+		};
+	}
+	return { ms: requested };
+}
+
 export async function execBash(
 	args: Record<string, unknown>,
 	cwd: string,
@@ -288,8 +307,10 @@ export async function execBash(
 	// literally — a bare `setTimeout(fn, 0)` fires almost immediately, and
 	// callers reasonably expect 0 to mean unlimited (curl's --max-time 0, etc.)
 	// rather than an instant kill.
-	const explicitTimeout = typeof args.timeout === "number" && args.timeout > 0 ? args.timeout : undefined;
-	const timeout = explicitTimeout ?? config.defaultBashTimeout;
+	const requestedTimeout = typeof args.timeout === "number" && args.timeout > 0 ? args.timeout : undefined;
+	const timeoutRead = readBashTimeout(requestedTimeout);
+	const explicitTimeoutMs = timeoutRead?.ms;
+	const timeoutMs = explicitTimeoutMs ?? config.defaultBashTimeoutMs;
 
 	// Block dangerous commands (rm -rf, sudo, etc.)
 	if (confirmBash) {
@@ -325,8 +346,12 @@ export async function execBash(
 
 	// Falling back is right, but doing it silently is not: a model that asked
 	// for a background task and got a foreground run reads the eventual
-	// "[TIMED OUT] after 180 seconds" as the dev server having crashed, and
+	// "[TIMED OUT] after 180000ms" as the dev server having crashed, and
 	// retries the same call. Say which of the two reasons applies.
+	// Said out loud, never adjusted silently: a model that isn't told it wrote
+	// the wrong unit keeps writing it.
+	if (timeoutRead?.note) warnPrefix += `[warning] ${timeoutRead.note}\n\n`;
+
 	if (args.run_in_background === true && !managed) {
 		warnPrefix += background
 			? "[warning] run_in_background is unavailable here — the PTY backend (node-pty) could not be loaded, so this ran in the foreground with the normal timeout. Long-running commands will time out; run them yourself or redirect their output to a file.\n\n"
@@ -336,7 +361,7 @@ export async function execBash(
 	if (args.run_in_background === true && managed) {
 		// Background tasks are open-ended by default (dev servers, long builds)
 		// — only apply a kill timer when the model explicitly asked for one.
-		const task = managed.registry.start(command, cwd, config, explicitTimeout, managed);
+		const task = managed.registry.start(command, cwd, config, explicitTimeoutMs, managed);
 		return formatBackgroundStart(task, warnPrefix, false);
 	}
 
@@ -347,7 +372,7 @@ export async function execBash(
 		const task = managed.registry.start(command, cwd, config, undefined, managed, {
 			notifyOnCompletion: false,
 		});
-		if (task.status !== "running") return formatManagedTaskResult(task, config, warnPrefix, timeout);
+		if (task.status !== "running") return formatManagedTaskResult(task, config, warnPrefix, timeoutMs);
 
 		// Known servers/watchers should never consume a full model turn just to
 		// discover that they are open-ended. Other commands get OMP-style grace
@@ -357,14 +382,14 @@ export async function execBash(
 			return formatBackgroundStart(task, warnPrefix, true);
 		}
 
-		const waitMs = Math.min(AUTO_BACKGROUND_THRESHOLD_MS, Math.max(1000, timeout * 1000 - 1000));
+		const waitMs = Math.min(AUTO_BACKGROUND_THRESHOLD_MS, Math.max(1000, timeoutMs - 1000));
 		const outcome = await waitForManagedTask(task, waitMs, signal);
 		if (outcome === "aborted") {
 			managed.registry.kill(task.id);
 			return { content: "[ABORTED] Command was interrupted by user.", isError: true };
 		}
 		if (outcome === "exited" || task.status !== "running") {
-			return formatManagedTaskResult(task, config, warnPrefix, timeout);
+			return formatManagedTaskResult(task, config, warnPrefix, timeoutMs);
 		}
 		managed.registry.promote(task.id);
 		return formatBackgroundStart(task, warnPrefix, true);
@@ -416,14 +441,14 @@ export async function execBash(
 						exitCode: null,
 						timedOut: true,
 						outputTruncated: output.truncated,
-						timeoutSeconds: timeout,
+						timeoutMs,
 						warnPrefix,
 					});
 					finalResult = result;
 					resolve(result);
 				}, 5000);
 			}, 5000);
-		}, timeout * 1000);
+		}, timeoutMs);
 
 		const onAbort = () => {
 			aborted = true;
@@ -473,7 +498,7 @@ export async function execBash(
 				aborted,
 				timedOut,
 				outputTruncated: output.truncated,
-				timeoutSeconds: timeout,
+				timeoutMs,
 				warnPrefix,
 			});
 			finalResult = result;

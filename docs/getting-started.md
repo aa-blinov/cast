@@ -91,7 +91,7 @@ Subsequent launches remember choices and enter the TUI directly.
 | Context window | 128,000 tokens | Updated from provider metadata when available |
 | Max response tokens | 8,192 | Maximum tokens per assistant response |
 | Compaction threshold | 75% | Triggers context compaction when usage exceeds this |
-| Bash timeout | 180 seconds | Default timeout for shell commands |
+| Bash timeout | 180000 ms (3 minutes) | Default timeout for shell commands; the `timeout` argument is in milliseconds |
 | Reasoning level | `off` | Unless model metadata suggests otherwise |
 | Web tools | Disabled | Enable with `/web` (persists to settings) |
 

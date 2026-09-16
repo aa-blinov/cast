@@ -29,7 +29,8 @@ export interface AppConfig {
 	compactionThreshold: number;
 	maxToolOutputLines: number;
 	maxToolOutputBytes: number;
-	defaultBashTimeout: number;
+	/** Milliseconds. See DEFAULT_BASH_TIMEOUT_MS. */
+	defaultBashTimeoutMs: number;
 	reasoningLevel: string;
 	reasoningParams: ReasoningParams;
 	reasoningFormat: ReasoningFormat;
@@ -137,7 +138,7 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 		compactionThreshold: compactionThresholdSetting(settings),
 		maxToolOutputLines: maxToolOutputLinesSetting(settings),
 		maxToolOutputBytes: maxToolOutputBytesSetting(settings),
-		defaultBashTimeout: DEFAULT_BASH_TIMEOUT_SECONDS,
+		defaultBashTimeoutMs: DEFAULT_BASH_TIMEOUT_MS,
 		reasoningLevel: "off",
 		reasoningParams: { body: {}, enabled: false },
 		reasoningFormat: resolveReasoningFormat(baseURL),
@@ -145,11 +146,34 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 }
 
 /**
- * Seconds a foreground `bash` call gets when it passes no `timeout` of its own.
- * Exported because the TUI prints the effective timeout next to the command,
- * and a second copy of the number there would drift from this one.
+ * Milliseconds a foreground `bash` call gets when it passes no `timeout` of
+ * its own. Exported because the TUI prints the effective timeout next to the
+ * command, and a second copy of the number there would drift from this one.
  */
-export const DEFAULT_BASH_TIMEOUT_SECONDS = 180;
+export const DEFAULT_BASH_TIMEOUT_MS = 180_000;
+
+/**
+ * Ceiling on an explicit `bash` timeout. An hour is longer than any single
+ * command in a coding session legitimately needs; a server that really should
+ * run without a deadline says so by omitting the timeout and going background.
+ */
+export const MAX_BASH_TIMEOUT_MS = 3_600_000;
+
+/**
+ * Below this, an explicit `bash` timeout is read as seconds and converted.
+ *
+ * The unit is milliseconds, matching the more common harness convention, but
+ * the other one is real: mcode's bash timeout is seconds (120s default, 300s
+ * cap), and a model carrying that convention writes `timeout: 600` meaning ten
+ * minutes. Taken as milliseconds that is 0.6s — the command dies instantly and
+ * the model reads it as the command failing, which is worse than the overlong
+ * timeout this whole rule exists to prevent.
+ *
+ * One second is the dividing line: nothing legitimately asks for a sub-second
+ * command deadline, while every seconds-convention value that matters (1..999,
+ * i.e. up to ~16 minutes) lands below it.
+ */
+export const BASH_TIMEOUT_SECONDS_THRESHOLD = 1000;
 
 // ============================================================================
 // Model info (from OpenRouter /v1/models)
