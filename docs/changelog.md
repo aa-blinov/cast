@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.33.1
+
+### Added
+
+- **A `bash` row in the TUI shows the timeout that will apply to it** — `bash npm test · 3m` — so the deadline is visible while the command runs rather than only in the `[TIMED OUT]` result afterwards. It is the effective value: the call's own `timeout` when it gave one, the foreground default when it did not, and nothing at all for a background task that asked for no timer, since nothing will stop it.
+
 ## 0.33.0
 
 ### Changed
