@@ -2102,6 +2102,97 @@ describe("search path relativization", () => {
 	});
 });
 
+// `glob` and `grep` shell out to fd/rg when they exist and fall back to a JS
+// tree walk when they don't. The fallback is the half that honours nested
+// .gitignore files, and on a developer machine with fd installed it never
+// runs — so its coverage (and the per-file floor built on it) depended on
+// which binaries happened to be on PATH. Emptying PATH makes the spawn fail
+// with ENOENT, which is exactly the "not installed" case, on every machine.
+describe("search fallback when fd/rg are unavailable", () => {
+	function withoutPath<T>(run: () => Promise<T>): Promise<T> {
+		const realPath = process.env.PATH;
+		process.env.PATH = "";
+		return run().finally(() => {
+			if (realPath === undefined) delete process.env.PATH;
+			else process.env.PATH = realPath;
+		});
+	}
+
+	it("walks the tree itself and honours .gitignore, nested ones included", async () => {
+		const root = join(TEST_DIR, "fallback-glob");
+		mkdirSync(join(root, "src", "generated"), { recursive: true });
+		mkdirSync(join(root, "build"), { recursive: true });
+		writeFileSync(join(root, ".gitignore"), "*.log\nbuild/\n!keep.log\n", "utf-8");
+		writeFileSync(join(root, "src", "generated", ".gitignore"), "*.gen.ts\n", "utf-8");
+		writeFileSync(join(root, "src", "a.ts"), "export const a = 1;\n", "utf-8");
+		writeFileSync(join(root, "src", "generated", "b.gen.ts"), "export const b = 2;\n", "utf-8");
+		writeFileSync(join(root, "noisy.log"), "noise\n", "utf-8");
+		writeFileSync(join(root, "keep.log"), "kept\n", "utf-8");
+		writeFileSync(join(root, "build", "out.ts"), "export const out = 3;\n", "utf-8");
+
+		const { execGlob } = await import("../src/core/tools/search.ts");
+		const result = await withoutPath(() => execGlob({ pattern: "**/*", path: root }, root, mockConfig));
+		const files = result.content.split("\n").filter((line) => !line.startsWith("[note:"));
+
+		expect(files.some((f) => f.endsWith("src/a.ts"))).toBe(true);
+		// Ignored by the root .gitignore, by its directory rule, and by the
+		// nested .gitignore respectively.
+		expect(files.some((f) => f.endsWith("noisy.log"))).toBe(false);
+		expect(files.some((f) => f.includes("build/"))).toBe(false);
+		expect(files.some((f) => f.endsWith("b.gen.ts"))).toBe(false);
+		// A negation rule un-ignores its file.
+		expect(files.some((f) => f.endsWith("keep.log"))).toBe(true);
+	});
+
+	it("matches a plain pattern against the basename and a slashed one against the path", async () => {
+		const root = join(TEST_DIR, "fallback-glob-patterns");
+		mkdirSync(join(root, "pkg", "src"), { recursive: true });
+		writeFileSync(join(root, "pkg", "src", "index.ts"), "export {};\n", "utf-8");
+		writeFileSync(join(root, "pkg", "index.ts"), "export {};\n", "utf-8");
+
+		const { execGlob } = await import("../src/core/tools/search.ts");
+		const byName = await withoutPath(() => execGlob({ pattern: "index.ts", path: root }, root, mockConfig));
+		expect(byName.content.split("\n").filter((l) => l.endsWith("index.ts"))).toHaveLength(2);
+
+		const byPath = await withoutPath(() => execGlob({ pattern: "src/*.ts", path: root }, root, mockConfig));
+		const hits = byPath.content.split("\n").filter((l) => !l.startsWith("[note:"));
+		expect(hits).toHaveLength(1);
+		expect(hits[0]!.endsWith(join("pkg", "src", "index.ts"))).toBe(true);
+	});
+
+	it("greps file contents itself, with case-insensitivity and context", async () => {
+		const root = join(TEST_DIR, "fallback-grep");
+		mkdirSync(root, { recursive: true });
+		writeFileSync(join(root, ".gitignore"), "ignored.txt\n", "utf-8");
+		writeFileSync(join(root, "app.ts"), "before\nconst Marker = 1;\nafter\n", "utf-8");
+		writeFileSync(join(root, "ignored.txt"), "marker\n", "utf-8");
+
+		const { execGrep } = await import("../src/core/tools/search.ts");
+		const result = await withoutPath(() =>
+			execGrep({ pattern: "marker", path: root, ignoreCase: true, context: 1 }, root, mockConfig),
+		);
+
+		expect(result.content).toContain("const Marker = 1;");
+		// Context lines come back around the hit.
+		expect(result.content).toContain("before");
+		expect(result.content).toContain("after");
+		// A gitignored file is not searched.
+		expect(result.content).not.toContain("ignored.txt");
+	});
+
+	it("reports no matches rather than failing when the fallback finds nothing", async () => {
+		const root = join(TEST_DIR, "fallback-empty");
+		mkdirSync(root, { recursive: true });
+		writeFileSync(join(root, "a.ts"), "nothing here\n", "utf-8");
+
+		const { execGlob, execGrep } = await import("../src/core/tools/search.ts");
+		const globbed = await withoutPath(() => execGlob({ pattern: "*.py", path: root }, root, mockConfig));
+		expect(globbed.content).toBe("No files found");
+		const grepped = await withoutPath(() => execGrep({ pattern: "absent-token", path: root }, root, mockConfig));
+		expect(grepped.content).toBe("No matches found");
+	});
+});
+
 describe("file tools on large files", () => {
 	it("reads a window of a large file without loading it into memory", async () => {
 		// The whole file used to be read and split regardless of offset/limit,
