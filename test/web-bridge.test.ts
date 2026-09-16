@@ -2601,7 +2601,7 @@ describe("web bridge", () => {
 		expect(bridge.isFullyIdle(), "a turn in flight").toBe(false);
 		ws.status = "idle";
 
-		ws.backgroundBash.registry.start("sleep 30", process.cwd(), {} as never, 30, ws.backgroundBash);
+		ws.backgroundBash.registry.start("sleep 30", process.cwd(), {} as never, 30_000, ws.backgroundBash);
 		expect(bridge.isFullyIdle(), "a background task outlives the turn that started it").toBe(false);
 		ws.backgroundBash.registry.killAll();
 	});
@@ -4341,7 +4341,7 @@ describe("web bridge", () => {
 
 			runAgentLoop.mockClear();
 			runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
-			ws.backgroundBash.registry.start("echo bg-wake-marker", cwd, testConfig, 5, ws.backgroundBash);
+			ws.backgroundBash.registry.start("echo bg-wake-marker", cwd, testConfig, 5_000, ws.backgroundBash);
 			// Poll up to 5s — the inline `setTimeout(500)` wait was flaky under
 			// parallel-test load (background tasks schedule on the event loop,
 			// not a wall clock). Polling waits on the actual side effect.
@@ -4359,7 +4359,7 @@ describe("web bridge", () => {
 			const ws = bridge.createSession();
 			ws.runner.startRun(new AbortController());
 
-			ws.backgroundBash.registry.start("echo bg-followup-marker", cwd, testConfig, 5, ws.backgroundBash);
+			ws.backgroundBash.registry.start("echo bg-followup-marker", cwd, testConfig, 5_000, ws.backgroundBash);
 			await waitFor(() => ws.runner.followUpQueue.hasItems());
 
 			expect(runAgentLoop).not.toHaveBeenCalled();
