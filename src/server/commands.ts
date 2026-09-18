@@ -74,6 +74,12 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/abort", description: "Abort the current run", blocking: false, hidden: true },
 	{ name: "/build", description: "Exit plan mode, restore full toolset", blocking: true },
 	{ name: "/clear", description: "Clear context (and save)", blocking: true },
+	{
+		name: "/code-review",
+		description: "Review a diff with computed scope and language rules — [range] [-- path…]",
+		takesArgs: true,
+		blocking: true,
+	},
 	{ name: "/compact", description: "Compact context now", blocking: true },
 	{ name: "/continue", description: "Resume the most recent session", blocking: true, hidden: true },
 	{ name: "/copy", description: "Copy last assistant response", blocking: false },

@@ -56,6 +56,7 @@ export function getToolDefinitions(
 	includeSkillTool = true,
 	memoryEnabled = true,
 	goalActive = false,
+	reviewActive = false,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -609,6 +610,46 @@ export function getToolDefinitions(
 									},
 								},
 								required: ["todos"],
+							},
+						},
+					},
+				]
+			: []),
+		...(reviewActive
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "review_report",
+							description:
+								"Submit the findings of the code review under way. Every finding is checked against the files before it reaches the user: a line that does not hold is moved to where the quoted code actually is, and a finding whose code is nowhere in the file, or whose file is outside the review scope, is dropped. " +
+								"Call this once you have findings, then write your summary from the verdicts it returns — not from your own list. A review with nothing to report calls it with an empty array.",
+							parameters: {
+								type: "object",
+								properties: {
+									findings: {
+										type: "array",
+										description: "Every finding, each pinned to a file and line",
+										items: {
+											type: "object",
+											properties: {
+												path: { type: "string", description: "Path as it appears in the review scope" },
+												line: { type: "number", description: "Line number after the change" },
+												quote: {
+													type: "string",
+													description:
+														"The line's text, copied exactly as it stands in the file. This is what makes the position checkable — omit it and the line can only be range-checked",
+												},
+												issue: {
+													type: "string",
+													description: "The concrete failure, in one or two sentences",
+												},
+											},
+											required: ["path", "line", "issue"],
+										},
+									},
+								},
+								required: ["findings"],
 							},
 						},
 					},

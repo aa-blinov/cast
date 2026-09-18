@@ -14,6 +14,13 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { clearGoal, editGoalObjective, readGoal, startGoal } from "../../core/goal.ts";
+import {
+	buildReviewScope,
+	formatReviewBrief,
+	LARGE_REVIEW_FILES,
+	parseReviewArgs,
+	startReviewState,
+} from "../../core/review.ts";
 
 const ARG_WHITESPACE_SPLIT = /\s+/;
 
@@ -1073,6 +1080,38 @@ const commandHandlers: Record<string, CommandHandler> = {
 			console.error(`[cast server] /review submit failed:`, error);
 		});
 		return { ok: true, result: "Reviewing the session's work…" };
+	},
+	"/code-review": ({ ws, arg, cwd, submit, personas, currentPersona }) => {
+		const sessionCwd = ws.session.cwd ?? cwd;
+		const { range, paths } = parseReviewArgs(arg);
+		// The scope is computed before the turn starts, so a client that is
+		// only watching still sees what will be reviewed — and an empty diff
+		// costs no model call at all.
+		return (async () => {
+			let scope: Awaited<ReturnType<typeof buildReviewScope>>;
+			try {
+				scope = await buildReviewScope(sessionCwd, range, paths);
+			} catch (error) {
+				return { ok: false, error: error instanceof Error ? error.message : String(error) };
+			}
+			if (scope.files.length === 0) return { ok: true, result: `Nothing to review in ${scope.range}.` };
+			const persona = personas.find((p) => p.name === (ws.session.persona ?? "")) ?? currentPersona;
+			await startReviewState(ws.session.id, sessionCwd, scope);
+			void submit(ws.id, formatReviewBrief(scope, { delegate: persona.subagents })).catch((error) => {
+				console.error(`[cast server] /code-review submit failed:`, error);
+			});
+			return {
+				ok: true,
+				result: {
+					range: scope.range,
+					files: scope.files.length,
+					groups: scope.groups.map((g) => ({ label: g.label, files: g.files.map((f) => f.path) })),
+					skipped: scope.skipped.map((f) => ({ path: f.path, why: f.skipped })),
+					rules: scope.rules.map((r) => r.name),
+					large: scope.files.length > LARGE_REVIEW_FILES,
+				},
+			};
+		})();
 	},
 	"/rules": ({ ws, cwd, rulesForSessionCwd }) => {
 		// `sticky` is what the *daemon* has latched this session. The agent

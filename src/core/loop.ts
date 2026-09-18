@@ -105,6 +105,14 @@ import { type ProjectResolverDeps, resolveMcpForCwd } from "./project.ts";
 import { findProjectRoot } from "./project-root.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import {
+	clearReviewState,
+	formatFindingVerdicts,
+	parseFindings,
+	REVIEW_REPORT_REMINDER,
+	readReviewState,
+	verifyFindingsForSession,
+} from "./review.ts";
+import {
 	commitCheckpointWatermark,
 	compactMessages,
 	createSession,
@@ -1863,6 +1871,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			? readGoal(loopConfig.sessionId)
 			: undefined;
 	if (activeGoal && loopConfig.sessionId) recordGoalTurn(loopConfig.sessionId);
+	// Same ownership rule as the goal: a nested run must not report findings
+	// against its parent's review.
+	const activeReview = ownsGoal && loopConfig.sessionId ? readReviewState(loopConfig.sessionId) : undefined;
 	// Set by goal_update: the snapshot above stays stale on purpose (one file
 	// read per run), so the close has to be remembered here.
 	let goalClosed = false;
@@ -1873,6 +1884,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// the budget is spent the same either way, so this is the only thing that
 	// notices churn.
 	let goalLastPassSignature = "";
+	// A review that ends in prose has had none of its lines checked, which is
+	// the whole point of opening one. Set by the dispatch; the stop point asks
+	// once when it is still false.
+	let reviewReported = false;
+	let reviewNudged = false;
 	const builtinTools = getToolDefinitions(
 		subagentNames,
 		initialModel,
@@ -1883,6 +1899,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		allowedSkills?.some((skill) => !skill.disableModelInvocation) ?? false,
 		memoryEnabled,
 		Boolean(activeGoal),
+		Boolean(activeReview),
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
@@ -2160,6 +2177,24 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			// access to this closure's `todos` — the list must be visible to
 			// syncSystemPrompt on the very next request, not round-tripped through
 			// a separate store.
+			if (name === "review_report") {
+				if (!loopConfig.sessionId || !activeReview)
+					return { content: "Error: no code review is open in this session.", isError: true };
+				const findings = parseFindings(finalArgs.findings);
+				const verdicts = verifyFindingsForSession(loopConfig.sessionId, findings);
+				if (!verdicts) return { content: "Error: no code review is open in this session.", isError: true };
+				// Closing here, not after the turn: the check has run, so the
+				// scope has done its job, and a second submission would be
+				// checked against a scope the files may have moved past.
+				clearReviewState(loopConfig.sessionId);
+				reviewReported = true;
+				return {
+					content:
+						findings.length === 0
+							? "No findings recorded. Say so plainly, and name what you inspected to reach that conclusion."
+							: formatFindingVerdicts(verdicts),
+				};
+			}
 			if (name === "goal_update") {
 				// Validated, not defaulted: a missing or misspelled status used to
 				// fall through to "complete", so `goal_update({note:"still stuck"})`
@@ -2415,6 +2450,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// An interrupted goal turn is not a finished one: park it so the next
 		// run knows to re-check the world instead of trusting the transcript.
 		if (activeGoal && !goalClosed && loopConfig.sessionId) pauseGoalForAbort(loopConfig.sessionId);
+		// An abandoned review must not outlive its turn: its scope is a snapshot
+		// of a diff, and leaving it open would offer `review_report` on every
+		// later turn and check findings against a changeset that has moved on.
+		if (activeReview && !reviewReported && loopConfig.sessionId) clearReviewState(loopConfig.sessionId);
 		const shutdown = signal?.reason === "shutdown";
 		if (appendInterruptReminder(messages, shutdown ? "shutdown" : undefined)) {
 			onEvent({ type: "interrupt_reminder" });
@@ -3095,6 +3134,25 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					continue;
 				}
 			}
+			// An open review must not end as prose: ask once, then let the turn
+			// go. A second ask would be nagging, and the findings are in the
+			// transcript either way.
+			if (activeReview && !reviewReported && !signal?.aborted && loopConfig.sessionId) {
+				if (!reviewNudged) {
+					reviewNudged = true;
+					messages.push({ role: "user", content: REVIEW_REPORT_REMINDER });
+					onEvent({ type: "followup_injected", messages: [messages[messages.length - 1]!] });
+					continue;
+				}
+				// Asked and still not reported: close the review rather than
+				// leave its scope open for a later turn to check against a diff
+				// that has moved on.
+				clearReviewState(loopConfig.sessionId);
+				loopConfig.onWarning?.(
+					"The review ended without review_report, so its findings were never checked against the files.",
+				);
+			}
+
 			// An open goal doesn't stop here: it pushes the run forward instead of
 			// waiting for the user. Bounded twice over — its own continuation
 			// budget, and the outer iteration cap above, which ends the run

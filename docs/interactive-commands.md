@@ -104,8 +104,21 @@ See [Plan Mode](plan-mode.md) for the full workflow.
 |---------|-------------|
 | `/goal <description>` | Work autonomously toward a goal until it's done — bounded, never-ask |
 | `/review` | Ask the agent to review and verify its own work |
+| `/code-review [range] [-- path…]` | Review a diff: scope, groups and language rules computed before the model sees it |
 
 **`/goal [N] <description>`** runs one autonomous turn that keeps iterating (tools → verify → fix → repeat) until the goal is met, without yielding back to ask for permission. At most one clarifying question (via the `question` tool) if the goal is genuinely ambiguous. A leading number (`/goal 10 …`) sets the iteration budget yourself — or use `--steps N`. By default the run is bounded to **25 model calls**. Each model call can carry several tool calls, so the budget is a ceiling on LLM turns, not on individual tools. Near the cap the model is nudged to wrap up, and if it burns through anyway a warning fires and the run stops — it never loops forever on unproductive tool calls. Note: a tight budget can cut a long task short before it's finished, so size it to the task. Use it for start-to-finish tasks: "fix the tests", "set up the project and make the first commit", "implement X and verify it runs". Works in the TUI and the web composer.
+
+**`/code-review [range] [-- path…]`** reviews a change rather than the session. What must not go wrong is computed first, in code: which files are in scope (staged, unstaged and untracked against `HEAD`, or any git range you pass), which are filtered as generated, vendored or binary — each named with its reason so nothing looks silently missed — how they group into review units (a large file alone; a test with its implementation; otherwise by directory, capped), and which language rules apply. Only the judging is left to the model.
+
+Findings go through a `review_report` tool that checks each one against the file: a line that doesn't hold is moved to where the quoted code actually is, and a finding whose code is nowhere in the file — or whose file is outside the scope — is dropped before you ever read it. A finding on a line the change didn't touch is kept and flagged as context.
+
+```
+/code-review                          # working tree vs HEAD
+/code-review main..feature            # a branch's changes
+/code-review HEAD~3..HEAD -- src/     # narrow a large change to one subtree
+```
+
+Rules live in `prompts/review-rules/` — one document per language, loaded only for the languages actually in the diff, plus a shared default whose two standing orders are *precision over recall* (a false positive costs the trust you need for the next finding) and *don't duplicate the toolchain* (whatever the linter, formatter, compiler or test run already says is not a review comment). Add your own by dropping a file in that directory.
 
 **`/review`** asks the agent to verify its own most recent work: identify what changed (git diff / touched files), find and run the project's test and lint commands, and report honestly what was verified and what remains open — it never claims a check it didn't actually run.
 

@@ -240,6 +240,20 @@ Use for:
 - Isolating complex research that would pollute the main context
 - Delegating well-defined subtasks
 
+## Review Tool
+
+`review_report` exists only while a `/code-review` is open in the session. It takes the findings and checks every one against the files before they reach the user.
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `findings` | Yes | Array of `{path, line, quote, issue}`. An empty array is a valid answer — it means the change is clean |
+| ↳ `path` | Yes | Path as it appears in the review scope |
+| ↳ `line` | Yes | Line number after the change |
+| ↳ `quote` | No | The line's exact text. This is what makes the position checkable; without it only the line's existence is verified |
+| ↳ `issue` | Yes | The concrete failure, in a sentence or two |
+
+Each finding comes back with a verdict: **ok**, **relocated** (the quoted code was found elsewhere in the file and the line was corrected), **outside the change** (kept, but the line is context rather than diff), or **dropped** (the quoted code is not in the file, or the file is outside the scope). The summary the user reads is written from the verdicts, not from the model's own list.
+
 ## Plan Tools
 
 Mode-specific tools are deliberately narrow: `plan_done` is available only in plan mode; `todo_write` is available only in build mode. `question` is available in both modes and persists until the user answers it, including across TUI/web restarts. See [Plan Mode](plan-mode.md) for the write and bash gates.
