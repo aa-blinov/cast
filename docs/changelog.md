@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.36.2
+
+### Fixed
+
+- **A code review could not correct findings the position check rejected.** The first `review_report` closed the review, so a model told that its findings were unlocatable had nowhere to send the corrected ones — it got "no code review is open". Found on a real 45-file review where all four findings were dropped as unlocatable, which is exactly the case the check exists for. The scope now stays open until the turn ends, however many submissions that takes.
+
 ## 0.36.1
 
 Tests only: the TUI `/code-review` route shipped without one in 0.36.0, which the per-file coverage floor caught after the tag was cut.
