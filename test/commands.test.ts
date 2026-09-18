@@ -1590,6 +1590,78 @@ describe("/rules", () => {
 	});
 });
 
+describe("/code-review", () => {
+	// The scope is computed before the model sees anything, so the command has
+	// to hold up on a real repository rather than on a mocked git.
+	let repo: string;
+	let previousHome: string | undefined;
+
+	beforeEach(() => {
+		repo = join(tmpdir(), `cast-tui-cr-${process.pid}-${Date.now()}`);
+		mkdirSync(join(repo, "fake-home"), { recursive: true });
+		execFileSync("git", ["init", "-b", "main"], { cwd: repo, stdio: "ignore" });
+		execFileSync("git", ["config", "user.email", "t@example.com"], { cwd: repo });
+		execFileSync("git", ["config", "user.name", "T"], { cwd: repo });
+		writeFileSync(join(repo, "README.md"), "hi\n");
+		execFileSync("git", ["add", "README.md"], { cwd: repo });
+		execFileSync("git", ["commit", "-m", "init"], { cwd: repo, stdio: "ignore" });
+		previousHome = process.env.HOME;
+		process.env.HOME = join(repo, "fake-home");
+	});
+
+	afterEach(() => {
+		if (previousHome === undefined) delete process.env.HOME;
+		else process.env.HOME = previousHome;
+		rmSync(repo, { recursive: true, force: true });
+	});
+
+	it("says there is nothing to review rather than starting a turn", async () => {
+		const { deps, calls } = createFakeDeps({ cwd: repo });
+		await handleInput("/code-review", undefined, deps);
+		expect(noticeText(calls)).toContain("Nothing to review");
+		expect(calls["agent.submit"]).toBeUndefined();
+	});
+
+	it("computes the scope, opens the review, and submits the brief", async () => {
+		mkdirSync(join(repo, "src"), { recursive: true });
+		writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n");
+		writeFileSync(join(repo, "package-lock.json"), "{}\n");
+		const { deps, calls } = createFakeDeps({ cwd: repo });
+		const { readReviewState } = await import("../src/core/review.ts");
+
+		await handleInput("/code-review", undefined, deps);
+
+		const brief = String(calls["agent.submit"]?.[0]?.[0] ?? "");
+		expect(brief).toContain("src/a.ts");
+		// The filtered file is named as out of scope, not silently missing.
+		expect(brief).toContain("package-lock.json");
+		expect(brief).toContain("review_report");
+		// The review is open, which is what makes the position check possible.
+		expect(readReviewState("test-session")?.files).toEqual(["src/a.ts"]);
+	});
+
+	it("narrows the scope to the paths after --", async () => {
+		mkdirSync(join(repo, "src"), { recursive: true });
+		mkdirSync(join(repo, "docs"), { recursive: true });
+		writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n");
+		writeFileSync(join(repo, "docs", "b.md"), "# b\n");
+		const { deps, calls } = createFakeDeps({ cwd: repo });
+
+		await handleInput("/code-review -- src", undefined, deps);
+
+		const brief = String(calls["agent.submit"]?.[0]?.[0] ?? "");
+		expect(brief).toContain("src/a.ts");
+		expect(brief).not.toContain("docs/b.md");
+	});
+
+	it("refuses to start while a turn is running", async () => {
+		writeFileSync(join(repo, "README.md"), "changed\n");
+		const { deps, calls } = createFakeDeps({ cwd: repo, running: true });
+		await handleInput("/code-review", undefined, deps);
+		expect(calls["agent.submit"]).toBeUndefined();
+	});
+});
+
 describe("/goal", () => {
 	// The goal is session state under ~/.cast/goals, so /goal must write it,
 	// not just build a prompt — that was the whole point of making it durable.
