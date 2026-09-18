@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.35.0
+
+### Changed
+
+- **A goal's first "complete" now has to prove itself.** `goal_update` answers the first completion with a demand for evidence — enumerate what the objective requires from the current state, inspect each requirement, then call again with what you saw — and closes on the second call. One challenge per goal, so nothing can be held hostage by its own check, and an agent that stops at the challenge leaves the goal active rather than closed. Measured on MiniMax-M3 over twenty runs of a goal whose objective covers three files while the prompt names one: 19/20 before, 20/20 after; the run that failed had closed the goal after the first file. The check costs one extra model round per completion.
+
 ## 0.34.1
 
 ### Fixed
