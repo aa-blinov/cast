@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.36.1
+
+Tests only: the TUI `/code-review` route shipped without one in 0.36.0, which the per-file coverage floor caught after the tag was cut.
+
 ## 0.36.0
 
 ### Added
