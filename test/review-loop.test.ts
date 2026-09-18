@@ -162,6 +162,32 @@ describe("runAgentLoop — open code review", () => {
 		expect(warnings).toHaveLength(0);
 	});
 
+	// A real run on a 45-file change had all four findings dropped as
+	// unlocatable, tried to send corrected ones, and hit "no code review is
+	// open" — the check named the problem and then refused the fix.
+	it("accepts a corrected resubmission in the same turn", async () => {
+		const results: string[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(reportCall([{ path: "src/a.ts", line: 1, quote: "nowhere()", issue: "unlocatable" }]))
+			.mockImplementationOnce(async (_c: unknown, _m: unknown, messages: Message[]) => {
+				results.push(String(messages[messages.length - 1]?.content ?? ""));
+				return reportCall([{ path: "src/a.ts", line: 2, quote: "const b = 2;", issue: "corrected" }])();
+			})
+			.mockImplementationOnce(async (_c: unknown, _m: unknown, messages: Message[]) => {
+				results.push(String(messages[messages.length - 1]?.content ?? ""));
+				return stop();
+			});
+
+		await run();
+
+		expect(results[0]).toContain("0 stand, 1 dropped");
+		// The second call is checked, not refused.
+		expect(results[1]).toContain("1 stand, 0 dropped");
+		expect(results[1]).not.toContain("no code review is open");
+		// And the scope is closed once the turn is actually over.
+		expect(readReviewState(SESSION)).toBeUndefined();
+	});
+
 	it("verifies the positions it is given and says what moved", async () => {
 		let toolResult = "";
 		vi.mocked(streamAndCollect)
