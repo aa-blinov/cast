@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	challengeGoalCompletion,
 	clearGoal,
 	editGoalObjective,
 	goalPath,
@@ -167,6 +168,21 @@ describe("durable goal", () => {
 		expect(goal?.turns).toBe(1);
 		expect(goal?.continuations).toBe(1);
 		expect(goal?.status).toBe("active");
+	});
+
+	it("challenges a completion once and then lets it through", () => {
+		startGoal("s1", "ship it");
+		expect(challengeGoalCompletion("s1")?.completionChallenged).toBe(true);
+		// Only the first one: a goal cannot be held hostage by its own check.
+		expect(challengeGoalCompletion("s1")).toBeUndefined();
+		updateGoal("s1", "complete", "evidence");
+		expect(readGoal("s1")?.status).toBe("complete");
+	});
+
+	it("does not challenge a goal that is already closed", () => {
+		startGoal("s1", "ship it");
+		updateGoal("s1", "complete", "evidence");
+		expect(challengeGoalCompletion("s1")).toBeUndefined();
 	});
 
 	it("offers goal_update only while a goal is active", () => {
