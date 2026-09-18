@@ -24,7 +24,9 @@ import { type AppConfig, inputTokenBudget, type ProviderCredentials, reservedRes
 import { type AnnouncedLocalDate, appendDateRolloverReminder } from "./date-rollover-reminder.ts";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import {
+	challengeGoalCompletion,
 	GOAL_BUDGET_PROMPT,
+	GOAL_COMPLETION_CHALLENGE,
 	GOAL_CONTINUATION_PROMPT,
 	GOAL_NUDGE_PROMPT,
 	GOAL_RECOVERY_NOTE,
@@ -2184,6 +2186,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						content: "Goal marked blocked. It stops driving this run and no longer rides along with later turns.",
 					};
 				}
+				// One challenge per goal before the first close. Not an error and
+				// not a refusal: the model is told what would prove it and can
+				// close on the next call.
+				if (challengeGoalCompletion(loopConfig.sessionId)) return { content: GOAL_COMPLETION_CHALLENGE };
 				if (!updateGoal(loopConfig.sessionId, status, note))
 					return { content: "Error: there is no active goal to close.", isError: true };
 				goalClosed = true;

@@ -137,10 +137,18 @@ describe("runAgentLoop — durable goal", () => {
 		expect(readGoal(SESSION)?.status).toBe("budget_limited");
 	});
 
-	it("stops continuing once the agent closes the goal", async () => {
+	// One run in twenty closed a three-file goal after the first file, with a
+	// note that was true about the work done and silent about the rest. The
+	// first "complete" now buys a demand for proof instead of a close.
+	it("answers the first complete with a challenge and closes on the second", async () => {
 		startGoal(SESSION, "one thing", 5);
+		let challenge = "";
 		vi.mocked(streamAndCollect)
-			.mockImplementationOnce(goalUpdateCall({ status: "complete", note: "checked, all green" }))
+			.mockImplementationOnce(goalUpdateCall({ status: "complete", note: "did the thing" }))
+			.mockImplementationOnce(async (_c: unknown, _m: unknown, messages: Message[]) => {
+				challenge = String(messages[messages.length - 1]?.content ?? "");
+				return goalUpdateCall({ status: "complete", note: "checked each requirement, all green" })();
+			})
 			.mockImplementationOnce(stop);
 
 		await runAgentLoop([{ role: "user", content: "start" }], {
@@ -153,10 +161,32 @@ describe("runAgentLoop — durable goal", () => {
 			onWarning: () => {},
 		});
 
+		expect(challenge).toContain("Not closed yet");
+		expect(challenge).toContain("Work from the objective");
 		expect(readGoal(SESSION)?.status).toBe("complete");
-		// Two passes: the tool call and the reply after it. No continuation.
-		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+		// The close is the second call's doing, and nothing continued after it.
 		expect(readGoal(SESSION)?.continuations).toBe(0);
+	});
+
+	it("keeps the goal active when the agent stops at the challenge", async () => {
+		startGoal(SESSION, "one thing", 0);
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(goalUpdateCall({ status: "complete", note: "did the thing" }))
+			.mockImplementationOnce(stop);
+
+		await runAgentLoop([{ role: "user", content: "start" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: fakeHome,
+			systemPrompt: "base",
+			sessionId: SESSION,
+			onEvent: () => {},
+			onWarning: () => {},
+		});
+
+		// Challenged but never proven: the goal must not close itself.
+		expect(readGoal(SESSION)?.status).not.toBe("complete");
+		expect(readGoal(SESSION)?.completionChallenged).toBe(true);
 	});
 
 	// A missing or misspelled status used to fall through to "complete".

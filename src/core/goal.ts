@@ -46,6 +46,8 @@ export interface GoalState {
 	blockedStreak: number;
 	/** The blocker it reported last, so a different one restarts the count. */
 	blockedNote?: string;
+	/** Whether the first "complete" has already been sent back for proof. */
+	completionChallenged?: boolean;
 }
 
 /**
@@ -86,6 +88,7 @@ export function readGoal(sessionId: string): GoalState | undefined {
 			continuations: typeof parsed.continuations === "number" ? parsed.continuations : 0,
 			blockedStreak: typeof parsed.blockedStreak === "number" ? parsed.blockedStreak : 0,
 			blockedNote: typeof parsed.blockedNote === "string" ? parsed.blockedNote : undefined,
+			completionChallenged: parsed.completionChallenged === true,
 			maxContinuations:
 				typeof parsed.maxContinuations === "number" ? parsed.maxContinuations : GOAL_MAX_CONTINUATIONS,
 		};
@@ -134,6 +137,7 @@ export function startGoal(sessionId: string, objective: string, maxContinuations
 		continuations: 0,
 		maxContinuations,
 		blockedStreak: 0,
+		completionChallenged: false,
 	});
 }
 
@@ -175,6 +179,23 @@ export function reportGoalBlocked(
 	}
 	writeGoal(sessionId, { ...goal, blockedStreak: streak, blockedNote: note });
 	return { remaining: GOAL_BLOCKED_THRESHOLD - streak };
+}
+
+/**
+ * First "complete" on a goal is answered with a demand for proof rather than a
+ * close. Returns the challenged goal, or undefined when the goal is gone or has
+ * already been challenged — in which case the caller closes it for real.
+ *
+ * Measured: on a case whose objective covers three files while the prompt names
+ * one, one run in twenty closed the goal after the first file, with a note that
+ * described exactly the work it had done and nothing about the rest. The model
+ * is not lying there, it is answering the message instead of the objective, and
+ * the cheapest thing that catches it is being asked once, out loud, to check.
+ */
+export function challengeGoalCompletion(sessionId: string): GoalState | undefined {
+	const goal = readGoal(sessionId);
+	if (!goal || goal.status !== "active" || goal.completionChallenged) return undefined;
+	return writeGoal(sessionId, { ...goal, completionChallenged: true });
 }
 
 /** Close the goal. Returns undefined when there was no goal to close. */
@@ -267,3 +288,15 @@ export const GOAL_NUDGE_PROMPT = `That pass changed nothing: the same tools retu
 
 /** Injected once when the continuation budget runs out. */
 export const GOAL_BUDGET_PROMPT = `The goal has used its continuation budget, so stop starting new work on it now. Summarize what actually got done and what was verified, name what remains, and leave the user a clear next step. Call \`goal_update\` only if the goal is genuinely complete.`;
+
+/**
+ * The answer to a first `goal_update` with status "complete". It asks for the
+ * objective's requirements to be re-derived from the world rather than from
+ * the transcript — the failing runs all had a note that was true about the work
+ * done and silent about the requirements nobody had looked at.
+ */
+export const GOAL_COMPLETION_CHALLENGE = `Not closed yet — this is the one check every goal gets before it can be marked complete.
+
+Work from the objective, not from what you did this turn: list every requirement it names (every file, every test, every module — enumerate the set from the current state, don't recall it), and for each one, inspect it now and say what you saw. A requirement you haven't looked at since your last change is unverified, however sure you are.
+
+If all of them hold, call \`goal_update\` with status "complete" again and put that evidence in the note — this second call closes the goal. If any of them doesn't, keep working instead.`;
