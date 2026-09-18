@@ -32,6 +32,13 @@ import {
 } from "../core/project.ts";
 import { clearProjectRootCache } from "../core/project-root.ts";
 import { getModelsCache } from "../core/readline.ts";
+import {
+	buildReviewScope,
+	formatReviewBrief,
+	LARGE_REVIEW_FILES,
+	parseReviewArgs,
+	startReviewState,
+} from "../core/review.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
 import {
 	addUsage,
@@ -160,6 +167,11 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/abort", description: "Abort the current run" },
 	{ name: "/build", description: "Exit plan mode, restore full toolset" },
 	{ name: "/clear", description: "Clear context (and save)" },
+	{
+		name: "/code-review",
+		description: "Review a diff with computed scope and language rules — [range] [-- path…]",
+		takesArgs: true,
+	},
 	{ name: "/compact", description: "Compact context now" },
 	{ name: "/context", description: "List loaded AGENTS.md / CLAUDE.md context files" },
 	{ name: "/continue", description: "Resume the most recent session" },
@@ -3218,6 +3230,46 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			} catch (err) {
 				showNotice(`[${err instanceof Error ? err.message : String(err)}]`);
 			}
+			return;
+		},
+	},
+	{
+		// Its own command, not a flag on /review: /review judges the session's
+		// own work from the transcript, this one judges a diff whose scope was
+		// computed rather than recalled.
+		match: (input) => input === "/code-review" || input.startsWith("/code-review "),
+		run: async ({ input, images, deps, agent, session, showNotice }) => {
+			if (deps.running) {
+				showNotice("[Agent is running — wait for it to finish before /code-review]");
+				return;
+			}
+			const { range, paths } = parseReviewArgs(input === "/code-review" ? "" : input.slice("/code-review ".length));
+			let scope: Awaited<ReturnType<typeof buildReviewScope>>;
+			try {
+				scope = await buildReviewScope(deps.cwd, range, paths);
+			} catch (error) {
+				showNotice(`[/code-review: ${error instanceof Error ? error.message : String(error)}]`);
+				return;
+			}
+			if (scope.files.length === 0) {
+				showNotice(
+					`[Nothing to review in ${scope.range}${scope.skipped.length > 0 ? ` — ${scope.skipped.length} file(s) filtered as generated or vendored` : ""}]`,
+				);
+				return;
+			}
+			deps.agent.addDisplayMessage({ role: "user", content: input });
+			showNotice(
+				`[Reviewing ${scope.files.length} file(s) in ${scope.groups.length} group(s); rules: ${scope.rules.map((r) => r.name).join(", ")}]${
+					scope.files.length > LARGE_REVIEW_FILES
+						? ` [large change — narrow it with /code-review ${range ?? ""} -- <path> if this runs long]`
+						: ""
+				}`,
+			);
+			// Opening the review is what makes `review_report` exist for this
+			// turn and gives the position check something to hold findings
+			// against.
+			await startReviewState(session.id, deps.cwd, scope);
+			await agent.submit(formatReviewBrief(scope, { delegate: deps.currentPersona.subagents }), images);
 			return;
 		},
 	},
