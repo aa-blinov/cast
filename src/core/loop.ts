@@ -2183,10 +2183,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				const findings = parseFindings(finalArgs.findings);
 				const verdicts = verifyFindingsForSession(loopConfig.sessionId, findings);
 				if (!verdicts) return { content: "Error: no code review is open in this session.", isError: true };
-				// Closing here, not after the turn: the check has run, so the
-				// scope has done its job, and a second submission would be
-				// checked against a scope the files may have moved past.
-				clearReviewState(loopConfig.sessionId);
+				// The review stays open until the turn ends. Closing on the first
+				// submission was wrong in exactly the case the check exists for:
+				// a real run had all four of its findings dropped as unlocatable
+				// and tried to send corrected ones, and got "no code review is
+				// open" — the check told it what to fix and then refused the fix.
 				reviewReported = true;
 				return {
 					content:
@@ -3137,20 +3138,21 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			// An open review must not end as prose: ask once, then let the turn
 			// go. A second ask would be nagging, and the findings are in the
 			// transcript either way.
-			if (activeReview && !reviewReported && !signal?.aborted && loopConfig.sessionId) {
-				if (!reviewNudged) {
+			if (activeReview && loopConfig.sessionId) {
+				if (!reviewReported && !reviewNudged && !signal?.aborted) {
 					reviewNudged = true;
 					messages.push({ role: "user", content: REVIEW_REPORT_REMINDER });
 					onEvent({ type: "followup_injected", messages: [messages[messages.length - 1]!] });
 					continue;
 				}
-				// Asked and still not reported: close the review rather than
-				// leave its scope open for a later turn to check against a diff
-				// that has moved on.
+				// The turn is over either way: close the scope rather than leave
+				// it for a later turn to check against a diff that has moved on.
 				clearReviewState(loopConfig.sessionId);
-				loopConfig.onWarning?.(
-					"The review ended without review_report, so its findings were never checked against the files.",
-				);
+				if (!reviewReported) {
+					loopConfig.onWarning?.(
+						"The review ended without review_report, so its findings were never checked against the files.",
+					);
+				}
 			}
 
 			// An open goal doesn't stop here: it pushes the run forward instead of

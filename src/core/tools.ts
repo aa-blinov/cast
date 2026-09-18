@@ -623,7 +623,8 @@ export function getToolDefinitions(
 							name: "review_report",
 							description:
 								"Submit the findings of the code review under way. Every finding is checked against the files before it reaches the user: a line that does not hold is moved to where the quoted code actually is, and a finding whose code is nowhere in the file, or whose file is outside the review scope, is dropped. " +
-								"Call this once you have findings, then write your summary from the verdicts it returns — not from your own list. A review with nothing to report calls it with an empty array.",
+								"Call this once you have findings, then write your summary from the verdicts it returns — not from your own list. A review with nothing to report calls it with an empty array. " +
+								"If findings come back dropped or relocated, you may call again in the same turn with them corrected.",
 							parameters: {
 								type: "object",
 								properties: {
