@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.36.0
+
+### Added
+
+- **`/code-review [range] [-- path…]`** — a review of a change, where the scope is computed rather than recalled. Which files are in it, which are filtered as generated or vendored (each named with its reason), how they group into review units, and which language rules apply are all decided in code before the model sees anything; only the judging is left to it. Rules live in `prompts/review-rules/`, one document per language, loaded only for the languages actually in the diff — add your own by dropping a file there. Findings go through a `review_report` tool that checks each against the file: a wrong line is moved to where the quoted code actually is, a finding whose code isn't in the file (or whose file is out of scope) is dropped before you read it, and one on an untouched line is kept and flagged as context. `-- <path>` narrows a change too large for a single turn; past 25 files the command says so up front.
+
 ## 0.35.0
 
 ### Changed
