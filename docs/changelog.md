@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.36.3
+
+Tooling only, no user-facing change: `evals/review-bench/` measures `/code-review` on merged bug-fix pull requests with the fix reversed back out, so the planted defect's position is known and recall can be counted instead of judged.
+
+Two things it established straight away. Two runs of the same build score 10/16 and 12/16 with four cases flipping, so a configuration has to be repeated before its numbers mean anything. And two candidate improvements — putting the diff in the brief, and telling the reviewer to re-read a line before quoting it — were both measured and both dropped: neither moved recall, the inline diff halved the number of findings, and the position check that re-reading was meant to help was already dropping nothing on all sixteen cases.
+
 ## 0.36.2
 
 ### Fixed
