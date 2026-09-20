@@ -7,20 +7,42 @@ by construction, so recall can be counted rather than judged.
 ```bash
 cast server                              # the bench drives a running daemon
 evals/review-bench/prepare.sh            # clone + un-fix every case
-OUT=/tmp/base.jsonl evals/review-bench/run.sh
+ATTEMPTS=3 OUT=/tmp/base.jsonl evals/review-bench/run.sh
 evals/review-bench/score.py /tmp/base.jsonl
 ```
+
+`ATTEMPTS` follows the scoreboard protocol in `docs/eval-methodology.md`: one
+attempt is a quick diagnostic, three is what you compare on. A case counts as
+found only when every attempt found it; two out of three is reported as
+instability, never as partial credit. Each attempt runs in a fresh session and
+against a freshly restored working tree, because the reviewer can write files
+and an attempt that reviews the previous attempt's edits measures nothing.
 
 `cases.txt` is `repo|pr|(unused)|merge-sha|title`, one merged PR per line, each
 one a fix that touches real source. Work trees land in `work/` (override with
 `REVIEW_BENCH_WORK`), and `PERSONA` picks the persona under test.
 
+## Where it stands
+
+First run under the three-attempt protocol, `senior` persona:
+
+```
+found     9/16   every attempt found the planted defect
+unstable  4/16   pallets/click#3865, pallets/click#3678,
+                 sindresorhus/p-limit#109, sharkdp/fd#2127
+missed    3/16   expressjs/express#6088, chalk/chalk#688, chalk/chalk#642
+findings 80, median 164s
+```
+
+Those four unstable cases are why single-attempt runs of the same build scored
+anywhere from 8/16 to 12/16.
+
 ## Read the numbers carefully
 
-**Repeat a configuration before believing it.** Two runs of the same build gave
-10/16 and 12/16, with four individual cases flipping. Anything smaller than that
-is noise, and the first round of this bench produced three confident conclusions
-that were all artefacts:
+**Repeat a configuration before believing it.** Before the protocol was in
+place, two runs of the same build gave 10/16 and 12/16, with four individual
+cases flipping. The first round of this bench also produced three confident
+conclusions that were all artefacts:
 
 - the reverse patch was taken against the branch point instead of the merge's
   first parent, so every unrelated commit that landed in main while the PR was

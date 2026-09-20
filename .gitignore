@@ -41,3 +41,6 @@ test/__test_tmp__/
 .cast/
 chapters/
 __pycache__/
+evals/review-bench/work/
+evals/review-bench/ready.tsv
+evals/review-bench/*.jsonl
