@@ -40,3 +40,4 @@ test/__test_tmp__/
 # not repository configuration.
 .cast/
 chapters/
+__pycache__/
