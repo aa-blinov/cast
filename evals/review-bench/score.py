@@ -59,7 +59,7 @@ def score(path):
             (hit, len(reported), row["seconds"])
         )
 
-    per_case, found, split, findings, seconds = {}, 0, 0, 0, []
+    per_case, found, split, findings, seconds = {}, 0, 0, [], []
     for case, tries in attempts.items():
         hits = sum(1 for hit, _, _ in tries if hit)
         # All attempts, or it did not hold. A 2/3 is instability, not a pass.
@@ -69,15 +69,18 @@ def score(path):
                           statistics.median([s for _, _, s in tries]))
         found += verdict == "found"
         split += verdict == "split"
-        findings += sum(n for _, n, _ in tries)
+        # Per attempt, not summed: a total that scales with ATTEMPTS cannot be
+        # compared against a run that used a different number of them.
+        findings.append(statistics.median([n for _, n, _ in tries]))
         seconds += [s for _, _, s in tries]
-    return per_case, found, split, len(attempts), findings, statistics.median(seconds or [0])
+    return (per_case, found, split, len(attempts),
+            statistics.median(findings or [0]), statistics.median(seconds or [0]))
 
 
 def main(paths):
     scored = [(p, *score(p)) for p in paths]
     names = [p.rsplit("/", 1)[-1].replace(".jsonl", "") for p in paths]
-    print(f"{'case':<30}" + "".join(f"{n:>26}" for n in names))
+    print(f"{'case':<30}" + "".join(f"{n:>27}" for n in names))
     for case in scored[0][1]:
         cells = ""
         for _, per_case, *_ in scored:
@@ -87,7 +90,12 @@ def main(paths):
     print()
     for (_, _, found, split, total, findings, median), name in zip(scored, names):
         note = f"   ({split} unstable)" if split else ""
-        print(f"{name:<22} found {found}/{total}{note}   findings {findings}   median {median:.0f}s")
+        print(f"{name:<22} found {found}/{total}{note}   findings/attempt {findings:.0f}   median {median:.0f}s")
+    if len(scored) > 1:
+        a, b = scored[0][1], scored[1][1]
+        flipped = [c for c in a if c in b and a[c][0] != b[c][0]]
+        print(f"\n{names[0]} vs {names[1]}: {len(flipped)} case(s) changed verdict"
+              f"{' — ' + ', '.join(flipped) if flipped else ''}")
     if any(s[3] for s in scored):
         print("\nUnstable cases found the defect in some attempts and not others. They are"
               "\nnot partial credit: they are the reason one attempt per case proves nothing.")
