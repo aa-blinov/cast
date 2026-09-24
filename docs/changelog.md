@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.36.4
+
+### Fixed
+
+- **A code review skipped hand-maintained vendored code.** The noise filter dropped everything under `vendor/` and `third_party/` along with `node_modules` and `dist`, but those are not the same thing: an installed package arrives from a package manager, while vendored code is checked in and then edited by hand. Measured on chalk, whose fix lives in `source/vendor/supports-color/`: one review was left with nothing in scope at all and answered "no reviewable changes", and another saw only the readme and the tests. With the filter narrowed to installed and generated directories, the first case now finds the defect on every attempt.
+
 ## 0.36.3
 
 Tooling only, no user-facing change: `evals/review-bench/` measures `/code-review` on merged bug-fix pull requests with the fix reversed back out, so the planted defect's position is known and recall can be counted instead of judged.
