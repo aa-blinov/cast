@@ -1,6 +1,5 @@
 expressjs/express|7459||9a34acf03cb818ff3f8bc40e44176e277a25cbb9|fix(res.send): preserve ETag generation with Transfer-Encoding
 expressjs/express|5555||116f69a4d11f580d098df0005e1ab3cadb5b5195|fix #5554 passing URL instances with new location encoding
-expressjs/express|6088||6cd404eb28ff861180f435b3015f8d0c8c0b44d4|fix: enhance req.acceptsCharsets method
 pallets/click|3865||70689853e39c30e36eb0d83d586cc914a74db9d3|Fix short help abbreviation
 pallets/click|3818||00f257bb8e714064bea16425007543bbc0800445|Fix race condition on `KeyboardInterrupt` in `Command.main()`
 pallets/click|3805||4295457ddc7b5ca9a733d59ca40d9651b02b9b1d|Fix `copy`, `deepcopy` and `pickle` of `Sentinel` members
@@ -14,3 +13,4 @@ sharkdp/fd|2082||ee195f4dd64b10b645dbcf8ec4aa752622cb4d8e|Fix panic on out-of-ra
 sharkdp/fd|1164||99d1db8cb35349fd80174361535db9474563120f|Fix panic when using --owner
 chalk/chalk|688||e91293130c7d642c7b91152c3c942743a3b910a7|Fix: Treat a numeric `FORCE_COLOR` as an exact level
 chalk/chalk|642||4ebb62d1ca70c122674558a88932ddf6545fe9ef|Fix `navigator` not defined `ReferenceError`
+expressjs/express|4893||18e5985b8a9d5e8423db0a9121f22bdaecd5b120|fix(res.send): add Content-Length header only if Transfer-Encoding is not present

@@ -79,9 +79,14 @@ const SKIP_PATTERNS: Array<{ re: RegExp; why: string }> = [
 		why: "lockfile",
 	},
 	{
-		re: /(^|\/)(node_modules|vendor|third_party|\.venv|venv|dist|build|out|target|coverage)\//,
-		why: "vendored or generated directory",
+		re: /(^|\/)(node_modules|\.venv|venv|dist|build|out|target|coverage)\//,
+		why: "installed or generated directory",
 	},
+	// `vendor/` and `third_party/` are deliberately NOT here. Those hold code a
+	// person checks in and then edits by hand, so a change inside one is a
+	// change someone made on purpose. Skipping them cost two measured cases:
+	// chalk's fix lives in source/vendor/supports-color/, and filtering it left
+	// one review with nothing in scope at all.
 	{ re: /\.(min\.js|min\.css|map|snap)$/, why: "generated artifact" },
 	{ re: /\.(png|jpe?g|gif|ico|svg|pdf|zip|tar|gz|woff2?|ttf|eot|mp4|mp3|wasm)$/i, why: "binary or asset" },
 	{ re: /(^|\/)(\.pnp\.cjs|\.yarn)\//, why: "package manager internals" },

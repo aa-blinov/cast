@@ -61,7 +61,7 @@ describe("review scope from git", () => {
 
 	// The filter is the point of doing selection in code: whether a lockfile is
 	// worth reviewing is not a judgement call worth a model's attention.
-	it("filters generated, vendored and binary paths and says why", async () => {
+	it("filters installed, generated and binary paths and says why", async () => {
 		mkdirSync(join(repo, "node_modules", "dep"), { recursive: true });
 		mkdirSync(join(repo, "src"), { recursive: true });
 		writeFileSync(join(repo, "package-lock.json"), "{}\n");
@@ -73,7 +73,7 @@ describe("review scope from git", () => {
 		expect(files.map((f) => f.path)).toEqual(["src/real.ts"]);
 		const reasons = new Map(skipped.map((f) => [f.path, f.skipped]));
 		expect(reasons.get("package-lock.json")).toBe("lockfile");
-		expect(reasons.get("node_modules/dep/index.js")).toBe("vendored or generated directory");
+		expect(reasons.get("node_modules/dep/index.js")).toBe("installed or generated directory");
 		expect(reasons.get("logo.png")).toBe("binary or asset");
 	});
 
@@ -352,5 +352,19 @@ describe("brief", () => {
 		const scope = await buildReviewScope(repo);
 		expect(formatReviewBrief(scope, { delegate: true })).toContain("One `task` per group");
 		expect(formatReviewBrief(scope, { delegate: false })).not.toContain("One `task` per group");
+	});
+
+	// chalk keeps its fix in source/vendor/supports-color/. Filtering that away
+	// left one measured review with an empty scope and missed the defect in
+	// another: vendored code is checked in and edited by hand, unlike node_modules.
+	it("reviews vendored code, which is hand-edited, unlike an installed package", async () => {
+		mkdirSync(join(repo, "source", "vendor", "dep"), { recursive: true });
+		mkdirSync(join(repo, "third_party"), { recursive: true });
+		writeFileSync(join(repo, "source", "vendor", "dep", "index.js"), "export const a = 1;\n");
+		writeFileSync(join(repo, "third_party", "lib.js"), "export const b = 2;\n");
+
+		const { files, skipped } = await collectReviewFiles(repo);
+		expect(files.map((f) => f.path).sort()).toEqual(["source/vendor/dep/index.js", "third_party/lib.js"]);
+		expect(skipped).toHaveLength(0);
 	});
 });
