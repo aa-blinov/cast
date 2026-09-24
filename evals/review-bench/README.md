@@ -15,8 +15,13 @@ evals/review-bench/score.py /tmp/base.jsonl
 attempt is a quick diagnostic, three is what you compare on. A case counts as
 found only when every attempt found it; two out of three is reported as
 instability, never as partial credit. Each attempt runs in a fresh session and
-against a freshly restored working tree, because the reviewer can write files
-and an attempt that reviews the previous attempt's edits measures nothing.
+against a working tree restored with `reset --hard` (not `checkout -- .`, which
+restores from the index and would hand back anything the reviewer staged). An
+attempt that cannot run is still recorded, as a non-hit: dropping the row would
+shrink the denominator and turn one lucky run out of three into "found 1/1".
+
+The fixture is also restored after the last attempt, because `score.py` derives
+ground truth from `git diff` at scoring time.
 
 `cases.txt` is `repo|pr|(unused)|merge-sha|title`, one merged PR per line, each
 one a fix that touches real source. Work trees land in `work/` (override with
