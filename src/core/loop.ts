@@ -122,6 +122,7 @@ import {
 	getCheckpointWatermark,
 	getMessagesAfterCheckpoint,
 	loadSession,
+	MAX_SUMMARY_TOKENS,
 	markImageMessagesOutOfContext,
 	saveSession,
 	shouldCompact,
@@ -586,7 +587,9 @@ export async function compactSessionMessages(
 						{ role: "user", content: promptText },
 					],
 					[],
-					2000,
+					// Budget to the summary ceiling: at 2000 the summary was cut
+					// long before clampSummary's 8000-token limit could matter.
+					MAX_SUMMARY_TOKENS,
 					signal,
 					undefined,
 					undefined,
@@ -807,6 +810,8 @@ export type AgentEvent =
 	| { type: "open_work_gate_exhausted"; openSteps: number; maxFires: number }
 	/** Prior turn was aborted mid-stream; a `<system-reminder>` was appended for the model. */
 	| { type: "interrupt_reminder" }
+	/** skill_install changed the installed set; hosts refresh slash commands. */
+	| { type: "skills_changed" }
 	/** Build-mode todo_write call landed — carries the full replacement list. */
 	| { type: "todos_updated"; todos: TodoItem[] }
 	/** Session crossed local midnight; a date-rollover `<system-reminder>` was appended. */
@@ -901,6 +906,10 @@ export interface LoopConfig {
 	permissionMode?: string;
 	/** Loaded skills — for the skill tool. */
 	skills?: import("./skills.ts").Skill[];
+	/** Re-reads the installed skills for this run's cwd, bypassing any host
+	 *  cache. Enables skill_install and lets a skill installed mid-turn be
+	 *  loaded in the same turn. Omitted by hosts that can't rescan (subagents). */
+	reloadSkills?: () => import("./skills.ts").Skill[];
 	/** Restrict bash to the read-only allowlist without the rest of plan mode.
 	 * Used for subagents spawned from a plan-mode parent: they inherit the
 	 * inspection-only bash but not the authoring tools or the plan prompt
@@ -1848,10 +1857,23 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// restriction can't be routed around by delegating, anything it spawns
 	// via `task`) may invoke — same glob semantics as `tools:`. Omitted =
 	// every discovered skill stays available.
-	const allowedSkills =
+	const personaSkillFilter = (list: import("./skills.ts").Skill[]) =>
 		currentPersonaObj?.skills !== undefined
-			? loopConfig.skills?.filter((s) => matchesToolsAllowlist(s.name, currentPersonaObj.skills!))
-			: loopConfig.skills;
+			? list.filter((s) => matchesToolsAllowlist(s.name, currentPersonaObj.skills!))
+			: // A copy either way: the skill tool swaps a reloaded list into this
+				// array in place, which must not reach into the host's cache.
+				[...list];
+	// Installing writes outside the project and pulls third-party code, so it
+	// stays out of plan mode and read-only runs like the other writing tools.
+	const skillInstallAllowed =
+		Boolean(loopConfig.reloadSkills) && !loopConfig.planState?.enabled && loopConfig.readOnlyBash !== true;
+	// With install available the skill tool has to exist even when nothing is
+	// installed yet, or the skill just installed could not be loaded.
+	const allowedSkills = loopConfig.skills
+		? personaSkillFilter(loopConfig.skills)
+		: skillInstallAllowed
+			? []
+			: undefined;
 	// A plan is authored before build mode; only build mode exposes its live
 	// todo projection as execution state.
 	const todoModeActive = !loopConfig.planState?.enabled;
@@ -1896,10 +1918,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		sshHostNames,
 		Boolean(loopConfig.backgroundBash),
 		todoModeActive,
-		allowedSkills?.some((skill) => !skill.disableModelInvocation) ?? false,
+		skillInstallAllowed || (allowedSkills?.some((skill) => !skill.disableModelInvocation) ?? false),
 		memoryEnabled,
 		Boolean(activeGoal),
 		Boolean(activeReview),
+		skillInstallAllowed,
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
@@ -2118,6 +2141,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					skills: allowedSkills,
 					sessionId: loopConfig.sessionId,
 					cwd,
+					...(loopConfig.reloadSkills
+						? {
+								reload: () => personaSkillFilter(loopConfig.reloadSkills!()),
+								onSkillsChanged: () => onEvent({ type: "skills_changed" }),
+							}
+						: {}),
 					// Plan mode (and a plan-mode parent's subagent) restricts a skill's
 					// inline commands exactly as it restricts the bash tool.
 					inlineGate: { readOnly: loopConfig.planState?.enabled === true || loopConfig.readOnlyBash === true },
@@ -2343,41 +2372,53 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// write it into messages[0]. Memory is deliberately not reconstructed here:
 	// ordinary turns get only a small recall hint, while the full durable context
 	// is inserted at a checkpoint boundary after compaction.
-	const syncSystemPrompt = (): void => {
-		let prompt = systemPrompt;
-		let userText = "";
-		for (let i = messages.length - 1; i >= 0; i--) {
-			const m = messages[i]!;
+	// Memory as it stood when the turn began. Re-read on every request, a
+	// memory write mid-turn changed messages[0] and made the provider re-bill
+	// the whole history behind it; the model already knows what it just wrote.
+	let memoryBlockForTurn: string | undefined;
+	const lastUserText = (msgs: Message[]): string => {
+		for (let i = msgs.length - 1; i >= 0; i--) {
+			const m = msgs[i]!;
 			if (m.role !== "user") continue;
-			if (typeof m.content === "string") {
-				userText = m.content;
-			} else if (Array.isArray(m.content)) {
+			if (typeof m.content === "string") return m.content;
+			if (Array.isArray(m.content)) {
 				const textPart = m.content.find((p: { type?: string }) => p.type === "text") as
 					| { type: "text"; text: string }
 					| undefined;
-				if (textPart) userText = textPart.text;
+				if (textPart) return textPart.text;
 			}
-			break;
+			return "";
 		}
+		return "";
+	};
+	// The person's latest prompt, for @-mentions. Read from the tail on each
+	// request, it picked up whatever the harness appended last (a reminder, a
+	// checkpoint, an image relay), and the mentioned rule dropped out mid-turn.
+	let promptUserText = lastUserText(messages);
+	// Where the provider's last prompt-token reading was taken, so the
+	// mid-turn guard only estimates what came after it.
+	let requestLength = 0;
+	let measuredAt: number | undefined;
+	const syncSystemPrompt = (turnStart = false): void => {
+		let prompt = systemPrompt;
 		if (loopConfig.rebuildSystemPrompt) {
-			prompt = loopConfig.rebuildSystemPrompt({ userText, contextFiles });
+			prompt = loopConfig.rebuildSystemPrompt({ userText: promptUserText, contextFiles });
 		}
 		if (activeGoal) {
 			prompt = goalResumed
 				? `${prompt}\n\n${goalPromptBlock(activeGoal)}\n\n${GOAL_RECOVERY_NOTE}`
 				: `${prompt}\n\n${goalPromptBlock(activeGoal)}`;
 		}
-		if (memoryService && isMemoryWriteEnabled() && loopConfig.memory?.sessionId) {
-			prompt = `${prompt}\n\n${memorySystemPrompt(cwd, loopConfig.memory.sessionId)}`;
+		if (turnStart || memoryBlockForTurn === undefined) {
+			memoryBlockForTurn = "";
+			if (memoryService && isMemoryWriteEnabled() && loopConfig.memory?.sessionId) {
+				memoryBlockForTurn = `\n\n${memorySystemPrompt(cwd, loopConfig.memory.sessionId)}`;
+				if (hasMemoryOrTasks(cwd, loopConfig.memory.sessionId)) {
+					memoryBlockForTurn += `\n\n${MEMORY_RECALL_HINT}`;
+				}
+			}
 		}
-		if (
-			memoryService &&
-			isMemoryWriteEnabled() &&
-			loopConfig.memory?.sessionId &&
-			hasMemoryOrTasks(cwd, loopConfig.memory.sessionId)
-		) {
-			prompt = `${prompt}\n\n${MEMORY_RECALL_HINT}`;
-		}
+		prompt = `${prompt}${memoryBlockForTurn}`;
 		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
 		// (always active in the TUI) replaces `prompt` wholesale and would
 		// silently drop a block added earlier. The restriction must be the
@@ -2407,15 +2448,27 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				prompt = `${prompt}\n\n${BUILD_MODE_PROMPT.replace("{{PLAN}}", () => buildPlanSnapshot.content)}${otherPlansLine}`;
 			}
 		}
-		if (todoModeActive && todos.length > 0) {
-			prompt = `${prompt}\n\n${TODO_LIST_PROMPT.replace("{{TODOS}}", () => formatTodoList(todos))}`;
-		}
 		if (messages.length === 0 || messages[0]?.role !== "system") {
 			messages.unshift({ role: "system", content: prompt });
 		} else {
 			messages[0] = { role: "system", content: prompt };
 		}
 	};
+
+	// The todo list changes on every todo_write, often every step of a turn.
+	// In messages[0] each change made the provider re-bill the whole history
+	// behind it; as the request's last message only the list itself is new.
+	// Request-only: never pushed onto `messages`, so it is not saved.
+	const withRequestTail = (msgs: Message[]): Message[] =>
+		todoModeActive && todos.length > 0
+			? [
+					...msgs,
+					{
+						role: "user",
+						content: `<system-reminder>\n${TODO_LIST_PROMPT.replace("{{TODOS}}", () => formatTodoList(todos))}\n</system-reminder>`,
+					},
+				]
+			: msgs;
 
 	const appendMemoryRebuildBoundary = (): void => {
 		if (!memoryService || !isMemoryWriteEnabled() || !loopConfig.memory?.sessionId) return;
@@ -2494,7 +2547,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			}
 
 			// Sync before compaction so it summarizes against the right system prompt.
-			syncSystemPrompt();
+			syncSystemPrompt(true);
 
 			// Compaction (suppressed for short-lived system agents)
 			if (!loopConfig.skipCompaction && shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
@@ -2556,8 +2609,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// the point the turn is short of room.
 				if (!nearCapReminderSent && activeCap >= 4 && outerIteration >= activeCap - 3) {
 					nearCapReminderSent = true;
+					// A user-role reminder, like every other harness notice: a
+					// system message here was saved as the session's system row,
+					// displacing the persona prompt.
 					messages.push({
-						role: "system",
+						role: "user",
 						content: `<system-reminder>You are near the end of this turn's iteration budget (~${activeCap - outerIteration} iterations left). Finish the current work and summarize; do not start new sub-tasks.</system-reminder>`,
 					});
 				}
@@ -2567,6 +2623,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						messages.push(msg);
 					}
 					onEvent({ type: "steering_injected", messages: [...pendingMessages] });
+					promptUserText = lastUserText(pendingMessages) || promptUserText;
 					pendingMessages = [];
 					// A fresh user instruction resets the doom-loop window — "run it
 					// again" after three identical calls is an explicit go-ahead, not
@@ -2594,7 +2651,13 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// markers; automatic-prefix providers keep the native message shape.
 				// The live messages/tools arrays stay clean so saveSession never
 				// persists provider-specific structured content.
+				// The tail goes on after the markers: it changes whenever the
+				// list does, and a breakpoint on it would cache a prefix the
+				// next request never repeats.
+				requestLength = messages.length;
+				measuredAt = undefined;
 				const cached = applyCacheControl(messages, tools, loopConfig.cachePrefixBoundary, promptCacheStrategy.mode);
+				cached.messages = withRequestTail(cached.messages);
 
 				// Vision fallback: if the model doesn't support images (404 from
 				// OpenRouter or similar), strip any image_url messages we added
@@ -2679,7 +2742,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						completion = await streamAndCollect(
 							client,
 							currentModel,
-							messages,
+							withRequestTail(messages),
 							tools,
 							config.maxResponseTokens,
 							signal,
@@ -2763,6 +2826,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					// recorded, the same as the finishReason==="aborted" path below.
 					if (completion.usage) {
 						loopConfig.lastPromptTokens = completion.usage.promptTokens;
+						measuredAt = requestLength;
 						onEvent({
 							type: "usage",
 							usage: completion.usage,
@@ -2827,6 +2891,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 
 				if (completion.usage) {
 					loopConfig.lastPromptTokens = completion.usage.promptTokens;
+					measuredAt = requestLength;
 					onEvent({
 						type: "usage",
 						usage: completion.usage,
@@ -3030,12 +3095,19 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// turn's actual prompt-token count) and the next LLM call. There's
 				// no fresh usage reading yet at this point, so fall back to the
 				// char-based estimate — same threshold math as shouldCompact, just
-				// fed an estimate instead of a measured value.
+				// fed an estimate instead of a measured value. The estimate starts
+				// from the prompt the provider just measured, which already counts
+				// the system prompt, tool schemas and images at their real cost;
+				// only what was added since is guessed from characters.
+				const contextEstimate =
+					measuredAt !== undefined && loopConfig.lastPromptTokens !== undefined
+						? loopConfig.lastPromptTokens + estimateTokens(messages.slice(measuredAt))
+						: estimateTokens(messages) + Math.ceil(JSON.stringify(tools).length / 3.8);
 				if (
 					toolCalls &&
 					toolCalls.length > 0 &&
 					!loopConfig.skipCompaction &&
-					shouldCompact(messages, config, estimateTokens(messages))
+					shouldCompact(messages, config, contextEstimate)
 				) {
 					const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
 					if (result.compacted) appendMemoryRebuildBoundary();
@@ -3102,6 +3174,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					messages.push(msg);
 				}
 				onEvent({ type: "followup_injected", messages: [...followUpMsgs] });
+				promptUserText = lastUserText(followUpMsgs) || promptUserText;
 				overflowCompacted = false;
 				toolResultTrimmed = false;
 				// Same as steering: a new user message resets the doom-loop window.

@@ -589,6 +589,24 @@ describe("ACP adapter", () => {
 		expect(loopConfig.confirmBash).toBeUndefined();
 		expect(result.stopReason).toBe("end_turn");
 	});
+
+	it("gives the loop a per-request prompt rebuild, one context-file list across prompts, and the local date", async () => {
+		const { session } = makeSession();
+		const echo = async (msgs: unknown) => msgs as undefined;
+		runAgentLoopSpy.mockImplementationOnce(echo).mockImplementationOnce(echo);
+		const send = () =>
+			adapter.submitPrompt("sid", [{ type: "text", text: "hi" }], session, mockClient as any, {
+				version: "test",
+				permissionMode: "bypass",
+			});
+		await send();
+		await send();
+
+		const [first, second] = runAgentLoopSpy.mock.calls.map((c) => c[1]);
+		expect(typeof first.rebuildSystemPrompt).toBe("function");
+		expect(first.contextFiles).toBe(second.contextFiles);
+		expect(first.announcedLocalDate.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+	});
 });
 
 const { translateEvent } = await import("../src/core/acp/bridge.ts");

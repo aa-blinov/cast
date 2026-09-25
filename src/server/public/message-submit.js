@@ -223,10 +223,14 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		// does not cancel it. The connect handler refetches the session, so
 		// anything the command emits in the meantime is picked up there.
 		await waitForSessionStream?.(id);
+		// Compare the command word, not a prefix: a skill is also a /command,
+		// and "/web-artifacts-builder" or "/queue-reset" used to land in the
+		// /web or /queue branch (the first then threw on its string result).
+		const commandName = text.trim().split(/\s+/)[0];
 		try {
 			const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
 			if (text === "/sessions") await loadSessions();
-			if ((text.startsWith("/new") || text === "/fork") && result?.result?.sessionId) {
+			if ((commandName === "/new" || text === "/fork") && result?.result?.sessionId) {
 				await loadSessions();
 				await selectSession(result.result.sessionId);
 				return; // now viewing the fresh session — nothing to append a notice to
@@ -236,27 +240,27 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				setSession({ ...session, messages: [], oldestSeq: null, hasMoreHistory: false });
 				return; // context just got wiped — nothing left to append a notice to
 			}
-			if (text.startsWith("/persona") && result?.result?.persona) {
+			if (commandName === "/persona" && result?.result?.persona) {
 				setSession((prev) => (prev ? { ...prev, persona: result.result.persona } : prev));
 				await loadSessions();
 				addNotice(`Persona: ${result.result.label ?? result.result.persona}`);
-			} else if (text.startsWith("/model") && result?.result?.model) {
+			} else if ((commandName === "/model" || commandName === "/model-selection") && result?.result?.model) {
 				setSession((prev) => (prev ? { ...prev, model: result.result.model } : prev));
 				setDefaultModel(result.result.model);
 				await loadSessions();
 				addNotice(`Model: ${result.result.model}`);
-			} else if (text.startsWith("/theme") && result?.result?.theme) {
+			} else if (commandName === "/theme" && result?.result?.theme) {
 				if (result.result.colors) applyTheme(result.result.colors);
 				setCurrentThemeId(result.result.theme);
 				addNotice(`Theme: ${result.result.label ?? result.result.theme}`);
-			} else if (text.startsWith("/undo")) {
+			} else if (commandName === "/undo") {
 				if (result?.result) addNotice(result.result);
 				// Refetch history and status to sync UI after undo
 				await selectSession(id, { push: false });
-			} else if (text.startsWith("/current") && result?.result) {
+			} else if (commandName === "/current" && result?.result) {
 				const r = result.result;
 				addNotice(`${r.persona} · ${r.model} · ${r.status} · ${r.messageCount} msg`);
-			} else if (text.startsWith("/usage") && result?.result) {
+			} else if (commandName === "/usage" && result?.result) {
 				const u = result.result;
 				const cost = u.cost ? ` · $${u.cost.toFixed(4)}` : "";
 				addNotice(
@@ -264,24 +268,27 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				);
 			} else if (text === "/sessions" && Array.isArray(result?.result)) {
 				addNotice(`${result.result.length} session${result.result.length === 1 ? "" : "s"}`);
-			} else if (text.startsWith("/repo") && result?.result) {
+			} else if (commandName === "/repo" && result?.result) {
 				const r = result.result;
 				addNotice(
 					r.isGit ? `${r.cwd} · ${r.branch}${r.dirty ? " (dirty)" : ""}` : `${r.cwd} — not a git repository`,
 				);
-			} else if (text.startsWith("/reasoning") && result?.result) {
+			} else if (
+				(commandName === "/reasoning" || commandName === "/reasoning-display" || commandName === "/reasoning-format") &&
+				result?.result
+			) {
 				const r = result.result;
 				addNotice(
 					r.note ??
 						`Reasoning: ${r.reasoningLevel}${r.options?.length ? ` (options: ${r.options.join(", ")})` : ""}`,
 				);
-			} else if (text.startsWith("/web") && result?.result && "webTools" in result.result) {
+			} else if (commandName === "/web" && typeof result?.result === "object" && "webTools" in result.result) {
 				addNotice(`Web tools: ${result.result.webTools ? "enabled" : "disabled"}`);
-			} else if ((text.startsWith("/steer") || text.startsWith("/s ")) && result?.ok) {
+			} else if ((commandName === "/steer" || commandName === "/s") && result?.ok) {
 				const msg = text.replace(STEER_CMD_RE, "");
 				if (msg) setPendingSteers((prev) => [...prev, msg]);
 				addNotice(result.result);
-			} else if ((text.startsWith("/queue") || text.startsWith("/q ")) && result?.ok) {
+			} else if ((commandName === "/queue" || commandName === "/q") && result?.ok) {
 				const msg = text.replace(QUEUE_CMD_RE, "");
 				if (msg) setPendingQueue((prev) => [...prev, msg]);
 				addNotice(result.result);

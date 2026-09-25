@@ -1095,7 +1095,7 @@ const CACHE_CONTROL: CacheControlEphemeral = { type: "ephemeral" };
  * file bricks it on providers whose chat template expects plain strings.
  */
 function withCacheControlOnText(
-	message: Extract<ChatCompletionMessageParam, { role: "system" | "user" | "assistant" | "developer" }>,
+	message: Extract<ChatCompletionMessageParam, { role: "system" | "user" | "assistant" | "developer" | "tool" }>,
 ): ChatCompletionMessageParam | null {
 	const content = message.content;
 	if (typeof content === "string") {
@@ -1159,14 +1159,16 @@ export function applyCacheControl(
 		} as ToolWithCacheControl;
 	}
 
-	// 3. The fork boundary, when supplied, otherwise the last user or assistant
-	// message. Marking the boundary lets a maintenance fork reuse the immutable
-	// parent prefix while its maintenance instruction remains uncached tail.
+	// 3. The fork boundary, when supplied, otherwise the last message with text.
+	// Marking the boundary lets a maintenance fork reuse the immutable parent
+	// prefix while its maintenance instruction remains uncached tail. Tool rows
+	// count: in a tool loop the tail is tool results, and a breakpoint left on
+	// the user prompt would re-bill every result of the turn on each request.
 	const start =
 		cacheMessageIndex === undefined ? outMessages.length - 1 : Math.min(cacheMessageIndex, outMessages.length - 1);
 	for (let i = start; i >= 0; i--) {
 		const message = outMessages[i]!;
-		if (message.role === "user" || message.role === "assistant") {
+		if (message.role === "user" || message.role === "assistant" || message.role === "tool") {
 			const marked = withCacheControlOnText(message);
 			if (marked) {
 				outMessages[i] = marked as Message;

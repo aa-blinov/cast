@@ -99,6 +99,29 @@ describe("web SSE events", () => {
 		expect(state.api).not.toHaveBeenCalled();
 	});
 
+	it("shows a tool call once when its completion streamed nothing before it", () => {
+		const state = createContext();
+		// assistant_message rebuilt from the event already carries the call...
+		handleSseEvent(
+			{ type: "assistant_message", content: "", toolCalls: [{ id: "c1", name: "skill_install", arguments: "{}" }] },
+			state,
+		);
+		// ...and the live tool_start for the same call follows.
+		handleSseEvent({ type: "tool_start", id: "c1", name: "skill_install", args: "{}", status: "running" }, state);
+
+		let session = { messages: [{ role: "user", content: "go" }] as unknown[] };
+		for (const [updater] of state.setSession.mock.calls)
+			session = (updater as (p: unknown) => typeof session)(session);
+		expect(session.messages).toEqual([{ role: "user", content: "go" }]);
+		expect(state.updateStreaming).toHaveBeenCalledWith(expect.objectContaining({ type: "tool_start" }));
+	});
+
+	it("refreshes the slash-command palette when the agent installs a skill", () => {
+		const state = { ...createContext(), refreshCommands: vi.fn() };
+		handleSseEvent({ type: "skills_changed" }, state);
+		expect(state.refreshCommands).toHaveBeenCalledOnce();
+	});
+
 	it("renders a notice as a warning row instead of failing the turn", () => {
 		const state = createContext();
 		handleSseEvent({ type: "notice", message: "Provider changed — switched to hy3" }, state);

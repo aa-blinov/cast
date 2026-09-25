@@ -28,7 +28,7 @@ import {
 	type ToolResult,
 	toolError,
 } from "./tools/shared.ts";
-import { execSkill, type SkillToolDeps } from "./tools/skill.ts";
+import { execSkill, execSkillInstall, SKILL_INSTALL_TOOL_DESCRIPTION, type SkillToolDeps } from "./tools/skill.ts";
 import { execSsh } from "./tools/ssh.ts";
 import { execTask, type TaskExecutorDeps } from "./tools/task.ts";
 import { execWebFetch, execWebSearch } from "./tools/web.ts";
@@ -57,6 +57,7 @@ export function getToolDefinitions(
 	memoryEnabled = true,
 	goalActive = false,
 	reviewActive = false,
+	includeSkillInstallTool = false,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -719,6 +720,32 @@ export function getToolDefinitions(
 					},
 				]
 			: []),
+		...(includeSkillInstallTool
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "skill_install",
+							description: SKILL_INSTALL_TOOL_DESCRIPTION,
+							parameters: {
+								type: "object",
+								properties: {
+									source: {
+										type: "string",
+										description:
+											"owner/repo (e.g. 'vercel-labs/agent-skills'), a github.com URL, or a pasted `npx skills add …` line",
+									},
+									skill: {
+										type: "string",
+										description: "The skill to install from that repo, when it holds more than one",
+									},
+								},
+								required: ["source"],
+							},
+						},
+					},
+				]
+			: []),
 	];
 }
 
@@ -852,6 +879,9 @@ export function createToolExecutor(
 							cwd: skillDeps.cwd ?? cwd,
 							inlineGate: { ...skillDeps.inlineGate, confirm: skillDeps.inlineGate?.confirm ?? confirmBash },
 						});
+					case "skill_install":
+						if (!skillDeps?.reload) return { content: "Skill install not available.", isError: true };
+						return execSkillInstall(args, skillDeps, confirmBash);
 					default:
 						return { content: `Unknown tool: ${name}`, isError: true };
 				}

@@ -434,6 +434,36 @@ describe("compactMessages", () => {
 		expect(capturedText).toContain("src/config.ts");
 	});
 
+	it("gives the summarizer a long user instruction whole and the text of structured content", async () => {
+		const instruction = `${"context ".repeat(200)}KEEP_THIS_CONSTRAINT`;
+		const messages: Message[] = [
+			{ role: "system", content: "sys" },
+			{ role: "user", content: instruction },
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "what is on this screenshot" },
+					{ type: "image_url", image_url: { url: "data:image/png;base64,AA" } },
+				],
+			} as unknown as Message,
+			{ role: "assistant", content: "a login form" },
+			{ role: "user", content: "Thanks" },
+			{ role: "assistant", content: "You're welcome" },
+		];
+		let capturedText = "";
+		await compactMessages(
+			messages,
+			async (text) => {
+				capturedText = text;
+				return "summary";
+			},
+			{ contextWindow: 1, maxResponseTokens: 0, compactionThreshold: 0 } as any,
+		);
+
+		expect(capturedText).toContain("KEEP_THIS_CONSTRAINT");
+		expect(capturedText).toContain("what is on this screenshot [image_url]");
+	});
+
 	it("appends deterministic read/modified file tags to the summary, extracted from tool_calls", async () => {
 		const messages: Message[] = [
 			{ role: "system", content: "sys" },
@@ -908,6 +938,30 @@ describe("session persistence", () => {
 		expect(events.map((e) => e.type)).toEqual(["tool_start", "retry", "error"]);
 		expect(events[1]!.payload).toEqual({ attempt: 2, reason: "boom" });
 		expect(events[0]!.seq).toBeLessThan(events[1]!.seq);
+	});
+
+	it("loads a changed persona prompt at the head, not after the turns it came before", () => {
+		// saveSession writes a changed system prompt as a new row at the next
+		// seq; loaded by seq it sat mid-conversation and reached the model as a
+		// second, stale system prompt next to the fresh one.
+		const session = createSession("gpt-4o", projectA);
+		session.messages = [
+			{ role: "system", content: "SYS v1" },
+			{ role: "user", content: "hello" },
+			{ role: "assistant", content: "hi" },
+		] as Message[];
+		saveSession(session);
+		session.messages[0] = { role: "system", content: "SYS v2" } as Message;
+		session.messages.push({ role: "user", content: "again" } as Message);
+		saveSession(session);
+
+		const back = loadSession(session.id)!;
+		expect(back.messages.map((m) => `${m.role}:${m.content}`)).toEqual([
+			"system:SYS v2",
+			"user:hello",
+			"assistant:hi",
+			"user:again",
+		]);
 	});
 
 	it("anchors run notices to the newest persisted message and reads back only anchored ones", () => {

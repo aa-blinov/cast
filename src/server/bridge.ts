@@ -86,6 +86,7 @@ import {
 	updateLastCheckpoint,
 } from "../core/session.ts";
 import {
+	contextWindowSetting,
 	getProjectTrust,
 	loadSettings,
 	type PermissionMode,
@@ -720,6 +721,28 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 		skillsByCwd.set(sessionCwd, resolved);
 		return resolved;
+	}
+
+	/** Tells every open client its slash commands changed (the same event the
+	 *  agent's skill_install emits), whichever surface ran the command: the
+	 *  composer, Settings, or another tab. */
+	function announceSkillsChanged(): void {
+		for (const ws of sessions.values()) broadcaster.broadcast(ws, { type: "skills_changed" });
+	}
+
+	/** A skill was just installed or removed. Global skills show in every
+	 *  project, so every cwd's cached set is stale: drop them all, and re-read
+	 *  this one now (synchronously, like skillsForSessionCwd) for the turn that
+	 *  is running. The rest recompute on their next turn. */
+	function rediscoverSkills(sessionCwd: string): Skill[] {
+		skillsByCwd.clear();
+		const disabled = new Set(loadSettings().disabledSkills ?? []);
+		const fresh = discoverSkillsForCwd(projectDeps, sessionCwd, trustForSessionCwd(sessionCwd)).filter(
+			(skill) => !disabled.has(skill.name),
+		);
+		if (sessionCwd === cwd) skills = fresh;
+		else skillsByCwd.set(sessionCwd, fresh);
+		return fresh;
 	}
 
 	const rulesByCwd = new Map<string, ReturnType<typeof resolveRulesForCwd>>();
@@ -1550,8 +1573,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			runReasoningFormat,
 			ws.reasoningLevelOverride ?? config.reasoningLevel,
 		);
+		// The window of the model this run talks to: `config.contextWindow` is
+		// the one the daemon started with, so a session on a smaller model
+		// compacted only after the provider had already rejected the request.
+		// An explicit setting still wins, as at startup.
+		const runContextWindow = contextWindowSetting() === undefined ? modelInfoFor(runModel)?.contextWindow : undefined;
 		const runConfig = {
 			...config,
+			...(runContextWindow && runContextWindow > 0 ? { contextWindow: runContextWindow } : {}),
 			baseURL: effectiveBaseURL,
 			apiKey: effectiveApiKey,
 			reasoningFormat: runReasoningFormat,
@@ -1622,11 +1651,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			rebuildSystemPrompt: ({ userText, contextFiles: ctxFiles }) => {
 				const sessionCwd = ws.session.cwd ?? cwd;
 				const sessionRules = rulesForSessionCwd(sessionCwd);
-				const newAuto = matchAutoRules(sessionRules.directoryRules, ctxFiles);
-				const sticky = unionStickyRules(ws.activeAutoRules ?? [], newAuto);
+				// Mentioned rules latch like auto ones, see App.tsx.
+				const sticky = unionStickyRules(ws.activeAutoRules ?? [], [
+					...matchAutoRules(sessionRules.directoryRules, ctxFiles),
+					...selectMentionedRules(sessionRules.directoryRules, userText),
+				]);
 				ws.activeAutoRules = sticky;
-				const mentioned = selectMentionedRules(sessionRules.directoryRules, userText);
-				const rulesBlock = formatRulesForTurn(sticky, mentioned);
+				const rulesBlock = formatRulesForTurn(sticky, []);
 				const nestedContext = trustForSessionCwd(sessionCwd)
 					? formatContextFilesForPrompt(resolveNestedContextFiles(sessionCwd, ctxFiles))
 					: "";
@@ -1675,6 +1706,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// the next agent call.
 			defaultOuterIterations: turnIterationCap(),
 			skills: ws.noSkills ? [] : (ws.sessionSkills ?? skills),
+			// A session started without skills stays without them, installs included.
+			...(ws.noSkills
+				? {}
+				: {
+						reloadSkills: () => {
+							ws.sessionSkills = rediscoverSkills(sessionCwd);
+							return ws.sessionSkills;
+						},
+					}),
 			personas: turnPersonas,
 			currentPersona: persona.name,
 			subagentPrompts: subPrompts,
@@ -1900,7 +1940,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						cost: event.usage.cost,
 						latencyMs: event.generationMs,
 						ttftMs: event.ttftMs,
-						contextWindow: config.contextWindow,
+						contextWindow: runConfig.contextWindow,
 						turnId: ws.currentClientMessageId,
 					});
 					if (event.background) {
@@ -2881,12 +2921,18 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			refreshSkillsFromSkillsSh: async () => {
 				const skillsResult = await resolveSkillsForCwd(projectDeps, cwd, projectTrusted);
 				skills = skillsResult.skills;
+				// skills.sh installs globally, which every other project sees too.
+				skillsByCwd.clear();
 				recomputeAllSystemPrompts();
+				announceSkillsChanged();
 			},
 			refreshSkillsFromSkills: async () => {
 				const skillsResult = await resolveSkillsForCwd(projectDeps, cwd, projectTrusted);
 				skills = skillsResult.skills;
+				// An enable/disable toggle filters every cwd's set.
+				skillsByCwd.clear();
 				recomputeAllSystemPrompts();
+				announceSkillsChanged();
 			},
 			reloadBridgeState: async (sessionCwd) => {
 				try {

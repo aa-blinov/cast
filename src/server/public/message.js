@@ -11,6 +11,19 @@ import { TurnMetaLine } from "./turn-meta.js";
 
 const html = htm.bind(h);
 
+const SKILL_INVOCATION_RE = /^<skill name="([^"]+)" location="([^"]*)"[^>]*>[\s\S]*<\/skill>(?:\n\nUser: ([\s\S]*))?$/;
+
+/** A /skill command is sent to the model as the whole rendered SKILL.md
+ *  (renderSkillInvocation), so the thread showed the file's full text as if
+ *  the person had pasted it. Recognize that shape to show what they typed. */
+export function parseSkillInvocation(content) {
+	if (typeof content !== "string" || !content.startsWith("<skill name=")) return null;
+	const match = SKILL_INVOCATION_RE.exec(content);
+	if (!match) return null;
+	const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+	return { name: unescape(match[1]), location: unescape(match[2]), args: match[3]?.trim() ?? "" };
+}
+
 function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false }) {
 	const role = msg.role || "assistant";
 	// Only used by the legacy floating image-result branch below (pre
@@ -135,6 +148,17 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false })
 					onClose=${() => setPreviewSrc(null)}
 				/>`
 			}
+		</div>
+	`;
+	}
+
+	const invoked = role === "user" ? parseSkillInvocation(content) : null;
+	if (invoked) {
+		return html`
+		<div class="message message-user">
+			<div class="message-label">user</div>
+			<div class="message-content">${`/${invoked.name}${invoked.args ? ` ${invoked.args}` : ""}`}</div>
+			<div class="message-skill-note" title=${invoked.location}>skill loaded</div>
 		</div>
 	`;
 	}
