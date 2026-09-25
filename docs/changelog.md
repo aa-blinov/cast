@@ -4,6 +4,24 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.39.0
+
+### Added
+
+- **The agent can install a skill and use it right away.** Ask it to install one (from skills.sh or a local path) and the new `skill_install` tool installs it, asking first like a shell command does. The skill works in the same turn, and in the web UI its slash command and completion hints show up immediately, with no restart. A `/skill` invocation reads in the thread as the command you typed, not the whole SKILL.md.
+
+### Fixed
+
+- **Long sessions stop paying for their whole history again.** Measured on mimo-v2.6-flash against 0.38.0:
+  - Each `todo_write` rewrote the system prompt, and the provider cache fell from 100% to 0-14% on the next request. It now stays at 99%.
+  - A session reopened after a restart sent the persona prompt twice. It now sends it once.
+  - On OpenRouter, the cache point now moves forward through tool calls. It used to stay on your message, so every tool result in the turn was billed again on each request.
+- **`@rule` mentions stick.** A mentioned rule dropped out after the agent read an image and was gone on the next turn. It now stays for the rest of the session, the way glob rules do.
+- **Compaction keeps your instructions.** The summarizer only saw the first 500 characters of each of your messages and had a 2000-token budget, so a requirement at the end of a long message was missing from the summary. It now sees up to 8000 characters of each message and has an 8000-token budget.
+- **The web UI compacts against the session's own model.** Every session used the context window of the model the server started with, so a session on a larger model compacted on every turn.
+- **Compaction in the middle of a turn triggers on time.** Its size estimate left out tool definitions and counted images as a few tokens, so a large tool result could push past the limit unnoticed.
+- **Editors over ACP get project rules, nested AGENTS.md files and the date change.** None of them reached the model on that path before.
+
 ## 0.38.0
 
 ### Added
