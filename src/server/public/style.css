@@ -833,6 +833,28 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 }
 .composer-image-remove svg { width: 10px; height: 10px; }
 .composer-image-remove:hover { background: rgba(0,0,0,.85); }
+.composer-voice {
+	display: flex; align-items: center; gap: 8px;
+	margin: 0 max(16px, env(safe-area-inset-left)) 6px;
+	padding: 4px 6px 4px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-surface);
+	font-size: var(--fs-ui); color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+	width: fit-content; max-width: calc(100% - 32px);
+}
+.composer-voice-live { color: var(--status-error-fg); }
+.composer-voice-live::before {
+	content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px;
+	border-radius: 50%; background: currentColor; vertical-align: 1px;
+	animation: composer-voice-pulse 1.2s ease-in-out infinite;
+}
+@keyframes composer-voice-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .composer-voice-live::before { animation: none; } }
+.composer-voice-player { height: 32px; max-width: 240px; min-width: 0; }
+.composer-mic-recording { color: var(--status-error-fg); }
+
 .composer-docs {
 	display: flex; flex-wrap: wrap; gap: 6px;
 	padding: 0 max(16px, env(safe-area-inset-left)) 6px;
@@ -1195,6 +1217,10 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 }
 .plan-decision-textarea::placeholder {
 	color: var(--text-dim);
+	/* Touch devices floor fields at 16px against iOS focus zoom; the zoom
+	 * reads the field's size, not the placeholder's, so the hint can match
+	 * the options around it. */
+	font-size: var(--fs-ui);
 }
 .plan-decision-textarea:focus {
 	border-color: var(--cyan);

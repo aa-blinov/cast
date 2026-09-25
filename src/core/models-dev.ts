@@ -21,6 +21,7 @@ interface ModelsDevModel {
 	reasoning?: boolean;
 	reasoning_options?: ModelsDevReasoningOption[];
 	limit?: { context?: number; output?: number };
+	modalities?: { input?: string[]; output?: string[] };
 }
 interface ModelsDevProvider {
 	models?: Record<string, ModelsDevModel>;
@@ -31,6 +32,8 @@ export interface ModelsDevModelMetadata {
 	reasoning?: boolean;
 	reasoningOptions?: ModelsDevReasoningOption[];
 	contextWindow?: number;
+	/** Accepts `input_audio` message parts. */
+	audioInput?: boolean;
 }
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -139,9 +142,24 @@ export function lookupModelMetadataFromCatalog(
 			: undefined;
 	const contextWindow = lookupContextWindowFromCatalog(modelId, catalog);
 	const reasoningOptions = matches.find((model) => model.reasoning_options?.length)?.reasoning_options;
+	// By majority, unlike reasoning: resellers of one model disagree on its
+	// modalities, and one wrong "audio" sends a voice note to a model that
+	// answers 404. The official entries agree with what the endpoint accepts.
+	const withModalities = matches.filter((model) => Array.isArray(model.modalities?.input));
+	const audioInput =
+		withModalities.length > 0
+			? withModalities.filter((model) => model.modalities!.input!.includes("audio")).length * 2 >
+				withModalities.length
+			: undefined;
 
-	if (reasoning === undefined && reasoningOptions === undefined && contextWindow === undefined) return undefined;
-	return { reasoning, reasoningOptions, contextWindow };
+	if (
+		reasoning === undefined &&
+		reasoningOptions === undefined &&
+		contextWindow === undefined &&
+		audioInput === undefined
+	)
+		return undefined;
+	return { reasoning, reasoningOptions, contextWindow, audioInput };
 }
 
 /**

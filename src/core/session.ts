@@ -1178,6 +1178,20 @@ export function getMessageImage(
 	return { mimeType: match[1], buffer: Buffer.from(match[2], "base64") };
 }
 
+/** One voice note from a user turn, as WAV bytes for the audio-blob route,
+ *  for the same reason getMessageImage exists. */
+export function getMessageAudio(id: string, seq: number, audioIndex: number): Buffer | undefined {
+	const row = getDb().prepare("SELECT content_json FROM messages WHERE session_id = ? AND seq = ?").get(id, seq) as
+		| { content_json: string }
+		| undefined;
+	if (!row) return undefined;
+	const message = JSON.parse(row.content_json) as Message;
+	if (message.role !== "user" || !Array.isArray(message.content)) return undefined;
+	const parts = message.content as Array<{ type?: string; input_audio?: { data?: string } }>;
+	const data = parts.filter((p) => p.type === "input_audio" && p.input_audio?.data)[audioIndex]?.input_audio?.data;
+	return data ? Buffer.from(data, "base64") : undefined;
+}
+
 export interface HistoryPage {
 	messages: Message[];
 	reasoning: Record<number, string>;

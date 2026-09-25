@@ -325,6 +325,8 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		clientMessageId,
 	};
 	pendingOutgoingRef.current.set(clientMessageId, outgoing);
+	const shownAudios = (images ?? []).filter((url) => url.startsWith("data:audio/"));
+	const shownImages = (images ?? []).filter((url) => !url.startsWith("data:audio/"));
 	setSession((prev) =>
 		prev?.id === id && isCurrentDraft()
 			? {
@@ -334,7 +336,10 @@ export async function submitMessage(text, images, pendingDocs, context) {
 						{
 							role: "user",
 							content: finalText,
-							...(images?.length ? { images } : {}),
+							// A voice note rides the attachment list as a data:audio URL
+							// (see bridge.ts's buildUserContent); shown as a player.
+							...(shownImages.length ? { images: shownImages } : {}),
+							...(shownAudios.length ? { audios: shownAudios } : {}),
 							clientMessageId,
 							pending: true,
 							pendingAt: Date.now(),

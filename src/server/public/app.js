@@ -2225,7 +2225,7 @@ function App() {
 						</button>
 					`
 					}
-					<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+					<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} audioInput=${Boolean(session?.audioInput)} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
 				</div>
 			</main>
 

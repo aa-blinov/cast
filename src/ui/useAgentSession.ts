@@ -415,6 +415,7 @@ export function messageContentToText(content: unknown): string {
 	if (Array.isArray(content)) {
 		const parts: string[] = [];
 		let images = 0;
+		let voices = 0;
 		for (const part of content) {
 			if (!part || typeof part !== "object" || !("type" in part)) continue;
 			const type = (part as { type: unknown }).type;
@@ -422,9 +423,12 @@ export function messageContentToText(content: unknown): string {
 				parts.push((part as { text: string }).text);
 			} else if (type === "image_url") {
 				images++;
+			} else if (type === "input_audio") {
+				voices++;
 			}
 		}
 		if (images > 0) parts.push(images === 1 ? "[image]" : `[${images} images]`);
+		if (voices > 0) parts.push(voices === 1 ? "[voice message]" : `[${voices} voice messages]`);
 		if (parts.length > 0) return parts.join("\n");
 	}
 	return "[structured content]";

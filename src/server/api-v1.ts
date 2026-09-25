@@ -29,7 +29,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "GET",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|diff|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
+			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
 	},
 	{ method: "DELETE", legacyPath: /^\/api\/sessions\/[^/]+(\/(permanent|share|fs|inputs))?$/ },
 	{
@@ -219,6 +219,19 @@ const additionalApiV1Paths: OpenApiObject = {
 				"200": {
 					description: "Image bytes",
 					content: { "image/*": { schema: { type: "string", format: "binary" } } },
+				},
+				"404": errorResponse,
+			},
+		},
+	},
+	"/api/v1/sessions/{id}/audio": {
+		get: {
+			summary: "Download a voice message from a user turn",
+			parameters: [idParameter],
+			responses: {
+				"200": {
+					description: "WAV bytes; honours Range",
+					content: { "audio/wav": { schema: { type: "string", format: "binary" } } },
 				},
 				"404": errorResponse,
 			},
@@ -758,6 +771,11 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					// listing is for.
 					title: { type: "string" },
 					pinned: { type: "boolean" },
+					audioInput: {
+						type: "boolean",
+						description:
+							"Whether the model of the next turn accepts voice messages (`data:audio/wav` in `images`).",
+					},
 					shareToken: { type: ["string", "null"], description: "Public share token, when the session is shared." },
 					turnStartedAt: { type: ["integer", "null"], description: "Epoch ms the in-flight turn began." },
 					question: { type: ["object", "null"], description: "Pending question awaiting an answer." },
@@ -803,7 +821,13 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 				type: "object",
 				properties: {
 					text: { type: "string" },
-					images: { type: "array", maxItems: 6, items: { type: "string", contentEncoding: "base64" } },
+					images: {
+						type: "array",
+						maxItems: 6,
+						description:
+							"data: URLs. Images, or one voice message as `data:audio/wav;base64,...` when the session's `audioInput` is true.",
+						items: { type: "string", contentEncoding: "base64" },
+					},
 					clientMessageId: { type: "string", maxLength: 200 },
 					goal: {
 						description:

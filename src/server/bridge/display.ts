@@ -70,6 +70,8 @@ export interface DisplayMessage {
 	 * pushes after such a tool result, since a plain string `content` can't
 	 * hold both text and inline images. */
 	images?: string[];
+	/** Voice notes on a user turn, as URLs to the audio-blob route. */
+	audios?: string[];
 	/** Set on rows replayed from run events rather than stored messages: a
 	 *  provider retry run, a failed turn, or a turn stopped by hand. */
 	notice?: "retry" | "error" | "aborted";
@@ -293,13 +295,14 @@ export function toDisplayMessages(
 			if (toolCallId && imagesByToolCallId.has(toolCallId)) return;
 			const parts = m.content as Array<{ type?: string; text?: string; image_url?: { url?: string } }>;
 			const dataUrls = parts.filter((p) => p.type === "image_url" && p.image_url?.url).map((p) => p.image_url!.url!);
+			const audioCount = parts.filter((p) => p.type === "input_audio").length;
 			// Present-but-empty text (a caption-less real send — see buildUserContent,
 			// which always includes this part) must stay distinguishable from no
 			// text part at all (the tool-only relay) — the client uses exactly this
 			// null-vs-string distinction to label the message "you" vs "image (read)".
 			const textPartObj = parts.find((p) => p.type === "text");
 			let textPart = textPartObj ? (textPartObj.text ?? "") : null;
-			if (dataUrls.length > 0) {
+			if (dataUrls.length > 0 || audioCount > 0) {
 				// A message with both images and an attached document (see
 				// inputs.ts) carries its <system-reminder> inside this same text
 				// part — extract it the same way the plain-string branch below
@@ -315,11 +318,19 @@ export function toDisplayMessages(
 					sessionId && seq !== undefined
 						? dataUrls.map((_, idx) => `${imageApiPrefix}/sessions/${sessionId}/image?seq=${seq}&idx=${idx}`)
 						: dataUrls;
+				const audios =
+					sessionId && seq !== undefined
+						? Array.from(
+								{ length: audioCount },
+								(_, idx) => `${imageApiPrefix}/sessions/${sessionId}/audio?seq=${seq}&idx=${idx}`,
+							)
+						: [];
 				out.push({
 					role: m.role,
 					content: textPart,
 					seq: seqs?.[i],
-					images,
+					...(images.length > 0 ? { images } : {}),
+					...(audios.length > 0 ? { audios } : {}),
 					...((m as Message & { castClientMessageId?: string }).castClientMessageId
 						? { clientMessageId: (m as Message & { castClientMessageId?: string }).castClientMessageId }
 						: {}),

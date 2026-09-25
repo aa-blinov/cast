@@ -1,14 +1,17 @@
 import { blocksFromAssistantCompletion } from "./stream-blocks.js";
 
 function normalizeUserContent(content) {
-	if (typeof content === "string") return { text: content, images: [] };
+	if (typeof content === "string") return { text: content, images: [], audios: [] };
 	if (Array.isArray(content)) {
 		return {
 			text: content.find((part) => part.type === "text")?.text ?? "",
 			images: content.filter((part) => part.type === "image_url").map((part) => part.image_url.url),
+			audios: content
+				.filter((part) => part.type === "input_audio")
+				.map((part) => `data:audio/${part.input_audio.format};base64,${part.input_audio.data}`),
 		};
 	}
-	return { text: "", images: [] };
+	return { text: "", images: [], audios: [] };
 }
 
 /** Same wording as the server's formatRetries (bridge/display.ts), so the
@@ -150,6 +153,7 @@ export function handleSseEvent(event, context) {
 							role: "user",
 							content: normalized.text,
 							...(normalized.images.length ? { images: normalized.images } : {}),
+							...(normalized.audios.length ? { audios: normalized.audios } : {}),
 							...(clientMessageId ? { clientMessageId } : {}),
 						},
 					],

@@ -316,6 +316,8 @@ export const SHARED_TOOL_PAYLOAD_PLACEHOLDER = "[hidden in the shared view]";
  * hasn't been created yet, so it can't stat/open a missing one. */
 export const SANDBOX_CWD = "sandbox";
 
+const AUDIO_DATA_URL_RE = /^data:audio\/(wav);base64,(.+)$/s;
+
 export interface ServerBridge {
 	createSession(
 		personaName?: string,
@@ -436,6 +438,7 @@ export interface ServerBridge {
 	/** Releases process-wide live-event subscriptions when the daemon shuts down. */
 	dispose?(): void;
 	executeCommand(sessionId: string, command: string): Promise<{ ok: boolean; result?: unknown; error?: string }>;
+	acceptsAudio(sessionId: string): boolean;
 	/** Runs a settings-only command without requiring a visible chat session.
 	 * This is intentionally separate from executeCommand so the TUI keeps its
 	 * session-bound command path unchanged. */
@@ -1181,15 +1184,36 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	fsWatcher.setOnIdle(idleEvictor.syncIdleSessionEviction);
 
 	/** Builds a real user turn's `content` — plain text when there are no
-	 * images (matches every existing persisted message and the tests that
-	 * assert on it), or a `[{type:"text"},...image_url]` array otherwise.
-	 * Always includes the text part, even empty, when images are present —
+	 * attachments (matches every existing persisted message and the tests that
+	 * assert on it), or a `[{type:"text"},...image_url | input_audio]` array
+	 * otherwise. Attachments are data: URLs; a voice note (`data:audio/wav`)
+	 * rides the same list as photos so every path that carries a turn (steer,
+	 * queue, retry) carries it too, and goes to the model as `input_audio`.
+	 * Always includes the text part, even empty, when attachments are present —
 	 * that's what session.ts's isRealTurnStart (compaction's safe-cut-point
 	 * search) uses to tell a real turn from the tool-only image_url relay
 	 * loop.ts inserts after a `read` on an image file, which never has one. */
 	function buildUserContent(text: string, images?: string[]): string | Array<Record<string, unknown>> {
 		if (!images || images.length === 0) return text;
-		return [{ type: "text", text }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))];
+		return [
+			{ type: "text", text },
+			...images.map((url) => {
+				const audio = AUDIO_DATA_URL_RE.exec(url);
+				return audio
+					? { type: "input_audio", input_audio: { data: audio[2], format: audio[1] } }
+					: { type: "image_url", image_url: { url } };
+			}),
+		];
+	}
+
+	/** Whether the model the session's next turn runs on takes voice input. A
+	 * text-only model answers a voice note with a 404, so the client hides the
+	 * mic and the chat route refuses one for it. */
+	function acceptsAudio(sessionId: string): boolean {
+		const ws = sessions.get(sessionId);
+		if (!ws) return false;
+		const model = ws.session.mode === "plan" && planModel ? planModel : ws.session.model;
+		return modelInfoFor(model)?.audioInput === true;
 	}
 
 	/** Observation-only, fire-and-forget — a skill/rule name expanding into its actual prompt content. */
@@ -3346,6 +3370,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			void closeMcpConnections(mcpResult.connections);
 		},
 		executeCommand,
+		acceptsAudio,
 		executeSettingsCommand,
 		getConfig,
 		getPersonas,
