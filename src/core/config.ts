@@ -210,6 +210,8 @@ export interface ModelInfo {
 	reasoningSupported?: boolean;
 	/** Context window size in tokens (from /v1/models) */
 	contextWindow?: number;
+	/** Accepts voice input as `input_audio` parts (from the models.dev catalog). */
+	audioInput?: boolean;
 }
 
 export interface FetchModelsResult {
@@ -229,6 +231,7 @@ export function enrichModelsWithCatalog(models: ModelInfo[], catalog: ModelsDevC
 			reasoning: model.reasoning ?? catalogReasoning,
 			reasoningSupported: model.reasoning ? true : fallback.reasoning,
 			contextWindow: model.contextWindow ?? fallback.contextWindow,
+			audioInput: model.audioInput ?? fallback.audioInput,
 		};
 	});
 }

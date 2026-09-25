@@ -10,6 +10,7 @@ import {
 } from "./composer-attachments.js";
 import { CommandPalette, PICKER_LIST_ID, pickerOptionId, ValueSuggest } from "./composer-pickers.js";
 import { icons } from "./icons.js";
+import { MAX_VOICE_SECONDS, startVoiceRecording, voiceUnavailableReason } from "./voice-recorder.js";
 
 const PERSONA_CMD_RE = /^\/persona\s+(\S*)$/i;
 
@@ -37,6 +38,7 @@ export function Composer({
 	activeId,
 	commands,
 	personas,
+	audioInput = false,
 	onSubmit,
 	onAbort,
 	onDocUploaded,
@@ -51,6 +53,13 @@ export function Composer({
 	// composer just tracks {id, name, path, uploading, error} for each and
 	// references the already-on-disk path via a <system-reminder> at send time.
 	const [docs, setDocs] = useState([]);
+	// A recorded voice note ({ dataUrl, seconds }), sent as one more data: URL
+	// beside the images; only offered when the session's model hears audio.
+	const [voice, setVoice] = useState(null);
+	const [recordingSince, setRecordingSince] = useState(null);
+	const [voiceStatus, setVoiceStatus] = useState(null);
+	const recorderRef = useRef(null);
+	const [, setTick] = useState(0);
 	const [dragOver, setDragOver] = useState(false);
 	const textareaRef = useRef(null);
 	const pickerRef = useRef(null);
@@ -62,7 +71,51 @@ export function Composer({
 	useEffect(() => {
 		setDocs([]);
 		setImages([]);
+		setVoice(null);
+		recorderRef.current?.cancel();
+		recorderRef.current = null;
+		setRecordingSince(null);
 	}, [activeId]);
+
+	// Re-render once a second while recording, for the elapsed-time label.
+	useEffect(() => {
+		if (recordingSince === null) return;
+		const timer = setInterval(() => setTick((n) => n + 1), 1000);
+		return () => clearInterval(timer);
+	}, [recordingSince]);
+
+	const finishRecording = useCallback(async () => {
+		const recorder = recorderRef.current;
+		if (!recorder) return;
+		recorderRef.current = null;
+		setRecordingSince(null);
+		setVoiceStatus("Preparing voice note…");
+		try {
+			setVoice(await recorder.stop());
+			setVoiceStatus(null);
+		} catch {
+			setVoiceStatus("Couldn't read the recording");
+		}
+	}, []);
+
+	const toggleRecording = useCallback(async () => {
+		if (recorderRef.current) return finishRecording();
+		setVoiceStatus(null);
+		try {
+			recorderRef.current = await startVoiceRecording({ onLimit: () => void finishRecording() });
+			setVoice(null);
+			setRecordingSince(Date.now());
+		} catch {
+			recorderRef.current = null;
+			setVoiceStatus("Microphone access was denied");
+		}
+	}, [finishRecording]);
+
+	const cancelRecording = useCallback(() => {
+		recorderRef.current?.cancel();
+		recorderRef.current = null;
+		setRecordingSince(null);
+	}, []);
 
 	const MAX_IMAGES = 6;
 	const [resizingImages, setResizingImages] = useState(0);
@@ -200,7 +253,8 @@ export function Composer({
 		const pendingDocs = docs.filter((d) => d.pending && d.dataUrl);
 		// A caption-less image/document send is allowed — an attachment alone
 		// is a complete message, same as any chat app.
-		if (!trimmed && images.length === 0 && readyDocs.length === 0) return;
+		if (recordingSince !== null) return;
+		if (!trimmed && images.length === 0 && readyDocs.length === 0 && !voice) return;
 		// Invisible to the user (toDisplayMessages strips <system-reminder>
 		// blocks and shows them as a separate "[system] ..." notice instead of
 		// leaving them in the message bubble) — the model gets the absolute
@@ -211,7 +265,7 @@ export function Composer({
 				? `${trimmed}\n\n<system-reminder>\nThe user attached the following file(s) to this message:\n${readyDocs.map((d) => `- ${d.name}: ${d.path ?? `(pending — will be uploaded on send)`}`).join("\n")}\n</system-reminder>`
 				: trimmed;
 		// Snapshot to restore only if submit explicitly reports failure (e.g. connection lost before SSE ready)
-		const snapshot = { value, images: [...images], docs: [...docs] };
+		const snapshot = { value, images: [...images], docs: [...docs], voice };
 		// Optimistic clear — feels instant, no "Sending…" hang. Not while the
 		// daemon connection is down, though: that submit waits for a reconnect,
 		// and emptying the box for those seconds looks like the message went
@@ -220,6 +274,7 @@ export function Composer({
 			setValue("");
 			setImages([]);
 			setDocs([]);
+			setVoice(null);
 		};
 		if (sendReady) clearDraft();
 		setCmdVisible(false);
@@ -237,7 +292,8 @@ export function Composer({
 		// except while the connection is down, where the submit waits for a
 		// reconnect and releasing the button early would send it twice.
 		if (sendReady) setTimeout(() => setSending(false), 400);
-		Promise.resolve(onSubmit(text, images, pendingDocs.length > 0 ? pendingDocs : undefined))
+		const attachments = voice ? [...images, voice.dataUrl] : images;
+		Promise.resolve(onSubmit(text, attachments, pendingDocs.length > 0 ? pendingDocs : undefined))
 			.finally(() => {
 				if (!sendReady) setSending(false);
 			})
@@ -248,6 +304,7 @@ export function Composer({
 					setValue((prev) => (prev ? prev : snapshot.value));
 					setImages((prev) => (prev.length ? prev : snapshot.images));
 					setDocs((prev) => (prev.length ? prev : snapshot.docs));
+					setVoice((prev) => prev ?? snapshot.voice);
 					requestAnimationFrame(() => {
 						if (textareaRef.current) {
 							textareaRef.current.focus();
@@ -261,8 +318,9 @@ export function Composer({
 				setValue((prev) => (prev ? prev : snapshot.value));
 				setImages((prev) => (prev.length ? prev : snapshot.images));
 				setDocs((prev) => (prev.length ? prev : snapshot.docs));
+				setVoice((prev) => prev ?? snapshot.voice);
 			});
-	}, [value, images, docs, onSubmit, ready, sendReady, sending]);
+	}, [value, images, docs, voice, recordingSince, onSubmit, ready, sendReady, sending]);
 
 	const handleCmdSelect = useCallback(
 		async (name) => {
@@ -326,7 +384,9 @@ export function Composer({
 	const pickerOpen = pickerItems.length > 0;
 	const attachmentsBlocked = !canSubmitAttachments(docs) || resizingImages > 0;
 	const hasReadyDocs = docs.some((d) => (d.path || d.pending) && !d.uploading && !d.error);
-	const sendBlocked = !ready || sending || resizingImages > 0;
+	const sendBlocked = !ready || sending || resizingImages > 0 || recordingSince !== null;
+	const voiceBlockedReason = audioInput ? voiceUnavailableReason() : null;
+	const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
 	// Arrow-key nav must scroll the picker, not just select past the visible
 	// edge — mouse/scroll-wheel already worked, but the highlighted row could
@@ -416,6 +476,22 @@ export function Composer({
 			`
 			}
 			${
+				(recordingSince !== null || voice || voiceStatus) &&
+				html`
+				<div class="composer-voice" role="status">
+					${
+						recordingSince !== null
+							? html`<span class="composer-voice-live">Recording ${clock((Date.now() - recordingSince) / 1000)} / ${clock(MAX_VOICE_SECONDS)}</span>
+								<button type="button" class="composer-doc-remove" onClick=${cancelRecording} aria-label="Discard recording"><${icons.xMark} /></button>`
+							: voice
+								? html`<audio class="composer-voice-player" controls src=${voice.dataUrl}></audio>
+									<button type="button" class="composer-doc-remove" onClick=${() => setVoice(null)} aria-label="Remove voice message"><${icons.xMark} /></button>`
+								: html`<span class="composer-voice-status">${voiceStatus}</span>`
+					}
+				</div>
+			`
+			}
+			${
 				docs.length > 0 &&
 				html`
 				<div class="composer-docs">
@@ -460,6 +536,19 @@ export function Composer({
 					aria-label="Attach image or file"
 					title="Attach image or file"
 				><${icons.paperclip} /></button>
+				${
+					audioInput &&
+					html`<button
+						type="button"
+						class="composer-attach composer-mic${recordingSince !== null ? " composer-mic-recording" : ""}"
+						onPointerDown=${keepComposerFocus}
+						onClick=${toggleRecording}
+						disabled=${!ready || Boolean(voiceBlockedReason)}
+						aria-pressed=${recordingSince !== null}
+						aria-label=${recordingSince !== null ? "Stop recording" : "Record a voice message"}
+						title=${voiceBlockedReason ?? (recordingSince !== null ? "Stop recording" : "Record a voice message")}
+					><${recordingSince !== null ? icons.stop : icons.microphone} /></button>`
+				}
 				<textarea
 					ref=${textareaRef}
 					class="composer-input"
@@ -478,7 +567,7 @@ export function Composer({
 				${
 						running
 						? html`<button class="composer-abort" onPointerDown=${keepComposerFocus} onClick=${onAbort} disabled=${aborting} aria-label=${aborting ? "Aborting…" : "Abort"} title=${aborting ? "Aborting…" : sendReady ? "Abort (Esc)" : "Abort — waiting for connection"} aria-busy=${aborting ? "true" : "false"}><${aborting ? icons.spinner : icons.stop} /></button>`
-						: html`<button class="composer-send" onPointerDown=${keepComposerFocus} onClick=${handleSubmit} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></button>`
+						: html`<button class="composer-send" onPointerDown=${keepComposerFocus} onClick=${handleSubmit} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs && !voice)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></button>`
 				}
 			</div>
 		</div>

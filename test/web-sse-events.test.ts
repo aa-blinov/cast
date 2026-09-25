@@ -220,4 +220,26 @@ describe("web SSE events", () => {
 			updater({ messages: [{ role: "user", content: "hello", clientMessageId: "msg-1", pending: true }] }),
 		).toEqual({ messages: [{ role: "user", content: "hello", clientMessageId: "msg-1", pending: false }] });
 	});
+
+	it("shows a voice note sent from another tab as a playable data: URL", () => {
+		const state = createContext();
+		handleSseEvent(
+			{
+				type: "user_message",
+				message: {
+					role: "user",
+					content: [
+						{ type: "text", text: "" },
+						{ type: "input_audio", input_audio: { data: "UklGRg==", format: "wav" } },
+					],
+				},
+			},
+			state,
+		);
+
+		const updater = state.setSession.mock.calls[0]![0] as (prev: unknown) => { messages: unknown[] };
+		expect(updater({ messages: [] }).messages).toEqual([
+			{ role: "user", content: "", audios: ["data:audio/wav;base64,UklGRg=="] },
+		]);
+	});
 });

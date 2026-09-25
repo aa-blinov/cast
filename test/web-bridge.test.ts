@@ -3958,6 +3958,34 @@ describe("web bridge", () => {
 		]);
 	});
 
+	it("submit sends a voice note as input_audio beside the text", () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+
+		bridge.submit(ws.id, "", ["data:audio/wav;base64,UklGRg=="]);
+
+		expect(ws.session.messages.at(-1)?.content).toEqual([
+			{ type: "text", text: "" },
+			{ type: "input_audio", input_audio: { data: "UklGRg==", format: "wav" } },
+		]);
+	});
+
+	it("accepts audio only for a model the catalog marks as hearing it", () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const previous = getModelsCache();
+		try {
+			setModelsCache([{ id: ws.session.model, audioInput: true }]);
+			expect(bridge.acceptsAudio(ws.id)).toBe(true);
+			setModelsCache([{ id: ws.session.model, audioInput: false }]);
+			expect(bridge.acceptsAudio(ws.id)).toBe(false);
+			setModelsCache([]);
+			expect(bridge.acceptsAudio(ws.id)).toBe(false);
+		} finally {
+			setModelsCache(previous);
+		}
+	});
+
 	it("submit with no images stays a plain string (unchanged behavior)", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
@@ -4533,6 +4561,29 @@ describe("web bridge", () => {
 // ============================================================================
 // toDisplayMessages — tool status reconstruction and image_url user messages
 // ============================================================================
+
+describe("toDisplayMessages — voice notes", () => {
+	it("points a user turn's voice note at the audio route, like an image", () => {
+		const out = toDisplayMessages(
+			[
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "" },
+						{ type: "input_audio", input_audio: { data: "UklGRg==", format: "wav" } },
+					],
+				} as never,
+			],
+			{},
+			{},
+			"sess1",
+			[7],
+		);
+
+		expect(out[0]).toMatchObject({ role: "user", content: "", audios: ["/api/sessions/sess1/audio?seq=7&idx=0"] });
+		expect(out[0]?.images).toBeUndefined();
+	});
+});
 
 describe("toDisplayMessages — tool status reconstruction", () => {
 	it("uses the shared terminal vocabulary for persisted successful and failed MCP calls", () => {

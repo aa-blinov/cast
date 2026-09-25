@@ -119,7 +119,7 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false })
 		`;
 	}
 
-	if (msg.images?.length) {
+	if (msg.images?.length || msg.audios?.length) {
 		// Array `content` on a role:"user" message is either a real send with
 		// an attached photo (a text part is always present, even empty — see
 		// bridge.ts's buildUserContent, and toDisplayMessages preserves that
@@ -134,11 +134,15 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false })
 		<div class="message ${isRealSend ? "message-user" : "message-image-result"}">
 		<div class="message-label">${isRealSend ? "user" : "image (read)"}</div>
 			${content && html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`}
-			<div class="message-content message-images">
+			${msg.audios?.map((src, i) => html`<audio key=${`a${i}`} class="message-audio" controls preload="metadata" src=${src} aria-label="Voice message ${i + 1}"></audio>`)}
+			${
+				msg.images?.length > 0 &&
+				html`<div class="message-content message-images">
 				${msg.images.map(
 					(src, i) => html`<img key=${i} src=${src} class="message-image" loading="lazy" alt="Attached image ${i + 1}" ...${pressable(() => setPreviewSrc(src))} />`,
 				)}
-			</div>
+			</div>`
+			}
 			${
 				previewSrc &&
 				html`<${FilePreviewModal}

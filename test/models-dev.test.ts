@@ -144,3 +144,25 @@ describe("fetchModelsDevCatalog", () => {
 		await expect(fetchModelsDevCatalog()).resolves.toBeUndefined();
 	});
 });
+
+describe("lookupModelMetadataFromCatalog — audio input", () => {
+	// A reseller mislabelling one model's modalities must not let a voice
+	// note reach a model that answers it with a 404.
+	it("takes audio input by majority of the exact matches", () => {
+		const catalog = {
+			xiaomi: { models: { "mimo-v2.6-flash": { modalities: { input: ["text", "audio"] } } } },
+			resale: { models: { "mimo-v2.6-flash": { modalities: { input: ["text", "image", "audio"] } } } },
+			odd: { models: { "mimo-v2.6-flash": { modalities: { input: ["text"] } } } },
+			pro: { models: { "mimo-v2.5-pro": { modalities: { input: ["text"] } } } },
+			miss: { models: { "mimo-v2.5-pro": { modalities: { input: ["text", "audio"] } } } },
+			third: { models: { "mimo-v2.5-pro": { modalities: { input: ["text"] } } } },
+		};
+		expect(lookupModelMetadataFromCatalog("mimo-v2.6-flash", catalog)?.audioInput).toBe(true);
+		expect(lookupModelMetadataFromCatalog("mimo-v2.5-pro", catalog)?.audioInput).toBe(false);
+	});
+
+	it("leaves audio input unknown when no entry lists modalities", () => {
+		const catalog = { openai: { models: { "gpt-4o": { limit: { context: 128_000 } } } } };
+		expect(lookupModelMetadataFromCatalog("gpt-4o", catalog)?.audioInput).toBeUndefined();
+	});
+});

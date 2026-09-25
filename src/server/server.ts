@@ -32,7 +32,7 @@ import {
 	listProjectMemoryCheckpoints,
 	searchProjectMemory,
 } from "../core/memory.ts";
-import { getHistoryPage, getMessageImage, getRunNotices, getSessionEvents } from "../core/session.ts";
+import { getHistoryPage, getMessageAudio, getMessageImage, getRunNotices, getSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import {
 	countRecentLlmRequests,
@@ -137,6 +137,7 @@ function secretsMatch(value: string, expected: string): boolean {
 
 const PORT_RE = /:\d+$/;
 const ROUTE_PARAM_RE = /:(\w+)/g;
+const BYTE_RANGE_RE = /^bytes=(\d*)-(\d*)$/;
 
 /** Thrown by readBody() when a request body exceeds MAX_REQUEST_BODY_BYTES, so
  * the top-level route wrapper can answer 413 instead of a generic 500. */
@@ -428,9 +429,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	}
 
 	function setSecurityHeaders(req: IncomingMessage, res: ServerResponse): void {
+		// media-src: a voice note plays from its data: URL until the turn is saved.
 		res.setHeader(
 			"Content-Security-Policy",
-			"default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'",
+			"default-src 'self'; base-uri 'self'; frame-ancestors 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self'; object-src 'none'",
 		);
 		const forwardedProto = req.headers["x-forwarded-proto"];
 		const isHttps =
@@ -1344,6 +1346,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			id: ws.id,
 			persona: ws.session.persona,
 			model: ws.session.model,
+			audioInput: bridge.acceptsAudio(ws.id),
 			cwd: ws.session.cwd,
 			mode: ws.session.mode ?? "build",
 			question: bridge.getQuestion(ws.id),
@@ -1429,6 +1432,40 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("GET", "/api/sessions/:id/events/history", (_req, res, params) => {
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
 		json(res, { events: getSessionEvents(params.id) });
+	});
+
+	route("GET", "/api/sessions/:id/audio", (req, res, params) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const seq = Number(url.searchParams.get("seq"));
+		const idx = Number(url.searchParams.get("idx"));
+		if (!Number.isFinite(seq) || !Number.isFinite(idx)) return json(res, { error: "Missing/invalid seq/idx" }, 400);
+		const audio = getMessageAudio(params.id, seq, idx);
+		if (!audio) return json(res, { error: "Not found" }, 404);
+		const headers = {
+			"Content-Type": "audio/wav",
+			"Accept-Ranges": "bytes",
+			"Cache-Control": "private, max-age=31536000, immutable",
+		};
+		// Safari won't play an <audio> source that can't answer a Range request.
+		const range = BYTE_RANGE_RE.exec(req.headers.range ?? "");
+		if (range && (range[1] || range[2])) {
+			const start = range[1] ? Number(range[1]) : Math.max(0, audio.length - Number(range[2]));
+			const end = range[1] && range[2] ? Math.min(Number(range[2]), audio.length - 1) : audio.length - 1;
+			if (start > end || start >= audio.length) {
+				res.writeHead(416, { "Content-Range": `bytes */${audio.length}` });
+				res.end();
+				return;
+			}
+			res.writeHead(206, {
+				...headers,
+				"Content-Range": `bytes ${start}-${end}/${audio.length}`,
+				"Content-Length": end - start + 1,
+			});
+			res.end(audio.subarray(start, end + 1));
+			return;
+		}
+		res.writeHead(200, { ...headers, "Content-Length": audio.length });
+		res.end(audio);
 	});
 
 	// Raw bytes for one image embedded in a `read`-on-image-file message (see
@@ -1530,6 +1567,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// again several turns later.
 	const MAX_IMAGES_PER_MESSAGE = 6;
 	const MAX_IMAGE_DATA_URL_BYTES = 4 * 1024 * 1024;
+	// 16 kHz mono WAV is 32 KB a second: about five minutes of speech.
+	const MAX_AUDIO_DATA_URL_BYTES = 13 * 1024 * 1024;
 
 	route("POST", "/api/sessions/:id/chat", async (req, res, params) => {
 		const ws = bridge.getSession(params.id);
@@ -1563,8 +1602,18 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			if (images.length > MAX_IMAGES_PER_MESSAGE) {
 				return json(res, { error: `Too many images — max ${MAX_IMAGES_PER_MESSAGE} per message` }, 400);
 			}
-			const tooBig = images.find((url) => url.length > MAX_IMAGE_DATA_URL_BYTES);
+			const audio = images.filter((url) => url.startsWith("data:audio/"));
+			const tooBig = images.find((url) => !url.startsWith("data:audio/") && url.length > MAX_IMAGE_DATA_URL_BYTES);
 			if (tooBig) return json(res, { error: "One of the images is too large" }, 400);
+			if (audio.some((url) => !url.startsWith("data:audio/wav;base64,"))) {
+				return json(res, { error: "Voice messages must be WAV" }, 400);
+			}
+			if (audio.some((url) => url.length > MAX_AUDIO_DATA_URL_BYTES)) {
+				return json(res, { error: "The voice message is too long" }, 400);
+			}
+			if (audio.length > 0 && !bridge.acceptsAudio(params.id)) {
+				return json(res, { error: "This model does not accept voice messages" }, 400);
+			}
 		}
 		try {
 			// Don't await the full submit: the daemon broadcasts status:running

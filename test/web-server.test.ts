@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import { storeProjectMemory } from "../src/core/memory.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
-import { appendMessage, createSession, saveSession } from "../src/core/session.ts";
+import { appendMessage, createSession, getHistoryPage, saveSession } from "../src/core/session.ts";
 import { queryEndpointOverview } from "../src/core/telemetry.ts";
 import type { ServerBridge } from "../src/server/bridge.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
@@ -818,5 +818,91 @@ describe("worktree creation over HTTP honours the WorktreeCreate hook", () => {
 		expect(res.status).toBe(400);
 		expect(((await res.json()) as { error: string }).error).toMatch(/block/i);
 		expect(existsSync(join(repo, ".cast", "worktrees", "blocked-over-http"))).toBe(false);
+	});
+});
+
+describe("voice messages on the chat route", () => {
+	async function login(): Promise<string> {
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		return auth.headers.get("set-cookie")!;
+	}
+
+	async function restartWith(acceptsAudio: boolean, submit = vi.fn(async () => {})): Promise<typeof submit> {
+		await stopTestServer();
+		server = startServer({
+			port: 0,
+			host: "127.0.0.1",
+			bridge: { getSession: () => ({ id: "s1", session: {} }), acceptsAudio: () => acceptsAudio, submit } as never,
+			webUser: "cast",
+			serverPassword: "test-password",
+			version: "test",
+		});
+		await once(server, "listening");
+		origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		return submit;
+	}
+
+	const send = async (images: string[]) =>
+		fetch(`${origin}/api/sessions/s1/chat`, {
+			method: "POST",
+			headers: { Cookie: await login(), "Content-Type": "application/json" },
+			body: JSON.stringify({ text: "", images }),
+		});
+
+	it("refuses a voice note for a model that can't hear it, before it reaches the provider", async () => {
+		const submit = await restartWith(false);
+		const res = await send(["data:audio/wav;base64,UklGRg=="]);
+		expect(res.status).toBe(400);
+		expect(((await res.json()) as { error?: string }).error).toContain("does not accept voice");
+		expect(submit).not.toHaveBeenCalled();
+	});
+
+	it("passes a WAV voice note through for a model that hears audio, and refuses other formats", async () => {
+		const submit = await restartWith(true);
+		expect((await send(["data:audio/wav;base64,UklGRg=="])).status).toBe(202);
+		expect(submit).toHaveBeenCalledTimes(1);
+		expect((await send(["data:audio/webm;base64,GkXf"])).status).toBe(400);
+	});
+});
+
+describe("voice message playback route", () => {
+	it("lets the page play a voice note from its data: URL before the turn is saved", async () => {
+		const res = await fetch(`${origin}/login`, { redirect: "manual" });
+		expect(res.headers.get("content-security-policy")).toContain("media-src 'self' data: blob:");
+	});
+
+	it("serves a stored voice note as WAV and answers Range requests, which Safari needs to play it", async () => {
+		const session = createSession("/tmp", "senior", "m");
+		const wav = Buffer.from("RIFF0123456789");
+		appendMessage(session, {
+			role: "user",
+			content: [
+				{ type: "text", text: "" },
+				{ type: "input_audio", input_audio: { data: wav.toString("base64"), format: "wav" } },
+			],
+		} as never);
+		saveSession(session);
+		const seq = getHistoryPage(session.id).seqs[0];
+		const auth = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const headers = { Cookie: auth.headers.get("set-cookie")! };
+		const url = `${origin}/api/sessions/${session.id}/audio?seq=${seq}&idx=0`;
+
+		const full = await fetch(url, { headers });
+		expect(full.status).toBe(200);
+		expect(full.headers.get("content-type")).toBe("audio/wav");
+		expect(Buffer.from(await full.arrayBuffer())).toEqual(wav);
+
+		const part = await fetch(url, { headers: { ...headers, Range: "bytes=4-7" } });
+		expect(part.status).toBe(206);
+		expect(part.headers.get("content-range")).toBe(`bytes 4-7/${wav.length}`);
+		expect(Buffer.from(await part.arrayBuffer()).toString()).toBe("0123");
 	});
 });
