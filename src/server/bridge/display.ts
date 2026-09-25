@@ -70,6 +70,84 @@ export interface DisplayMessage {
 	 * pushes after such a tool result, since a plain string `content` can't
 	 * hold both text and inline images. */
 	images?: string[];
+	/** Set on rows replayed from run events rather than stored messages: a
+	 *  provider retry run, a failed turn, or a turn stopped by hand. */
+	notice?: "retry" | "error" | "aborted";
+	/** Every attempt of a retry run, oldest first (notice: "retry"). */
+	attempts?: RetryAttempt[];
+}
+
+export interface RetryAttempt {
+	attempt: number;
+	reason: string;
+}
+
+/** Shared wording for a retry run's row. The web client builds the live row
+ *  with the same text (sse-events.js formatRetries), so a reload shows what
+ *  was on screen. */
+export function formatRetries(attempts: RetryAttempt[]): string {
+	return ["Provider retries:", ...attempts.map((a) => `- attempt ${a.attempt}: ${a.reason}`)].join("\n");
+}
+
+/** Replays run notices (see getRunNotices) into a page of display messages.
+ *  Each goes right before the first row whose seq is past its anchor, which
+ *  also covers anchors on tool results: those have no row of their own and
+ *  are folded into the assistant message before them. Consecutive retries
+ *  on the same anchor become one row listing every attempt. Only notices
+ *  whose anchor falls in [fromSeq, toSeq] belong to this page. */
+export function insertRunNotices(
+	messages: DisplayMessage[],
+	notices: Array<{ eventSeq: number; type: string; afterSeq: number; payload: Record<string, unknown> }>,
+	fromSeq: number,
+	toSeq: number,
+): DisplayMessage[] {
+	const rows: Array<{ afterSeq: number; row: DisplayMessage }> = [];
+	let retryRun: { afterSeq: number; lastEventSeq: number; row: DisplayMessage } | null = null;
+	for (const notice of notices) {
+		if (notice.afterSeq < fromSeq || notice.afterSeq > toSeq) continue;
+		if (notice.type === "retry") {
+			const attempt = {
+				attempt: Number(notice.payload.attempt) || 0,
+				reason: String(notice.payload.reason ?? ""),
+			};
+			if (retryRun && retryRun.afterSeq === notice.afterSeq && retryRun.lastEventSeq === notice.eventSeq - 1) {
+				retryRun.row.attempts!.push(attempt);
+				retryRun.row.content = formatRetries(retryRun.row.attempts!);
+				retryRun.lastEventSeq = notice.eventSeq;
+				continue;
+			}
+			const row: DisplayMessage = {
+				role: "warning",
+				notice: "retry",
+				attempts: [attempt],
+				content: formatRetries([attempt]),
+			};
+			retryRun = { afterSeq: notice.afterSeq, lastEventSeq: notice.eventSeq, row };
+			rows.push({ afterSeq: notice.afterSeq, row });
+			continue;
+		}
+		retryRun = null;
+		if (notice.type === "error") {
+			rows.push({
+				afterSeq: notice.afterSeq,
+				row: { role: "error", notice: "error", content: String(notice.payload.message ?? "Unknown error") },
+			});
+		} else {
+			rows.push({ afterSeq: notice.afterSeq, row: { role: "warning", notice: "aborted", content: "Run aborted" } });
+		}
+	}
+	if (rows.length === 0) return messages;
+	rows.sort((a, b) => a.afterSeq - b.afterSeq);
+	const out: DisplayMessage[] = [];
+	let next = 0;
+	for (const message of messages) {
+		if (typeof message.seq === "number") {
+			while (next < rows.length && rows[next]!.afterSeq < message.seq) out.push(rows[next++]!.row);
+		}
+		out.push(message);
+	}
+	while (next < rows.length) out.push(rows[next++]!.row);
+	return out;
 }
 
 export function reconcileActiveStream(

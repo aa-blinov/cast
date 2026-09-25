@@ -7,6 +7,7 @@ import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
+import { mergeHistoryPage } from "./history-merge.js";
 import { escapeHtml, renderMarkdown } from "./markdown.js";
 import { CastLogo } from "./cast-logo.js";
 import { isNearTop, scrollTopAfterPrepend, shouldFollow } from "./chat-scroll.js";
@@ -452,24 +453,6 @@ function keyForMessage(msg) {
 	return k;
 }
 
-function mergeHistoryPage(previous, incoming) {
-	if (!Array.isArray(incoming)) return previous;
-	const incomingClientIds = new Set(incoming.map((message) => message.clientMessageId).filter(Boolean));
-	const pending = previous.filter(
-		(message) => message.pending === true && !incomingClientIds.has(message.clientMessageId),
-	);
-	if (incoming.length === 0) return pending;
-	const firstSeq = incoming.find((message) => typeof message.seq === "number")?.seq;
-	const before =
-		typeof firstSeq === "number"
-			? previous.filter((message) => typeof message.seq === "number" && message.seq < firstSeq)
-			: [];
-	const existing = new Map(
-		previous.filter((message) => typeof message.seq === "number").map((message) => [message.seq, message]),
-	);
-	return [...before, ...incoming.map((message) => existing.get(message.seq) ?? message), ...pending];
-}
-
 function HistoryBoundary({ status, atEnd, onRetry }) {
 	if (status === "loading") {
 		return h(
@@ -905,7 +888,7 @@ function App() {
 	// message at messages[0] is role:"system" and gets filtered from view.
 	const addNotice = useCallback(
 		(text, role = "warning") => {
-			setSession((prev) => (prev ? { ...prev, messages: [...prev.messages, { role, content: text }] } : prev));
+			setSession((prev) => (prev ? { ...prev, messages: [...prev.messages, { role, content: text, local: true }] } : prev));
 		},
 		[setSession],
 	);
@@ -1341,10 +1324,9 @@ function App() {
 		if (!activeId || aborting) return;
 		setAborting(true);
 		try {
+			// The "Run aborted" row comes with the turn's own end event, after
+			// the partial reply settles, so it can't land above that reply.
 			await api("POST", `/api/sessions/${activeId}/abort`);
-			setSession((prev) =>
-				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: "Run aborted" }] } : prev,
-			);
 		} catch (err) {
 			showToast(err.message, "error");
 		} finally {
@@ -1352,7 +1334,22 @@ function App() {
 			// even if the server responded instantly.
 			setTimeout(() => setAborting(false), 400);
 		}
-	}, [activeId, aborting, setSession, showToast]);
+	}, [activeId, aborting, showToast]);
+
+	// Re-runs a failed or stopped turn from the saved history (no new prompt):
+	// the server refuses when the last turn ended normally, and says why.
+	const [retryingTurn, setRetryingTurn] = useState(false);
+	const retryTurn = useCallback(async () => {
+		if (!activeId || retryingTurn) return;
+		setRetryingTurn(true);
+		try {
+			await api("POST", `/api/sessions/${activeId}/retry`);
+		} catch (err) {
+			showToast(err.message, "error");
+		} finally {
+			setRetryingTurn(false);
+		}
+	}, [activeId, retryingTurn, showToast]);
 
 	// Load diff — always the full multi-file diff. Selecting a file in the
 	// list (setDiffFile below) just changes which of the already-fetched
@@ -1524,7 +1521,7 @@ function App() {
 				settleSessionStreamWaiter(streamSessionId, false);
 				setSession((prev) =>
 					prev
-						? { ...prev, messages: [...prev.messages, { role: "warning", content: "Connection terminated" }] }
+						? { ...prev, messages: [...prev.messages, { role: "warning", content: "Connection terminated", local: true }] }
 						: prev,
 				);
 				startReconnectLoop();
@@ -2156,6 +2153,17 @@ function App() {
 								})
 							}
 							${messages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} />`)}
+							${
+								!running &&
+								(messages[messages.length - 1]?.notice === "error" ||
+									messages[messages.length - 1]?.notice === "aborted") &&
+								html`<div class="turn-retry">
+									<button class="modal-btn" onClick=${retryTurn} disabled=${retryingTurn} aria-busy=${retryingTurn ? "true" : "false"}>
+										<${icons.arrowPath} /> Retry turn
+									</button>
+									<span class="turn-retry-hint">Runs the turn again from here, without resending your message.</span>
+								</div>`
+							}
 							<${LiveStreamingBlocksModule} controllerRef=${streamingControllerRef} onFrame=${_scrollStreamingFrame} renderMarkdown=${renderMarkdown} showReasoning=${showReasoning} />
 							${
 								!running &&

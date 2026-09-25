@@ -34,6 +34,11 @@
  * growing reply stays still while tokens arrive. */
 .message-entering { animation: rise .15s var(--ease-out); }
 .messages-inner > * + * { padding-top: 6px; }
+/* Offered under a turn that failed or was stopped. */
+.turn-retry { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.turn-retry .modal-btn { display: inline-flex; align-items: center; gap: 6px; }
+.turn-retry .modal-btn svg { width: 14px; height: 14px; }
+.turn-retry-hint { color: var(--text-muted); font-size: var(--fs-ui); }
 .history-boundary {
 	display: flex;
 	align-items: center;

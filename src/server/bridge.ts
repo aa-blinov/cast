@@ -70,7 +70,9 @@ import {
 	deleteSession,
 	forkSession,
 	getHistoryPage,
+	getRunNotices,
 	hasRecentClientMessageId,
+	lastPersistedSeq,
 	listSessionSummaries,
 	loadSession,
 	loadSessionByShareToken,
@@ -420,6 +422,10 @@ export interface ServerBridge {
 	setSessionMode(sessionId: string, mode: "plan" | "build"): { ok: true } | { ok: false; error: string };
 	resetContext(sessionId: string): { ok: true; originalTask?: string } | { ok: false; error: string };
 	abort(sessionId: string): void;
+	/** Re-runs a turn that failed or was stopped, from the history as it
+	 *  stands (no new user message). Refused while running, or when the last
+	 *  turn ended normally. */
+	retryTurn(sessionId: string): { ok: true } | { ok: false; error: string };
 	subscribe(sessionId: string, callback: (event: WebEvent) => void): void;
 	unsubscribe(sessionId: string, callback: (event: WebEvent) => void): void;
 	/** Sidebar-wide event stream — fires for every session's session_update,
@@ -1766,7 +1772,16 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						case "date_rollover":
 						case "end":
 						case "error":
-							appendSessionEvent(sessionId, event.type, event);
+							// Retries, errors and aborts are replayed into the history
+							// (see getRunNotices): anchor each to the newest persisted
+							// message, which onMessagesChanged keeps current mid-run.
+							appendSessionEvent(
+								sessionId,
+								event.type,
+								event.type === "retry" || event.type === "error" || event.type === "end"
+									? { ...event, afterSeq: lastPersistedSeq(ws.session) }
+									: event,
+							);
 							if (event.type === "retry") {
 								recordLlmRequest({
 									sessionId: ws.id,
@@ -2142,6 +2157,27 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
 		ws.runner.abort();
+	}
+
+	function retryTurn(sessionId: string): { ok: true } | { ok: false; error: string } {
+		const ws = sessions.get(sessionId);
+		if (!ws) return { ok: false, error: "Session not found" };
+		if (ws.status === "running" || ws.runner.isRunning) return { ok: false, error: "A turn is already running" };
+		// Only a turn whose last word was an error or an abort: anchored to the
+		// newest message, so nothing has happened in the thread since.
+		const last = getRunNotices(sessionId).at(-1);
+		if (!last || last.type === "retry" || last.afterSeq !== lastPersistedSeq(ws.session)) {
+			return { ok: false, error: "The last turn did not fail or get stopped" };
+		}
+		// An empty queue runs the loop on the saved history as it stands: the
+		// prompt of a turn that failed before replying is already the last
+		// message, and a stopped turn ends with its interrupt reminder. The
+		// text only feeds UserPromptSubmit hooks.
+		const lastUser = [...ws.session.messages]
+			.reverse()
+			.find((m) => m.role === "user" && typeof m.content === "string");
+		void submit(sessionId, typeof lastUser?.content === "string" ? lastUser.content : "", undefined, undefined, []);
+		return { ok: true };
 	}
 
 	function steer(sessionId: string, message: string): void {
@@ -3249,6 +3285,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		setSessionMode,
 		resetContext,
 		abort,
+		retryTurn,
 		subscribe,
 		unsubscribe,
 		subscribeAll,

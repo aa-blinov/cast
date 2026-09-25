@@ -11,36 +11,43 @@ function normalizeUserContent(content) {
 	return { text: "", images: [] };
 }
 
-/** Replaces the single "[Retrying..." warning row in place, or appends one —
- *  a retry storm updates one row instead of spamming the transcript. */
-function upsertRetryRow(messages, text) {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (m && m.role === "warning" && typeof m.content === "string" && m.content.startsWith("[Retrying")) {
-			const next = messages.slice();
-			next[i] = { role: "warning", content: text };
-			return next;
-		}
+/** Same wording as the server's formatRetries (bridge/display.ts), so the
+ *  row a reload replays from the run log reads exactly like the live one. */
+function formatRetries(attempts) {
+	return ["Provider retries:", ...attempts.map((a) => `- attempt ${a.attempt}: ${a.reason}`)].join("\n");
+}
+
+/** Adds an attempt to the retry row that is still the newest thing in the
+ *  thread, or starts one. The row stays after the reply arrives: it is the
+ *  log of what the provider did, and the server replays it on reload. */
+function appendRetryAttempt(messages, attempt) {
+	const last = messages[messages.length - 1];
+	if (last?.notice === "retry") {
+		const attempts = [...last.attempts, attempt];
+		return [...messages.slice(0, -1), { ...last, attempts, content: formatRetries(attempts) }];
 	}
-	return [...messages, { role: "warning", content: text }];
+	return [...messages, { role: "warning", notice: "retry", local: true, attempts: [attempt], content: formatRetries([attempt]) }];
 }
 
-/** Drops any lingering "[Retrying..." warning row once real content streams —
- *  the retry belongs to the waiting phase, not the reply. Returns the same
- *  array reference when there's nothing to strip. */
-function isRetryRow(m) {
-	return Boolean(m) && m.role === "warning" && typeof m.content === "string" && m.content.startsWith("[Retrying");
+/** A turn cut short (Stop, or a failed completion) never sends the
+ *  assistant_message that would settle what already streamed, so the reply
+ *  text and tool cards so far were wiped on "end". Keep them as a settled
+ *  message instead; a call still marked running will never finish, so it
+ *  settles as failed rather than spinning forever. */
+function settleLeftoverStreaming(takeStreamingNow, setSession) {
+	const blocks = takeStreamingNow();
+	if (blocks.length === 0) return;
+	const settled = blocks.map((block) =>
+		block.kind === "tool" && block.call.status === "running" ? { ...block, call: { ...block.call, status: "error" } } : block,
+	);
+	setSession((prev) => (prev ? { ...prev, messages: [...prev.messages, { role: "assistant", blocks: settled }] } : prev));
 }
 
-function stripRetryRow(messages) {
-	// Checked before building anything: this runs on every token and thinking
-	// event, and a retry row is present for a fraction of a second at most —
-	// so the common case is a scan that finds nothing, and allocating a copy
-	// of the whole loaded transcript per token just to discard it was pure GC
-	// churn at 50+ tokens/s on a session with thousands of messages.
-	if (!messages.some(isRetryRow)) return messages;
-	return messages.filter((m) => !isRetryRow(m));
-}
+/** The server's session_end messageCount counts user and assistant rows only,
+ *  so compare like with like: counting the client's own notice rows made every
+ *  turn look like it missed events and forced a refetch. */
+const countTurnMessages = (messages) =>
+	messages.filter((m) => (m.role === "user" || m.role === "assistant") && m.pending !== true).length;
 
 /** Short chime for "the turn finished", on a lazily-created shared context. */
 let chimeContext;
@@ -83,7 +90,6 @@ export function handleSseEvent(event, context) {
 		activeId,
 		wasRunningRef,
 		updateStreaming,
-		resetStreamingNow,
 		takeStreamingNow,
 		diffOpenRef,
 		queueDiffRefresh,
@@ -148,26 +154,16 @@ export function handleSseEvent(event, context) {
 		}
 		case "token":
 			updateStreaming({ type: "content", text: event.text });
-			setSession((prev) => {
-				if (!prev) return prev;
-				const messages = stripRetryRow(prev.messages);
-				return messages === prev.messages ? prev : { ...prev, messages };
-			});
 			break;
 		case "thinking":
 			updateStreaming({ type: "thinking", text: event.text });
-			setSession((prev) => {
-				if (!prev) return prev;
-				const messages = stripRetryRow(prev.messages);
-				return messages === prev.messages ? prev : { ...prev, messages };
-			});
 			break;
 		case "retry":
 			setSession((prev) =>
 				prev
 					? {
 							...prev,
-							messages: upsertRetryRow(prev.messages, `[Retrying (attempt ${event.attempt}): ${event.reason}]`),
+							messages: appendRetryAttempt(prev.messages, { attempt: event.attempt, reason: event.reason }),
 						}
 					: prev,
 			);
@@ -176,11 +172,6 @@ export function handleSseEvent(event, context) {
 			updateStreaming({
 				type: "tool_start",
 				call: { id: event.id, name: event.name, args: event.args, status: event.status },
-			});
-			setSession((prev) => {
-				if (!prev) return prev;
-				const messages = stripRetryRow(prev.messages);
-				return messages === prev.messages ? prev : { ...prev, messages };
 			});
 			break;
 		case "tool_end":
@@ -231,7 +222,12 @@ export function handleSseEvent(event, context) {
 		}
 		case "end": {
 			const wasRunning = wasRunningRef.current;
-			resetStreamingNow();
+			settleLeftoverStreaming(takeStreamingNow, setSession);
+			if (event.reason === "aborted") {
+				setSession((prev) =>
+					prev ? { ...prev, messages: [...prev.messages, { role: "warning", notice: "aborted", content: "Run aborted", local: true }] } : prev,
+				);
+			}
 			setRunning(false);
 			setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
 			setPendingSteers([]);
@@ -274,7 +270,7 @@ export function handleSseEvent(event, context) {
 		case "session_end":
 			setSession((prev) => {
 				if (!prev) return prev;
-				if (event.messageCount === prev.messages.length) return { ...prev, usage: event.usage };
+				if (event.messageCount === countTurnMessages(prev.messages)) return { ...prev, usage: event.usage };
 				api("GET", `/api/sessions/${streamSessionId}`)
 					.then((data) => {
 						if (!data || !isCurrent()) return;
@@ -307,7 +303,7 @@ export function handleSseEvent(event, context) {
 			break;
 		case "notice":
 			setSession((prev) =>
-				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.message }] } : prev,
+				prev ? { ...prev, messages: [...prev.messages, { role: "warning", content: event.message, local: true }] } : prev,
 			);
 			break;
 		case "bash_confirm":
@@ -320,20 +316,20 @@ export function handleSseEvent(event, context) {
 			const status = actor.status === "success" ? "completed" : actor.status;
 			setSession((prev) =>
 				prev
-					? { ...prev, messages: [...prev.messages, { role: "warning", content: `${actor.agent} ${status}` }] }
+					? { ...prev, messages: [...prev.messages, { role: "warning", content: `${actor.agent} ${status}`, local: true }] }
 					: prev,
 			);
 			break;
 		}
 		case "error":
-			resetStreamingNow();
+			settleLeftoverStreaming(takeStreamingNow, setSession);
 			setRunning(false);
 			setSession((prev) =>
 				prev
 					? {
 							...prev,
 							status: "error",
-							messages: [...prev.messages, { role: "error", content: event.message ?? "Unknown error" }],
+							messages: [...prev.messages, { role: "error", notice: "error", content: event.message ?? "Unknown error", local: true }],
 						}
 					: prev,
 			);
@@ -370,7 +366,7 @@ export function handleSseEvent(event, context) {
 							...prev,
 							messages: [
 								...prev.messages,
-								{ role: "warning", content: `Doom loop: ${event.tool} called ${event.attempts} times` },
+								{ role: "warning", content: `Doom loop: ${event.tool} called ${event.attempts} times`, local: true },
 							],
 						}
 					: prev,

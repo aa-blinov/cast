@@ -32,7 +32,7 @@ import {
 	listProjectMemoryCheckpoints,
 	searchProjectMemory,
 } from "../core/memory.ts";
-import { getHistoryPage, getMessageImage, getSessionEvents } from "../core/session.ts";
+import { getHistoryPage, getMessageImage, getRunNotices, getSessionEvents } from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import {
 	countRecentLlmRequests,
@@ -66,6 +66,7 @@ import {
 	legacyPathForApiV1,
 	OPENAPI_V1_PATH,
 } from "./api-v1.ts";
+import { insertRunNotices } from "./bridge/display.ts";
 import {
 	reconcileActiveStream,
 	SANDBOX_CWD,
@@ -1328,8 +1329,15 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const turns = Number(url.searchParams.get("turns")) || undefined;
 		const page = getHistoryPage(params.id, undefined, turns);
 		const apiPrefix = (req.url ?? "").startsWith(API_V1_PREFIX) ? API_V1_PREFIX : "/api";
+		// The newest page owns every anchor from its first row on, including
+		// ones on messages written after the page was read.
 		const reconciled = reconcileActiveStream(
-			toDisplayMessages(page.messages, page.reasoning, page.turnMeta, ws.id, page.seqs, apiPrefix),
+			insertRunNotices(
+				toDisplayMessages(page.messages, page.reasoning, page.turnMeta, ws.id, page.seqs, apiPrefix),
+				getRunNotices(params.id),
+				page.seqs[0] ?? 0,
+				Number.POSITIVE_INFINITY,
+			),
 			ws.activeStream,
 		);
 		json(res, {
@@ -1377,13 +1385,18 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const turns = Number(url.searchParams.get("turns")) || undefined;
 		const page = getHistoryPage(params.id, before, turns);
 		json(res, {
-			messages: toDisplayMessages(
-				page.messages,
-				page.reasoning,
-				page.turnMeta,
-				params.id,
-				page.seqs,
-				(req.url ?? "").startsWith(API_V1_PREFIX) ? API_V1_PREFIX : "/api",
+			messages: insertRunNotices(
+				toDisplayMessages(
+					page.messages,
+					page.reasoning,
+					page.turnMeta,
+					params.id,
+					page.seqs,
+					(req.url ?? "").startsWith(API_V1_PREFIX) ? API_V1_PREFIX : "/api",
+				),
+				getRunNotices(params.id),
+				page.seqs[0] ?? 0,
+				page.seqs[page.seqs.length - 1] ?? -1,
 			),
 			oldestSeq: page.oldestSeq ?? null,
 			hasMoreHistory: page.hasMore,
@@ -1659,6 +1672,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
 		bridge.abort(params.id);
+		json(res, { ok: true });
+	});
+
+	route("POST", "/api/sessions/:id/retry", (_req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		const result = bridge.retryTurn(params.id);
+		if (!result.ok) return json(res, { error: result.error }, 409);
 		json(res, { ok: true });
 	});
 

@@ -35,7 +35,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "POST",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|inputs\/upload)$/,
+			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|inputs\/upload)$/,
 	},
 	{ method: "GET", legacyPath: /^\/api\/browse$/ },
 	{ method: "POST", legacyPath: /^\/api\/browse\/mkdir$/ },
@@ -509,6 +509,18 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					"200": jsonResponse("Abort requested", { $ref: "#/components/schemas/Ok" }),
 					"401": errorResponse,
 					"404": errorResponse,
+				},
+			},
+		},
+		"/api/v1/sessions/{id}/retry": {
+			post: {
+				summary: "Re-run a turn that failed or was stopped, from the saved history",
+				parameters: [idParameter],
+				responses: {
+					"200": jsonResponse("Turn restarted", { $ref: "#/components/schemas/Ok" }),
+					"401": errorResponse,
+					"404": errorResponse,
+					"409": errorResponse,
 				},
 			},
 		},

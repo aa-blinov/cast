@@ -1547,6 +1547,54 @@ export function getSessionEvents(
 	}));
 }
 
+/** Seq of the session's newest persisted message, or undefined before its
+ *  first save. Used to anchor a run notice (retry, error, abort) to the point
+ *  in the history where it happened, by row rather than by array index,
+ *  which compaction rewrites. */
+export function lastPersistedSeq(session: SessionState): number | undefined {
+	const last = session.messages[session.messages.length - 1];
+	return last ? messageSeq.get(last) : undefined;
+}
+
+/** Event types that are part of what a person saw happen in a thread, not
+ *  just telemetry: they are replayed into the history at their anchor. */
+export const RUN_NOTICE_EVENT_TYPES = ["retry", "error", "end"] as const;
+
+export interface RunNoticeEvent {
+	/** session_events row order, so consecutive retries can be grouped. */
+	eventSeq: number;
+	ts: string;
+	type: (typeof RUN_NOTICE_EVENT_TYPES)[number];
+	afterSeq: number;
+	payload: Record<string, unknown>;
+}
+
+/** Retry, error and abort events that carry an anchor, oldest first. An end
+ *  event only counts when it was an abort; events recorded before anchors
+ *  existed have none and are skipped, since there is nowhere to put them. */
+export function getRunNotices(sessionId: string): RunNoticeEvent[] {
+	const rows = getDb()
+		.prepare(
+			`SELECT seq, ts, type, payload_json FROM session_events
+			 WHERE session_id = ? AND type IN (${RUN_NOTICE_EVENT_TYPES.map(() => "?").join(", ")}) ORDER BY seq`,
+		)
+		.all(sessionId, ...RUN_NOTICE_EVENT_TYPES) as Array<{
+		seq: number;
+		ts: string;
+		type: RunNoticeEvent["type"];
+		payload_json: string | null;
+	}>;
+	const notices: RunNoticeEvent[] = [];
+	for (const row of rows) {
+		if (!row.payload_json) continue;
+		const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+		if (typeof payload.afterSeq !== "number") continue;
+		if (row.type === "end" && payload.reason !== "aborted") continue;
+		notices.push({ eventSeq: row.seq, ts: row.ts, type: row.type, afterSeq: payload.afterSeq, payload });
+	}
+	return notices;
+}
+
 // ----------------------------------------------------------------------------
 // Subagent (task tool) transcripts — the child run's full message chain,
 // persisted so a subagent's work survives the process that ran it.
@@ -2341,7 +2389,20 @@ export function hasRecentClientMessageId(
 export function pruneSessionEvents(now: number = Date.now(), retentionMs: number = SESSION_EVENT_RETENTION_MS): number {
 	const db = getDb();
 	const cutoff = new Date(now - retentionMs).toISOString();
-	const prune = () => Number(db.prepare("DELETE FROM session_events WHERE ts < ?").run(cutoff).changes);
+	// Retries, errors and aborts that carry an anchor are part of the thread's
+	// history now (see getRunNotices), not disposable telemetry: pruning them
+	// would make a week-old thread lose the errors it showed.
+	const prune = () =>
+		Number(
+			db
+				.prepare(
+					`DELETE FROM session_events WHERE ts < ? AND NOT (
+						payload_json LIKE '%"afterSeq":%'
+						AND (type IN ('retry', 'error') OR (type = 'end' AND payload_json LIKE '%"reason":"aborted"%'))
+					)`,
+				)
+				.run(cutoff).changes,
+		);
 	if (db.isTransaction) return prune();
 	db.exec("BEGIN IMMEDIATE");
 	try {
