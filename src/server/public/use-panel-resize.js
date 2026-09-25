@@ -1,8 +1,32 @@
-import { useCallback, useEffect, useRef } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef } from "preact/hooks";
+
+// Pointer events arrive faster than the grid can relayout the transcript, so
+// apply at most one width per frame. flush() lands the last position on
+// release instead of dropping it with the pending frame.
+export function perFrame(apply) {
+	let id = 0;
+	let last = null;
+	const run = (event) => {
+		last = event;
+		if (!id) {
+			id = requestAnimationFrame(() => {
+				id = 0;
+				apply(last);
+			});
+		}
+	};
+	run.flush = () => {
+		if (!id) return;
+		cancelAnimationFrame(id);
+		id = 0;
+		apply(last);
+	};
+	return run;
+}
 
 export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth, setSidebarWidth }) {
 	const diffDragRef = useRef(null);
-	const onDiffResizeMove = useCallback(
+	const applyDiffResize = useCallback(
 		(event) => {
 			const state = diffDragRef.current;
 			if (!state) return;
@@ -17,13 +41,15 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 		},
 		[setDiffWidth],
 	);
+	const onDiffResizeMove = useMemo(() => perFrame(applyDiffResize), [applyDiffResize]);
 	const onDiffResizeEnd = useCallback(() => {
+		onDiffResizeMove.flush();
 		diffDragRef.current = null;
 		document.body.classList.remove("resizing-diff");
 		window.removeEventListener("pointermove", onDiffResizeMove);
-		window.removeEventListener("pointercancel", onDiffResizeMove);
 		window.removeEventListener("pointerup", onDiffResizeEnd);
 		window.removeEventListener("pointercancel", onDiffResizeEnd);
+		window.removeEventListener("blur", onDiffResizeEnd);
 	}, [onDiffResizeMove]);
 	const startDiffResize = useCallback(
 		(event) => {
@@ -35,12 +61,15 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 			};
 			document.body.classList.add("resizing-diff");
 			window.addEventListener("pointermove", onDiffResizeMove);
-			window.addEventListener("pointercancel", onDiffResizeMove);
 			window.addEventListener("pointerup", onDiffResizeEnd, { once: true });
 			window.addEventListener("pointercancel", onDiffResizeEnd, { once: true });
+			// A release the window never sees (alt-tab, capture stolen) would
+			// otherwise leave the drag stuck to the pointer.
+			window.addEventListener("blur", onDiffResizeEnd, { once: true });
 			if (event.target?.setPointerCapture) {
 				try {
 					event.target.setPointerCapture(event.pointerId);
+					event.target.addEventListener("lostpointercapture", onDiffResizeEnd, { once: true });
 				} catch {}
 			}
 		},
@@ -48,7 +77,7 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 	);
 
 	const sidebarDragRef = useRef(null);
-	const onSidebarResizeMove = useCallback(
+	const applySidebarResize = useCallback(
 		(event) => {
 			const state = sidebarDragRef.current;
 			if (!state) return;
@@ -64,13 +93,15 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 		},
 		[diffOpen, setSidebarWidth],
 	);
+	const onSidebarResizeMove = useMemo(() => perFrame(applySidebarResize), [applySidebarResize]);
 	const onSidebarResizeEnd = useCallback(() => {
+		onSidebarResizeMove.flush();
 		sidebarDragRef.current = null;
 		document.body.classList.remove("resizing-sidebar");
 		window.removeEventListener("pointermove", onSidebarResizeMove);
-		window.removeEventListener("pointercancel", onSidebarResizeMove);
 		window.removeEventListener("pointerup", onSidebarResizeEnd);
 		window.removeEventListener("pointercancel", onSidebarResizeEnd);
+		window.removeEventListener("blur", onSidebarResizeEnd);
 	}, [onSidebarResizeMove]);
 	const startSidebarResize = useCallback(
 		(event) => {
@@ -83,12 +114,15 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 			};
 			document.body.classList.add("resizing-sidebar");
 			window.addEventListener("pointermove", onSidebarResizeMove);
-			window.addEventListener("pointercancel", onSidebarResizeMove);
 			window.addEventListener("pointerup", onSidebarResizeEnd, { once: true });
 			window.addEventListener("pointercancel", onSidebarResizeEnd, { once: true });
+			// A release the window never sees (alt-tab, capture stolen) would
+			// otherwise leave the drag stuck to the pointer.
+			window.addEventListener("blur", onSidebarResizeEnd, { once: true });
 			if (event.target?.setPointerCapture) {
 				try {
 					event.target.setPointerCapture(event.pointerId);
+					event.target.addEventListener("lostpointercapture", onSidebarResizeEnd, { once: true });
 				} catch {}
 			}
 		},
@@ -99,9 +133,7 @@ export function usePanelResize({ diffOpen, diffWidth, setDiffWidth, sidebarWidth
 	useEffect(
 		() => () => {
 			window.removeEventListener("pointermove", onDiffResizeMove);
-			window.removeEventListener("pointercancel", onDiffResizeMove);
 			window.removeEventListener("pointermove", onSidebarResizeMove);
-			window.removeEventListener("pointercancel", onSidebarResizeMove);
 			document.body.classList.remove("resizing-diff", "resizing-sidebar");
 		},
 		[onDiffResizeMove, onSidebarResizeMove],

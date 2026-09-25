@@ -25,6 +25,7 @@ import { closeSseConnection, openSseConnection } from "./sse-connection.js";
 import { handleSseEvent } from "./sse-events.js";
 import { StatusPopover } from "./status-popover.js";
 import { LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
+import { accentForeground, readableTextLevels } from "./theme-contrast.js";
 import { usePanelResize } from "./use-panel-resize.js";
 import { readOlderPages, useSessionController } from "./use-session-controller.js";
 import { useSessionState } from "./use-session-state.js";
@@ -33,6 +34,10 @@ import { useWorkspaceState } from "./use-workspace-state.js";
 const FRONTMATTER_LINE_RE = /^- (.+?): (.+)$/;
 
 const html = htm.bind(h);
+
+// Matches the drawer breakpoint in style.css.
+const MOBILE_LAYOUT_QUERY = "(max-width: 768px)";
+
 // Behind a click, so behind a dynamic import: ~150KB of settings panels,
 // dashboard, modals and workspace explorers used to load before the first
 // paint. prefetchWhenIdle (below, after mount) warms them once the page is
@@ -74,8 +79,13 @@ window.addEventListener("storage", (e) => {
 		try { applyTheme(JSON.parse(e.newValue)); } catch {}
 	}
 });
-function applyTheme(colors) {
-	if (!colors) return;
+// --text and --text-dim in tokens.css; themes don't override them.
+const TEXT_COLOR = "#fafafa";
+const DIM_TEXT_COLOR = "#a1a1aa";
+
+function applyTheme(themeColors) {
+	if (!themeColors) return;
+	let colors = themeColors;
 	const root = document.documentElement.style;
 	root.setProperty("--cyan", colors.accent);
 	root.setProperty("--violet", colors.gradient.to);
@@ -92,7 +102,30 @@ function applyTheme(colors) {
 	root.setProperty("--amber", colors.warning);
 	root.setProperty("--rose", colors.error);
 	root.setProperty("--persona", colors.persona);
-	root.setProperty("--text-muted", colors.muted);
+	const hex = /^#[0-9a-f]{6}$/i;
+	const surfaces = [colors.bg, colors.bgSurface, colors.bgRaised, colors.bgHover];
+	if ([colors.accent, colors.muted, ...surfaces].every((c) => hex.test(c ?? ""))) {
+		colors = {
+			...colors,
+			accentFg: accentForeground(colors.accent, colors.bg),
+			...readableTextLevels({
+				muted: colors.muted,
+				dim: DIM_TEXT_COLOR,
+				text: TEXT_COLOR,
+				surface: colors.bgSurface,
+				raised: colors.bgRaised,
+				hover: colors.bgHover,
+			}),
+		};
+	}
+	root.setProperty("--text-muted", colors.mutedText ?? colors.muted);
+	for (const [prop, value] of [
+		["--accent-fg", colors.accentFg],
+		["--text-dim", colors.dimText],
+	]) {
+		if (value) root.setProperty(prop, value);
+		else root.removeProperty(prop);
+	}
 	if (colors.bg) root.setProperty("--bg", colors.bg);
 	if (colors.bgSurface) root.setProperty("--bg-surface", colors.bgSurface);
 	if (colors.bgRaised) root.setProperty("--bg-raised", colors.bgRaised);
@@ -214,6 +247,14 @@ function initTooltips() {
 			// the element was born with.
 			const current = el.getAttribute("title");
 			if (current) el.setAttribute("data-tooltip", current);
+			// For an icon-only control the title is its only accessible name;
+			// carry it over so hovering doesn't leave a screen reader with a
+			// nameless button. Controls with visible text or their own label
+			// keep those.
+			if (current && !el.textContent.trim() && (!el.hasAttribute("aria-label") || el.dataset.tooltipLabel)) {
+				el.setAttribute("aria-label", current);
+				el.dataset.tooltipLabel = "1";
+			}
 			el.removeAttribute("title");
 		});
 		el.addEventListener("mouseleave", () => {
@@ -681,6 +722,25 @@ function App() {
 		confirmState,
 		setConfirmState,
 	} = useWorkspaceState();
+	// The transcript itself isn't a live region: streamed markdown repaints on
+	// every flush and a screen reader would read each one. Announce the end of
+	// a turn instead, once, and only for the session that was running.
+	const [turnAnnouncement, setTurnAnnouncement] = useState("");
+	const lastRunRef = useRef({ id: null, running: false });
+	useEffect(() => {
+		const prev = lastRunRef.current;
+		// Cleared when a turn starts so the next identical message is read again.
+		if (running) setTurnAnnouncement("");
+		else if (prev.id === activeId && prev.running) setTurnAnnouncement("Reply finished");
+		lastRunRef.current = { id: activeId, running };
+	}, [activeId, running]);
+	const [isMobileLayout, setIsMobileLayout] = useState(() => window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
+	useEffect(() => {
+		const query = window.matchMedia(MOBILE_LAYOUT_QUERY);
+		const onChange = () => setIsMobileLayout(query.matches);
+		query.addEventListener("change", onChange);
+		return () => query.removeEventListener("change", onChange);
+	}, []);
 	// Dashboard is a local toggle (not persisted) — a separate full-screen
 	// analytics view swapped in place of the chat area. Settings and the
 	// dashboard are now dedicated routes (/settings, /dashboard); the open
@@ -1685,6 +1745,9 @@ function App() {
 	// Global hotkeys
 	useEffect(() => {
 		const onKey = (e) => {
+			// A field that used Escape for itself (inline rename, "new folder")
+			// already handled it; don't also close the dialog around it.
+			if (e.key === "Escape" && e.defaultPrevented) return;
 			if (e.key === "Escape" && hotkeysOpen) {
 				setHotkeysOpen(false);
 				return;
@@ -1814,10 +1877,10 @@ function App() {
 	const defaultP = personas.find((x) => x.name === "senior") ?? personas[0];
 
 	// Which meaning of the toggle applies depends on viewport (drawer on
-	// mobile, collapsible column on desktop) — read at render time, same as
-	// toggleSidebar's own check, so the chevron always matches the layout
-	// it's about to flip.
-	const sidebarVisible = typeof window !== "undefined" && window.innerWidth <= 768 ? sidebarOpen : !sidebarCollapsed;
+	// mobile, collapsible column on desktop). Tracked as state, not read at
+	// render time: the sidebar is inert whenever it's hidden, and a stale read
+	// after resizing past the breakpoint would leave a visible sidebar dead.
+	const sidebarVisible = isMobileLayout ? sidebarOpen : !sidebarCollapsed;
 
 	const appStyle = {};
 	const minChatWidth = typeof window !== "undefined" && window.innerWidth <= 1100 ? 280 : 320;
@@ -1872,10 +1935,10 @@ function App() {
 		confirmState &&
 		html`
 		<div class="modal-backdrop" onClick=${() => closeConfirm(false)}>
-			<div class="modal modal-confirm" role="alertdialog" aria-modal="true" aria-label="Confirm" tabIndex="-1" ref=${confirmModalRef} onClick=${(e) => e.stopPropagation()}>
-				<div class="modal-confirm-body">${confirmState.message}</div>
+			<div class="modal modal-confirm" role="alertdialog" aria-modal="true" aria-label="Confirm" aria-describedby="confirm-message" tabIndex="-1" ref=${confirmModalRef} onClick=${(e) => e.stopPropagation()}>
+				<div class="modal-confirm-body" id="confirm-message">${confirmState.message}</div>
 				<div class="modal-footer">
-					<button class="modal-btn" onClick=${() => closeConfirm(false)}>Cancel</button>
+					<button class="modal-btn" data-dismiss onClick=${() => closeConfirm(false)}>Cancel</button>
 					<button class="modal-btn modal-btn-danger" onClick=${() => closeConfirm(true)}>Confirm</button>
 				</div>
 			</div>
@@ -1885,7 +1948,7 @@ function App() {
 	return html`
 		<div class="app${diffOpen ? " with-diff" : ""}${sidebarCollapsed ? " sidebar-collapsed" : ""}" style=${appStyle}>
 			<!-- Toasts -->
-			<div class="toast-stack">
+			<div class="toast-stack" role="status" aria-live="polite">
 				${toasts.map(
 					(t) => html`
 					<div key=${t.id} class="toast toast-${t.type}">${t.text}</div>
@@ -1903,6 +1966,9 @@ function App() {
 				<span class="header-logo" title=${statusDotTitle}>
 					<span class="status-dot ${statusDotState}" title=${statusDotTitle} aria-label=${statusDotTitle} role="img" />
 				</span>
+				<!-- Announce only trouble: saying "connected" on every load is noise. -->
+				<span class="sr-only" role="status">${statusDotState === "connected" ? "" : statusDotTitle}</span>
+				<span class="sr-only" role="status">${turnAnnouncement}</span>
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
 					<button class="menu-toggle${dashboardOpen ? " active" : ""}" onClick=${() => navigate("/dashboard" + (activeId ? `?session=${activeId}` : ""))} aria-label="Dashboard" title="Dashboard">
@@ -1946,6 +2012,7 @@ function App() {
 					window.location.assign("/login");
 				}}
 				open=${sidebarOpen}
+				collapsed=${!sidebarVisible}
 				sessionsLoaded=${sessionsLoaded}
 				defaultModel=${defaultModel}
 				defaultModelLoaded=${staticResourcesLoadedRef.current}

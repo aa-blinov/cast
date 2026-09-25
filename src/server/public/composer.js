@@ -462,6 +462,7 @@ export function Composer({
 				<textarea
 					ref=${textareaRef}
 					class="composer-input"
+					aria-label="Message"
 					placeholder=${!ready ? "Connecting…" : !sendReady ? "Reconnecting…" : "Type a message…"}
 					rows="1"
 					disabled=${!ready}

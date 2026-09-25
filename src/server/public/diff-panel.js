@@ -1,5 +1,6 @@
 import htm from "htm";
 import { h } from "preact";
+import { pressable } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
@@ -27,10 +28,10 @@ export function DiffPanel({
 	const header = html`
 		<div class="diff-header">
 			<div class="diff-tabs">
-				<button class="diff-tab${tab === "inputs" ? " active" : ""}" onClick=${() => onTabChange("inputs")}>Inputs</button>
-				<button class="diff-tab${tab === "fs" ? " active" : ""}" onClick=${() => onTabChange("fs")}>Files</button>
-				${memoryEnabled && html`<button class="diff-tab${tab === "memory" ? " active" : ""}" onClick=${() => onTabChange("memory")}>Memory</button>`}
-				<button class="diff-tab${tab === "changes" ? " active" : ""}" onClick=${() => onTabChange("changes")}>Changes</button>
+				<button aria-pressed=${Boolean(tab === "inputs")} class="diff-tab${tab === "inputs" ? " active" : ""}" onClick=${() => onTabChange("inputs")}>Inputs</button>
+				<button aria-pressed=${Boolean(tab === "fs")} class="diff-tab${tab === "fs" ? " active" : ""}" onClick=${() => onTabChange("fs")}>Files</button>
+				${memoryEnabled && html`<button aria-pressed=${Boolean(tab === "memory")} class="diff-tab${tab === "memory" ? " active" : ""}" onClick=${() => onTabChange("memory")}>Memory</button>`}
+				<button aria-pressed=${Boolean(tab === "changes")} class="diff-tab${tab === "changes" ? " active" : ""}" onClick=${() => onTabChange("changes")}>Changes</button>
 			</div>
 		</div>
 	`;
@@ -44,7 +45,7 @@ export function DiffPanel({
 	// instant a real session's data landed a moment later).
 	if (!activeId) {
 		return html`
-			<aside class="diff-panel${openClass}">
+			<aside class="diff-panel${openClass}" inert=${!open}>
 				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 				${header}
 				${
@@ -65,7 +66,7 @@ export function DiffPanel({
 
 	if (tab === "inputs") {
 		return html`
-			<aside class="diff-panel${openClass}">
+			<aside class="diff-panel${openClass}" inert=${!open}>
 				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 				${header}
 				<${InputsExplorer} activeId=${activeId} confirm=${confirm} refreshNonce=${inputsRefreshNonce} />
@@ -75,7 +76,7 @@ export function DiffPanel({
 
 	if (tab === "fs") {
 		return html`
-			<aside class="diff-panel${openClass}">
+			<aside class="diff-panel${openClass}" inert=${!open}>
 				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 				${header}
 				<${FileExplorerModule} activeId=${activeId} cwd=${cwd} confirm=${confirm} refreshNonce=${fsRefreshNonce} />
@@ -85,7 +86,7 @@ export function DiffPanel({
 
 	if (tab === "memory" && memoryEnabled) {
 		return html`
-			<aside class="diff-panel${openClass}">
+			<aside class="diff-panel${openClass}" inert=${!open}>
 				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 				${header}
 				<${MemoryExplorerModule} activeId=${activeId} />
@@ -95,7 +96,7 @@ export function DiffPanel({
 
 	if (!data)
 		return html`
-		<aside class="diff-panel${openClass}">
+		<aside class="diff-panel${openClass}" inert=${!open}>
 			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 			${header}
 			<div class="fs-skeleton" style="padding:12px">
@@ -167,7 +168,7 @@ export function DiffPanel({
 	}
 
 	return html`
-		<aside class="diff-panel${openClass}">
+		<aside class="diff-panel${openClass}" inert=${!open}>
 			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
 			${header}
 			<div class="diff-file-list">
@@ -180,7 +181,7 @@ export function DiffPanel({
 						</div>
 						${sec.files.map(
 							(f) => html`
-							<div key=${f.path} class="diff-file-item${f.path === activePath ? " active" : ""}" onClick=${() => onSelectFile(f.path)} title=${f.path}>
+							<div key=${f.path} class="diff-file-item${f.path === activePath ? " active" : ""}" aria-current=${f.path === activePath ? "true" : undefined} ...${pressable(() => onSelectFile(f.path))} title=${f.path}>
 								<span class="diff-file-badge ${sec.cls}"></span>
 								<span class="diff-file-path">
 									<span class="diff-file-dir">${f.path.slice(0, f.path.lastIndexOf("/") + 1)}</span><span class="diff-file-base">${f.path.slice(f.path.lastIndexOf("/") + 1)}</span>

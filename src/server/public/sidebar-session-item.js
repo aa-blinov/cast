@@ -1,6 +1,7 @@
 import htm from "htm";
 import { h } from "preact";
 import { icons } from "./icons.js";
+import { pressable } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
@@ -44,15 +45,20 @@ export function SidebarSessionItem({
 			key=${s.id}
 			class="sidebar-item${isActive ? " active" : ""}${menuOpen ? " menu-open" : ""}"
 			title=${s.cwd}
-			onClick=${() => onSelect(s.id)}
+			aria-current=${isActive ? "true" : undefined}
+			...${pressable(() => onSelect(s.id))}
 			onContextMenu=${(e) => {
 				e.preventDefault();
 				e.stopPropagation();
 				openMenu(s.id, e.currentTarget);
 			}}
 		>
-			<span class="sidebar-item-status ${s.status || "idle"}" />
-			<button class="sidebar-item-pin${s.pinned ? " pinned" : ""}" title=${s.pinned ? "Unpin" : "Pin to top"} onClick=${(
+			<span
+				class="sidebar-item-status ${s.status || "idle"}"
+				role=${s.status && s.status !== "idle" ? "img" : undefined}
+				aria-label=${s.status && s.status !== "idle" ? s.status : undefined}
+			/>
+			<button class="sidebar-item-pin${s.pinned ? " pinned" : ""}" title=${s.pinned ? "Unpin" : "Pin to top"} aria-label=${s.pinned ? "Unpin" : "Pin to top"} aria-pressed=${Boolean(s.pinned)} onClick=${(
 				e,
 			) => {
 				e.stopPropagation();
@@ -80,7 +86,7 @@ export function SidebarSessionItem({
 						}}>${s.title || s.persona || "unknown"}</span>`
 			}
 			<div class="sidebar-item-menu-anchor">
-				<button class="sidebar-item-more" title="More" aria-label="More" onClick=${(e) => {
+				<button class="sidebar-item-more" title="More" aria-label="More" aria-haspopup="menu" aria-expanded=${menuOpen} onClick=${(e) => {
 					e.stopPropagation();
 					openMenu(menuFor === s.id ? null : s.id, e.currentTarget.closest(".sidebar-item"));
 				}}><${icons.ellipsisVertical} /></button>

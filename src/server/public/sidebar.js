@@ -28,6 +28,7 @@ export function Sidebar({
 	onForkSession,
 	onLogout,
 	open,
+	collapsed,
 	confirm,
 	sessionsLoaded,
 	defaultModel,
@@ -86,7 +87,10 @@ export function Sidebar({
 	// of two permanently-visible ones.
 	const [menuFor, setMenuFor] = useState(null);
 	const [menuPos, setMenuPos] = useState(null);
+	const menuRef = useRef(null);
+	const menuAnchorRef = useRef(null);
 	const openMenu = useCallback((id, rowEl) => {
+		menuAnchorRef.current = rowEl?.querySelector(".sidebar-item-more") ?? null;
 		if (rowEl) {
 			const rect = rowEl.getBoundingClientRect();
 			const ESTIMATED_MENU_HEIGHT = 190; // 4 items + padding, roomy on purpose
@@ -98,7 +102,17 @@ export function Sidebar({
 			// once at the <nav> level (see menuSession below), not nested inside
 			// the row, so it isn't a content-visibility descendant.
 			const MENU_WIDTH = 160;
-			setMenuPos({ top: upward ? rect.top - ESTIMATED_MENU_HEIGHT + 4 : rect.bottom + 4, left: rect.right - MENU_WIDTH, width: MENU_WIDTH });
+			// The mobile drawer slides in with a transform, which makes the
+			// <nav> the containing block for position:fixed; offset by its
+			// origin there or the menu lands a header-height below its row.
+			const nav = rowEl.closest(".sidebar");
+			const origin =
+				nav && getComputedStyle(nav).transform !== "none" ? nav.getBoundingClientRect() : { top: 0, left: 0 };
+			setMenuPos({
+				top: (upward ? rect.top - ESTIMATED_MENU_HEIGHT + 4 : rect.bottom + 4) - origin.top,
+				left: rect.right - MENU_WIDTH - origin.left,
+				width: MENU_WIDTH,
+			});
 		} else {
 			setMenuPos(null);
 		}
@@ -114,7 +128,18 @@ export function Sidebar({
 			setMenuPos(null);
 		};
 		const onKey = (e) => {
-			if (e.key === "Escape") close();
+			if (e.key === "Escape") {
+				close();
+				menuAnchorRef.current?.focus();
+				return;
+			}
+			if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+			const items = Array.from(menuRef.current?.querySelectorAll("[role=menuitem]:not([disabled])") ?? []);
+			if (items.length === 0) return;
+			e.preventDefault();
+			const step = e.key === "ArrowDown" ? 1 : -1;
+			const at = items.indexOf(document.activeElement);
+			items[(at + step + items.length) % items.length].focus();
 		};
 		// Capture phase + next-tick registration: the same click that opens
 		// the menu (button click / contextmenu) would otherwise immediately
@@ -141,6 +166,10 @@ export function Sidebar({
 			window.removeEventListener("resize", close);
 		};
 	}, [menuFor]);
+	// preventScroll: any scroll closes the menu (see above).
+	useEffect(() => {
+		if (menuPos) menuRef.current?.querySelector("[role=menuitem]:not([disabled])")?.focus({ preventScroll: true });
+	}, [menuPos]);
 
 	// Primary grouping is by recency (Today / Yesterday / Previous 7 days /
 	// Previous 30 days / Older) — cwd is still discoverable on hover via the
@@ -235,7 +264,7 @@ export function Sidebar({
 	};
 
 	return html`
-		<nav class="sidebar${open ? " open" : ""}">
+		<nav class="sidebar${open ? " open" : ""}" inert=${collapsed}>
 			<div class="sidebar-new-section">
 				<div class="sidebar-new-buttons">
 					<button
@@ -261,12 +290,12 @@ export function Sidebar({
 						<span class="dir-row-label">Directory</span>
 						<div class="dir-toggle">
 							<button
-								class="dir-toggle-btn${!isSandbox ? " active" : ""}"
+								aria-pressed=${Boolean(!isSandbox)} class="dir-toggle-btn${!isSandbox ? " active" : ""}"
 								title=${isSandbox ? defaultCwd : cwd}
 								onClick=${isSandbox ? () => onSetCwd(null) : onOpenDirPicker}
 							>${shortPath(isSandbox ? defaultCwd : cwd)}</button>
 							<button
-								class="dir-toggle-btn dir-toggle-sandbox${isSandbox ? " active" : ""}"
+								aria-pressed=${Boolean(isSandbox)} class="dir-toggle-btn dir-toggle-sandbox${isSandbox ? " active" : ""}"
 								title="Create a fresh sandbox directory for a throwaway session"
 								onClick=${() => onSetCwd(SANDBOX_CWD)}
 							>new</button>
@@ -292,6 +321,7 @@ export function Sidebar({
 						<input
 							class="sidebar-search"
 							type="text"
+							aria-label="Search sessions"
 							placeholder="Search sessions..."
 							value=${search}
 							onInput=${(e) => setSearch(e.target.value)}
@@ -316,21 +346,25 @@ export function Sidebar({
 				menuSession &&
 				menuPos &&
 				html`
-				<div class="sidebar-item-menu" style=${`top:${menuPos.top}px;left:${menuPos.left}px;width:${menuPos.width}px;`} onClick=${(e) => e.stopPropagation()}>
-					<button class="sidebar-item-menu-item" onClick=${() => {
+				<div class="sidebar-item-menu" role="menu" aria-label="Session actions" ref=${menuRef} style=${`top:${menuPos.top}px;left:${menuPos.left}px;width:${menuPos.width}px;`} onClick=${(e) => e.stopPropagation()}>
+					<button role="menuitem" class="sidebar-item-menu-item" onClick=${() => {
 						setMenuFor(null);
 						startEdit(menuSession);
 					}}><${icons.pencil} /> Rename</button>
-					<button class="sidebar-item-menu-item" onClick=${() => {
+					<button role="menuitem" class="sidebar-item-menu-item" onClick=${() => {
 						setMenuFor(null);
+						// The dialog restores focus to whatever held it; this item is about to unmount.
+						menuAnchorRef.current?.focus();
 						onShareSession(menuSession);
 					}}><${icons.link} /> Share</button>
-					<button class="sidebar-item-menu-item" disabled=${menuSession.status === "running"} title=${menuSession.status === "running" ? "Wait for the agent to finish" : "Create a new session from this context"} onClick=${() => {
+					<button role="menuitem" class="sidebar-item-menu-item" disabled=${menuSession.status === "running"} title=${menuSession.status === "running" ? "Wait for the agent to finish" : "Create a new session from this context"} onClick=${() => {
 						setMenuFor(null);
 						onForkSession(menuSession.id);
 					}}><${icons.fork} /> Fork</button>
-					<button class="sidebar-item-menu-item danger" onClick=${() => {
+					<button role="menuitem" class="sidebar-item-menu-item danger" onClick=${() => {
 						setMenuFor(null);
+						// The dialog restores focus to whatever held it; this item is about to unmount.
+						menuAnchorRef.current?.focus();
 						doDelete(menuSession);
 					}}><${icons.trash} /> Delete</button>
 				</div>`

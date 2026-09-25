@@ -5,7 +5,7 @@
 <!-- resizes-content: the on-screen keyboard shrinks the layout viewport instead of
      covering the page, so the composer sits on top of it and the transcript keeps
      its own scroll (the default, resizes-visual, pans the header off-screen). -->
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>Cast</title>
 <script>
 // Applies the last-known theme/font/scale (cached by app.js — see
@@ -14,10 +14,8 @@
 // defaults for however long the network takes, then jumping. Deliberately
 // the very first thing in <head>, before any <link> — a browser defers
 // script execution until every *preceding* stylesheet's CSSOM is ready, so
-// this ran second-to-nothing-blocking, right after this document itself,
-// with no possibility of getting stuck behind style.css's own Google Fonts
-// @import (which is exactly the kind of slow external round trip this
-// exists to not wait on).
+// this runs right after the document itself, never stuck behind a
+// stylesheet round trip.
 try {
 	const colors = JSON.parse(localStorage.getItem("cast:themeColors"));
 	if (colors) {
@@ -34,7 +32,9 @@ try {
 		root.setProperty("--amber", colors.warning);
 		root.setProperty("--rose", colors.error);
 		root.setProperty("--persona", colors.persona);
-		root.setProperty("--text-muted", colors.muted);
+		root.setProperty("--text-muted", colors.mutedText ?? colors.muted);
+		if (colors.accentFg) root.setProperty("--accent-fg", colors.accentFg);
+		if (colors.dimText) root.setProperty("--text-dim", colors.dimText);
 		if (colors.bg) root.setProperty("--bg", colors.bg);
 		if (colors.bgSurface) root.setProperty("--bg-surface", colors.bgSurface);
 		if (colors.bgRaised) root.setProperty("--bg-raised", colors.bgRaised);

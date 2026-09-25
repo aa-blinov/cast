@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("htm", () => ({ default: { bind: () => () => null } }), { virtual: true });
 vi.mock("preact", () => ({ h: () => null }), { virtual: true });
+vi.mock("preact/hooks", () => ({ useEffect: () => {}, useRef: () => ({ current: null }) }), { virtual: true });
 vi.mock("../src/server/public/file-explorer.js", () => ({ FileExplorer: () => null }));
 
 import { DiffPanel } from "../src/server/public/diff-panel.js";

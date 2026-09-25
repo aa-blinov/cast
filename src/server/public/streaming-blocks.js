@@ -83,7 +83,7 @@ export function StreamingBlocks({ blocks, renderMarkdown, showReasoning = false 
 	if (!blocks || blocks.length === 0) return null;
 	const collapsed = collapseMidWordBoundaries(blocks);
 	return html`
-		<div class="message-group">
+		<div class="message-group message-group-streaming">
 			${collapsed.map(
 				(block, index) =>
 					html`<${BlockView}

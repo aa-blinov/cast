@@ -32,7 +32,10 @@ const markdownCache = new Map();
 const CODE_COPY_ICON_SVG =
 	'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg>';
 const CODE_COPY_BUTTON = `<button type="button" class="code-copy-btn" title="Copy" aria-label="Copy code">${CODE_COPY_ICON_SVG}</button>`;
-const MARKDOWN_CACHE_LIMIT = 300;
+// Sized past a long session's loaded history: every visible message looks
+// itself up on render, so a cache smaller than the transcript misses on every
+// pass, whatever the eviction order.
+const MARKDOWN_CACHE_LIMIT = 2000;
 /** Schemes a link may keep. Everything else (javascript:, data:, vbscript:) renders as plain text. */
 const SAFE_URL_RE = /^(?:https?:\/\/|mailto:)/i;
 
@@ -105,12 +108,18 @@ const SANITIZE_OPTIONS = { ADD_ATTR: ["target"] };
  * `useCache = false` for the text of a turn that is still streaming: its text
  * is a different string every flush, so every one of those intermediate
  * versions was landing in the cache and evicting the finished messages it
- * exists to hold (300 entries, ~100 new versions per streamed answer). The
+ * exists to hold (a bounded LRU, ~100 new versions per streamed answer). The
  * result is identical either way — this only decides whether it is remembered.
  */
 function renderMarkdown(text, useCache = true) {
 	if (!text) return "";
-	if (useCache && markdownCache.has(text)) return markdownCache.get(text);
+	if (useCache && markdownCache.has(text)) {
+		// Re-insert so eviction drops the least recently used entry, not the oldest.
+		const hit = markdownCache.get(text);
+		markdownCache.delete(text);
+		markdownCache.set(text, hit);
+		return hit;
+	}
 	const parsed = marked.parse(text);
 	const out = purify ? purify.sanitize(parsed, SANITIZE_OPTIONS) : parsed;
 	if (useCache) {

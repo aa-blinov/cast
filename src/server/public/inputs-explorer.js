@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { FilePreviewModal } from "./file-preview.js";
 import { humanSize } from "./file-size.js";
 import { icons } from "./icons.js";
+import { pressable } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
@@ -63,7 +64,7 @@ export function InputsExplorer({ activeId, confirm, refreshNonce }) {
 					: html`<div class="fs-tree">${entries.map(
 							(entry) => html`
 					<div key=${entry.name} class="fs-row">
-						<div class="fs-row-main" onClick=${() => setPreviewName(entry.name)}>
+						<div class="fs-row-main" ...${pressable(() => setPreviewName(entry.name))}>
 							<span class="fs-icon"><${icons.docFile} /></span><span class="fs-name">${entry.name}</span>
 							${entry.size != null ? html`<span class="fs-size">${humanSize(entry.size)}</span>` : null}
 						</div>

@@ -87,8 +87,8 @@ export function SlotModelPicker({
 	}, [act, modelCommand]);
 	const hasOverride = currentProvider || currentModel;
 	return html`<div class="settings-form-row">
-		<select disabled=${busy} value=${providerValue} onChange=${(event) => onProviderChange(event.target.value)}><option value="">${defaultLabel}</option>${visibleProviders.map((provider) => html`<option key=${provider.name} value=${provider.name}>${provider.name}</option>`)}</select>
-		<select disabled=${busy || (loading && models.length === 0)} onChange=${(event) => setModelValue(event.target.value)} value=${modelValue && models.some((model) => model.id === modelValue) ? modelValue : ""}>
+		<select aria-label="Provider" disabled=${busy} value=${providerValue} onChange=${(event) => onProviderChange(event.target.value)}><option value="">${defaultLabel}</option>${visibleProviders.map((provider) => html`<option key=${provider.name} value=${provider.name}>${provider.name}</option>`)}</select>
+		<select aria-label="Model" disabled=${busy || (loading && models.length === 0)} onChange=${(event) => setModelValue(event.target.value)} value=${modelValue && models.some((model) => model.id === modelValue) ? modelValue : ""}>
 			<option value="">${loading && models.length === 0 ? "Loading" : `Pick a model…${fallbackModel && models.some((model) => model.id === fallbackModel) ? ` (inherits ${fallbackModel})` : ""}`}</option>
 			${[...models].sort((a, b) => a.id.localeCompare(b.id)).map((model) => html`<option key=${model.id} value=${model.id}>${model.id}</option>`)}
 		</select>

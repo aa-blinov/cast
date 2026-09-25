@@ -61,13 +61,13 @@ export function QuestionCard({ question, onChoose }) {
 						${
 							item.multi
 								? item.options.map(
-										(option) => html`<button class="plan-decision-option ${answers[index]?.includes(option.value) ? "selected" : ""}" onClick=${() => toggleMulti(index, option.value)}>
+										(option) => html`<button aria-pressed=${Boolean(answers[index]?.includes(option.value))} class="plan-decision-option ${answers[index]?.includes(option.value) ? "selected" : ""}" onClick=${() => toggleMulti(index, option.value)}>
 											<span class="plan-decision-option-label">${option.label}${option.value === item.recommended ? " (recommended)" : ""}</span>
 											${option.description && html`<span class="plan-decision-option-description">${option.description}</span>`}
 										</button>`,
 									)
 								: item.options.map(
-										(option) => html`<button class="plan-decision-option ${answers[index] === option.value ? "selected" : ""}" onClick=${() => setAnswers((prev) => prev.map((value, i) => (i === index ? option.value : value)))}>
+										(option) => html`<button aria-pressed=${Boolean(answers[index] === option.value)} class="plan-decision-option ${answers[index] === option.value ? "selected" : ""}" onClick=${() => setAnswers((prev) => prev.map((value, i) => (i === index ? option.value : value)))}>
 											<span class="plan-decision-option-label">${option.label}${option.value === item.recommended ? " (recommended)" : ""}</span>
 											${option.description && html`<span class="plan-decision-option-description">${option.description}</span>`}
 										</button>`,
@@ -79,6 +79,7 @@ export function QuestionCard({ question, onChoose }) {
 							html`<textarea
 								class="plan-decision-option plan-decision-textarea"
 								value=${answers[index]}
+								aria-label="Your own answer"
 								placeholder="Or your own answer…"
 								rows="2"
 								onInput=${(e) => setAnswers((prev) => prev.map((value, i) => (i === index ? e.currentTarget.value : value)))}

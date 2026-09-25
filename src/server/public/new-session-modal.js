@@ -288,7 +288,7 @@ export function NewSessionModal({
 							(p) => html`
 								<button
 									key=${p.name}
-									class=${`new-session-persona${persona === p.name ? " selected" : ""}`}
+									aria-pressed=${Boolean(persona === p.name)} class=${`new-session-persona${persona === p.name ? " selected" : ""}`}
 									onClick=${() => setPersona(p.name)}
 									type="button"
 								>
@@ -302,6 +302,7 @@ export function NewSessionModal({
 					<div class="new-session-section-title">Provider & Model</div>
 					<div class="new-session-model">
 						<select
+							aria-label="Provider"
 							value=${provider}
 							disabled=${busy}
 							onChange=${(e) => { setProvider(e.target.value); setModelCheck(null); }}
@@ -311,6 +312,7 @@ export function NewSessionModal({
 						</select>
 						<div class="new-session-model-row">
 							<select
+								aria-label="Model"
 								value=${model}
 								disabled=${busy}
 								onChange=${(e) => { setModel(e.target.value); setModelCheck(null); }}
@@ -318,7 +320,7 @@ export function NewSessionModal({
 								<option value="">— Select model —</option>
 								${(models || []).filter((m) => !provider || (m.provider && m.provider === provider) || !m.provider).slice(0, 50).map((m) => html`<option value=${m.id}>${m.id}${m.provider ? ` – ${m.provider}` : ""}</option>`)}
 							</select>
-							<button class="modal-btn icon-btn verify-btn" title="Проверить доступность модели" disabled=${busy || checkingModel || !provider || !model} onClick=${async () => {
+							<button title="Check that the model responds" aria-label="Check that the model responds" aria-busy=${checkingModel ? "true" : "false"} disabled=${busy || checkingModel || !provider || !model} onClick=${async () => {
 							setCheckingModel(true); setModelCheck(null);
 							try{
 								// verify the exact provider+model pair — any change keeps button enabled (save is Create session)
@@ -326,28 +328,28 @@ export function NewSessionModal({
 								if (res?.ok) {
 									const list = await api("GET", `/api/models?provider=${encodeURIComponent(provider)}`).catch(()=>null);
 									const hasModel = list?.models?.some((x) => x.id === model);
-									setModelCheck({ ok: !!hasModel, msg: hasModel ? `✓ ${model} отвечает via ${provider}` : `✕ ${model} не найден для ${provider}` });
+									setModelCheck({ ok: !!hasModel, msg: hasModel ? `✓ ${model} responds via ${provider}` : `✕ ${model} not found for ${provider}` });
 								} else {
 									setModelCheck({ ok: false, msg: res?.error || "Provider unreachable" });
 								}
 							} catch (e) { setModelCheck({ ok: false, msg: e.message }); }
 							finally { setCheckingModel(false); }
-						}} class="verify-btn">${checkingModel ? "loading" : html`<${icons.arrowPath} />`}</button>
+						}} class="verify-btn">${checkingModel ? html`<${icons.spinner} />` : html`<${icons.arrowPath} />`}</button>
 						</div>
 					</div>
-					${modelCheck ? html`<div class=${modelCheck.ok ? "modal-hint" : "new-session-error"} style="margin-bottom:8px; font-size:.72rem; line-height:1.4">${modelCheck.msg}</div>` : null}
+					${modelCheck ? html`<div role="status" class=${modelCheck.ok ? "modal-hint" : "new-session-error"} style="margin-bottom:8px; font-size:var(--fs-micro); line-height:1.4">${modelCheck.msg}</div>` : null}
 
 					<div class="new-session-section-title">Working directory</div>
 					<div class="new-session-cwd">
 						<button
 							type="button"
-							class=${`modal-btn new-session-cwd-toggle${!sandbox ? " active" : ""}`}
+							aria-pressed=${Boolean(!sandbox)} class=${`modal-btn new-session-cwd-toggle${!sandbox ? " active" : ""}`}
 							title=${cwd ? `Selected: ${cwd}` : "Pick a directory…"}
 							onClick=${() => { setSandbox(false); setWorktreeEnabled(false); onOpenDirPicker?.(); }}
 						>Select dir</button>
 						<button
 							type="button"
-							class=${`modal-btn new-session-cwd-toggle${sandbox ? " active" : ""}`}
+							aria-pressed=${Boolean(sandbox)} class=${`modal-btn new-session-cwd-toggle${sandbox ? " active" : ""}`}
 							title=${cwd && !sandbox ? `Selected: ${cwd}` : "Create a fresh sandbox directory for a throwaway session"}
 							onClick=${() => onSandboxChange(!sandbox)}
 						>Sandbox</button>
@@ -393,6 +395,7 @@ export function NewSessionModal({
 									<input
 										class="new-session-input"
 										type="text"
+										aria-label="Worktree name"
 										placeholder=${worktreeName}
 										value=${worktreeName}
 										onInput=${(e) => setWorktreeName(e.target.value)}
@@ -422,7 +425,7 @@ export function NewSessionModal({
 							: null
 					}
 
-					${error ? html`<div class="new-session-error">${error}</div>` : null}
+					${error ? html`<div class="new-session-error" role="alert">${error}</div>` : null}
 				</div>
 				<div class="modal-footer">
 					<button class="modal-btn" onClick=${onClose} disabled=${busy}>Cancel</button>

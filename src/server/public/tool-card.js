@@ -3,6 +3,7 @@ import { h } from "preact";
 import { useState } from "preact/hooks";
 import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
+import { pressable } from "./modal-focus.js";
 import { getToolCardOpen, getToolCardPreviewSrc, setToolCardOpen, setToolCardPreviewSrc } from "./tool-card-state.js";
 
 const UNICODE_ESCAPE_RE = /\\u[\dA-Fa-f]{4}/;
@@ -107,12 +108,13 @@ export function ToolCard({ call, renderMarkdown }) {
 				data-tool=${call.name}
 				role=${hasResult ? "button" : undefined}
 				tabIndex=${hasResult ? 0 : undefined}
+				aria-expanded=${hasResult ? open : undefined}
 				onClick=${hasResult ? () => setOpen((openState) => !openState) : undefined}
 				onKeyDown=${hasResult ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((s) => !s); } } : undefined}
 			>
 				${mcp && html`<span class="tool-card-mcp-badge">MCP</span>`}
 				<span class="tool-card-name">${mcp ? mcpToolLabel(call.name) : call.name}</span>
-				<span class="tool-card-status ${statusClass}" />
+				<span class="tool-card-status ${statusClass}" role="img" aria-label=${statusClass} />
 				${hasResult && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
 			</div>
 			${args && html`<div class="tool-card-body">${args}</div>`}
@@ -121,7 +123,7 @@ export function ToolCard({ call, renderMarkdown }) {
 				call.images?.length &&
 				html`
 				<div class="message-content message-images tool-card-images">
-					${call.images.map((src, index) => html`<img key=${index} src=${src} class="message-image" loading="lazy" alt="Tool image ${index + 1}" onClick=${() => setPreviewSrc(src)} />`)}
+					${call.images.map((src, index) => html`<img key=${index} src=${src} class="message-image" loading="lazy" alt="Tool image ${index + 1}" ...${pressable(() => setPreviewSrc(src))} />`)}
 				</div>
 			`
 			}

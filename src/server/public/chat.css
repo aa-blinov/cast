@@ -32,10 +32,7 @@
  * applied once by the client on first paint, then removed — play it.
  * Streaming updates on the same DOM subtree don't re-add it, so the
  * growing reply stays still while tokens arrive. */
-.message-entering { animation: rise .15s ease; }
-@media (prefers-reduced-motion: reduce) {
-	.message-entering { animation: none; }
-}
+.message-entering { animation: rise .15s var(--ease-out); }
 .messages-inner > * + * { padding-top: 6px; }
 .history-boundary {
 	display: flex;
@@ -45,7 +42,7 @@
 	min-height: 28px;
 	padding: 4px 0 10px;
 	color: var(--text-muted);
-	font-size: .72rem;
+	font-size: var(--fs-micro);
 	letter-spacing: .01em;
 }
 .history-boundary-loading {
@@ -82,14 +79,16 @@
 	padding: 3px 2px;
 	max-width: 100%;
 	word-wrap: break-word;
-	font-size: .9rem;
+	font-size: var(--fs-body);
 	line-height: 1.5;
 	content-visibility: auto;
 	contain-intrinsic-size: auto 120px;
 }
 /* Streaming block is actively mutating — keep it rendered even offscreen
-   so height measurements for auto-scroll stay accurate */
-.message-group .message:last-child {
+   so height measurements for auto-scroll stay accurate. Scoped to the live
+   group: matching every settled group's last message kept the whole
+   transcript laid out, which is what a panel drag paid for on each frame. */
+.message-group-streaming .message:last-child {
 	content-visibility: visible;
 }
 
@@ -109,8 +108,8 @@
 }
 .empty-state-banner .cast-logo-grad-from { stop-color: var(--gradient-from); }
 .empty-state-banner .cast-logo-grad-to { stop-color: var(--gradient-to); }
-.empty-state-title { color: var(--text); font-size: .95rem; font-weight: 600; margin-bottom: 4px; }
-.empty-state-hint { font-size: .8rem; }
+.empty-state-title { color: var(--text); font-size: var(--fs-body); font-weight: 600; margin-bottom: 4px; }
+.empty-state-hint { font-size: var(--fs-ui); }
 .empty-state-hint code {
 	background: var(--bg-raised);
 	border: 1px solid var(--border);
@@ -141,7 +140,7 @@
 	z-index: 10;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 	transition: background-color .15s ease, border-color .15s ease, color .15s ease;
-	animation: btn-fade-in .15s ease;
+	animation: btn-fade-in .15s var(--ease-out);
 }
 .scroll-bottom-btn:hover { color: var(--text); border-color: var(--cyan); }
 
@@ -167,12 +166,12 @@
 	border: 1px solid var(--border-active);
 	border-radius: var(--radius-sm);
 	padding: 9px 13px;
-	font-size: .82rem;
+	font-size: var(--fs-ui);
 	color: var(--text);
 	box-shadow: 0 4px 16px rgba(0,0,0,.3);
-	animation: toast-in .18s ease;
+	animation: toast-in .18s var(--ease-out);
 }
-.toast-error { border-color: rgba(239,68,68,.4); color: #fca5a5; }
+.toast-error { border-color: var(--danger-border); color: var(--status-error-fg); }
 @keyframes toast-in {
 	from { opacity: 0; transform: translateX(12px); }
 	to { opacity: 1; transform: translateX(0); }
@@ -188,15 +187,15 @@
 	border-radius: var(--radius);
 	padding: 10px 14px;
 	color: var(--text-dim);
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 }
 .message-error {
-	background: rgba(239,68,68,.06);
+	background: var(--danger-subtle);
 	border: 1px solid var(--danger-border);
 	border-radius: var(--radius);
 	padding: 10px 14px;
 	color: var(--status-error-fg);
-	font-size: .85rem;
+	font-size: var(--fs-body);
 }
 .message-reasoning {
 	border: 1px dashed var(--border-active);
@@ -205,7 +204,7 @@
 	background: var(--bg-surface);
 }
 .turn-meta {
-	font-size: .72rem;
+	font-size: var(--fs-micro);
 	color: var(--text-dim);
 	padding: 2px 4px 10px;
 	font-family: var(--font);
@@ -213,7 +212,7 @@
 .message-reasoning .message-label { color: var(--text-dim); }
 .message-reasoning .message-content { color: var(--text-dim); font-style: italic; overflow-wrap: break-word; word-break: break-word; }
 .message-label {
-	font-size: .68rem; font-weight: 600;
+	font-size: var(--fs-micro); font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: .04em;
 	margin-bottom: 2px;
@@ -229,7 +228,7 @@
 	padding: 2px 8px;
 	border-radius: var(--radius-sm);
 	border: 1px solid var(--border);
-	font-size: .72rem; color: var(--text-muted);
+	font-size: var(--fs-micro); color: var(--text-muted);
 }
 .message-attachment-chip svg { width: 12px; height: 12px; opacity: .6; }
 .message-attachment-name {
@@ -239,7 +238,7 @@
 .message-assistant .message-label { color: var(--purple); }
 .message-content {
 	font-family: var(--font);
-	font-size: .9rem;
+	font-size: var(--fs-body);
 	line-height: 1.55;
 	white-space: pre-wrap;
 	overflow-wrap: break-word;
@@ -272,7 +271,7 @@
 	border: 1px solid var(--border);
 	padding: 1px 5px;
 	border-radius: 4px;
-	font-size: .82rem;
+	font-size: var(--fs-ui);
 }
 .message-content pre {
 	background: var(--bg-raised);
@@ -286,11 +285,11 @@
 }
 .message-content pre code {
 	background: none; padding: 0; border: none;
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 }
 .message-content .code-lang {
 	font-family: var(--font-mono);
-	font-size: .65rem;
+	font-size: var(--fs-micro);
 	text-transform: uppercase;
 	letter-spacing: .05em;
 	color: var(--text-muted);
@@ -339,10 +338,10 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 	line-height: 1.3;
 	color: var(--text);
 }
-.md-body h1 { font-size: 1.25rem; }
-.md-body h2 { font-size: 1.12rem; }
-.md-body h3 { font-size: 1rem; }
-.md-body h4, .md-body h5, .md-body h6 { font-size: .92rem; }
+.md-body h1 { font-size: var(--fs-display); }
+.md-body h2 { font-size: var(--fs-title); }
+.md-body h3 { font-size: var(--fs-lead); }
+.md-body h4, .md-body h5, .md-body h6 { font-size: var(--fs-body); }
 .md-body blockquote {
 	margin: .5em 0;
 	padding: 2px 0 2px 10px;
@@ -365,7 +364,7 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
    like separate paragraphs. */
 .md-body li > p { margin: .2em 0; }
 .md-body input[type="checkbox"] { margin-right: .4em; vertical-align: baseline; accent-color: var(--cyan); }
-.md-body table { border-collapse: collapse; width: 100%; font-size: .82rem; }
+.md-body table { border-collapse: collapse; width: 100%; font-size: var(--fs-ui); }
 .md-body th, .md-body td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
 .md-body th { background: var(--bg-raised); font-weight: 600; color: var(--text); }
 .md-body .md-table-wrap { overflow-x: auto; margin: 8px 0; }

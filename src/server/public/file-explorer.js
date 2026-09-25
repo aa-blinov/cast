@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { FilePreviewModal } from "./file-preview.js";
 import { humanSize } from "./file-size.js";
 import { icons } from "./icons.js";
+import { pressable } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
@@ -284,7 +285,7 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 		return html`
 			<div key=${fullPath}>
 				<div class="fs-row">
-					<div class="fs-row-main" style=${{ paddingLeft: `${depth * 16}px` }} onClick=${() => (isDir ? toggleDir(fullPath) : setPreviewPath(fullPath))}>
+					<div class="fs-row-main" style=${{ paddingLeft: `${depth * 16}px` }} aria-expanded=${isDir ? isOpen : undefined} ...${pressable(() => (isDir ? toggleDir(fullPath) : setPreviewPath(fullPath)))}>
 						${
 							isDir
 								? html`<span class="fs-chevron${isOpen ? " open" : ""}"><${icons.chevronRight} /></span>`
@@ -310,7 +311,7 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 	return html`
 		<div class="fs-explorer">
 			<div class="fs-toolbar">
-				<input class="fs-search" placeholder="Search files…" value=${query} onInput=${(e) => onSearchInput(e.target.value)} />
+				<input class="fs-search" aria-label="Search files" placeholder="Search files…" value=${query} onInput=${(e) => onSearchInput(e.target.value)} />
 				<button class="fs-collapse-btn" title="Collapse all folders" onClick=${collapseAll}><${icons.chevronUp} /></button>
 			</div>
 			<div class="fs-tree">
@@ -328,7 +329,7 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 										const isBusy = busyPath === r.path;
 										return html`
 										<div key=${r.path} class="fs-row">
-											<div class="fs-row-main" onClick=${() => r.type !== "dir" && setPreviewPath(r.path)}>
+											<div class="fs-row-main" ...${r.type !== "dir" ? pressable(() => setPreviewPath(r.path)) : {}}>
 												<span class="fs-chevron-spacer"></span>
 												<span class="fs-icon">${r.type === "dir" ? html`<${icons.folder} />` : html`<${icons.docFile} />`}</span>
 												${renderName(r.path, r.path)}

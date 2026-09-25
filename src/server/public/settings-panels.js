@@ -181,15 +181,15 @@ function SettingsMemory({ data, busy, act }) {
 			<div class="settings-compact-list">
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Memory</span><span>${enabled ? "Retrieval and the Memory sidebar are active" : "Memory retrieval and the Memory sidebar are disabled"}</span></div>
-					<button class="settings-toggle" role="switch" aria-checked=${enabled ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory ${enabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${enabled ? "Enabled" : "Disabled"}</button>
+					<button class="settings-toggle" role="switch" aria-label="Memory" aria-checked=${enabled ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory ${enabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${enabled ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Background writing</span><span>${writeEnabled ? "The writer and checkpoint agent may update memory" : "Existing memory remains readable; no new memory is written"}</span></div>
-					<button class="settings-toggle" role="switch" aria-checked=${writeEnabled ? "true" : "false"} disabled=${busy || !enabled} onClick=${() => act(`/memory write ${writeEnabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${writeEnabled ? "Enabled" : "Disabled"}</button>
+					<button class="settings-toggle" role="switch" aria-label="Background writing" aria-checked=${writeEnabled ? "true" : "false"} disabled=${busy || !enabled} onClick=${() => act(`/memory write ${writeEnabled ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${writeEnabled ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint prefix fork</span><span>${checkpointFork ? "Checkpoint writers retain the parent prefix for prompt-cache reuse" : "Checkpoint writers receive only the post-checkpoint delta"}</span></div>
-					<button class="settings-toggle" role="switch" aria-checked=${checkpointFork ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory checkpoint fork ${checkpointFork ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${checkpointFork ? "Enabled" : "Disabled"}</button>
+					<button class="settings-toggle" role="switch" aria-label="Checkpoint prefix fork" aria-checked=${checkpointFork ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory checkpoint fork ${checkpointFork ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${checkpointFork ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Checkpoint thresholds</span><span>${thresholds.length > 0 ? `Writer fires at ${thresholds.join("%,")}% of the window` : "Writer fires at the window-based defaults"}</span></div>
@@ -208,7 +208,7 @@ function SettingsMemory({ data, busy, act }) {
 				})}
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic dream</span><span>${dreamAuto ? `Consolidates project memory on a new session, at most every ${dreamInterval} day${dreamInterval === 1 ? "" : "s"}` : "Manual only. Enable to consolidate durable project memory on new sessions"}</span></div>
-					<button class="settings-toggle" role="switch" aria-checked=${dreamAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory dream ${dreamAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${dreamAuto ? "Enabled" : "Disabled"}</button>
+					<button class="settings-toggle" role="switch" aria-label="Automatic dream" aria-checked=${dreamAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory dream ${dreamAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${dreamAuto ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Dream interval</span><span>Minimum days between automatic consolidation runs; 0 runs on every new session</span></div>
@@ -216,7 +216,7 @@ function SettingsMemory({ data, busy, act }) {
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Automatic distill</span><span>${distillAuto ? `Packages repeated workflows on a new session, at most every ${distillInterval} day${distillInterval === 1 ? "" : "s"}` : "Manual only. Enable to package repeated workflows into reusable assets"}</span></div>
-					<button class="settings-toggle" role="switch" aria-checked=${distillAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory distill ${distillAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${distillAuto ? "Enabled" : "Disabled"}</button>
+					<button class="settings-toggle" role="switch" aria-label="Automatic distill" aria-checked=${distillAuto ? "true" : "false"} disabled=${busy || !enabled || !writeEnabled} onClick=${() => act(`/memory distill ${distillAuto ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${distillAuto ? "Enabled" : "Disabled"}</button>
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Distill interval</span><span>Minimum days between automatic workflow packaging runs</span></div>
@@ -232,7 +232,7 @@ function SettingsMemory({ data, busy, act }) {
 				</div>
 				<div class="settings-compact-row">
 					<div class="settings-compact-copy"><span class="settings-compact-title">Reconcile before search</span><span>${reconcile ? "File changes are checked before memory search" : "Search uses the existing SQLite index until the next writer sync"}</span></div>
-					<button class="settings-toggle" role="switch" aria-checked=${reconcile ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory reconcile ${reconcile ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${reconcile ? "Enabled" : "Disabled"}</button>
+					<button class="settings-toggle" role="switch" aria-label="Reconcile before search" aria-checked=${reconcile ? "true" : "false"} disabled=${busy} onClick=${() => act(`/memory reconcile ${reconcile ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${reconcile ? "Enabled" : "Disabled"}</button>
 				</div>
 			</div>
 		</div>
@@ -276,7 +276,7 @@ function SettingsWeb({ data, busy, act }) {
 		<div class="settings-compact-list">
 			<div class="settings-compact-row">
 				<div class="settings-compact-copy"><span class="settings-compact-title">Web tools</span><span>Lets the agent search the web and read pages.</span></div>
-				<button class="settings-toggle" role="switch" aria-checked=${webOn ? "true" : "false"} disabled=${busy} onClick=${() => act(`/web ${webOn ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${webOn ? "Enabled" : "Disabled"}</button>
+				<button class="settings-toggle" role="switch" aria-label="Web tools" aria-checked=${webOn ? "true" : "false"} disabled=${busy} onClick=${() => act(`/web ${webOn ? "off" : "on"}`)}><span class="settings-toggle-thumb" />${webOn ? "Enabled" : "Disabled"}</button>
 			</div>
 			<div class="settings-compact-row">
 				<div class="settings-compact-copy"><span class="settings-compact-title">Search</span><span>DuckDuckGo is free but rate-limited; Tavily and Brave need a key.</span></div>
@@ -904,7 +904,7 @@ function InfoPopover({ text, readUrl, contentLabel = "Skill content" }) {
 		infoOpen && html`<div class="info-popover-backdrop" onClick=${() => setInfoOpen(false)} />`,
 		infoOpen &&
 			html`<div class="info-popover" onClick=${(e) => e.stopPropagation()}>
-			<div class="info-popover-header"><button class="modal-btn icon-btn" onClick=${() => setInfoOpen(false)}><${icons.xMark} /></button></div>
+			<div class="info-popover-header"><button class="modal-btn icon-btn" aria-label="Close" onClick=${() => setInfoOpen(false)}><${icons.xMark} /></button></div>
 			<div class="info-popover-text">${text}</div>
 		</div>`,
 		bookOpen &&
