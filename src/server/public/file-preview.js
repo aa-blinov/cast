@@ -315,7 +315,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 	};
 
 	return html`<div class="modal-backdrop" onClick=${onClose}><div class="modal modal-preview" role="dialog" aria-modal="true" aria-label="File preview" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
-		<div class="modal-header"><span title=${path}>${name}</span><div style=${{ display: "flex", gap: "6px", alignItems: "center" }}>
+		<div class="modal-header"><h2 class="modal-title" title=${path}>${name}</h2><div style=${{ display: "flex", gap: "6px", alignItems: "center" }}>
 			<button class="modal-btn icon-btn" onClick=${handleCopy} disabled=${copyDisabled} title=${copied ? "Copied" : "Copy"} aria-label="Copy file contents"><${copied ? icons.check : icons.clipboard} /></button>${isPdf ? html`<a class="modal-btn icon-btn" href=${previewHref} target="_blank" rel="noopener" title="Open in new tab"><${icons.link} /></a>` : null}<a class="modal-btn icon-btn" href=${downloadHref} download title="Download"><${icons.arrowDownTray} /></a><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 		</div></div><div class="fs-preview-body">${body}</div>
 	</div></div>`;

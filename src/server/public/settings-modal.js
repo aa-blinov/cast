@@ -334,7 +334,7 @@ export function SettingsModal({
 		<div class="modal-backdrop" onClick=${onClose}>
 			<div class="modal settings-modal" role="dialog" aria-modal="true" aria-label="Settings" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
-					<span>Settings</span>
+					<h2 class="modal-title">Settings</h2>
 					<div style=${{ display: "flex", gap: "6px", alignItems: "center" }}>
 						<button class="modal-btn" disabled=${busy} onClick=${() => act("/reload")} title="Re-scan .cast/ directories for skills, rules, MCP servers, and personas from disk">Reload resources</button>
 						<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>

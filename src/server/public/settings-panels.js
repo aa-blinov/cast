@@ -911,7 +911,7 @@ function InfoPopover({ text, readUrl, contentLabel = "Skill content" }) {
 			html`<div class="modal-backdrop" onClick=${() => setBookOpen(false)}>
 			<div class="modal modal-preview" role="dialog" aria-modal="true" aria-label=${contentLabel} tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
-					<span>${contentLabel}</span>
+					<h2 class="modal-title">${contentLabel}</h2>
 					<button class="modal-close" onClick=${() => setBookOpen(false)} aria-label="Close"><${icons.xMark} /></button>
 				</div>
 				<div class="fs-preview-body">

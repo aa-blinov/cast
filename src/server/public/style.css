@@ -303,6 +303,9 @@ body.resizing-sidebar * { user-select: none; }
 }
 .sidebar-resize-handle:hover::after,
 body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
+/* Same focus treatment as .diff-resize-handle: the drag line, drawn wider. */
+.sidebar-resize-handle:focus-visible { outline: none; }
+.sidebar-resize-handle:focus-visible::after { background: var(--cyan); left: 2px; width: 4px; }
 .sidebar-scroll {
 	flex: 1;
 	overflow-y: auto;
@@ -1001,6 +1004,9 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	border-bottom: 1px solid var(--border);
 	font-size: var(--fs-body); font-weight: 600;
 }
+/* Modal titles are real headings for screen-reader navigation; they keep the
+ * header's type rather than the browser's heading size. */
+.modal-title { font-size: inherit; font-weight: inherit; }
 .modal-close {
 	background: none; border: none;
 	color: var(--text-muted); cursor: pointer;
@@ -1527,6 +1533,8 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	.scroll-bottom-btn, .dash-pager-btn, .fs-collapse-btn, .fs-action, .dir-toggle-btn {
 		min-width: 44px; min-height: 44px;
 	}
+	/* Palette rows are tapped, not arrowed, on a phone. */
+	.cmd-item { min-height: 44px; }
 	.verify-btn { flex-basis: 44px; }
 
 	/* Controls packed into a row or onto a thumbnail keep their look; only the

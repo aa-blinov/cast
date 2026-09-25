@@ -8,7 +8,7 @@ import {
 	readFileAsDataUrl,
 	resizeImageToDataUrl,
 } from "./composer-attachments.js";
-import { CommandPalette, ValueSuggest } from "./composer-pickers.js";
+import { CommandPalette, PICKER_LIST_ID, pickerOptionId, ValueSuggest } from "./composer-pickers.js";
 import { icons } from "./icons.js";
 
 const PERSONA_CMD_RE = /^\/persona\s+(\S*)$/i;
@@ -323,6 +323,7 @@ export function Composer({
 		pickerSelect = handleCmdSelect;
 	}
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
+	const pickerOpen = pickerItems.length > 0;
 	const attachmentsBlocked = !canSubmitAttachments(docs) || resizingImages > 0;
 	const hasReadyDocs = docs.some((d) => (d.path || d.pending) && !d.uploading && !d.error);
 	const sendBlocked = !ready || sending || resizingImages > 0;
@@ -463,6 +464,9 @@ export function Composer({
 					ref=${textareaRef}
 					class="composer-input"
 					aria-label="Message"
+					aria-autocomplete="list"
+					aria-controls=${pickerOpen ? PICKER_LIST_ID : undefined}
+					aria-activedescendant=${pickerOpen ? pickerOptionId(clampedIndex) : undefined}
 					placeholder=${!ready ? "Connecting…" : !sendReady ? "Reconnecting…" : "Type a message…"}
 					rows="1"
 					disabled=${!ready}

@@ -278,7 +278,7 @@ export function NewSessionModal({
 				onClick=${(e) => e.stopPropagation()}
 			>
 				<div class="modal-header">
-					<span>New session</span>
+					<h2 class="modal-title">New session</h2>
 					<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 				</div>
 				<div class="new-session-body">

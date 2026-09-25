@@ -1215,7 +1215,7 @@ function App() {
 			return next;
 		});
 	}, [setDiffOpen, setSidebarCollapsed, setSidebarOpen]);
-	const { startDiffResize, startSidebarResize } = usePanelResize({
+	const { diffHandleProps, sidebarHandleProps } = usePanelResize({
 		diffOpen,
 		diffWidth,
 		setDiffWidth,
@@ -1918,7 +1918,7 @@ function App() {
 		<div class="modal-backdrop" onClick=${() => setHotkeysOpen(false)}>
 			<div class="modal modal-hotkeys" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts" tabIndex="-1" ref=${hotkeysModalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
-					<span>Keyboard shortcuts</span>
+					<h2 class="modal-title">Keyboard shortcuts</h2>
 					<button class="modal-close" onClick=${() => setHotkeysOpen(false)} aria-label="Close"><${icons.xMark} /></button>
 				</div>
 				<div class="hotkeys-list" dangerouslySetInnerHTML=${{ __html: hotkeysHtml }}></div>
@@ -1958,6 +1958,7 @@ function App() {
 
 			<!-- Header -->
 			<header class="header">
+				<h1 class="sr-only">${session?.title || "Cast"}</h1>
 				<button class="menu-toggle${sidebarVisible ? " active" : " collapsed"}" onClick=${toggleSidebar} aria-label=${sidebarVisible ? "Collapse sessions" : "Expand sessions"}>
 					<${icons.chevronRight} class="chevron-icon" />
 				</button>
@@ -2016,7 +2017,7 @@ function App() {
 				sessionsLoaded=${sessionsLoaded}
 				defaultModel=${defaultModel}
 				defaultModelLoaded=${staticResourcesLoadedRef.current}
-				onResizeStart=${startSidebarResize}
+				resizeHandleProps=${sidebarHandleProps}
 				confirm=${requestConfirm}
 				hasMore=${hasMoreSessions}
 				onLoadMore=${loadMoreSessions}
@@ -2251,7 +2252,7 @@ function App() {
 			     leave this unmounted entirely while still reserving its grid
 			     column on open, which read as content shifting into an empty
 			     void with no panel there to show for it. -->
-			<${WorkspacePanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} onResizeStart=${startDiffResize} open=${diffOpen} activeId=${activeId} cwd=${session?.cwd} tab=${diffTab} onTabChange=${setDiffTab} memoryEnabled=${memoryEnabled} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} />
+			<${WorkspacePanelModule} data=${diffData} activeFile=${diffFile} onSelectFile=${setDiffFile} resizeHandleProps=${diffHandleProps} open=${diffOpen} activeId=${activeId} cwd=${session?.cwd} tab=${diffTab} onTabChange=${setDiffTab} memoryEnabled=${memoryEnabled} confirm=${requestConfirm} fsRefreshNonce=${fsRefreshNonce} inputsRefreshNonce=${inputsRefreshNonce} bootstrapping=${bootstrapping} />
 		</div>
 	`;
 }

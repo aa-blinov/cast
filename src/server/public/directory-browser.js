@@ -83,7 +83,7 @@ export function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
 			<div class="modal" role="dialog" aria-modal="true" aria-label="Choose working directory" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
-				<div class="modal-header"><span>Choose working directory</span><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button></div>
+				<div class="modal-header"><h2 class="modal-title">Choose working directory</h2><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button></div>
 				<div class="dir-path" title=${path}>${path}</div>
 				<div class="dir-list">
 					${parent !== null && html`<div class="dir-item dir-item-up" ...${pressable(() => load(parent))}>.. (parent directory)</div>`}

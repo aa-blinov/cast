@@ -33,7 +33,7 @@ export function Sidebar({
 	sessionsLoaded,
 	defaultModel,
 	defaultModelLoaded,
-	onResizeStart,
+	resizeHandleProps,
 	hasMore,
 	onLoadMore,
 	loadingMore,
@@ -257,7 +257,7 @@ export function Sidebar({
 		});
 		return html`
 			<div key=${key} class="sidebar-session-group">
-				<div class="sidebar-group-label">${group.label}</div>
+				<h3 class="sidebar-group-label">${group.label}</h3>
 				${groupSessions.map(renderItem)}
 			</div>
 		`;
@@ -314,7 +314,7 @@ export function Sidebar({
 					)}
 				</div>
 				<div class="sidebar-section">
-					<div class="sidebar-section-title">Sessions</div>
+					<h2 class="sidebar-section-title">Sessions</h2>
 					${
 						sessions.length > 4 &&
 						html`
@@ -341,7 +341,7 @@ export function Sidebar({
 					<${icons.arrowLeftOnRectangle} />
 				</button>
 			</div>
-			<div class="sidebar-resize-handle" onPointerDown=${onResizeStart} aria-hidden="true" />
+			<div class="sidebar-resize-handle" ...${resizeHandleProps} />
 			${
 				menuSession &&
 				menuPos &&
