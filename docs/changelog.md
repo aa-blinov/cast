@@ -4,6 +4,16 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.40.0
+
+### Added
+
+- **Voice messages in the web UI.** With a model that accepts audio, such as mimo-v2.6-flash or -pro, a microphone button sits next to the attachment clip. Record, listen back, and send: the model gets your voice itself, with no transcription step in between, and replies or calls tools as it would to typed text. For a text-only model the button isn't shown and the server refuses voice notes. Voice notes stay in the thread as players after a reload. The browser only opens the microphone over HTTPS or on localhost, so a daemon reached over plain http needs an HTTPS proxy in front for this to work.
+
+### Fixed
+
+- **On a phone, the question card's "Or your own answer…" hint is the same size as the options.** It used to be noticeably bigger.
+
 ## 0.39.0
 
 ### Added
