@@ -2131,6 +2131,4670 @@
     "p95Turns": 7,
     "p99Turns": 10
   },
+  "mimo-v2.6-flash [high]": {
+    "bench": "behavior",
+    "model": "mimo-v2.6-flash",
+    "timestamp": "2026-09-25T09:28:59.649Z",
+    "commit": "316fc22",
+    "providerUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "reasoningLevel": "high",
+    "repeat": 3,
+    "results": [
+      {
+        "caseId": "required-read-tool",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8852,
+          5788,
+          3780
+        ],
+        "promptTokens": [
+          15882,
+          15882,
+          15880
+        ],
+        "completionTokens": [
+          99,
+          98,
+          97
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "direct-request-stays-build",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5653,
+          4359,
+          4634
+        ],
+        "promptTokens": [
+          15854,
+          15860,
+          15853
+        ],
+        "completionTokens": [
+          92,
+          90,
+          93
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "read-range-uses-offset-limit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8875,
+          4536,
+          4757
+        ],
+        "promptTokens": [
+          15966,
+          15960,
+          15970
+        ],
+        "completionTokens": [
+          149,
+          145,
+          164
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "grep-argument-is-grounded",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          11319,
+          8345,
+          9219
+        ],
+        "promptTokens": [
+          24144,
+          24158,
+          24151
+        ],
+        "completionTokens": [
+          239,
+          237,
+          226
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "glob-argument-is-grounded",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          11011,
+          7909,
+          5221
+        ],
+        "promptTokens": [
+          24334,
+          24329,
+          16016
+        ],
+        "completionTokens": [
+          315,
+          305,
+          206
+        ],
+        "turns": [
+          3,
+          3,
+          2
+        ]
+      },
+      {
+        "caseId": "write-creates-parent-directories",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          7121,
+          8027,
+          64103
+        ],
+        "promptTokens": [
+          16011,
+          24185,
+          33933
+        ],
+        "completionTokens": [
+          201,
+          282,
+          1062
+        ],
+        "turns": [
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "caseId": "known-path-skips-search",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          6911,
+          4711,
+          5967
+        ],
+        "promptTokens": [
+          15874,
+          15876,
+          15876
+        ],
+        "completionTokens": [
+          109,
+          97,
+          155
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "ls-directory-argument",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          6080,
+          5025,
+          4981
+        ],
+        "promptTokens": [
+          15894,
+          15893,
+          15894
+        ],
+        "completionTokens": [
+          107,
+          103,
+          107
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "todo-write-structured-list",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          90128,
+          48350,
+          52456
+        ],
+        "promptTokens": [
+          82615,
+          63068,
+          101353
+        ],
+        "completionTokens": [
+          3164,
+          2045,
+          2359
+        ],
+        "turns": [
+          9,
+          7,
+          11
+        ]
+      },
+      {
+        "caseId": "bash-argument-grounding",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5506,
+          6244,
+          10208
+        ],
+        "promptTokens": [
+          15947,
+          15942,
+          24274
+        ],
+        "completionTokens": [
+          91,
+          100,
+          373
+        ],
+        "turns": [
+          2,
+          2,
+          3
+        ]
+      },
+      {
+        "caseId": "bash-timeout-unit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          4297,
+          5214,
+          5097
+        ],
+        "promptTokens": [
+          15955,
+          15940,
+          15956
+        ],
+        "completionTokens": [
+          140,
+          125,
+          152
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "grep-flags-are-grounded",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8560,
+          9608,
+          46101
+        ],
+        "promptTokens": [
+          24238,
+          24257,
+          24249
+        ],
+        "completionTokens": [
+          280,
+          367,
+          299
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "write-overwrites-existing-file",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          13595,
+          56080,
+          17999
+        ],
+        "promptTokens": [
+          32712,
+          32961,
+          24233
+        ],
+        "completionTokens": [
+          485,
+          545,
+          579
+        ],
+        "turns": [
+          4,
+          4,
+          3
+        ]
+      },
+      {
+        "caseId": "goal-continues-past-first-stop",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          80111,
+          68692,
+          56344
+        ],
+        "promptTokens": [
+          88291,
+          108740,
+          120042
+        ],
+        "completionTokens": [
+          1775,
+          1784,
+          1841
+        ],
+        "turns": [
+          9,
+          11,
+          12
+        ]
+      },
+      {
+        "caseId": "goal-survives-cascading-failures",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          134317,
+          84283,
+          63497
+        ],
+        "promptTokens": [
+          161844,
+          146520,
+          125791
+        ],
+        "completionTokens": [
+          3653,
+          2681,
+          2739
+        ],
+        "turns": [
+          15,
+          14,
+          12
+        ]
+      },
+      {
+        "caseId": "goal-blocks-only-after-repeats",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          300006,
+          300004,
+          300005
+        ],
+        "promptTokens": [
+          125524,
+          227273,
+          174701
+        ],
+        "completionTokens": [
+          2426,
+          4734,
+          7535
+        ],
+        "turns": [
+          12,
+          16,
+          13
+        ]
+      },
+      {
+        "caseId": "search-then-read",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8156,
+          51287,
+          12343
+        ],
+        "promptTokens": [
+          24181,
+          32659,
+          24189
+        ],
+        "completionTokens": [
+          231,
+          501,
+          292
+        ],
+        "turns": [
+          3,
+          4,
+          3
+        ]
+      },
+      {
+        "caseId": "read-before-edit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          44121,
+          8543,
+          9187
+        ],
+        "promptTokens": [
+          24045,
+          24039,
+          24051
+        ],
+        "completionTokens": [
+          202,
+          196,
+          201
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "independent-reads-share-turn",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          47188,
+          6069,
+          11886
+        ],
+        "promptTokens": [
+          16067,
+          16066,
+          16069
+        ],
+        "completionTokens": [
+          211,
+          210,
+          198
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "write-then-read-back",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          12018,
+          7527,
+          63217
+        ],
+        "promptTokens": [
+          24209,
+          24077,
+          60703
+        ],
+        "completionTokens": [
+          290,
+          201,
+          1763
+        ],
+        "turns": [
+          3,
+          3,
+          7
+        ]
+      },
+      {
+        "caseId": "read-error-then-recover",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          9141,
+          9850,
+          15510
+        ],
+        "promptTokens": [
+          24230,
+          24268,
+          24240
+        ],
+        "completionTokens": [
+          226,
+          221,
+          219
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "edit-targets-one-duplicate-block",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          12349,
+          9271,
+          31496
+        ],
+        "promptTokens": [
+          24190,
+          24145,
+          32500
+        ],
+        "completionTokens": [
+          271,
+          235,
+          330
+        ],
+        "turns": [
+          3,
+          3,
+          4
+        ]
+      },
+      {
+        "caseId": "bash-fix-reruns-check",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          56813,
+          18342,
+          17586
+        ],
+        "promptTokens": [
+          60019,
+          48492,
+          42067
+        ],
+        "completionTokens": [
+          947,
+          658,
+          582
+        ],
+        "turns": [
+          7,
+          5,
+          5
+        ]
+      },
+      {
+        "caseId": "task-delegates-scoped-investigation",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          49346,
+          47526,
+          33110
+        ],
+        "promptTokens": [
+          47761,
+          48646,
+          48221
+        ],
+        "completionTokens": [
+          539,
+          1342,
+          1084
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "skill-loads-matching-workflow",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          14494,
+          31185,
+          11341
+        ],
+        "promptTokens": [
+          32256,
+          32242,
+          32256
+        ],
+        "completionTokens": [
+          567,
+          563,
+          546
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "plan-done-signal",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          23365,
+          138639,
+          11310
+        ],
+        "promptTokens": [
+          28104,
+          100663,
+          28167
+        ],
+        "completionTokens": [
+          500,
+          6152,
+          350
+        ],
+        "turns": [
+          3,
+          8,
+          3
+        ]
+      },
+      {
+        "caseId": "background-bash-output",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          14334,
+          14418,
+          13076
+        ],
+        "promptTokens": [
+          32132,
+          32014,
+          32152
+        ],
+        "completionTokens": [
+          228,
+          135,
+          196
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "background-bash-kill",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          9948,
+          40560,
+          14077
+        ],
+        "promptTokens": [
+          31996,
+          40152,
+          32065
+        ],
+        "completionTokens": [
+          154,
+          189,
+          184
+        ],
+        "turns": [
+          4,
+          5,
+          4
+        ]
+      },
+      {
+        "caseId": "mcp-release-lookup-chain",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          18355,
+          8262,
+          19652
+        ],
+        "promptTokens": [
+          24417,
+          24395,
+          24380
+        ],
+        "completionTokens": [
+          189,
+          175,
+          177
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "edit-ambiguous-not-write-fallback",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          33887,
+          11687,
+          11680
+        ],
+        "promptTokens": [
+          32778,
+          32797,
+          32881
+        ],
+        "completionTokens": [
+          359,
+          372,
+          421
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "background-bash-explicit-timeout",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          47660,
+          21929,
+          69503
+        ],
+        "promptTokens": [
+          61070,
+          32733,
+          65103
+        ],
+        "completionTokens": [
+          1507,
+          479,
+          3267
+        ],
+        "turns": [
+          7,
+          4,
+          7
+        ]
+      },
+      {
+        "caseId": "task-parallel-delegation",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          50617,
+          36464,
+          35641
+        ],
+        "promptTokens": [
+          67780,
+          55201,
+          55079
+        ],
+        "completionTokens": [
+          1460,
+          1432,
+          1536
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "todo-write-marks-step-done",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          19374,
+          12775,
+          18185
+        ],
+        "promptTokens": [
+          33553,
+          24802,
+          24951
+        ],
+        "completionTokens": [
+          841,
+          570,
+          548
+        ],
+        "turns": [
+          4,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "mcp-lookup-reports-not-found",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          10937,
+          15282,
+          17647
+        ],
+        "promptTokens": [
+          24600,
+          33080,
+          16219
+        ],
+        "completionTokens": [
+          327,
+          412,
+          240
+        ],
+        "turns": [
+          3,
+          4,
+          2
+        ]
+      },
+      {
+        "caseId": "plan-reentry-reuses-existing-plan",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          48413,
+          31832,
+          17867
+        ],
+        "promptTokens": [
+          48801,
+          48103,
+          37757
+        ],
+        "completionTokens": [
+          2067,
+          1349,
+          834
+        ],
+        "turns": [
+          5,
+          5,
+          4
+        ]
+      },
+      {
+        "caseId": "plan-open-question-blocks-done",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          15275,
+          33073,
+          32603
+        ],
+        "promptTokens": [
+          28370,
+          38646,
+          28906
+        ],
+        "completionTokens": [
+          746,
+          977,
+          1481
+        ],
+        "turns": [
+          3,
+          4,
+          3
+        ]
+      },
+      {
+        "caseId": "build-mode-flags-plan-divergence",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          47244,
+          75912,
+          37496
+        ],
+        "promptTokens": [
+          87274,
+          176612,
+          90028
+        ],
+        "completionTokens": [
+          1786,
+          2660,
+          1072
+        ],
+        "turns": [
+          9,
+          19,
+          9
+        ]
+      },
+      {
+        "caseId": "task-worker-delegates-real-edit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          24317,
+          20668,
+          28883
+        ],
+        "promptTokens": [
+          60286,
+          52115,
+          69239
+        ],
+        "completionTokens": [
+          908,
+          963,
+          1021
+        ],
+        "turns": [
+          2,
+          2,
+          3
+        ]
+      },
+      {
+        "caseId": "task-review-follows-nontrivial-change",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          240009,
+          240014,
+          240003
+        ],
+        "promptTokens": [
+          115186,
+          126203,
+          70706
+        ],
+        "completionTokens": [
+          12870,
+          8707,
+          7127
+        ],
+        "turns": [
+          8,
+          9,
+          4
+        ]
+      },
+      {
+        "caseId": "skill-not-loaded-for-generic-request",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          4233,
+          5108,
+          4413
+        ],
+        "promptTokens": [
+          18989,
+          18993,
+          18992
+        ],
+        "completionTokens": [
+          86,
+          88,
+          89
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          13826,
+          20214,
+          14269
+        ],
+        "promptTokens": [
+          35001,
+          43807,
+          43962
+        ],
+        "completionTokens": [
+          596,
+          605,
+          542
+        ],
+        "turns": [
+          4,
+          5,
+          5
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          13358,
+          15729,
+          13630
+        ],
+        "promptTokens": [
+          43704,
+          43728,
+          43722
+        ],
+        "completionTokens": [
+          461,
+          492,
+          488
+        ],
+        "turns": [
+          5,
+          5,
+          5
+        ]
+      }
+    ],
+    "casesTotal": 42,
+    "casesPassed": 39,
+    "score": 0.9285714285714286,
+    "consistentCases": 40,
+    "bySignal": {
+      "required-tool": {
+        "passed": 6,
+        "total": 8
+      },
+      "argument-grounding": {
+        "passed": 9,
+        "total": 11
+      },
+      "no-unneeded-tools": {
+        "passed": 10,
+        "total": 11
+      },
+      "tool-result-integrity": {
+        "passed": 8,
+        "total": 8
+      },
+      "filesystem-safety": {
+        "passed": 9,
+        "total": 9
+      },
+      "state-persistence": {
+        "passed": 8,
+        "total": 8
+      },
+      "tool-chain": {
+        "passed": 12,
+        "total": 12
+      },
+      "tool-error-recovery": {
+        "passed": 8,
+        "total": 8
+      },
+      "parallel-tools": {
+        "passed": 2,
+        "total": 2
+      },
+      "delegation": {
+        "passed": 4,
+        "total": 4
+      },
+      "skill-discovery": {
+        "passed": 2,
+        "total": 2
+      },
+      "plan-lifecycle": {
+        "passed": 5,
+        "total": 6
+      },
+      "state-transition": {
+        "passed": 1,
+        "total": 2
+      },
+      "background-lifecycle": {
+        "passed": 3,
+        "total": 3
+      },
+      "mcp-discovery": {
+        "passed": 2,
+        "total": 2
+      },
+      "mcp-tool-chain": {
+        "passed": 1,
+        "total": 1
+      },
+      "plan-safety": {
+        "passed": 1,
+        "total": 1
+      }
+    },
+    "certified": true,
+    "core": {
+      "casesTotal": 13,
+      "casesPassed": 11,
+      "score": 0.8461538461538461
+    },
+    "chain": {
+      "casesTotal": 29,
+      "casesPassed": 28,
+      "score": 0.9655172413793104
+    },
+    "avgDurationMs": 36590.80158730159,
+    "medianDurationMs": 14456,
+    "p75DurationMs": 44121,
+    "p95DurationMs": 138639,
+    "p99DurationMs": 300005,
+    "avgPromptTokens": 43733.19841269841,
+    "medianPromptTokens": 32005,
+    "p75PromptTokens": 48492,
+    "p95PromptTokens": 125791,
+    "p99PromptTokens": 176612,
+    "avgCompletionTokens": 1018.1825396825396,
+    "medianCompletionTokens": 369.5,
+    "p75CompletionTokens": 1021,
+    "p95CompletionTokens": 3653,
+    "p99CompletionTokens": 8707,
+    "avgTurns": 4.333333333333333,
+    "medianTurns": 3,
+    "p75Turns": 5,
+    "p95Turns": 12,
+    "p99Turns": 16
+  },
+  "mimo-v2.6-flash [off]": {
+    "bench": "behavior",
+    "model": "mimo-v2.6-flash",
+    "timestamp": "2026-09-25T09:02:44.251Z",
+    "commit": "316fc22",
+    "providerUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "reasoningLevel": "off",
+    "repeat": 3,
+    "results": [
+      {
+        "caseId": "required-read-tool",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5782,
+          4210,
+          5110
+        ],
+        "promptTokens": [
+          15873,
+          15880,
+          15877
+        ],
+        "completionTokens": [
+          64,
+          71,
+          82
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "direct-request-stays-build",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          4442,
+          3435,
+          6139
+        ],
+        "promptTokens": [
+          15844,
+          15844,
+          15846
+        ],
+        "completionTokens": [
+          65,
+          65,
+          65
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "read-range-uses-offset-limit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5710,
+          8281,
+          5657
+        ],
+        "promptTokens": [
+          15944,
+          15954,
+          15944
+        ],
+        "completionTokens": [
+          104,
+          113,
+          105
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "grep-argument-is-grounded",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8054,
+          7358,
+          5883
+        ],
+        "promptTokens": [
+          24097,
+          24115,
+          15954
+        ],
+        "completionTokens": [
+          199,
+          213,
+          137
+        ],
+        "turns": [
+          3,
+          3,
+          2
+        ]
+      },
+      {
+        "caseId": "glob-argument-is-grounded",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          6119,
+          7137,
+          13721
+        ],
+        "promptTokens": [
+          15997,
+          15999,
+          15999
+        ],
+        "completionTokens": [
+          90,
+          92,
+          86
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "write-creates-parent-directories",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5804,
+          4442,
+          12575
+        ],
+        "promptTokens": [
+          15940,
+          15942,
+          15942
+        ],
+        "completionTokens": [
+          92,
+          90,
+          86
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "known-path-skips-search",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5365,
+          8592,
+          3912
+        ],
+        "promptTokens": [
+          15865,
+          15865,
+          15867
+        ],
+        "completionTokens": [
+          79,
+          80,
+          68
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "ls-directory-argument",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          5665,
+          5037,
+          13152
+        ],
+        "promptTokens": [
+          15881,
+          15871,
+          15883
+        ],
+        "completionTokens": [
+          81,
+          75,
+          81
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "todo-write-structured-list",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          49585,
+          62162,
+          36756
+        ],
+        "promptTokens": [
+          105157,
+          96788,
+          105873
+        ],
+        "completionTokens": [
+          1032,
+          943,
+          1040
+        ],
+        "turns": [
+          12,
+          11,
+          12
+        ]
+      },
+      {
+        "caseId": "bash-argument-grounding",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          7756,
+          6296,
+          4292
+        ],
+        "promptTokens": [
+          15941,
+          15939,
+          15941
+        ],
+        "completionTokens": [
+          70,
+          70,
+          70
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "bash-timeout-unit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          4559,
+          4208,
+          3518
+        ],
+        "promptTokens": [
+          15895,
+          15895,
+          15895
+        ],
+        "completionTokens": [
+          68,
+          68,
+          68
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "grep-flags-are-grounded",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          9496,
+          7694,
+          7637
+        ],
+        "promptTokens": [
+          24135,
+          24157,
+          24135
+        ],
+        "completionTokens": [
+          156,
+          189,
+          175
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "write-overwrites-existing-file",
+        "passed": false,
+        "consistent": true,
+        "durationsMs": [
+          8600,
+          10442,
+          7559
+        ],
+        "promptTokens": [
+          32267,
+          24045,
+          24066
+        ],
+        "completionTokens": [
+          205,
+          144,
+          167
+        ],
+        "turns": [
+          4,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "goal-continues-past-first-stop",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          50949,
+          58492,
+          105047
+        ],
+        "promptTokens": [
+          126046,
+          105390,
+          125253
+        ],
+        "completionTokens": [
+          1268,
+          1194,
+          1137
+        ],
+        "turns": [
+          13,
+          11,
+          13
+        ]
+      },
+      {
+        "caseId": "goal-survives-cascading-failures",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          97629,
+          66360,
+          60113
+        ],
+        "promptTokens": [
+          144863,
+          116458,
+          119244
+        ],
+        "completionTokens": [
+          2324,
+          1126,
+          1307
+        ],
+        "turns": [
+          14,
+          12,
+          12
+        ]
+      },
+      {
+        "caseId": "goal-blocks-only-after-repeats",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          300007,
+          232065,
+          300003
+        ],
+        "promptTokens": [
+          81957,
+          441931,
+          106119
+        ],
+        "completionTokens": [
+          780,
+          3947,
+          1236
+        ],
+        "turns": [
+          8,
+          18,
+          9
+        ]
+      },
+      {
+        "caseId": "search-then-read",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8833,
+          14098,
+          12520
+        ],
+        "promptTokens": [
+          24127,
+          24129,
+          24136
+        ],
+        "completionTokens": [
+          192,
+          238,
+          190
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "read-before-edit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          10955,
+          7773,
+          7883
+        ],
+        "promptTokens": [
+          24015,
+          24012,
+          24018
+        ],
+        "completionTokens": [
+          164,
+          163,
+          162
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "independent-reads-share-turn",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          11837,
+          5409,
+          6172
+        ],
+        "promptTokens": [
+          16046,
+          16044,
+          16042
+        ],
+        "completionTokens": [
+          145,
+          147,
+          134
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "write-then-read-back",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          7954,
+          6978,
+          10261
+        ],
+        "promptTokens": [
+          24065,
+          24039,
+          24042
+        ],
+        "completionTokens": [
+          214,
+          191,
+          139
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "read-error-then-recover",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          6347,
+          9061,
+          6352
+        ],
+        "promptTokens": [
+          16109,
+          16109,
+          16107
+        ],
+        "completionTokens": [
+          187,
+          140,
+          173
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "edit-targets-one-duplicate-block",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          10805,
+          8044,
+          11608
+        ],
+        "promptTokens": [
+          24133,
+          24150,
+          24136
+        ],
+        "completionTokens": [
+          191,
+          198,
+          190
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "bash-fix-reruns-check",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          26778,
+          38664,
+          26643
+        ],
+        "promptTokens": [
+          49330,
+          49374,
+          49496
+        ],
+        "completionTokens": [
+          452,
+          480,
+          548
+        ],
+        "turns": [
+          6,
+          6,
+          6
+        ]
+      },
+      {
+        "caseId": "task-delegates-scoped-investigation",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          24206,
+          47732,
+          21327
+        ],
+        "promptTokens": [
+          48133,
+          48554,
+          35391
+        ],
+        "completionTokens": [
+          825,
+          963,
+          431
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "skill-loads-matching-workflow",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          11986,
+          11999,
+          13702
+        ],
+        "promptTokens": [
+          32218,
+          32239,
+          32190
+        ],
+        "completionTokens": [
+          503,
+          490,
+          447
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "plan-done-signal",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          15239,
+          36721,
+          8988
+        ],
+        "promptTokens": [
+          28063,
+          38507,
+          27983
+        ],
+        "completionTokens": [
+          226,
+          757,
+          220
+        ],
+        "turns": [
+          3,
+          4,
+          3
+        ]
+      },
+      {
+        "caseId": "background-bash-output",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          11754,
+          13157,
+          36854
+        ],
+        "promptTokens": [
+          32024,
+          32069,
+          32018
+        ],
+        "completionTokens": [
+          128,
+          137,
+          121
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "background-bash-kill",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          11303,
+          33925,
+          14107
+        ],
+        "promptTokens": [
+          31960,
+          31960,
+          31952
+        ],
+        "completionTokens": [
+          111,
+          115,
+          105
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "mcp-release-lookup-chain",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          26530,
+          6903,
+          11110
+        ],
+        "promptTokens": [
+          24325,
+          24322,
+          24322
+        ],
+        "completionTokens": [
+          75,
+          77,
+          73
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "edit-ambiguous-not-write-fallback",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8697,
+          12967,
+          33096
+        ],
+        "promptTokens": [
+          24262,
+          24262,
+          32656
+        ],
+        "completionTokens": [
+          196,
+          196,
+          255
+        ],
+        "turns": [
+          3,
+          3,
+          4
+        ]
+      },
+      {
+        "caseId": "background-bash-explicit-timeout",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          13304,
+          51396,
+          9394
+        ],
+        "promptTokens": [
+          32366,
+          32367,
+          32293
+        ],
+        "completionTokens": [
+          241,
+          235,
+          172
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "task-parallel-delegation",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          50912,
+          50768,
+          28862
+        ],
+        "promptTokens": [
+          54432,
+          54651,
+          55270
+        ],
+        "completionTokens": [
+          1023,
+          1168,
+          1320
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "todo-write-marks-step-done",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          7931,
+          30056,
+          9561
+        ],
+        "promptTokens": [
+          24679,
+          24687,
+          24687
+        ],
+        "completionTokens": [
+          253,
+          256,
+          260
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "mcp-lookup-reports-not-found",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          34337,
+          11600,
+          21896
+        ],
+        "promptTokens": [
+          32606,
+          32606,
+          41579
+        ],
+        "completionTokens": [
+          127,
+          202,
+          430
+        ],
+        "turns": [
+          4,
+          4,
+          5
+        ]
+      },
+      {
+        "caseId": "plan-reentry-reuses-existing-plan",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          32859,
+          10594,
+          14051
+        ],
+        "promptTokens": [
+          37358,
+          37358,
+          37358
+        ],
+        "completionTokens": [
+          373,
+          387,
+          391
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "plan-open-question-blocks-done",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          37697,
+          9403,
+          11610
+        ],
+        "promptTokens": [
+          37788,
+          18617,
+          28324
+        ],
+        "completionTokens": [
+          556,
+          319,
+          517
+        ],
+        "turns": [
+          4,
+          2,
+          3
+        ]
+      },
+      {
+        "caseId": "build-mode-flags-plan-divergence",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          25854,
+          47131,
+          58639
+        ],
+        "promptTokens": [
+          69349,
+          89213,
+          132790
+        ],
+        "completionTokens": [
+          902,
+          704,
+          941
+        ],
+        "turns": [
+          8,
+          9,
+          14
+        ]
+      },
+      {
+        "caseId": "task-worker-delegates-real-edit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          16513,
+          38618,
+          23803
+        ],
+        "promptTokens": [
+          51419,
+          51336,
+          51303
+        ],
+        "completionTokens": [
+          691,
+          574,
+          629
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "task-review-follows-nontrivial-change",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          80291,
+          67540,
+          140502
+        ],
+        "promptTokens": [
+          68661,
+          125118,
+          223304
+        ],
+        "completionTokens": [
+          1813,
+          2896,
+          6714
+        ],
+        "turns": [
+          5,
+          11,
+          5
+        ]
+      },
+      {
+        "caseId": "skill-not-loaded-for-generic-request",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5622,
+          25523,
+          4628
+        ],
+        "promptTokens": [
+          18980,
+          18988,
+          18982
+        ],
+        "completionTokens": [
+          62,
+          76,
+          62
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          40763,
+          14931,
+          19358
+        ],
+        "promptTokens": [
+          52194,
+          43310,
+          52194
+        ],
+        "completionTokens": [
+          403,
+          343,
+          411
+        ],
+        "turns": [
+          6,
+          5,
+          6
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          33775,
+          10872,
+          10887
+        ],
+        "promptTokens": [
+          43571,
+          43571,
+          43571
+        ],
+        "completionTokens": [
+          417,
+          406,
+          415
+        ],
+        "turns": [
+          5,
+          5,
+          5
+        ]
+      }
+    ],
+    "casesTotal": 42,
+    "casesPassed": 37,
+    "score": 0.8809523809523809,
+    "consistentCases": 39,
+    "bySignal": {
+      "required-tool": {
+        "passed": 6,
+        "total": 8
+      },
+      "argument-grounding": {
+        "passed": 8,
+        "total": 11
+      },
+      "no-unneeded-tools": {
+        "passed": 9,
+        "total": 11
+      },
+      "tool-result-integrity": {
+        "passed": 7,
+        "total": 8
+      },
+      "filesystem-safety": {
+        "passed": 9,
+        "total": 9
+      },
+      "state-persistence": {
+        "passed": 8,
+        "total": 8
+      },
+      "tool-chain": {
+        "passed": 12,
+        "total": 12
+      },
+      "tool-error-recovery": {
+        "passed": 8,
+        "total": 8
+      },
+      "parallel-tools": {
+        "passed": 2,
+        "total": 2
+      },
+      "delegation": {
+        "passed": 3,
+        "total": 4
+      },
+      "skill-discovery": {
+        "passed": 2,
+        "total": 2
+      },
+      "plan-lifecycle": {
+        "passed": 5,
+        "total": 6
+      },
+      "state-transition": {
+        "passed": 0,
+        "total": 2
+      },
+      "background-lifecycle": {
+        "passed": 3,
+        "total": 3
+      },
+      "mcp-discovery": {
+        "passed": 2,
+        "total": 2
+      },
+      "mcp-tool-chain": {
+        "passed": 1,
+        "total": 1
+      },
+      "plan-safety": {
+        "passed": 1,
+        "total": 1
+      }
+    },
+    "certified": true,
+    "core": {
+      "casesTotal": 13,
+      "casesPassed": 10,
+      "score": 0.7692307692307693
+    },
+    "chain": {
+      "casesTotal": 29,
+      "casesPassed": 27,
+      "score": 0.9310344827586207
+    },
+    "avgDurationMs": 27234.650793650795,
+    "medianDurationMs": 11609,
+    "p75DurationMs": 32859,
+    "p95DurationMs": 80291,
+    "p99DurationMs": 300003,
+    "avgPromptTokens": 42552.079365079364,
+    "medianPromptTokens": 24683,
+    "p75PromptTokens": 43571,
+    "p95PromptTokens": 125118,
+    "p99PromptTokens": 223304,
+    "avgCompletionTokens": 467.0238095238095,
+    "medianCompletionTokens": 196,
+    "p75CompletionTokens": 490,
+    "p95CompletionTokens": 1307,
+    "p99CompletionTokens": 3947,
+    "avgTurns": 4.103174603174603,
+    "medianTurns": 3,
+    "p75Turns": 4,
+    "p95Turns": 12,
+    "p99Turns": 14
+  },
+  "mimo-v2.6-pro [high]": {
+    "bench": "behavior",
+    "model": "mimo-v2.6-pro",
+    "timestamp": "2026-09-25T09:28:59.660Z",
+    "commit": "316fc22",
+    "providerUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "reasoningLevel": "high",
+    "repeat": 3,
+    "results": [
+      {
+        "caseId": "required-read-tool",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          14488,
+          8508,
+          22421
+        ],
+        "promptTokens": [
+          15892,
+          15941,
+          15989
+        ],
+        "completionTokens": [
+          106,
+          159,
+          245
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "direct-request-stays-build",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8422,
+          8483,
+          13658
+        ],
+        "promptTokens": [
+          15983,
+          15862,
+          15857
+        ],
+        "completionTokens": [
+          228,
+          92,
+          89
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "read-range-uses-offset-limit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          13038,
+          6882,
+          6693
+        ],
+        "promptTokens": [
+          15972,
+          15969,
+          15952
+        ],
+        "completionTokens": [
+          157,
+          140,
+          125
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "grep-argument-is-grounded",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          27989,
+          17300,
+          16205
+        ],
+        "promptTokens": [
+          24215,
+          24156,
+          24142
+        ],
+        "completionTokens": [
+          334,
+          251,
+          238
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "glob-argument-is-grounded",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          19990,
+          15417,
+          15885
+        ],
+        "promptTokens": [
+          16264,
+          16018,
+          16092
+        ],
+        "completionTokens": [
+          306,
+          184,
+          346
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "write-creates-parent-directories",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          15344,
+          22010,
+          21759
+        ],
+        "promptTokens": [
+          16126,
+          16053,
+          24135
+        ],
+        "completionTokens": [
+          394,
+          477,
+          356
+        ],
+        "turns": [
+          2,
+          2,
+          3
+        ]
+      },
+      {
+        "caseId": "known-path-skips-search",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5318,
+          12545,
+          11598
+        ],
+        "promptTokens": [
+          15901,
+          15885,
+          15890
+        ],
+        "completionTokens": [
+          133,
+          132,
+          126
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "ls-directory-argument",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          9811,
+          7497,
+          6281
+        ],
+        "promptTokens": [
+          15900,
+          15894,
+          15900
+        ],
+        "completionTokens": [
+          120,
+          118,
+          121
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "todo-write-structured-list",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          118753,
+          150017,
+          150002
+        ],
+        "promptTokens": [
+          79635,
+          81595,
+          33377
+        ],
+        "completionTokens": [
+          3721,
+          4219,
+          3628
+        ],
+        "turns": [
+          8,
+          8,
+          4
+        ]
+      },
+      {
+        "caseId": "bash-argument-grounding",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          12550,
+          13608,
+          8236
+        ],
+        "promptTokens": [
+          15944,
+          15904,
+          15948
+        ],
+        "completionTokens": [
+          85,
+          129,
+          85
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "bash-timeout-unit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          21080,
+          28318,
+          11925
+        ],
+        "promptTokens": [
+          16066,
+          16190,
+          16033
+        ],
+        "completionTokens": [
+          250,
+          395,
+          225
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "grep-flags-are-grounded",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          35035,
+          14591,
+          27269
+        ],
+        "promptTokens": [
+          24780,
+          24229,
+          24728
+        ],
+        "completionTokens": [
+          839,
+          382,
+          655
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "write-overwrites-existing-file",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8584,
+          28497,
+          14699
+        ],
+        "promptTokens": [
+          16008,
+          24587,
+          24513
+        ],
+        "completionTokens": [
+          157,
+          456,
+          461
+        ],
+        "turns": [
+          2,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "goal-continues-past-first-stop",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          62753,
+          53294,
+          122033
+        ],
+        "promptTokens": [
+          79946,
+          79137,
+          82714
+        ],
+        "completionTokens": [
+          1672,
+          1793,
+          2680
+        ],
+        "turns": [
+          8,
+          8,
+          8
+        ]
+      },
+      {
+        "caseId": "goal-survives-cascading-failures",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          200585,
+          132938,
+          113987
+        ],
+        "promptTokens": [
+          178349,
+          136411,
+          130721
+        ],
+        "completionTokens": [
+          6355,
+          4375,
+          3730
+        ],
+        "turns": [
+          14,
+          12,
+          12
+        ]
+      },
+      {
+        "caseId": "goal-blocks-only-after-repeats",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          129372,
+          300002,
+          113921
+        ],
+        "promptTokens": [
+          71233,
+          163259,
+          91523
+        ],
+        "completionTokens": [
+          4121,
+          7488,
+          4036
+        ],
+        "turns": [
+          7,
+          13,
+          8
+        ]
+      },
+      {
+        "caseId": "search-then-read",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          20271,
+          14104,
+          13663
+        ],
+        "promptTokens": [
+          24166,
+          24134,
+          24177
+        ],
+        "completionTokens": [
+          278,
+          230,
+          298
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "read-before-edit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          14516,
+          15443,
+          15315
+        ],
+        "promptTokens": [
+          24210,
+          24112,
+          24044
+        ],
+        "completionTokens": [
+          321,
+          245,
+          206
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "independent-reads-share-turn",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8003,
+          9062,
+          12167
+        ],
+        "promptTokens": [
+          16054,
+          16055,
+          16063
+        ],
+        "completionTokens": [
+          206,
+          202,
+          228
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "write-then-read-back",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          36973,
+          25287,
+          31079
+        ],
+        "promptTokens": [
+          25444,
+          24896,
+          25262
+        ],
+        "completionTokens": [
+          994,
+          748,
+          909
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "read-error-then-recover",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          27102,
+          19137,
+          16078
+        ],
+        "promptTokens": [
+          32794,
+          24296,
+          24258
+        ],
+        "completionTokens": [
+          512,
+          425,
+          254
+        ],
+        "turns": [
+          4,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "edit-targets-one-duplicate-block",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          13871,
+          23014,
+          16937
+        ],
+        "promptTokens": [
+          24191,
+          41479,
+          24383
+        ],
+        "completionTokens": [
+          251,
+          484,
+          386
+        ],
+        "turns": [
+          3,
+          5,
+          3
+        ]
+      },
+      {
+        "caseId": "bash-fix-reruns-check",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          27148,
+          25585,
+          29652
+        ],
+        "promptTokens": [
+          41797,
+          41338,
+          50939
+        ],
+        "completionTokens": [
+          637,
+          598,
+          741
+        ],
+        "turns": [
+          5,
+          5,
+          6
+        ]
+      },
+      {
+        "caseId": "task-delegates-scoped-investigation",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          54395,
+          28492,
+          37885
+        ],
+        "promptTokens": [
+          43014,
+          51443,
+          52267
+        ],
+        "completionTokens": [
+          1552,
+          831,
+          1264
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "skill-loads-matching-workflow",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          21244,
+          19706,
+          19992
+        ],
+        "promptTokens": [
+          32409,
+          32359,
+          32367
+        ],
+        "completionTokens": [
+          867,
+          826,
+          676
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "plan-done-signal",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          46113,
+          44208,
+          27645
+        ],
+        "promptTokens": [
+          29256,
+          30421,
+          28669
+        ],
+        "completionTokens": [
+          955,
+          1573,
+          691
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "background-bash-output",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          17670,
+          25228,
+          21183
+        ],
+        "promptTokens": [
+          32063,
+          32055,
+          32079
+        ],
+        "completionTokens": [
+          181,
+          174,
+          188
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "background-bash-kill",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          29697,
+          22925,
+          29542
+        ],
+        "promptTokens": [
+          48517,
+          40342,
+          40359
+        ],
+        "completionTokens": [
+          311,
+          249,
+          250
+        ],
+        "turns": [
+          6,
+          5,
+          5
+        ]
+      },
+      {
+        "caseId": "mcp-release-lookup-chain",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          29724,
+          18700,
+          14139
+        ],
+        "promptTokens": [
+          24491,
+          24595,
+          24433
+        ],
+        "completionTokens": [
+          427,
+          490,
+          247
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "edit-ambiguous-not-write-fallback",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          21334,
+          31991,
+          27763
+        ],
+        "promptTokens": [
+          32815,
+          33669,
+          33152
+        ],
+        "completionTokens": [
+          444,
+          872,
+          606
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "background-bash-explicit-timeout",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          90004,
+          33678,
+          54642
+        ],
+        "promptTokens": [
+          46840,
+          33701,
+          53303
+        ],
+        "completionTokens": [
+          3099,
+          862,
+          1432
+        ],
+        "turns": [
+          5,
+          4,
+          6
+        ]
+      },
+      {
+        "caseId": "task-parallel-delegation",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          45854,
+          46238,
+          42892
+        ],
+        "promptTokens": [
+          54889,
+          54525,
+          54314
+        ],
+        "completionTokens": [
+          1540,
+          1475,
+          1445
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "todo-write-marks-step-done",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          47259,
+          99035,
+          36643
+        ],
+        "promptTokens": [
+          26262,
+          28172,
+          25415
+        ],
+        "completionTokens": [
+          1905,
+          3631,
+          1129
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "mcp-lookup-reports-not-found",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          21501,
+          16307,
+          21866
+        ],
+        "promptTokens": [
+          16255,
+          16225,
+          16253
+        ],
+        "completionTokens": [
+          620,
+          405,
+          609
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "plan-reentry-reuses-existing-plan",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          39079,
+          74454,
+          71700
+        ],
+        "promptTokens": [
+          38746,
+          50459,
+          39671
+        ],
+        "completionTokens": [
+          1355,
+          2475,
+          2595
+        ],
+        "turns": [
+          4,
+          5,
+          4
+        ]
+      },
+      {
+        "caseId": "plan-open-question-blocks-done",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          29669,
+          71123,
+          108053
+        ],
+        "promptTokens": [
+          28953,
+          28861,
+          42747
+        ],
+        "completionTokens": [
+          1212,
+          2461,
+          4245
+        ],
+        "turns": [
+          3,
+          3,
+          4
+        ]
+      },
+      {
+        "caseId": "build-mode-flags-plan-divergence",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          69534,
+          84697,
+          51458
+        ],
+        "promptTokens": [
+          114909,
+          108976,
+          92756
+        ],
+        "completionTokens": [
+          2492,
+          2593,
+          2217
+        ],
+        "turns": [
+          11,
+          11,
+          9
+        ]
+      },
+      {
+        "caseId": "task-worker-delegates-real-edit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          41854,
+          41427,
+          36126
+        ],
+        "promptTokens": [
+          61161,
+          61889,
+          52480
+        ],
+        "completionTokens": [
+          1094,
+          1413,
+          1196
+        ],
+        "turns": [
+          3,
+          3,
+          2
+        ]
+      },
+      {
+        "caseId": "task-review-follows-nontrivial-change",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          240002,
+          240010,
+          240007
+        ],
+        "promptTokens": [
+          58315,
+          60737,
+          88013
+        ],
+        "completionTokens": [
+          5538,
+          8132,
+          9257
+        ],
+        "turns": [
+          4,
+          4,
+          7
+        ]
+      },
+      {
+        "caseId": "skill-not-loaded-for-generic-request",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8914,
+          12283,
+          13109
+        ],
+        "promptTokens": [
+          19000,
+          19000,
+          19002
+        ],
+        "completionTokens": [
+          93,
+          100,
+          141
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          44208,
+          25674,
+          29641
+        ],
+        "promptTokens": [
+          47534,
+          45082,
+          44782
+        ],
+        "completionTokens": [
+          1697,
+          845,
+          801
+        ],
+        "turns": [
+          5,
+          5,
+          5
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          22584,
+          27312,
+          17922
+        ],
+        "promptTokens": [
+          43843,
+          53140,
+          43909
+        ],
+        "completionTokens": [
+          535,
+          727,
+          562
+        ],
+        "turns": [
+          5,
+          6,
+          5
+        ]
+      }
+    ],
+    "casesTotal": 42,
+    "casesPassed": 39,
+    "score": 0.9285714285714286,
+    "consistentCases": 39,
+    "bySignal": {
+      "required-tool": {
+        "passed": 7,
+        "total": 8
+      },
+      "argument-grounding": {
+        "passed": 10,
+        "total": 11
+      },
+      "no-unneeded-tools": {
+        "passed": 10,
+        "total": 11
+      },
+      "tool-result-integrity": {
+        "passed": 8,
+        "total": 8
+      },
+      "filesystem-safety": {
+        "passed": 9,
+        "total": 9
+      },
+      "state-persistence": {
+        "passed": 7,
+        "total": 8
+      },
+      "tool-chain": {
+        "passed": 12,
+        "total": 12
+      },
+      "tool-error-recovery": {
+        "passed": 7,
+        "total": 8
+      },
+      "parallel-tools": {
+        "passed": 2,
+        "total": 2
+      },
+      "delegation": {
+        "passed": 3,
+        "total": 4
+      },
+      "skill-discovery": {
+        "passed": 2,
+        "total": 2
+      },
+      "plan-lifecycle": {
+        "passed": 6,
+        "total": 6
+      },
+      "state-transition": {
+        "passed": 1,
+        "total": 2
+      },
+      "background-lifecycle": {
+        "passed": 3,
+        "total": 3
+      },
+      "mcp-discovery": {
+        "passed": 2,
+        "total": 2
+      },
+      "mcp-tool-chain": {
+        "passed": 1,
+        "total": 1
+      },
+      "plan-safety": {
+        "passed": 1,
+        "total": 1
+      }
+    },
+    "certified": true,
+    "core": {
+      "casesTotal": 13,
+      "casesPassed": 12,
+      "score": 0.9230769230769231
+    },
+    "chain": {
+      "casesTotal": 29,
+      "casesPassed": 27,
+      "score": 0.9310344827586207
+    },
+    "avgDurationMs": 42859.78571428572,
+    "medianDurationMs": 25257.5,
+    "p75DurationMs": 44208,
+    "p95DurationMs": 150002,
+    "p99DurationMs": 240010,
+    "avgPromptTokens": 38522.25396825397,
+    "medianPromptTokens": 27217,
+    "p75PromptTokens": 46840,
+    "p95PromptTokens": 92756,
+    "p99PromptTokens": 163259,
+    "avgCompletionTokens": 1203.7222222222222,
+    "medianCompletionTokens": 523.5,
+    "p75CompletionTokens": 1432,
+    "p95CompletionTokens": 4245,
+    "p99CompletionTokens": 8132,
+    "avgTurns": 3.8412698412698414,
+    "medianTurns": 3,
+    "p75Turns": 4,
+    "p95Turns": 9,
+    "p99Turns": 13
+  },
+  "mimo-v2.6-pro [off]": {
+    "bench": "behavior",
+    "model": "mimo-v2.6-pro",
+    "timestamp": "2026-09-25T09:02:44.266Z",
+    "commit": "316fc22",
+    "providerUrl": "https://token-plan-sgp.xiaomimimo.com/v1",
+    "reasoningLevel": "off",
+    "repeat": 3,
+    "results": [
+      {
+        "caseId": "required-read-tool",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5347,
+          4949,
+          5492
+        ],
+        "promptTokens": [
+          15877,
+          15879,
+          15873
+        ],
+        "completionTokens": [
+          89,
+          124,
+          80
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "direct-request-stays-build",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          4610,
+          6338,
+          6381
+        ],
+        "promptTokens": [
+          15842,
+          15842,
+          15846
+        ],
+        "completionTokens": [
+          71,
+          76,
+          65
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "read-range-uses-offset-limit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5115,
+          6467,
+          4754
+        ],
+        "promptTokens": [
+          15942,
+          15946,
+          15946
+        ],
+        "completionTokens": [
+          117,
+          118,
+          110
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "grep-argument-is-grounded",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          9434,
+          12122,
+          8262
+        ],
+        "promptTokens": [
+          24094,
+          24097,
+          24094
+        ],
+        "completionTokens": [
+          212,
+          209,
+          209
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "glob-argument-is-grounded",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          4667,
+          4807,
+          5438
+        ],
+        "promptTokens": [
+          16000,
+          15999,
+          15999
+        ],
+        "completionTokens": [
+          93,
+          96,
+          92
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "write-creates-parent-directories",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          4495,
+          5283,
+          4910
+        ],
+        "promptTokens": [
+          15943,
+          15942,
+          15945
+        ],
+        "completionTokens": [
+          81,
+          86,
+          87
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "known-path-skips-search",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          4449,
+          4513,
+          6776
+        ],
+        "promptTokens": [
+          15867,
+          15869,
+          15869
+        ],
+        "completionTokens": [
+          70,
+          69,
+          68
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "ls-directory-argument",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5104,
+          4464,
+          5447
+        ],
+        "promptTokens": [
+          15883,
+          15879,
+          15879
+        ],
+        "completionTokens": [
+          72,
+          77,
+          77
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "todo-write-structured-list",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          53579,
+          45419,
+          150027
+        ],
+        "promptTokens": [
+          109414,
+          80080,
+          214833
+        ],
+        "completionTokens": [
+          1311,
+          1141,
+          1225
+        ],
+        "turns": [
+          12,
+          9,
+          12
+        ]
+      },
+      {
+        "caseId": "bash-argument-grounding",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          6503,
+          5546,
+          6886
+        ],
+        "promptTokens": [
+          15939,
+          15948,
+          15894
+        ],
+        "completionTokens": [
+          78,
+          81,
+          71
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "bash-timeout-unit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          5298,
+          7408,
+          5166
+        ],
+        "promptTokens": [
+          15895,
+          15895,
+          15901
+        ],
+        "completionTokens": [
+          72,
+          75,
+          101
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "grep-flags-are-grounded",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          20651,
+          30770,
+          8124
+        ],
+        "promptTokens": [
+          49765,
+          24135,
+          24132
+        ],
+        "completionTokens": [
+          384,
+          185,
+          158
+        ],
+        "turns": [
+          6,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "write-overwrites-existing-file",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          4327,
+          5363,
+          7079
+        ],
+        "promptTokens": [
+          15981,
+          15979,
+          15981
+        ],
+        "completionTokens": [
+          90,
+          103,
+          96
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "goal-continues-past-first-stop",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          33354,
+          40593,
+          48439
+        ],
+        "promptTokens": [
+          64452,
+          85375,
+          95952
+        ],
+        "completionTokens": [
+          632,
+          789,
+          1078
+        ],
+        "turns": [
+          7,
+          9,
+          10
+        ]
+      },
+      {
+        "caseId": "goal-survives-cascading-failures",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          62672,
+          54687,
+          61603
+        ],
+        "promptTokens": [
+          161795,
+          98554,
+          139425
+        ],
+        "completionTokens": [
+          1723,
+          1350,
+          1549
+        ],
+        "turns": [
+          16,
+          10,
+          14
+        ]
+      },
+      {
+        "caseId": "goal-blocks-only-after-repeats",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          93217,
+          300004,
+          300003
+        ],
+        "promptTokens": [
+          59472,
+          429867,
+          162310
+        ],
+        "completionTokens": [
+          1568,
+          5781,
+          3271
+        ],
+        "turns": [
+          6,
+          28,
+          14
+        ]
+      },
+      {
+        "caseId": "search-then-read",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          15923,
+          15075,
+          13780
+        ],
+        "promptTokens": [
+          24132,
+          24127,
+          24104
+        ],
+        "completionTokens": [
+          238,
+          239,
+          222
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "read-before-edit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          36654,
+          11131,
+          16682
+        ],
+        "promptTokens": [
+          24042,
+          32349,
+          32728
+        ],
+        "completionTokens": [
+          178,
+          237,
+          301
+        ],
+        "turns": [
+          3,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "independent-reads-share-turn",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          17508,
+          7957,
+          11324
+        ],
+        "promptTokens": [
+          16046,
+          16054,
+          16042
+        ],
+        "completionTokens": [
+          165,
+          183,
+          146
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "write-then-read-back",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          18169,
+          15880,
+          11948
+        ],
+        "promptTokens": [
+          32204,
+          24073,
+          24238
+        ],
+        "completionTokens": [
+          270,
+          168,
+          385
+        ],
+        "turns": [
+          4,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "read-error-then-recover",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          16025,
+          13519,
+          8189
+        ],
+        "promptTokens": [
+          24467,
+          24229,
+          24571
+        ],
+        "completionTokens": [
+          223,
+          218,
+          252
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "edit-targets-one-duplicate-block",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          17822,
+          10802,
+          24181
+        ],
+        "promptTokens": [
+          32679,
+          24112,
+          24130
+        ],
+        "completionTokens": [
+          258,
+          189,
+          208
+        ],
+        "turns": [
+          4,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "bash-fix-reruns-check",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          24719,
+          20752,
+          24765
+        ],
+        "promptTokens": [
+          50463,
+          50472,
+          50493
+        ],
+        "completionTokens": [
+          549,
+          594,
+          592
+        ],
+        "turns": [
+          6,
+          6,
+          6
+        ]
+      },
+      {
+        "caseId": "task-delegates-scoped-investigation",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          32381,
+          35024,
+          29722
+        ],
+        "promptTokens": [
+          42339,
+          62134,
+          42351
+        ],
+        "completionTokens": [
+          990,
+          1388,
+          764
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "skill-loads-matching-workflow",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          20063,
+          16780,
+          25878
+        ],
+        "promptTokens": [
+          32209,
+          32226,
+          32235
+        ],
+        "completionTokens": [
+          512,
+          608,
+          537
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "plan-done-signal",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          103392,
+          11062,
+          36533
+        ],
+        "promptTokens": [
+          135758,
+          28470,
+          72525
+        ],
+        "completionTokens": [
+          2412,
+          335,
+          1081
+        ],
+        "turns": [
+          11,
+          3,
+          7
+        ]
+      },
+      {
+        "caseId": "background-bash-output",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          15312,
+          20619,
+          13964
+        ],
+        "promptTokens": [
+          32046,
+          32027,
+          32041
+        ],
+        "completionTokens": [
+          136,
+          128,
+          132
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "background-bash-kill",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          9576,
+          10474,
+          20999
+        ],
+        "promptTokens": [
+          31963,
+          31973,
+          31922
+        ],
+        "completionTokens": [
+          107,
+          109,
+          99
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "mcp-release-lookup-chain",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          8772,
+          8862,
+          9375
+        ],
+        "promptTokens": [
+          24319,
+          24346,
+          24347
+        ],
+        "completionTokens": [
+          83,
+          99,
+          97
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "edit-ambiguous-not-write-fallback",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          7632,
+          119779,
+          12714
+        ],
+        "promptTokens": [
+          26015,
+          115442,
+          32745
+        ],
+        "completionTokens": [
+          230,
+          1570,
+          334
+        ],
+        "turns": [
+          3,
+          12,
+          4
+        ]
+      },
+      {
+        "caseId": "background-bash-explicit-timeout",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          25749,
+          21419,
+          22927
+        ],
+        "promptTokens": [
+          32672,
+          32452,
+          32515
+        ],
+        "completionTokens": [
+          560,
+          310,
+          414
+        ],
+        "turns": [
+          4,
+          4,
+          4
+        ]
+      },
+      {
+        "caseId": "task-parallel-delegation",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          39421,
+          39719,
+          31287
+        ],
+        "promptTokens": [
+          68650,
+          77529,
+          68867
+        ],
+        "completionTokens": [
+          1110,
+          1266,
+          1277
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "todo-write-marks-step-done",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          9499,
+          11720,
+          18292
+        ],
+        "promptTokens": [
+          24728,
+          24731,
+          24727
+        ],
+        "completionTokens": [
+          350,
+          304,
+          310
+        ],
+        "turns": [
+          3,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "mcp-lookup-reports-not-found",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          15572,
+          12273,
+          12360
+        ],
+        "promptTokens": [
+          40909,
+          24398,
+          24395
+        ],
+        "completionTokens": [
+          264,
+          207,
+          276
+        ],
+        "turns": [
+          5,
+          3,
+          3
+        ]
+      },
+      {
+        "caseId": "plan-reentry-reuses-existing-plan",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          31153,
+          180004,
+          180011
+        ],
+        "promptTokens": [
+          78342,
+          276062,
+          396496
+        ],
+        "completionTokens": [
+          837,
+          2409,
+          3450
+        ],
+        "turns": [
+          8,
+          19,
+          34
+        ]
+      },
+      {
+        "caseId": "plan-open-question-blocks-done",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          15664,
+          15274,
+          32037
+        ],
+        "promptTokens": [
+          37901,
+          37955,
+          68191
+        ],
+        "completionTokens": [
+          526,
+          476,
+          849
+        ],
+        "turns": [
+          4,
+          4,
+          7
+        ]
+      },
+      {
+        "caseId": "build-mode-flags-plan-divergence",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          150006,
+          55656,
+          45731
+        ],
+        "promptTokens": [
+          46386,
+          84118,
+          77760
+        ],
+        "completionTokens": [
+          1547,
+          1055,
+          1010
+        ],
+        "turns": [
+          5,
+          8,
+          8
+        ]
+      },
+      {
+        "caseId": "task-worker-delegates-real-edit",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          21927,
+          23513,
+          22262
+        ],
+        "promptTokens": [
+          51600,
+          51741,
+          51949
+        ],
+        "completionTokens": [
+          762,
+          834,
+          794
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "task-review-follows-nontrivial-change",
+        "passed": true,
+        "consistent": true,
+        "durationsMs": [
+          240013,
+          186364,
+          240002
+        ],
+        "promptTokens": [
+          382482,
+          232686,
+          221624
+        ],
+        "completionTokens": [
+          9621,
+          6268,
+          9625
+        ],
+        "turns": [
+          21,
+          17,
+          14
+        ]
+      },
+      {
+        "caseId": "skill-not-loaded-for-generic-request",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          6030,
+          6423,
+          6515
+        ],
+        "promptTokens": [
+          18984,
+          19054,
+          18980
+        ],
+        "completionTokens": [
+          71,
+          90,
+          68
+        ],
+        "turns": [
+          2,
+          2,
+          2
+        ]
+      },
+      {
+        "caseId": "approved-plan-todo-progress",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          16145,
+          15296,
+          22012
+        ],
+        "promptTokens": [
+          43846,
+          43773,
+          43737
+        ],
+        "completionTokens": [
+          492,
+          438,
+          478
+        ],
+        "turns": [
+          5,
+          5,
+          5
+        ]
+      },
+      {
+        "caseId": "clean-context-plan-todo-state",
+        "passed": false,
+        "consistent": false,
+        "durationsMs": [
+          14398,
+          15354,
+          20003
+        ],
+        "promptTokens": [
+          43631,
+          43674,
+          52075
+        ],
+        "completionTokens": [
+          437,
+          444,
+          440
+        ],
+        "turns": [
+          5,
+          5,
+          6
+        ]
+      }
+    ],
+    "casesTotal": 42,
+    "casesPassed": 28,
+    "score": 0.6666666666666666,
+    "consistentCases": 28,
+    "bySignal": {
+      "required-tool": {
+        "passed": 6,
+        "total": 8
+      },
+      "argument-grounding": {
+        "passed": 9,
+        "total": 11
+      },
+      "no-unneeded-tools": {
+        "passed": 8,
+        "total": 11
+      },
+      "tool-result-integrity": {
+        "passed": 7,
+        "total": 8
+      },
+      "filesystem-safety": {
+        "passed": 3,
+        "total": 9
+      },
+      "state-persistence": {
+        "passed": 4,
+        "total": 8
+      },
+      "tool-chain": {
+        "passed": 7,
+        "total": 12
+      },
+      "tool-error-recovery": {
+        "passed": 4,
+        "total": 8
+      },
+      "parallel-tools": {
+        "passed": 2,
+        "total": 2
+      },
+      "delegation": {
+        "passed": 4,
+        "total": 4
+      },
+      "skill-discovery": {
+        "passed": 1,
+        "total": 2
+      },
+      "plan-lifecycle": {
+        "passed": 1,
+        "total": 6
+      },
+      "state-transition": {
+        "passed": 1,
+        "total": 2
+      },
+      "background-lifecycle": {
+        "passed": 3,
+        "total": 3
+      },
+      "mcp-discovery": {
+        "passed": 2,
+        "total": 2
+      },
+      "mcp-tool-chain": {
+        "passed": 1,
+        "total": 1
+      },
+      "plan-safety": {
+        "passed": 1,
+        "total": 1
+      }
+    },
+    "certified": false,
+    "core": {
+      "casesTotal": 13,
+      "casesPassed": 10,
+      "score": 0.7692307692307693
+    },
+    "chain": {
+      "casesTotal": 29,
+      "casesPassed": 18,
+      "score": 0.6206896551724138
+    },
+    "avgDurationMs": 33651.51587301587,
+    "medianDurationMs": 15333,
+    "p75DurationMs": 30770,
+    "p95DurationMs": 180004,
+    "p99DurationMs": 300003,
+    "avgPromptTokens": 53683.60317460317,
+    "medianPromptTokens": 31942.5,
+    "p75PromptTokens": 51600,
+    "p95PromptTokens": 214833,
+    "p99PromptTokens": 396496,
+    "avgCompletionTokens": 734.8809523809524,
+    "medianCompletionTokens": 255,
+    "p75CompletionTokens": 764,
+    "p95CompletionTokens": 2412,
+    "p99CompletionTokens": 9621,
+    "avgTurns": 4.912698412698413,
+    "medianTurns": 3,
+    "p75Turns": 5,
+    "p95Turns": 14,
+    "p99Turns": 28
+  },
   "openai/gpt-5.6-luna": {
     "bench": "behavior",
     "model": "openai/gpt-5.6-luna",

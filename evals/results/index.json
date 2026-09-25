@@ -169,5 +169,35 @@
     "failed": 2,
     "commit": "0a42006",
     "file": "runs/2026-09-03T08-23-52-503Z_run_MiniMax-M3.json"
+  },
+  {
+    "timestamp": "2026-09-25T09:02:44.090Z",
+    "kind": "compare",
+    "models": [
+      "mimo-v2.6-flash",
+      "mimo-v2.6-pro"
+    ],
+    "total": 84,
+    "passed": 74,
+    "failed": 10,
+    "commit": "316fc22",
+    "file": "runs/2026-09-25T09-02-44-090Z_compare-x3_mimo-v2.6-flash_mimo-v2.6-pro.json",
+    "repeat": 3,
+    "inconsistentCases": 16
+  },
+  {
+    "timestamp": "2026-09-25T09:28:59.581Z",
+    "kind": "compare",
+    "models": [
+      "mimo-v2.6-flash",
+      "mimo-v2.6-pro"
+    ],
+    "total": 84,
+    "passed": 81,
+    "failed": 3,
+    "commit": "316fc22",
+    "file": "runs/2026-09-25T09-28-59-581Z_compare-x3_mimo-v2.6-flash_mimo-v2.6-pro.json",
+    "repeat": 3,
+    "inconsistentCases": 5
   }
 ]
