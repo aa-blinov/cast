@@ -873,6 +873,8 @@ describe("voice message playback route", () => {
 	it("lets the page play a voice note from its data: URL before the turn is saved", async () => {
 		const res = await fetch(`${origin}/login`, { redirect: "manual" });
 		expect(res.headers.get("content-security-policy")).toContain("media-src 'self' data: blob:");
+		// A recording needs the page itself allowed to open the microphone.
+		expect(res.headers.get("permissions-policy")).toContain("microphone=(self)");
 	});
 
 	it("serves a stored voice note as WAV and answers Range requests, which Safari needs to play it", async () => {

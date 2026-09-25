@@ -105,9 +105,9 @@ export function Composer({
 			recorderRef.current = await startVoiceRecording({ onLimit: () => void finishRecording() });
 			setVoice(null);
 			setRecordingSince(Date.now());
-		} catch {
+		} catch (error) {
 			recorderRef.current = null;
-			setVoiceStatus("Microphone access was denied");
+			setVoiceStatus(error?.name === "NotFoundError" ? "No microphone found" : "Microphone access was denied");
 		}
 	}, [finishRecording]);
 
