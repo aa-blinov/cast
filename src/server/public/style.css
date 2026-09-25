@@ -1534,7 +1534,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 		min-width: 44px; min-height: 44px;
 	}
 	/* Palette rows are tapped, not arrowed, on a phone. */
-	.cmd-item { min-height: 44px; }
+	.cmd-item, .turn-retry .modal-btn { min-height: 44px; }
 	.verify-btn { flex-basis: 44px; }
 
 	/* Controls packed into a row or onto a thumbnail keep their look; only the

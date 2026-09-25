@@ -27,8 +27,10 @@ import {
 	getMessageImage,
 	getMessagesAfterCheckpoint,
 	getMostRecentSession,
+	getRunNotices,
 	getSessionEvents,
 	hasRecentClientMessageId,
+	lastPersistedSeq,
 	listSessionSummaries,
 	listSessions,
 	loadCheckpoints,
@@ -908,6 +910,25 @@ describe("session persistence", () => {
 		expect(events[0]!.seq).toBeLessThan(events[1]!.seq);
 	});
 
+	it("anchors run notices to the newest persisted message and reads back only anchored ones", () => {
+		const session = createSession("gpt-4o", projectA);
+		expect(lastPersistedSeq(session)).toBeUndefined();
+		appendMessage(session, { role: "user", content: "go" });
+		saveSession(session);
+		const anchor = lastPersistedSeq(session);
+		expect(typeof anchor).toBe("number");
+
+		appendSessionEvent(session.id, "retry", { attempt: 1, reason: "529", afterSeq: anchor });
+		appendSessionEvent(session.id, "retry", { attempt: 1, reason: "no anchor, from before anchors existed" });
+		appendSessionEvent(session.id, "end", { reason: "stop", afterSeq: anchor });
+		appendSessionEvent(session.id, "end", { reason: "aborted", afterSeq: anchor });
+		appendSessionEvent(session.id, "tool_start", { name: "bash", afterSeq: anchor });
+
+		const notices = getRunNotices(session.id);
+		expect(notices.map((n) => `${n.type}:${n.payload.reason}`)).toEqual(["retry:529", "end:aborted"]);
+		expect(notices.every((n) => n.afterSeq === anchor)).toBe(true);
+	});
+
 	it("persists subagent transcripts and loads them back in order", () => {
 		const session = createSession("gpt-4o", projectA);
 		saveSession(session);
@@ -1253,6 +1274,22 @@ describe("session persistence", () => {
 		expect(left).toHaveLength(1);
 		expect(left[0]!.type).toBe("tool_end");
 		expect(pruneSessionEvents()).toBe(0);
+	});
+
+	it("keeps an old thread's retries, errors and aborts when pruning telemetry", () => {
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+		appendSessionEvent(session.id, "retry", { attempt: 1, reason: "529", afterSeq: 0 });
+		appendSessionEvent(session.id, "error", { message: "boom", afterSeq: 0 });
+		appendSessionEvent(session.id, "end", { reason: "aborted", afterSeq: 0 });
+		appendSessionEvent(session.id, "end", { reason: "stop", afterSeq: 0 });
+		appendSessionEvent(session.id, "tool_start", { name: "read" });
+		getDb()
+			.prepare("UPDATE session_events SET ts = ? WHERE session_id = ?")
+			.run(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), session.id);
+
+		expect(pruneSessionEvents()).toBe(2);
+		expect(getSessionEvents(session.id).map((e) => e.type)).toEqual(["retry", "error", "end"]);
 	});
 
 	it("takes the session's own memory files with it, but never the project's (regression)", () => {

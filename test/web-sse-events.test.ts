@@ -48,10 +48,55 @@ describe("web SSE events", () => {
 		state.pendingPlanSignalRef.current = { kind: "done", sessionId: "session-1" };
 		handleSseEvent({ type: "end" }, state);
 
-		expect(state.resetStreamingNow).toHaveBeenCalledOnce();
+		expect(state.takeStreamingNow).toHaveBeenCalledOnce();
 		expect(state.setRunning).toHaveBeenCalledWith(false);
 		expect(state.setPlanTransition).toHaveBeenCalledWith({ kind: "done", sessionId: "session-1" });
 		expect(state.pendingPlanSignalRef.current).toBeNull();
+	});
+
+	it("keeps what streamed when a turn is stopped, with the abort notice after it", () => {
+		const state = createContext();
+		state.takeStreamingNow = vi.fn(() => [
+			{ kind: "content", text: "half an answer" },
+			{ kind: "tool", call: { id: "t1", name: "bash", status: "running" } },
+		]);
+		handleSseEvent({ type: "end", reason: "aborted" }, state);
+
+		let session = { messages: [{ role: "user", content: "go" }] };
+		for (const [updater] of state.setSession.mock.calls)
+			session = (updater as (p: unknown) => typeof session)(session);
+		expect(session.messages.map((m: { role: string }) => m.role)).toEqual(["user", "assistant", "warning"]);
+		const settled = session.messages[1] as { blocks: Array<{ kind: string; call?: { status: string } }> };
+		expect(settled.blocks[0]).toEqual({ kind: "content", text: "half an answer" });
+		// A call that was still running will never finish; it must not spin forever.
+		expect(settled.blocks[1]?.call?.status).toBe("error");
+		expect(session.messages[2]).toMatchObject({ content: "Run aborted", local: true });
+	});
+
+	it("keeps the streamed reply when a turn fails, then shows the error", () => {
+		const state = createContext();
+		state.takeStreamingNow = vi.fn(() => [{ kind: "content", text: "before the failure" }]);
+		handleSseEvent({ type: "error", message: "Provider overloaded" }, state);
+
+		let session = { messages: [] as Array<Record<string, unknown>> };
+		for (const [updater] of state.setSession.mock.calls)
+			session = (updater as (p: unknown) => typeof session)(session);
+		expect(session.messages.map((m) => m.role)).toEqual(["assistant", "error"]);
+		expect(session.messages[1]).toMatchObject({ content: "Provider overloaded", local: true });
+	});
+
+	it("does not refetch history just because the client has its own notice rows", () => {
+		const state = createContext();
+		handleSseEvent({ type: "session_end", usage: {}, messageCount: 2 }, state);
+		const updater = state.setSession.mock.calls[0]![0] as (prev: unknown) => unknown;
+		updater({
+			messages: [
+				{ role: "user", content: "a" },
+				{ role: "error", content: "boom", local: true },
+				{ role: "assistant", content: "b" },
+			],
+		});
+		expect(state.api).not.toHaveBeenCalled();
 	});
 
 	it("renders a notice as a warning row instead of failing the turn", () => {
@@ -61,7 +106,7 @@ describe("web SSE events", () => {
 		expect(state.setSession).toHaveBeenCalled();
 		const updater = state.setSession.mock.calls[0]![0] as (prev: unknown) => unknown;
 		expect(updater({ messages: [] })).toEqual({
-			messages: [{ role: "warning", content: "Provider changed — switched to hy3" }],
+			messages: [{ role: "warning", content: "Provider changed — switched to hy3", local: true }],
 		});
 	});
 
@@ -82,36 +127,59 @@ describe("web SSE events", () => {
 		expect(state.queueDiffRefresh).not.toHaveBeenCalled();
 	});
 
-	it("surfaces a retry as a warning row", () => {
+	const applyAll = (state: ReturnType<typeof createContext>, session: { messages: unknown[] }) => {
+		let next = session;
+		for (const [updater] of state.setSession.mock.calls) next = (updater as (p: unknown) => typeof next)(next);
+		return next;
+	};
+
+	it("surfaces a retry as a warning row that logs the attempt", () => {
 		const state = createContext();
 		handleSseEvent({ type: "retry", attempt: 3, reason: "429 Token Plan usage limit reached" }, state);
 
-		const updater = state.setSession.mock.calls[0]![0] as (prev: unknown) => unknown;
-		expect(updater({ messages: [] })).toEqual({
-			messages: [{ role: "warning", content: "[Retrying (attempt 3): 429 Token Plan usage limit reached]" }],
-		});
+		expect(applyAll(state, { messages: [] }).messages).toEqual([
+			{
+				role: "warning",
+				notice: "retry",
+				local: true,
+				attempts: [{ attempt: 3, reason: "429 Token Plan usage limit reached" }],
+				content: "Provider retries:\n- attempt 3: 429 Token Plan usage limit reached",
+			},
+		]);
 	});
 
-	it("updates the same retry row on subsequent attempts instead of spamming history", () => {
+	it("collects consecutive attempts into one row instead of spamming history", () => {
 		const state = createContext();
-		handleSseEvent({ type: "retry", attempt: 1, reason: "429" }, state);
-		handleSseEvent({ type: "retry", attempt: 2, reason: "429" }, state);
+		handleSseEvent({ type: "retry", attempt: 1, reason: "529" }, state);
+		handleSseEvent({ type: "retry", attempt: 2, reason: "529" }, state);
 
-		const updater = state.setSession.mock.calls[1]![0] as (prev: unknown) => unknown;
-		expect(updater({ messages: [{ role: "warning", content: "[Retrying (attempt 1): 429]" }] })).toEqual({
-			messages: [{ role: "warning", content: "[Retrying (attempt 2): 429]" }],
-		});
+		const rows = applyAll(state, { messages: [{ role: "user", content: "go" }] }).messages;
+		expect(rows).toHaveLength(2);
+		expect(rows[1]).toMatchObject({ content: "Provider retries:\n- attempt 1: 529\n- attempt 2: 529" });
 	});
 
-	it("drops the retry row once real content starts streaming", () => {
+	it("keeps the retry log once the reply starts streaming", () => {
 		const state = createContext();
-		handleSseEvent({ type: "retry", attempt: 1, reason: "429" }, state);
+		handleSseEvent({ type: "retry", attempt: 1, reason: "529" }, state);
 		handleSseEvent({ type: "token", text: "Hello" }, state);
 
-		const updater = state.setSession.mock.calls[1]![0] as (prev: unknown) => unknown;
-		expect(updater({ messages: [{ role: "warning", content: "[Retrying (attempt 1): 429]" }] })).toEqual({
-			messages: [],
-		});
+		expect(applyAll(state, { messages: [] }).messages).toHaveLength(1);
+		expect(state.updateStreaming).toHaveBeenCalledWith({ type: "content", text: "Hello" });
+	});
+
+	it("starts a new retry row for a later completion instead of rewriting an earlier turn's", () => {
+		const state = createContext();
+		handleSseEvent({ type: "retry", attempt: 1, reason: "529" }, state);
+		const earlier = {
+			role: "warning",
+			notice: "retry",
+			local: true,
+			attempts: [{ attempt: 1, reason: "old" }],
+			content: "old",
+		};
+		const rows = applyAll(state, { messages: [earlier, { role: "assistant", content: "done" }] }).messages;
+		expect(rows[0]).toBe(earlier);
+		expect(rows).toHaveLength(3);
 	});
 
 	it("acknowledges an optimistic user message by client id without appending a duplicate", () => {
