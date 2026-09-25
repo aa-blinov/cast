@@ -60,7 +60,7 @@ export function ShareModal({ session, onClose }) {
 	return html`
 		<div class="modal-backdrop" onClick=${onClose}>
 			<div class="modal modal-share" role="dialog" aria-modal="true" aria-label="Share thread" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
-				<div class="modal-header"><span>Share "${session.title || session.persona}"</span><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button></div>
+				<div class="modal-header"><h2 class="modal-title">Share "${session.title || session.persona}"</h2><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button></div>
 				<div class="modal-share-body">
 					<p class="modal-hint">Anyone with this link can read the conversation, read-only — no cast login needed.</p>
 					${url ? html`<div class="share-link-row"><input class="share-link-input" aria-label="Share link" readOnly value=${url} onClick=${(e) => e.target.select()} /><button class="modal-btn icon-btn" title="Copy link" onClick=${copy}><${copied ? icons.check : icons.link} /></button></div>` : html`<div class="modal-hint">Generating link…</div>`}

@@ -39,6 +39,10 @@
 }
 .diff-resize-handle:hover::after,
 body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
+/* The panel's overflow:hidden clips an outline on this edge strip, so focus
+ * shows as the drag line itself, drawn wider. */
+.diff-resize-handle:focus-visible { outline: none; }
+.diff-resize-handle:focus-visible::after { background: var(--cyan); left: 2px; width: 4px; }
 .diff-header {
 	display: flex; align-items: center;
 	padding: 8px 12px;

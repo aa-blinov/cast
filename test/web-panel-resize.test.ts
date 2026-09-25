@@ -11,7 +11,7 @@ vi.mock(
 	{ virtual: true },
 );
 
-import { perFrame } from "../src/server/public/use-panel-resize.js";
+import { nextWidthForKey, perFrame } from "../src/server/public/use-panel-resize.js";
 
 describe("perFrame", () => {
 	let frames: Array<() => void>;
@@ -54,5 +54,27 @@ describe("perFrame", () => {
 		const apply = vi.fn();
 		perFrame(apply).flush();
 		expect(apply).not.toHaveBeenCalled();
+	});
+});
+
+describe("nextWidthForKey", () => {
+	const range = { min: 320, max: 800 };
+
+	it("grows on the panel's grow key and shrinks on the other arrow", () => {
+		expect(nextWidthForKey("ArrowLeft", false, 500, range, "ArrowLeft")).toBe(516);
+		expect(nextWidthForKey("ArrowRight", false, 500, range, "ArrowLeft")).toBe(484);
+		expect(nextWidthForKey("ArrowRight", false, 500, range, "ArrowRight")).toBe(516);
+	});
+
+	it("takes bigger steps with Shift and clamps to the range", () => {
+		expect(nextWidthForKey("ArrowLeft", true, 500, range, "ArrowLeft")).toBe(564);
+		expect(nextWidthForKey("ArrowLeft", true, 790, range, "ArrowLeft")).toBe(800);
+		expect(nextWidthForKey("ArrowRight", true, 330, range, "ArrowLeft")).toBe(320);
+	});
+
+	it("jumps to the limits on Home and End and ignores other keys", () => {
+		expect(nextWidthForKey("Home", false, 500, range, "ArrowLeft")).toBe(320);
+		expect(nextWidthForKey("End", false, 500, range, "ArrowLeft")).toBe(800);
+		expect(nextWidthForKey("a", false, 500, range, "ArrowLeft")).toBeNull();
 	});
 });

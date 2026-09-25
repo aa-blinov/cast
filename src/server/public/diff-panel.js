@@ -11,7 +11,7 @@ export function DiffPanel({
 	data,
 	activeFile,
 	onSelectFile,
-	onResizeStart,
+	resizeHandleProps,
 	open,
 	activeId,
 	cwd,
@@ -46,7 +46,7 @@ export function DiffPanel({
 	if (!activeId) {
 		return html`
 			<aside class="diff-panel${openClass}" inert=${!open}>
-				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+				<div class="diff-resize-handle" ...${resizeHandleProps} />
 				${header}
 				${
 					bootstrapping
@@ -67,7 +67,7 @@ export function DiffPanel({
 	if (tab === "inputs") {
 		return html`
 			<aside class="diff-panel${openClass}" inert=${!open}>
-				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+				<div class="diff-resize-handle" ...${resizeHandleProps} />
 				${header}
 				<${InputsExplorer} activeId=${activeId} confirm=${confirm} refreshNonce=${inputsRefreshNonce} />
 			</aside>
@@ -77,7 +77,7 @@ export function DiffPanel({
 	if (tab === "fs") {
 		return html`
 			<aside class="diff-panel${openClass}" inert=${!open}>
-				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+				<div class="diff-resize-handle" ...${resizeHandleProps} />
 				${header}
 				<${FileExplorerModule} activeId=${activeId} cwd=${cwd} confirm=${confirm} refreshNonce=${fsRefreshNonce} />
 			</aside>
@@ -87,7 +87,7 @@ export function DiffPanel({
 	if (tab === "memory" && memoryEnabled) {
 		return html`
 			<aside class="diff-panel${openClass}" inert=${!open}>
-				<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+				<div class="diff-resize-handle" ...${resizeHandleProps} />
 				${header}
 				<${MemoryExplorerModule} activeId=${activeId} />
 			</aside>
@@ -97,7 +97,7 @@ export function DiffPanel({
 	if (!data)
 		return html`
 		<aside class="diff-panel${openClass}" inert=${!open}>
-			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+			<div class="diff-resize-handle" ...${resizeHandleProps} />
 			${header}
 			<div class="fs-skeleton" style="padding:12px">
 				<div class="fs-skeleton-row"></div>
@@ -169,7 +169,7 @@ export function DiffPanel({
 
 	return html`
 		<aside class="diff-panel${openClass}" inert=${!open}>
-			<div class="diff-resize-handle" onPointerDown=${onResizeStart} />
+			<div class="diff-resize-handle" ...${resizeHandleProps} />
 			${header}
 			<div class="diff-file-list">
 				${sections.map(

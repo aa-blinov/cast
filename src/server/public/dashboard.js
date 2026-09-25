@@ -456,7 +456,7 @@ export function Dashboard({ onClose }) {
 		<div class="modal-backdrop" onClick=${onClose}>
 			<div class="modal dash-modal" role="dialog" aria-modal="true" aria-label="Dashboard" tabIndex="-1" ref=${modalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-header">
-					<span class="dash-title">Dashboard</span>
+					<h2 class="modal-title dash-title">Dashboard</h2>
 					<div class="dash-tabs">
 						<button aria-pressed=${tab === "llm"} class="modal-btn${tab === "llm" ? " modal-btn-primary" : ""}" onClick=${() => setTab("llm")}>LLM</button>
 						<button aria-pressed=${tab === "memory"} class="modal-btn${tab === "memory" ? " modal-btn-primary" : ""}" onClick=${() => setTab("memory")}>Memory</button>
