@@ -26,8 +26,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { coreCases } from "../benches/behavior/tools/core/index.ts";
 import { chainCases } from "../benches/behavior/tools/chain/index.ts";
+import { coreCases } from "../benches/behavior/tools/core/index.ts";
 import type { RepeatedCompareResult, RepeatedSuiteResult } from "./runner.ts";
 
 /** Which of the two categories (see docs/eval-behavior.md) a case belongs to,
@@ -270,7 +270,11 @@ export function recomputeScoreboardEntry(entry: ScoreboardEntry): ScoreboardEntr
  * an obsolete contract contributing to a current score. Pass `isFullRun: true`
  * (no `--cases` filter) to fully replace `existing` outright.
  */
-export function mergeScoreboardEntry(existing: ScoreboardEntry | undefined, fresh: ScoreboardEntry, isFullRun: boolean): ScoreboardEntry {
+export function mergeScoreboardEntry(
+	existing: ScoreboardEntry | undefined,
+	fresh: ScoreboardEntry,
+	isFullRun: boolean,
+): ScoreboardEntry {
 	if (!existing || isFullRun) return fresh;
 	const activeCaseIds = new Set(ALL_CASES.map((evalCase) => evalCase.id));
 	const byId = new Map(existing.results.filter((r) => activeCaseIds.has(r.caseId)).map((r) => [r.caseId, r]));
@@ -288,13 +292,38 @@ export function readScoreboard(path: string = defaultScoreboardPath()): Record<s
 	return existsSync(path) ? JSON.parse(readFileSync(path, "utf-8")) : {};
 }
 
-/** Upserts one model's entry into the committed scoreboard JSON, keyed by
- *  model name — one row per model, no history (unlike baselines): this
- *  artifact only needs to show current state. Returns the path written. */
+/** One row per model and reasoning level: the same model certified with and
+ *  without reasoning is two different setups, and keying by model alone let
+ *  the second run silently overwrite the first. */
+export function scoreboardKey(model: string, reasoningLevel: string): string {
+	return `${model} [${reasoningLevel}]`;
+}
+
+/** The current row for a model at a reasoning level. Rows written before the
+ *  key carried the level sit under the bare model name; one of those counts
+ *  only when it was recorded at the same level. */
+export function findScoreboardEntry(
+	all: Record<string, ScoreboardEntry>,
+	model: string,
+	reasoningLevel: string,
+): ScoreboardEntry | undefined {
+	const legacy = all[model];
+	return all[scoreboardKey(model, reasoningLevel)] ?? (legacy?.reasoningLevel === reasoningLevel ? legacy : undefined);
+}
+
+/** Upserts one row into the committed scoreboard JSON (see scoreboardKey),
+ *  no history (unlike baselines): this artifact only needs to show current
+ *  state. A legacy row for the same model and level is replaced, not kept
+ *  beside it. Returns the path written. */
 export function upsertScoreboard(entry: ScoreboardEntry, path: string = defaultScoreboardPath()): string {
 	const existing = readScoreboard(path);
-	existing[entry.model] = entry;
-	const sorted = Object.fromEntries(Object.keys(existing).sort().map((key) => [key, existing[key]!]));
+	if (existing[entry.model]?.reasoningLevel === entry.reasoningLevel) delete existing[entry.model];
+	existing[scoreboardKey(entry.model, entry.reasoningLevel)] = entry;
+	const sorted = Object.fromEntries(
+		Object.keys(existing)
+			.sort()
+			.map((key) => [key, existing[key]!]),
+	);
 	writeFileSync(path, `${JSON.stringify(sorted, null, 2)}\n`, "utf-8");
 	return path;
 }

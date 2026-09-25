@@ -20,7 +20,7 @@
  *   --list-baselines       List all saved baselines
  */
 
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { BENCHES, DEFAULT_BENCH_IDS, findBench } from "./benches/index.ts";
@@ -45,17 +45,23 @@ import {
 	compareModels,
 	compareModelsRepeated,
 	type EvalCase,
+	type ProviderConnection,
 	printCompareReport,
 	printRepeatedCompareReport,
 	printReport,
-	type ProviderConnection,
 	type RepeatedSuiteResult,
 	type RunnerOptions,
 	runSuite,
 	saveCompareResults,
 	saveResults,
 } from "./lib/runner.ts";
-import { buildScoreboardEntry, mergeScoreboardEntry, readScoreboard, upsertScoreboard } from "./lib/scoreboard.ts";
+import {
+	buildScoreboardEntry,
+	findScoreboardEntry,
+	mergeScoreboardEntry,
+	readScoreboard,
+	upsertScoreboard,
+} from "./lib/scoreboard.ts";
 import { listCaseIds, printTrace, resolveRunFile } from "./lib/trace-view.ts";
 
 // Fixture files live under a per-process temp dir (see evals/lib/fixtures.ts) — wipe
@@ -107,7 +113,7 @@ function updateScoreboard(
 		// Entries written before `results` existed (aggregates only, no raw
 		// per-case data) can't be merged into — treat them the same as no
 		// entry at all rather than crashing on a missing array.
-		const rawExisting = existingAll[cleanName];
+		const rawExisting = findScoreboardEntry(existingAll, cleanName, fresh.reasoningLevel);
 		const existing = rawExisting && Array.isArray(rawExisting.results) ? rawExisting : undefined;
 		if (!isFullRun && !existing) {
 			console.error(
@@ -120,7 +126,9 @@ function updateScoreboard(
 		const pct = (entry.score * 100).toFixed(1);
 		const badge = entry.certified ? " ✓ certified" : "";
 		const scope = isFullRun ? "" : ` (merged ${fresh.results.length}/${entry.casesTotal} cases)`;
-		console.log(`Scoreboard updated (${modelName}): ${path} — ${pct}% (${entry.casesPassed}/${entry.casesTotal})${badge}${scope}`);
+		console.log(
+			`Scoreboard updated (${modelName}): ${path} — ${pct}% (${entry.casesPassed}/${entry.casesTotal})${badge}${scope}`,
+		);
 	}
 }
 
@@ -141,7 +149,9 @@ function checkRepeatedBaseline(
 	alpha: number,
 ): boolean {
 	if (benchIds.length !== 1) {
-		console.error(`--baseline with --repeat requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`);
+		console.error(
+			`--baseline with --repeat requires exactly one --bench (got ${benchIds.length}: ${benchIds.join(", ")})`,
+		);
 		process.exit(1);
 	}
 	const resolved = resolveBaseline(name, suite.model);
@@ -161,7 +171,9 @@ function checkRepeatedBaseline(
 	console.log(formatDelta(delta, threshold));
 	if (delta.hasRegression) {
 		if (delta.significance.sampleSizeSufficient && delta.significance.isSignificant) {
-			console.log(`\n✗ Statistically significant regression detected (p=${delta.significance.pValue.toFixed(4)} < α=${alpha})`);
+			console.log(
+				`\n✗ Statistically significant regression detected (p=${delta.significance.pValue.toFixed(4)} < α=${alpha})`,
+			);
 		} else {
 			console.log(`\n✗ Regression detected (threshold: ${threshold * 100}pp)`);
 		}
@@ -425,7 +437,9 @@ async function main(): Promise<void> {
 	const providerConnections: Record<string, ProviderConnection> = Object.fromEntries(
 		(settings.providers ?? []).map((entry) => [entry.name, { baseURL: entry.url, apiKey: entry.apiKey }]),
 	);
-	const providerUrls = Object.fromEntries(Object.entries(providerConnections).map(([name, connection]) => [name, connection.baseURL]));
+	const providerUrls = Object.fromEntries(
+		Object.entries(providerConnections).map(([name, connection]) => [name, connection.baseURL]),
+	);
 	const envConnection =
 		process.env.PROVIDER_BASE_URL && process.env.PROVIDER_API_KEY
 			? { baseURL: process.env.PROVIDER_BASE_URL, apiKey: process.env.PROVIDER_API_KEY }
@@ -437,7 +451,7 @@ async function main(): Promise<void> {
 			? envConnection
 			: settings.providerUrl && settings.apiKey
 				? { baseURL: settings.providerUrl, apiKey: settings.apiKey }
-			: undefined;
+				: undefined;
 	if (defaultConnection) providerUrls[""] = defaultConnection.baseURL;
 	if (!defaultConnection && Object.keys(providerConnections).length === 0) {
 		console.error("Eval settings need providerUrl/apiKey or at least one named provider in ~/.cast/settings.json");
