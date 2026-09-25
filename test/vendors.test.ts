@@ -116,6 +116,25 @@ describe("applyCacheControl", () => {
 		expect((out.tools[1] as any).cache_control).toEqual({ type: "ephemeral" });
 	});
 
+	it("moves the message breakpoint onto the tool results of a tool loop", () => {
+		const messages: Message[] = [
+			{ role: "system", content: "sys" },
+			{ role: "user", content: "run it" },
+			{
+				role: "assistant",
+				content: null,
+				tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: "{}" } }],
+			},
+			{ role: "tool", tool_call_id: "c1", content: "big output" },
+		];
+		const out = applyCacheControl(messages, []);
+
+		expect(out.messages[3]!.content).toEqual([
+			{ type: "text", text: "big output", cache_control: { type: "ephemeral" } },
+		]);
+		expect(out.messages[1]!.content).toBe("run it");
+	});
+
 	it("adds cache_control to the last user or assistant message", () => {
 		const messages: Message[] = [
 			{ role: "system", content: "sys" },

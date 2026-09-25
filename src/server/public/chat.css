@@ -34,6 +34,8 @@
  * growing reply stays still while tokens arrive. */
 .message-entering { animation: rise .15s var(--ease-out); }
 .messages-inner > * + * { padding-top: 6px; }
+/* Under a /skill command: the model got the whole SKILL.md, the thread shows what was typed. */
+.message-skill-note { color: var(--text-muted); font-size: var(--fs-micro); margin-top: 2px; }
 /* Offered under a turn that failed or was stopped. */
 .turn-retry { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
 .turn-retry .modal-btn { display: inline-flex; align-items: center; gap: 6px; }

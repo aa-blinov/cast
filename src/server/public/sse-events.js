@@ -29,6 +29,25 @@ function appendRetryAttempt(messages, attempt) {
 	return [...messages, { role: "warning", notice: "retry", local: true, attempts: [attempt], content: formatRetries([attempt]) }];
 }
 
+/** When a completion streams nothing before its tool call, its
+ *  assistant_message is rebuilt from the event, tool call card included, and
+ *  the tool_start that follows opens a live card for the same call: the call
+ *  showed twice. The live card is the one tool_end fills in, so the settled
+ *  copy goes. Only the newest messages can hold it. */
+function dropSettledToolCard(messages, callId) {
+	for (let i = messages.length - 1; i >= Math.max(0, messages.length - 3); i--) {
+		const message = messages[i];
+		if (message?.role !== "assistant" || !Array.isArray(message.blocks)) continue;
+		const blocks = message.blocks.filter((block) => !(block.kind === "tool" && block.call?.id === callId));
+		if (blocks.length === message.blocks.length) continue;
+		const next = messages.slice();
+		if (blocks.length === 0) next.splice(i, 1);
+		else next[i] = { ...message, blocks };
+		return next;
+	}
+	return messages;
+}
+
 /** A turn cut short (Stop, or a failed completion) never sends the
  *  assistant_message that would settle what already streamed, so the reply
  *  text and tool cards so far were wiped on "end". Keep them as a settled
@@ -99,6 +118,7 @@ export function handleSseEvent(event, context) {
 		api,
 		isCurrent,
 		mergeHistoryPage,
+		refreshCommands,
 	} = context;
 
 	switch (event.type) {
@@ -172,6 +192,11 @@ export function handleSseEvent(event, context) {
 			updateStreaming({
 				type: "tool_start",
 				call: { id: event.id, name: event.name, args: event.args, status: event.status },
+			});
+			setSession((prev) => {
+				if (!prev) return prev;
+				const messages = dropSettledToolCard(prev.messages, event.id);
+				return messages === prev.messages ? prev : { ...prev, messages };
 			});
 			break;
 		case "tool_end":
@@ -338,6 +363,11 @@ export function handleSseEvent(event, context) {
 			setSessions((prev) =>
 				prev.map((session) => (session.id === event.session.id ? { ...session, ...event.session } : session)),
 			);
+			break;
+		case "skills_changed":
+			// The agent installed a skill mid-turn: put its /skill:name in the
+			// composer's palette now rather than on the next session switch.
+			refreshCommands?.();
 			break;
 		case "fs_change":
 			// External edit (IDE, CI hook, etc.) on the session cwd while it

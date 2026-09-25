@@ -299,7 +299,8 @@ export function SettingsModal({
 					if (command.startsWith("/memory ") && typeof res.result?.memoryEnabled === "boolean") {
 						onMemoryChange?.(res.result.memoryEnabled);
 					}
-					if (command === "/reload" || command.startsWith("/skills ")) onReload?.();
+					// skills.sh installs and removals change the slash commands too.
+					if (command === "/reload" || command.startsWith("/skills ") || command.startsWith("/skills-sh ")) onReload?.();
 					if (
 						command === "/reload" ||
 						command.startsWith("/mcp ") ||

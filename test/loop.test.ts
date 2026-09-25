@@ -1514,7 +1514,8 @@ describe("runAgentLoop — retries a length-truncated response with no tool call
 		});
 
 		const reminders = messages.filter(
-			(m) => m.role === "system" && String(m.content).includes("near the end of this turn's iteration budget"),
+			// A user-role reminder: a system message there was saved as the session's system row.
+			(m) => m.role === "user" && String(m.content).includes("near the end of this turn's iteration budget"),
 		);
 		expect(reminders).toHaveLength(1);
 	});
@@ -2089,6 +2090,38 @@ describe("runAgentLoop — context files drive rule auto-attach", () => {
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}
+	});
+
+	it("reads @-mentions from the person's prompt, not from a harness reminder after it", async () => {
+		const seen: string[] = [];
+		const rebuildSystemPrompt = ({ userText }: { userText: string; contextFiles: string[] }) => {
+			seen.push(userText);
+			return "SYS";
+		};
+		const followUpQueue = new MessageQueue();
+		vi.mocked(streamAndCollect)
+			// Reasoning only: the loop appends a <system-reminder> nudge and asks again.
+			.mockImplementationOnce(async () => ({ content: "", thinking: "hmm", finishReason: "stop" }))
+			.mockImplementationOnce(async () => {
+				followUpQueue.enqueue({ role: "user", content: "next @other" });
+				return { content: "done", thinking: "", finishReason: "stop" };
+			})
+			.mockImplementationOnce(async () => ({ content: "second", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "use @web please" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "SYS",
+			followUpQueue,
+			rebuildSystemPrompt,
+			onEvent: () => {},
+		});
+
+		const split = seen.indexOf("next @other");
+		expect(split).toBeGreaterThan(1);
+		expect(new Set(seen.slice(0, split))).toEqual(new Set(["use @web please"]));
+		expect(new Set(seen.slice(split))).toEqual(new Set(["next @other"]));
 	});
 
 	// `edit` names its path argument `filePath`; every other file tool uses
@@ -2748,6 +2781,38 @@ describe("runAgentLoop — plan mode", () => {
 		// which is what the plan-mode prompt has always claimed.
 		expect(sshCalls).toEqual([]);
 		expect(results.join("\n")).toMatch(/not available/i);
+	});
+
+	it("offers skill_install (and the skill tool it feeds) only in build mode with a host that can rescan", async () => {
+		const advertised = async (extra: Record<string, unknown>) => {
+			let names: string[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, _messages, tools) => {
+				names = tools.map((tool) => tool.function.name);
+				return { content: "done", thinking: "", finishReason: "stop" };
+			});
+			await runAgentLoop([{ role: "user", content: "install a skill" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: "/tmp",
+				systemPrompt: "BASE_PROMPT",
+				onEvent: () => {},
+				...extra,
+			});
+			return names;
+		};
+
+		// No skills installed yet: the skill tool must still exist, or the one
+		// just installed could not be loaded in the same turn.
+		const build = await advertised({ reloadSkills: () => [] });
+		expect(build).toEqual(expect.arrayContaining(["skill_install", "skill"]));
+
+		const plan = await advertised({
+			reloadSkills: () => [],
+			planState: { enabled: true, plansDir: "/tmp/never-existing-plans-dir" },
+		});
+		expect(plan).not.toContain("skill_install");
+
+		expect(await advertised({})).not.toContain("skill_install");
 	});
 
 	it("does not advertise ssh in plan mode, even for a read-only command", async () => {
@@ -5015,6 +5080,7 @@ describe("runAgentLoop — compaction", () => {
 					thinking: "",
 					finishReason: "stop",
 					toolCalls: [{ id: "t1", name: "read", arguments: JSON.stringify({ path: "small.txt" }) }],
+					usage: { promptTokens: 300, completionTokens: 5, totalTokens: 305 },
 				}))
 				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
 
@@ -5034,6 +5100,38 @@ describe("runAgentLoop — compaction", () => {
 		}
 	});
 
+	// The char estimate never saw the system prompt, tool schemas or images,
+	// so a prompt the provider had measured near the cap looked half empty.
+	it("mid-turn guard counts from the provider's measured prompt, not a fresh char estimate", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-measured-"));
+		try {
+			writeFileSync(join(cwd, "small.txt"), "hello world");
+			const events: AgentEvent[] = [];
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "t1", name: "read", arguments: JSON.stringify({ path: "small.txt" }) }],
+					usage: { promptTokens: 1_400, completionTokens: 5, totalTokens: 1_405 },
+				}))
+				.mockImplementationOnce(async () => ({ content: "SUMMARY", thinking: "", finishReason: "stop" }))
+				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+			await runAgentLoop([...seedHistory(6), { role: "user", content: "read the small file" }], {
+				config: tinyBudgetConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "test",
+				onEvent: (e) => events.push(e),
+			});
+
+			expect(events.filter((e) => e.type === "compaction")).toHaveLength(1);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
 	it("malformed tool-call JSON alone does not trigger compaction (not a context-size signal)", async () => {
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)
@@ -5043,6 +5141,7 @@ describe("runAgentLoop — compaction", () => {
 				finishReason: "stop",
 				// Deliberately invalid JSON arguments.
 				toolCalls: [{ id: "t1", name: "read", arguments: "{not valid json" }],
+				usage: { promptTokens: 300, completionTokens: 5, totalTokens: 305 },
 			}))
 			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
 
@@ -5237,8 +5336,9 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 		expect(capturedTools.map((tool) => tool.function.name)).not.toContain("skill");
 	});
 
-	it("a todo_write call updates state, fires todos_updated, and steers the next turn's prompt", async () => {
+	it("a todo_write call updates state, fires todos_updated, and steers the next request from its tail", async () => {
 		const systemPrompts: string[] = [];
+		const lastMessages: string[] = [];
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)
 			.mockImplementationOnce(async (_c, _m, messages) => {
@@ -5263,10 +5363,11 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 			})
 			.mockImplementationOnce(async (_c, _m, messages) => {
 				systemPrompts.push(contentToText((messages as Message[])[0]!.content));
+				lastMessages.push(contentToText((messages as Message[]).at(-1)!.content));
 				return { content: "done", thinking: "", finishReason: "stop" };
 			});
 
-		await runAgentLoop([{ role: "user", content: "do the multi-step thing" }], {
+		const result = await runAgentLoop([{ role: "user", content: "do the multi-step thing" }], {
 			config: testConfig,
 			model: "test-model",
 			cwd: "/tmp",
@@ -5278,12 +5379,15 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 		expect(updated).toBeDefined();
 		if (updated?.type === "todos_updated") expect(updated.todos).toHaveLength(2);
 
-		// First request has no todos yet — nothing injected.
-		expect(systemPrompts[0]).toBe("BASE_PROMPT");
-		// Second request sees the list the tool call just wrote.
-		expect(systemPrompts[1]).toContain("Step one");
-		expect(systemPrompts[1]).toContain("Step two");
-		expect(systemPrompts[1]).toContain("[~] (high) Step one");
+		// The system prompt never changes with the list, so the provider's prefix
+		// cache over the whole history survives every todo_write.
+		expect(systemPrompts).toEqual(["BASE_PROMPT", "BASE_PROMPT"]);
+		// The next request sees the list the tool call just wrote, as its tail.
+		expect(lastMessages[0]).toContain("<system-reminder>");
+		expect(lastMessages[0]).toContain("Step two");
+		expect(lastMessages[0]).toContain("[~] (high) Step one");
+		// Request-only: the tail is never saved into the history.
+		expect(result.some((m) => contentToText(m.content).includes("[~] (high) Step one"))).toBe(false);
 	});
 
 	it("keeps the plan link when a rewritten todo shortened the paths in its text", async () => {

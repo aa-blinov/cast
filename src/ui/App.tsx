@@ -309,22 +309,24 @@ export function App(props: AppProps): JSX.Element {
 	// Called by the loop at the start of each outer iteration.
 	const rebuildSystemPrompt = useCallback(
 		({ userText, contextFiles: ctxFiles }: { userText: string; contextFiles: string[] }) => {
-			// 1. Latch auto-attach rules whose globs match files now in context.
-			const newAuto = matchAutoRules(directoryRules, ctxFiles);
-			const sticky = unionStickyRules(activeAutoRules, newAuto);
+			// 1. Latch auto-attach rules whose globs match files now in context,
+			//    and @-mentioned ones. A mention latches too: dropped on the next
+			//    turn, the rule vanished from under a conversation built on it
+			//    and the changed system prompt re-billed the whole history.
+			const newRules = [
+				...matchAutoRules(directoryRules, ctxFiles),
+				...selectMentionedRules(directoryRules, userText),
+			];
+			const sticky = unionStickyRules(activeAutoRules, newRules);
 			if (sticky.length !== activeAutoRules.length) {
 				setActiveAutoRules(sticky);
 			}
 
-			// 2. Select @-mentioned rules from the current user message.
-			const mentioned = selectMentionedRules(directoryRules, userText);
+			// 2. One block: always-apply + sticky rules (deduped). Must include
+			//    always-apply rules unconditionally — see formatRulesForTurn.
+			const rulesBlock = formatRulesForTurn(sticky, []);
 
-			// 3. One block: always-apply + sticky auto + mentioned (deduped).
-			//    Must include always-apply rules unconditionally — see
-			//    formatRulesForTurn.
-			const rulesBlock = formatRulesForTurn(sticky, mentioned);
-
-			// 4. Nested AGENTS.md/CLAUDE.md for files touched this session — a
+			// 3. Nested AGENTS.md/CLAUDE.md for files touched this session — a
 			//    subdirectory instruction file attaches once a file from its
 			//    subtree enters context (per-file resolve model).
 			//    Trust-gated like the cwd context file.
@@ -332,7 +334,7 @@ export function App(props: AppProps): JSX.Element {
 				? formatContextFilesForPrompt(resolveNestedContextFiles(cwd, ctxFiles))
 				: "";
 
-			// 5. Build the full system prompt.
+			// 4. Build the full system prompt.
 			const activePersona = currentPersonaRef.current;
 			return buildSystemPrompt(
 				activePersona,
@@ -344,7 +346,12 @@ export function App(props: AppProps): JSX.Element {
 				formatSkillsForPrompt(skills, activePersona.skills, ctxFiles),
 				formatMcpForPrompt(mcpResult, activePersona.mcp),
 				cwd,
-				{ model: activeModel, reasoningLevel: config.reasoningLevel, mode: planMode ? "plan" : "build" },
+				{
+					model: activeModel,
+					reasoningLevel: config.reasoningLevel,
+					reasoningMeta,
+					mode: planMode ? "plan" : "build",
+				},
 			);
 		},
 		[
@@ -358,6 +365,7 @@ export function App(props: AppProps): JSX.Element {
 			projectTrusted,
 			activeModel,
 			config.reasoningLevel,
+			reasoningMeta,
 			planMode,
 		],
 	);
@@ -382,7 +390,12 @@ export function App(props: AppProps): JSX.Element {
 			nextPersona.skills !== undefined ? formatSkillsForPrompt(skills, nextPersona.skills) : skillsPromptSuffix,
 			formatMcpForPrompt(mcpResult, nextPersona.mcp),
 			cwd,
-			{ model: activeModel, reasoningLevel: config.reasoningLevel, mode: planMode ? "plan" : "build" },
+			{
+				model: activeModel,
+				reasoningLevel: config.reasoningLevel,
+				reasoningMeta,
+				mode: planMode ? "plan" : "build",
+			},
 		);
 		setSystemPrompt(nextSystemPrompt);
 		return { persona: nextPersona, personas: nextPersonas, systemPrompt: nextSystemPrompt };
@@ -397,6 +410,7 @@ export function App(props: AppProps): JSX.Element {
 		mcpResult,
 		activeModel,
 		config.reasoningLevel,
+		reasoningMeta,
 		planMode,
 	]);
 

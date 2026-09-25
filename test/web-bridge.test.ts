@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
+import { getModelsCache, setModelsCache } from "../src/core/readline.ts";
 import type { Rule } from "../src/core/rules.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { createSession, getFullHistory, loadSession, saveSession } from "../src/core/session.ts";
@@ -1014,6 +1015,21 @@ describe("web bridge", () => {
 
 		const runConfig = runAgentLoop.mock.calls[0]![1] as { config: AppConfig };
 		expect(runConfig.config.apiKey).toBe("second-key");
+	});
+
+	it("compacts against the session model's context window, not the one the daemon started with", async () => {
+		const bridge = createServerBridge(makeResult({ config: { ...testConfig, contextWindow: 1_000_000 } }));
+		const ws = bridge.createSession();
+		const previous = getModelsCache();
+		setModelsCache([{ id: ws.session.model, contextWindow: 64_000 }]);
+		try {
+			await bridge.submit(ws.id, "hello");
+		} finally {
+			setModelsCache(previous);
+		}
+
+		const runConfig = runAgentLoop.mock.calls[0]![1] as { config: AppConfig };
+		expect(runConfig.config.contextWindow).toBe(64_000);
 	});
 
 	it("switching provider in one session does not leak into another already-open session's next run", async () => {

@@ -17,7 +17,7 @@ vi.mock("../src/server/public/streaming-blocks.js", () => ({ BlockView: () => nu
 vi.mock("../src/server/public/tool-card.js", () => ({ ToolCard: () => null }));
 vi.mock("../src/server/public/turn-meta.js", () => ({ TurnMetaLine: () => null }));
 
-import { Message } from "../src/server/public/message.js";
+import { Message, parseSkillInvocation } from "../src/server/public/message.js";
 
 const renderMarkdown = (s: string) => s;
 const escapeHtml = (s: string) => s;
@@ -44,5 +44,28 @@ describe("Message", () => {
 	it("re-renders when a prop is dropped", () => {
 		const { showReasoning: _, ...rest } = base;
 		expect(withProps(base).shouldComponentUpdate(rest)).toBe(true);
+	});
+});
+
+describe("parseSkillInvocation", () => {
+	const block = (extra = "") =>
+		`<skill name="web&amp;app" location="/home/u/.agents/skills/webapp/SKILL.md" allowed-tools="Bash">\nReferences are relative to /x.\n\n# Body\nSteps.\n</skill>${extra}`;
+
+	it("reads the skill a /command expanded into, with its arguments", () => {
+		expect(parseSkillInvocation(block("\n\nUser: check the login page"))).toEqual({
+			name: "web&app",
+			location: "/home/u/.agents/skills/webapp/SKILL.md",
+			args: "check the login page",
+		});
+	});
+
+	it("handles an invocation without arguments", () => {
+		expect(parseSkillInvocation(block())?.args).toBe("");
+	});
+
+	it("leaves ordinary messages alone", () => {
+		expect(parseSkillInvocation("please use <skill name=x> tags")).toBeNull();
+		expect(parseSkillInvocation('<skill name="x" location="y">unterminated')).toBeNull();
+		expect(parseSkillInvocation(undefined)).toBeNull();
 	});
 });

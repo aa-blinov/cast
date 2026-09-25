@@ -11,7 +11,7 @@ Skills are reusable instruction files the model can read on demand.
 
 `--no-skills` skips project, agents, global, and builtin discovery.
 
-`npx skills add owner/repo --skill name -a universal` → `.agents/skills/`; invoke with `/skill:name`.
+When the user asks for a skill, install it with the `skill_install` tool (`source`: owner/repo, a github.com URL, or a pasted `npx skills add …` line; `skill`: the name, for a repo with several). It installs globally, so every project sees it, and the skill tool can load it in the same turn; it also appears as `/<name>` in the web composer right away. Prefer it over running `npx skills add` through bash, which can land in a project `.agents/skills/` that only loads in trusted projects.
 
 **File format** — a directory with `SKILL.md`:
 
@@ -68,6 +68,6 @@ EOF
 `/skills-sh install <owner/repo> --skill <name>`, `/skills-sh uninstall <name>` —
 same in the TUI and the web UI (Settings → Skills.sh). Installs go to the
 universal scope (`~/.agents/skills`) and the catalog refreshes in the same
-session. A pasted `npx skills add …` line or a github.com URL is accepted; an
+session. The agent's `skill_install` tool does the same install. A pasted `npx skills add …` line or a github.com URL is accepted; an
 `-a <agent>` flag is dropped because that form installs only into one agent's
 directory, which cast does not scan.

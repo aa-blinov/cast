@@ -152,4 +152,33 @@ describe("web message submission", () => {
 		expect(vi.mocked(api)).toHaveBeenCalledTimes(1);
 		expect(vi.mocked(api)).not.toHaveBeenCalledWith("POST", "/api/sessions/session-1/chat", expect.anything());
 	});
+
+	it("treats a skill whose name starts like a built-in command as a skill", async () => {
+		// "/web-artifacts-builder" used to take the /web branch and throw on its
+		// string result, and "/queue-reset" the /queue one.
+		const addNotice = vi.fn();
+		const setPendingQueue = vi.fn();
+		const context = {
+			planRefineArmedRef: { current: false },
+			session: { id: "session-1", messages: [] },
+			draftVersionRef: { current: 0 },
+			activeId: "session-1",
+			setSession: vi.fn(),
+			pendingOutgoingRef: { current: new Map() },
+			waitForSessionStream: vi.fn().mockResolvedValue(true),
+			setRunning: vi.fn(),
+			showToast: vi.fn(),
+			addNotice,
+			setPendingQueue,
+			setPendingSteers: vi.fn(),
+		};
+
+		vi.mocked(api).mockResolvedValueOnce({ ok: true, result: "Invoked skill: web-artifacts-builder" });
+		await submitMessage("/web-artifacts-builder build me a page", undefined, undefined, context);
+		expect(addNotice).toHaveBeenLastCalledWith("Invoked skill: web-artifacts-builder");
+
+		vi.mocked(api).mockResolvedValueOnce({ ok: true, result: "Queue cleared" });
+		await submitMessage("/queue-reset", undefined, undefined, context);
+		expect(setPendingQueue).toHaveBeenLastCalledWith([]);
+	});
 });

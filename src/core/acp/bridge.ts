@@ -7,7 +7,8 @@
 
 import type * as acpSdk from "@agentclientprotocol/sdk";
 import { SLASH_COMMANDS } from "../../ui/commands.ts";
-import { formatContextFilesForPrompt, loadProjectContextFiles } from "../context-files.ts";
+import { formatContextFilesForPrompt, loadProjectContextFiles, resolveNestedContextFiles } from "../context-files.ts";
+import { initialAnnouncedLocalDate } from "../date-rollover-reminder.ts";
 import type { AgentEvent } from "../loop.ts";
 import { runAgentLoop } from "../loop.ts";
 import {
@@ -18,7 +19,8 @@ import {
 	type McpSetupResult,
 } from "../mcp.ts";
 import { createPlanState, type PlanState, resolvePlanQuestion, resolvePlanTransition } from "../plan.ts";
-import { buildSystemPrompt, resolvePromptContextForCwd } from "../project.ts";
+import { buildSystemPrompt, resolvePromptContextForCwd, resolveRulesForCwd } from "../project.ts";
+import { formatRulesForTurn, matchAutoRules, type Rule, selectMentionedRules, unionStickyRules } from "../rules.ts";
 import type { AgentRunner } from "../runner.ts";
 import { createAgentRunner } from "../runner.ts";
 import type { SessionState } from "../session.ts";
@@ -61,6 +63,10 @@ export interface AcpAdapterSession {
 	 * prompts within a session, so we only need to ship it once —
 	 * emitting on every prompt would burn a frame every turn. */
 	commandsEmitted: boolean;
+	/** Files that entered context this session, grown in place by the loop,
+	 * and the rules they latched. Kept across prompts like the web session's. */
+	contextFiles?: string[];
+	activeAutoRules?: Rule[];
 }
 
 // ---------------------------------------------------------------------------
@@ -540,6 +546,41 @@ function rebuildStartupPromptForCwd(startup: StartupResult, cwd: string): string
 	});
 }
 
+/** Per-request prompt rebuild, the web bridge's counterpart: rules that latch
+ * on context files or @-mentions and nested AGENTS.md only reach the model
+ * through it. Everything that does not change mid-prompt is resolved once. */
+function turnPromptBuilder(
+	session: AcpAdapterSession,
+	cwd: string,
+): (context: { userText: string; contextFiles: string[] }) => string {
+	const { startup, state } = session;
+	const trusted = getProjectTrust(loadSettings(), cwd) ?? false;
+	const rules = resolveRulesForCwd(cwd, trusted);
+	const { skillsPromptSuffix } = resolvePromptContextForCwd(cwd, trusted);
+	const context = startup.persona.agentsMd ? formatContextFilesForPrompt(loadProjectContextFiles(cwd, trusted)) : "";
+	const mcpSuffix = formatMcpForPrompt(mergedMcp(session));
+	return ({ userText, contextFiles }) => {
+		session.activeAutoRules = unionStickyRules(session.activeAutoRules ?? [], [
+			...matchAutoRules(rules.directoryRules, contextFiles),
+			...selectMentionedRules(rules.directoryRules, userText),
+		]);
+		const nested =
+			trusted && startup.persona.agentsMd
+				? formatContextFilesForPrompt(resolveNestedContextFiles(cwd, contextFiles))
+				: "";
+		return buildSystemPrompt(
+			startup.persona,
+			context + nested,
+			formatRulesForTurn(session.activeAutoRules, []),
+			rules.lazySuffix,
+			skillsPromptSuffix,
+			mcpSuffix,
+			cwd,
+			{ model: state.model, reasoningLevel: startup.config.reasoningLevel, reasoningMeta: startup.reasoningMeta },
+		);
+	};
+}
+
 // runAgentLoop wrapper
 // ---------------------------------------------------------------------------
 
@@ -565,12 +606,25 @@ async function runPromptInner(
 	saveSession(state);
 	const ac = new AbortController();
 	const lease = runner.startRun(ac);
+	const runCwd = state.cwd ?? startup.cwd;
+	session.contextFiles ??= [];
+	if (!state.lastAnnouncedLocalDate) state.lastAnnouncedLocalDate = initialAnnouncedLocalDate(state);
 	try {
 		const finalMessages = await runAgentLoop(state.messages, {
 			config: startup.config,
 			model: state.model,
-			cwd: state.cwd ?? startup.cwd,
+			cwd: runCwd,
 			systemPrompt: startup.systemPrompt,
+			rebuildSystemPrompt: turnPromptBuilder(session, runCwd),
+			contextFiles: session.contextFiles,
+			announcedLocalDate: {
+				get value() {
+					return state.lastAnnouncedLocalDate!;
+				},
+				set value(next: string) {
+					state.lastAnnouncedLocalDate = next;
+				},
+			},
 			memory: { sessionId: state.id },
 			automaticMemoryMaintenance,
 			automaticMemoryMessages,

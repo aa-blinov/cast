@@ -203,6 +203,8 @@ export function addUsage(
 // Token estimation
 // ============================================================================
 
+const IMAGE_TOKENS_ESTIMATE = 1_000;
+
 export function estimateTokens(messages: Message[]): number {
 	// Rough estimate: ~3.8 characters per token. Walk the structure directly
 	// to avoid materializing a huge JSON string via JSON.stringify.
@@ -215,6 +217,10 @@ export function estimateTokens(messages: Message[]): number {
 			for (const part of m.content) {
 				if (typeof part === "object" && part !== null && "text" in part && typeof part.text === "string") {
 					chars += part.text.length;
+				} else if (typeof part === "object" && part !== null && "type" in part && part.type === "image_url") {
+					// Providers bill an image at roughly a thousand tokens; counted as
+					// 50 characters, a screenshot-heavy turn never looked near the cap.
+					chars += IMAGE_TOKENS_ESTIMATE * 3.8;
 				} else {
 					chars += 50; // structured content estimate
 				}
@@ -447,7 +453,8 @@ function extractPreviousCompaction(systemMessages: Message[]): {
 	return { personaMessages, previousSummary };
 }
 
-const TOOL_RESULT_MAX_CHARS = 500;
+const TOOL_RESULT_MAX_CHARS = 2_000;
+const MESSAGE_MAX_CHARS = 8_000;
 const TAIL_MIN_TOKENS = 10_000;
 const TAIL_MAX_TOKENS = 20_000;
 const TAIL_MIN_TEXT_BLOCK_MESSAGES = 5;
@@ -521,14 +528,26 @@ function formatMessageForSummary(m: Message): string {
 		// that never happened. The end of a tool result is where the payload
 		// usually is (a compiler's error list, a test summary, the tail of a
 		// file), so dropping it was the worst half to lose.
-		const text = String(m.content);
-		if (text.length <= TOOL_RESULT_MAX_CHARS) return `tool (${m.tool_call_id}): ${text}`;
-		const half = Math.floor(TOOL_RESULT_MAX_CHARS / 2);
-		const cut = text.length - half * 2;
-		return `tool (${m.tool_call_id}): ${text.slice(0, half)}\n[…${cut} characters cut from the middle of this result for the summary — do not read the gap as absence…]\n${text.slice(-half)}`;
+		return `tool (${m.tool_call_id}): ${clipMiddle(String(m.content), TOOL_RESULT_MAX_CHARS)}`;
 	}
-	if (typeof m.content === "string") return `${m.role}: ${m.content.slice(0, 500)}`;
-	return `${m.role}: [structured content]`;
+	// The person's own words carry the task, its constraints and corrections,
+	// so they get far more room than a tool dump. Cut at 500 like tool output,
+	// a long instruction reached the summarizer as its first paragraph.
+	if (typeof m.content === "string") return `${m.role}: ${clipMiddle(m.content, MESSAGE_MAX_CHARS)}`;
+	if (Array.isArray(m.content)) {
+		const text = (m.content as Array<{ type?: string; text?: string }>)
+			.map((p) => (p.type === "text" ? (p.text ?? "") : `[${p.type ?? "part"}]`))
+			.join(" ");
+		return `${m.role}: ${clipMiddle(text, MESSAGE_MAX_CHARS)}`;
+	}
+	return `${m.role}: (no content)`;
+}
+
+function clipMiddle(text: string, max: number): string {
+	if (text.length <= max) return text;
+	const half = Math.floor(max / 2);
+	const cut = text.length - half * 2;
+	return `${text.slice(0, half)}\n[…${cut} characters cut from the middle for the summary — do not read the gap as absence…]\n${text.slice(-half)}`;
 }
 
 /**
@@ -543,7 +562,7 @@ function formatMessageForSummary(m: Message): string {
  */
 /** Ceiling on a compaction summary, in tokens. Generous next to the 10k–20k
  * tail it sits beside, and far below anything that could undo the compaction. */
-const MAX_SUMMARY_TOKENS = 8_000;
+export const MAX_SUMMARY_TOKENS = 8_000;
 const SUMMARY_CHARS_PER_TOKEN = 3.8;
 
 function clampSummary(summary: string): string {
@@ -1430,11 +1449,27 @@ export function loadSessionByShareToken(token: string): SessionState | null {
 function loadSessionByRow(row: SessionRow | undefined): SessionState | null {
 	if (!row) return null;
 	const db = getDb();
-	const msgRows = db
+	const storedRows = db
 		.prepare(
-			"SELECT seq, content_json, reasoning, turn_meta FROM messages WHERE session_id = ? AND in_context = 1 ORDER BY seq",
+			"SELECT seq, role, content_json, reasoning, turn_meta FROM messages WHERE session_id = ? AND in_context = 1 ORDER BY seq",
 		)
-		.all(row.id) as Array<{ seq: number; content_json: string; reasoning: string | null; turn_meta: string | null }>;
+		.all(row.id) as Array<{
+		seq: number;
+		role: string;
+		content_json: string;
+		reasoning: string | null;
+		turn_meta: string | null;
+	}>;
+	// The persona prompt is rebuilt every turn, and saveSession writes a changed
+	// one as a new row at the next seq, so by seq it lands after the turns it
+	// came before. Loaded in that order it reached the model mid-conversation,
+	// next to the fresh copy the loop puts at the head: two full system prompts
+	// per request, one of them stale. Its place is the head. Only the newest
+	// counts; saveSession keeps one active, and any older straggler is dropped.
+	const isPromptRow = (r: (typeof storedRows)[number]) =>
+		r.role === "system" && !r.content_json.includes(COMPACTION_MARKER_PREFIX);
+	const promptRow = [...storedRows].reverse().find(isPromptRow);
+	const msgRows = promptRow ? [promptRow, ...storedRows.filter((r) => !isPromptRow(r))] : storedRows;
 
 	const messages: Message[] = [];
 	const reasoning: Record<number, string> = {};

@@ -149,7 +149,7 @@ Reference a rule in your message by typing `@rule-name`:
 @api-style review this endpoint
 ```
 
-This activates the rule for that turn, regardless of its apply mode. Matching is by the bare `name` (case-insensitive). Code fences are skipped — `@name` inside a code block doesn't trigger.
+This activates the rule for the rest of the session, regardless of its apply mode, the same way an auto rule stays attached once its glob matched. Matching is by the bare `name` (case-insensitive). Code fences are skipped — `@name` inside a code block doesn't trigger.
 
 ## Commands
 

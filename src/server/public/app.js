@@ -1502,6 +1502,7 @@ function App() {
 					api,
 					isCurrent,
 					mergeHistoryPage,
+					refreshCommands: () => refreshCommands(streamSessionId),
 				});
 			} catch (error) {
 				console.error("[cast] SSE event handling failed", error);
