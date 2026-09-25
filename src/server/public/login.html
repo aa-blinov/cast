@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in · Cast</title>
 <script>
 try {
@@ -14,7 +14,9 @@ try {
 		root.setProperty("--gradient", `linear-gradient(135deg, ${colors.gradient.from}, ${colors.gradient.to})`);
 		root.setProperty("--gradient-from", colors.gradient.from);
 		root.setProperty("--gradient-to", colors.gradient.to);
-		root.setProperty("--text-muted", colors.muted);
+		root.setProperty("--text-muted", colors.mutedText ?? colors.muted);
+		if (colors.accentFg) root.setProperty("--accent-fg", colors.accentFg);
+		if (colors.dimText) root.setProperty("--text-dim", colors.dimText);
 		if (colors.bg) root.setProperty("--bg", colors.bg);
 		if (colors.bgSurface) root.setProperty("--bg-surface", colors.bgSurface);
 		if (colors.bgRaised) root.setProperty("--bg-raised", colors.bgRaised);

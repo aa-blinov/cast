@@ -10,7 +10,7 @@ function SettingsReasoning({ showReasoning, onToggle }) {
 			<button
 				type="button"
 				class="settings-toggle"
-				role="switch"
+				role="switch" aria-label="Show reasoning blocks"
 				aria-checked=${showReasoning ? "true" : "false"}
 				onClick=${onToggle}
 			><span class="settings-toggle-thumb" />${showReasoning ? "Enabled" : "Disabled"}</button>
@@ -19,7 +19,7 @@ function SettingsReasoning({ showReasoning, onToggle }) {
 }
 
 function SettingsTheme({ themes, currentThemeId, onPick }) {
-	return html`<div class="settings-theme-grid">${[...(themes || [])].sort((a, b) => a.label.localeCompare(b.label)).map((theme) => html`<button key=${theme.id} class="settings-theme-swatch${theme.id === currentThemeId ? " active" : ""}" style=${{ "--swatch-accent": theme.colors?.accent }} onClick=${() => onPick(theme.id)} title=${theme.description}><span class="settings-theme-dot" /><span class="settings-theme-label">${theme.label}</span></button>`)}</div>`;
+	return html`<div class="settings-theme-grid">${[...(themes || [])].sort((a, b) => a.label.localeCompare(b.label)).map((theme) => html`<button key=${theme.id} aria-pressed=${Boolean(theme.id === currentThemeId)} class="settings-theme-swatch${theme.id === currentThemeId ? " active" : ""}" style=${{ "--swatch-accent": theme.colors?.accent }} onClick=${() => onPick(theme.id)} title=${theme.description}><span class="settings-theme-dot" /><span class="settings-theme-label">${theme.label}</span></button>`)}</div>`;
 }
 
 function SettingsFont({ options, scales, currentFontId, currentFontScale, onPickFont, onPickScale }) {
@@ -28,15 +28,15 @@ function SettingsFont({ options, scales, currentFontId, currentFontScale, onPick
 			.filter((font) => font.mono === mono)
 			.map(
 				(font) =>
-					html`<button key=${font.id} class="settings-font-swatch${font.id === currentFontId ? " active" : ""}" style=${{ fontFamily: font.family }} onClick=${() => onPickFont(font.id)}>${font.label}</button>`,
+					html`<button key=${font.id} aria-pressed=${Boolean(font.id === currentFontId)} class="settings-font-swatch${font.id === currentFontId ? " active" : ""}" style=${{ fontFamily: font.family }} onClick=${() => onPickFont(font.id)}>${font.label}</button>`,
 			);
-	return html`<div class="settings-font-settings"><div class="settings-row-label">Scale</div><div class="settings-scale-row">${scales.map((scale) => html`<button key=${scale} class="settings-scale-btn${scale === currentFontScale ? " active" : ""}" onClick=${() => onPickScale(scale)}>${Math.round(scale * 100)}%</button>`)}</div><div class="settings-row-label">Monospace</div><div class="settings-font-grid">${renderFonts(true)}</div><div class="settings-row-label">Sans-serif</div><div class="settings-font-grid">${renderFonts(false)}</div></div>`;
+	return html`<div class="settings-font-settings"><div class="settings-row-label">Scale</div><div class="settings-scale-row">${scales.map((scale) => html`<button key=${scale} aria-pressed=${Boolean(scale === currentFontScale)} class="settings-scale-btn${scale === currentFontScale ? " active" : ""}" onClick=${() => onPickScale(scale)}>${Math.round(scale * 100)}%</button>`)}</div><div class="settings-row-label">Monospace</div><div class="settings-font-grid">${renderFonts(true)}</div><div class="settings-row-label">Sans-serif</div><div class="settings-font-grid">${renderFonts(false)}</div></div>`;
 }
 
 function SettingsCustomCss({ customCss, onSave }) {
 	return html`<div class="settings-rows"><div class="settings-section-title">Custom CSS</div>
 		<p class="settings-hint">Injected as <code>${"<style id=\"cast-custom-css\">"}</code> — survives reload, syncs across tabs via storage event.</p>
-		<textarea class="settings-textarea" rows="4" placeholder="/* e.g. .message { border-left: 2px solid var(--cyan) } */" value=${customCss} onInput=${(e) => onSave(e.target.value)} style="font-family:var(--font-mono);font-size:.75rem"></textarea>
+		<textarea class="settings-textarea" rows="4" aria-label="Custom CSS" placeholder="/* e.g. .message { border-left: 2px solid var(--cyan) } */" value=${customCss} onInput=${(e) => onSave(e.target.value)} style="font-family:var(--font-mono);font-size:var(--fs-ui)"></textarea>
 	</div>`;
 }
 

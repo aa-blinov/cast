@@ -344,12 +344,12 @@ export function SettingsModal({
 					<div class="settings-tabs">
 						${SETTINGS_TABS.map(
 							(t) => html`
-							<button key=${t.id} class="settings-tab${tab === t.id ? " active" : ""}" onClick=${() => setTab(t.id)}>${t.label}</button>
+							<button key=${t.id} aria-pressed=${Boolean(tab === t.id)} class="settings-tab${tab === t.id ? " active" : ""}" onClick=${() => setTab(t.id)}>${t.label}</button>
 						`,
 						)}
 					</div>
 					<div class="settings-pane">
-						${errors[tab] && html`<div class="settings-error">${errors[tab]}</div>`}
+						${errors[tab] && html`<div class="settings-error" role="alert">${errors[tab]}</div>`}
 						${
 							!hasData
 								? html`<div class="settings-loading">Loading</div>`

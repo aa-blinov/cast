@@ -3,7 +3,7 @@ import { h } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
-import { useModalFocusTrap } from "./modal-focus.js";
+import { pressable, useModalFocusTrap } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
@@ -86,10 +86,10 @@ export function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 				<div class="modal-header"><span>Choose working directory</span><button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button></div>
 				<div class="dir-path" title=${path}>${path}</div>
 				<div class="dir-list">
-					${parent !== null && html`<div class="dir-item dir-item-up" onClick=${() => load(parent)}>.. (parent directory)</div>`}
+					${parent !== null && html`<div class="dir-item dir-item-up" ...${pressable(() => load(parent))}>.. (parent directory)</div>`}
 					${entries.map(
 						(entry) =>
-							html`<div key=${entry.path} class="dir-item dir-item-row"><span class="dir-item-name" onClick=${() => load(entry.path)}>${entry.name}</span><button class="modal-btn icon-btn dir-item-delete" title="Delete folder" disabled=${busy} onClick=${(
+							html`<div key=${entry.path} class="dir-item dir-item-row"><span class="dir-item-name" ...${pressable(() => load(entry.path))}>${entry.name}</span><button class="modal-btn icon-btn dir-item-delete" title="Delete folder" disabled=${busy} onClick=${(
 								event,
 							) => {
 								event.stopPropagation();
@@ -97,15 +97,18 @@ export function DirectoryBrowser({ initialPath, onPick, onClose, confirm }) {
 							}}><${icons.trash} /></button></div>`,
 					)}
 					${!loading && entries.length === 0 && !error && html`<div class="dir-empty">No subdirectories</div>`}
-					${error && html`<div class="dir-error">${error}</div>`}
+					${error && html`<div class="dir-error" role="alert">${error}</div>`}
 				</div>
 				${
 					creating
-						? html`<div class="dir-create-row"><input ref=${newNameRef} type="text" placeholder="New folder name" value=${newName} disabled=${busy} onInput=${(e) => setNewName(e.target.value)} onKeyDown=${(
+						? html`<div class="dir-create-row"><input ref=${newNameRef} type="text" aria-label="New folder name" placeholder="New folder name" value=${newName} disabled=${busy} onInput=${(e) => setNewName(e.target.value)} onKeyDown=${(
 								e,
 							) => {
 								if (e.key === "Enter") submitCreate();
-								if (e.key === "Escape") setCreating(false);
+								if (e.key === "Escape") {
+									e.preventDefault();
+									setCreating(false);
+								}
 							}} /><button class="modal-btn" disabled=${busy} onClick=${() => setCreating(false)}>Cancel</button><button class="modal-btn modal-btn-primary" disabled=${busy || !newName.trim()} onClick=${submitCreate}>Create</button></div>`
 						: html`<button class="modal-btn dir-new-folder" disabled=${busy} onClick=${openCreate}>+ New folder</button>`
 				}

@@ -1,8 +1,9 @@
 import htm from "htm";
-import { h } from "preact";
+import { Component, h } from "preact";
 import { useState } from "preact/hooks";
 import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
+import { pressable } from "./modal-focus.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
 import { BlockView } from "./streaming-blocks.js";
 import { ToolCard } from "./tool-card.js";
@@ -10,7 +11,7 @@ import { TurnMetaLine } from "./turn-meta.js";
 
 const html = htm.bind(h);
 
-export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = false }) {
+function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false }) {
 	const role = msg.role || "assistant";
 	// Only used by the legacy floating image-result branch below (pre
 	// castToolCallId sessions) — declared unconditionally so hook order stays
@@ -122,7 +123,7 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = false
 			${content && html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`}
 			<div class="message-content message-images">
 				${msg.images.map(
-					(src, i) => html`<img key=${i} src=${src} class="message-image" loading="lazy" alt="Attached image ${i + 1}" onClick=${() => setPreviewSrc(src)} />`,
+					(src, i) => html`<img key=${i} src=${src} class="message-image" loading="lazy" alt="Attached image ${i + 1}" ...${pressable(() => setPreviewSrc(src))} />`,
 				)}
 			</div>
 			${
@@ -158,4 +159,21 @@ export function Message({ msg, renderMarkdown, escapeHtml, showReasoning = false
 		}
 	</div>
 `;
+}
+
+// Settled messages are immutable (a changed turn arrives as a new object), so
+// skipping on equal props is safe, and it keeps an unrelated App state change
+// (a modal, a panel drag) from reconciling and re-rendering markdown for the
+// whole transcript. preact/compat's memo isn't vendored; this is the same thing.
+export class Message extends Component {
+	shouldComponentUpdate(next) {
+		const prev = this.props;
+		for (const key in next) if (next[key] !== prev[key]) return true;
+		for (const key in prev) if (!(key in next)) return true;
+		return false;
+	}
+
+	render(props) {
+		return h(MessageView, props);
+	}
 }

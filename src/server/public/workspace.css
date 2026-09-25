@@ -13,7 +13,9 @@
 	width: 100%;
 	transition: border-color .16s ease;
 }
-.app:not(.with-diff) .diff-panel { border-left-color: transparent; }
+/* Zero width, not just transparent: in a 0px track the 1px border itself
+ * overflowed the page, and touch browsers widen the layout viewport to fit. */
+.app:not(.with-diff) .diff-panel { border-left-width: 0; }
 .diff-resize-handle {
 	position: absolute;
 	top: 0; bottom: 0; left: -4px;
@@ -57,7 +59,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	border: none;
 	color: var(--text-muted);
 	font-family: var(--font);
-	font-size: .72rem;
+	font-size: var(--fs-micro);
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: .03em;
@@ -95,15 +97,15 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 }
 .memory-search:focus { border-color: var(--cyan); }
 .memory-search::placeholder { color: var(--text-muted); }
-.memory-search-status { position: absolute; right: 9px; color: var(--text-muted); font-size: .68rem; }
-.memory-summary { margin-top: 7px; color: var(--text-muted); font-size: .68rem; }
+.memory-search-status { position: absolute; right: 9px; color: var(--text-muted); font-size: var(--fs-micro); }
+.memory-summary { margin-top: 7px; color: var(--text-muted); font-size: var(--fs-micro); }
 .memory-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 10px 16px; }
 .memory-card {
 	padding: 11px 10px 10px;
 	border: 1px solid var(--border);
 	border-radius: var(--radius-sm);
 	background: var(--bg-surface);
-	box-shadow: 0 1px 0 rgba(255,255,255,.02);
+	box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 2%, transparent);
 }
 .memory-card + .memory-card { margin-top: 8px; }
 .memory-card-topline { display: flex; align-items: center; gap: 8px; }
@@ -113,8 +115,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	color: var(--cyan);
-	font-size: .68rem;
-	font-weight: 700;
+	font-size: var(--fs-micro);
+	font-weight: 600;
 	letter-spacing: .04em;
 	text-transform: uppercase;
 }
@@ -123,26 +125,26 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	padding: 2px 5px;
 	border: 1px solid var(--border);
 	border-radius: 4px;
-	font-size: .58rem;
-	font-weight: 800;
+	font-size: var(--fs-micro);
+	font-weight: 600;
 	letter-spacing: .06em;
 }
 .memory-badge-critical { border-color: color-mix(in srgb, var(--rose) 40%, var(--border)); color: var(--rose); background: var(--danger-subtle); }
 .memory-badge-high { border-color: color-mix(in srgb, var(--green) 40%, var(--border)); color: var(--green); background: var(--success-subtle); }
 .memory-badge-medium { border-color: color-mix(in srgb, var(--amber) 40%, var(--border)); color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, transparent); }
 .memory-badge-low { color: var(--text-muted); background: var(--bg-hover); }
-.memory-content { margin: 8px 0 9px; color: var(--text); font-size: .8rem; line-height: 1.45; overflow-wrap: anywhere; }
-.memory-meta { display: flex; gap: 9px; color: var(--text-muted); font-size: .66rem; }
+.memory-content { margin: 8px 0 9px; color: var(--text); font-size: var(--fs-ui); line-height: 1.45; overflow-wrap: anywhere; }
+.memory-meta { display: flex; gap: 9px; color: var(--text-muted); font-size: var(--fs-micro); }
 .memory-meta span + span::before { content: '·'; margin-right: 9px; color: var(--border-active); }
 .memory-checkpoint, .memory-artifacts { margin: 9px 10px 0; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-surface); }
-.memory-section-label { color: var(--text-muted); font-size: .64rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-.memory-checkpoint-row { display: grid; grid-template-columns: 42px 1fr; gap: 8px; margin-top: 7px; font-size: .75rem; line-height: 1.35; }
+.memory-section-label { color: var(--text-muted); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.memory-checkpoint-row { display: grid; grid-template-columns: 42px 1fr; gap: 8px; margin-top: 7px; font-size: var(--fs-ui); line-height: 1.35; }
 .memory-checkpoint-row span { color: var(--text-muted); }
-.memory-checkpoint-row strong { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.memory-checkpoint-row strong { color: var(--text); font-weight: 400; overflow-wrap: anywhere; }
 .memory-artifacts { padding-bottom: 4px; }
 .memory-artifact { padding: 8px 0; border-top: 1px solid var(--border); }
 .memory-artifact:first-of-type { margin-top: 8px; }
-.memory-artifact-name { color: var(--text); font-size: .75rem; overflow-wrap: anywhere; }
+.memory-artifact-name { color: var(--text); font-size: var(--fs-ui); overflow-wrap: anywhere; }
 .diff-file-list {
 	overflow-y: auto;
 	border-bottom: 1px solid var(--border);
@@ -156,7 +158,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	display: flex; align-items: center; gap: 6px;
 	padding: 6px 12px;
 	cursor: pointer;
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 	font-family: var(--font-mono);
 	color: var(--text-dim);
 	transition: background .1s;
@@ -183,13 +185,13 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	color: var(--text-muted);
 }
 .diff-file-base { flex-shrink: 0; white-space: nowrap; }
-.diff-file-stats { margin-left: auto; flex-shrink: 0; font-size: .7rem; }
+.diff-file-stats { margin-left: auto; flex-shrink: 0; font-size: var(--fs-micro); }
 .diff-file-stats .add { color: var(--green); }
 .diff-file-stats .del { color: var(--rose); }
 .diff-group-header {
 	display: flex; align-items: center; justify-content: space-between;
 	padding: 6px 12px 2px;
-	font-size: .7rem;
+	font-size: var(--fs-micro);
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: .04em;
@@ -201,8 +203,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	background: var(--bg-raised);
 	border-radius: 8px;
 	padding: 0 6px;
-	font-size: .65rem;
-	font-weight: 500;
+	font-size: var(--fs-micro);
+	font-weight: 400;
 }
 .diff-file-badge {
 	width: 6px; height: 6px;
@@ -220,7 +222,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	display: flex;
 	flex-direction: column;
 	font-family: var(--font-mono);
-	font-size: .78rem;
+	font-size: var(--fs-ui);
 	line-height: 1.6;
 }
 .diff-hunk-header {
@@ -250,6 +252,20 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	white-space: pre-wrap;
 	word-break: break-word;
 }
+/* The +/- column: the server strips the diff prefix, and a tint alone
+ * doesn't tell added from removed for color-blind readers. Its own flex item
+ * (ordered between number and code) so wrapped code never runs under it. */
+.diff-line::before {
+	content: "";
+	order: 1;
+	flex-shrink: 0;
+	width: 2ch;
+	user-select: none;
+}
+.diff-line-num { order: 0; }
+.diff-line-content { order: 2; }
+.diff-line-add::before { content: "+"; color: var(--status-success-fg); }
+.diff-line-del::before { content: "-"; color: var(--status-error-fg); }
 .diff-line-add { background: var(--success-subtle); }
 .diff-line-add .diff-line-content { color: var(--text); }
 .diff-line-del { background: var(--danger-subtle); }
@@ -258,14 +274,14 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	display: flex; align-items: center; justify-content: center;
 	flex: 1;
 	color: var(--text-muted);
-	font-size: .85rem;
+	font-size: var(--fs-body);
 	text-align: center;
 	line-height: 1.6;
 }
 /* Title + hint as separate stacked lines (like the chat's own empty state)
    instead of one centered sentence split by a <br/> — that read as an
    uneven, floating one-liner rather than a clear two-part message. */
-.diff-empty-title { color: var(--text); font-size: .9rem; font-weight: 600; margin-bottom: 4px; }
+.diff-empty-title { color: var(--text); font-size: var(--fs-body); font-weight: 600; margin-bottom: 4px; }
 .diff-empty-hint p { margin: 0; }
 .diff-empty-hint code {
 	font-family: var(--font-mono);
@@ -273,12 +289,12 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	border: 1px solid var(--border);
 	border-radius: 4px;
 	padding: 1px 5px;
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 }
 .diff-empty-error {
-	color: #fca5a5;
+	color: var(--status-error-fg);
 	font-family: var(--font-mono);
-	font-size: .78rem;
+	font-size: var(--fs-ui);
 	white-space: pre-wrap;
 	text-align: left;
 	max-height: 100%;
@@ -308,7 +324,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	padding: 5px 9px;
 	color: var(--text);
 	font-family: var(--font);
-	font-size: .78rem;
+	font-size: var(--fs-ui);
 }
 .fs-search:focus { border-color: var(--cyan); outline: none; }
 .fs-collapse-btn {
@@ -335,7 +351,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	gap: 4px;
 	min-height: 30px;
 	padding-right: 8px;
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 	color: var(--text-dim);
 	content-visibility: auto;
 	contain-intrinsic-size: auto 30px;
@@ -373,7 +389,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .fs-row:hover .fs-name { color: var(--text); }
 .fs-size {
 	flex-shrink: 0;
-	font-size: .68rem;
+	font-size: var(--fs-micro);
 	color: var(--text-muted);
 	margin-left: auto;
 	padding-left: 8px;
@@ -406,7 +422,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	display: flex; align-items: center; justify-content: center;
 	flex: 1;
 	padding: 6px 8px;
-	font-size: .75rem;
+	font-size: var(--fs-ui);
 	color: var(--text-muted);
 	text-align: center;
 }
@@ -437,7 +453,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	padding: 1px 5px;
 	color: var(--text);
 	font-family: var(--font);
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 }
 
 /* ── File preview modal ──────────────────────────────────────────── */
@@ -452,7 +468,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	margin: 0;
 	padding: 14px 16px;
 	font-family: var(--font-mono);
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 	line-height: 1.6;
 	white-space: pre-wrap;
 	word-break: break-word;
@@ -474,7 +490,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	background: var(--bg-raised);
 	color: var(--text-muted);
 	font-family: var(--font-mono);
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 	line-height: 1.6;
 	text-align: right;
 	user-select: none;
@@ -496,7 +512,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	padding: 14px 18px;
 	width: 100%;
 	overflow: auto;
-	font-size: .88rem;
+	font-size: var(--fs-body);
 	/* .message-content (reused for its link/code/table rules) sets
 	 * white-space: pre-wrap for its own hand-rolled renderer, which has no
 	 * real block elements and relies on literal newlines for paragraph
@@ -543,7 +559,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .fs-preview-markdown li { margin: 2px 0; }
 .fs-preview-markdown li > p { margin: 0; }
 .fs-preview-markdown blockquote {
-	border-left: 3px solid var(--border);
+	/* Same quote rule as chat markdown (.md-body blockquote). */
+	border-left: 2px solid var(--border-active);
 	margin: 8px 0;
 	padding: 2px 12px;
 	color: var(--text-dim);
@@ -571,7 +588,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	flex-wrap: wrap;
 }
 .fs-preview-pdf-hint {
-	font-size: .7rem;
+	font-size: var(--fs-micro);
 	color: var(--text-muted);
 	margin-left: auto;
 }
@@ -592,7 +609,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .fs-preview-table {
 	border-collapse: collapse;
 	font-family: var(--font-mono);
-	font-size: .78rem;
+	font-size: var(--fs-ui);
 	white-space: nowrap;
 }
 .fs-preview-table th, .fs-preview-table td {
@@ -609,6 +626,6 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .fs-preview-table td { color: var(--text-dim); }
 .fs-preview-table-note {
 	padding: 10px 16px;
-	font-size: .75rem;
+	font-size: var(--fs-ui);
 	color: var(--text-muted);
 }

@@ -2,6 +2,8 @@
  * values on :root; derived values stay consistent with the selected theme. */
 @layer tokens {
 	:root {
+		/* Every theme is dark; native controls and scrollbars should match. */
+		color-scheme: dark;
 		--bg: #08080a;
 		--bg-surface: #131317;
 		--bg-raised: #1e1e24;
@@ -12,9 +14,11 @@
 		--border-subtle: color-mix(in srgb, var(--border) 55%, transparent);
 		--text: #fafafa;
 		--text-dim: #a1a1aa;
-		--text-muted: #71717a;
+		/* app.js derives muted/dim/accent-fg per theme to keep 4.5:1; these are the
+		 * same derivation for the default palette, used before a theme loads. */
+		--text-muted: #86868d;
 		--cyan: #8b5cf6;
-		--accent-fg: #ffffff;
+		--accent-fg: var(--bg);
 		--violet: #8b5cf6;
 		--teal: #2dd4bf;
 		--purple: #a78bfa;
@@ -32,15 +36,29 @@
 		--danger-subtle: color-mix(in srgb, var(--rose) 8%, transparent);
 		--danger-muted: color-mix(in srgb, var(--rose) 15%, transparent);
 		--danger-border: color-mix(in srgb, var(--rose) 30%, transparent);
+		--danger-border-strong: color-mix(in srgb, var(--rose) 50%, transparent);
+		--warning-subtle: color-mix(in srgb, var(--amber) 8%, transparent);
+		--warning-border: color-mix(in srgb, var(--amber) 25%, transparent);
 		--success-subtle: color-mix(in srgb, var(--green) 8%, transparent);
 		--status-error-fg: color-mix(in srgb, var(--rose) 64%, var(--text));
 		--status-success-fg: color-mix(in srgb, var(--green) 64%, var(--text));
 		--font: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 		--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 		--font-scale: 1;
+		/* Type roles. rem, so the root (the user's browser size times the
+		 * Settings scale) moves all of them together. micro is the floor:
+		 * uppercase section labels, badges, code-language tags. */
+		--fs-micro: .72rem;
+		--fs-ui: .8rem;     /* controls, rows, metadata */
+		--fs-body: .9rem;   /* chat prose, inputs, primary control labels */
+		--fs-lead: 1rem;
+		--fs-title: 1.12rem;
+		--fs-display: 1.25rem;
 		--radius: 8px;
 		--radius-sm: 6px;
 		--transition-fast: .15s ease;
+		/* Arrivals decelerate into place; routine hovers keep plain ease. */
+		--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 		--sidebar-w: 272px;
 		--header-h: 48px;
 	}

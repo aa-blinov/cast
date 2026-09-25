@@ -1,7 +1,7 @@
 /* ── Tool cards ───────────────────────────────────────────────────── */
 .tool-card {
 	font-family: var(--font-mono);
-	font-size: .8rem;
+	font-size: var(--fs-ui);
 	border-radius: var(--radius-sm);
 	margin: 4px 0;
 	overflow: hidden;
@@ -20,16 +20,16 @@
 }
 .tool-card-name {
 	color: var(--blue);
-	font-weight: 500;
+	font-weight: 400;
 	background: var(--bg-raised);
 	border: 1px solid var(--border);
 	border-radius: 4px;
 	padding: 1px 6px;
-	font-size: .75rem;
+	font-size: var(--fs-ui);
 }
 .tool-card-mcp-badge {
 	color: var(--text-muted);
-	font-size: .62rem;
+	font-size: var(--fs-micro);
 	font-weight: 600;
 	letter-spacing: .04em;
 	border: 1px solid var(--border);
@@ -48,7 +48,7 @@
 	padding: 8px 10px;
 	border-top: 1px solid var(--border);
 	color: var(--text-dim);
-	font-size: .75rem;
+	font-size: var(--fs-ui);
 	white-space: pre-wrap;
 	word-break: break-word;
 	max-height: 340px;
@@ -63,7 +63,7 @@
 	border-top: 1px dashed var(--border);
 	background: var(--bg);
 	color: var(--text-dim);
-	font-size: .75rem;
+	font-size: var(--fs-ui);
 	white-space: pre-wrap;
 	word-break: break-word;
 	max-height: 400px;
@@ -93,7 +93,7 @@
 .tool-card-result pre code { background: none; padding: 0; border: none; }
 .tool-card-result .code-lang {
 	font-family: var(--font-mono);
-	font-size: .6rem;
+	font-size: var(--fs-micro);
 	text-transform: uppercase;
 	letter-spacing: .05em;
 	color: var(--text-muted);

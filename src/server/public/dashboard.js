@@ -458,16 +458,16 @@ export function Dashboard({ onClose }) {
 				<div class="modal-header">
 					<span class="dash-title">Dashboard</span>
 					<div class="dash-tabs">
-						<button class="modal-btn${tab === "llm" ? " modal-btn-primary" : ""}" onClick=${() => setTab("llm")}>LLM</button>
-						<button class="modal-btn${tab === "memory" ? " modal-btn-primary" : ""}" onClick=${() => setTab("memory")}>Memory</button>
-						<button class="modal-btn${tab === "perf" ? " modal-btn-primary" : ""}" onClick=${() => setTab("perf")}>Performance</button>
-						<button class="modal-btn${tab === "reliability" ? " modal-btn-primary" : ""}" onClick=${() => setTab("reliability")}>Reliability</button>
-						<button class="modal-btn${tab === "system" ? " modal-btn-primary" : ""}" onClick=${() => setTab("system")}>System</button>
+						<button aria-pressed=${tab === "llm"} class="modal-btn${tab === "llm" ? " modal-btn-primary" : ""}" onClick=${() => setTab("llm")}>LLM</button>
+						<button aria-pressed=${tab === "memory"} class="modal-btn${tab === "memory" ? " modal-btn-primary" : ""}" onClick=${() => setTab("memory")}>Memory</button>
+						<button aria-pressed=${tab === "perf"} class="modal-btn${tab === "perf" ? " modal-btn-primary" : ""}" onClick=${() => setTab("perf")}>Performance</button>
+						<button aria-pressed=${tab === "reliability"} class="modal-btn${tab === "reliability" ? " modal-btn-primary" : ""}" onClick=${() => setTab("reliability")}>Reliability</button>
+						<button aria-pressed=${tab === "system"} class="modal-btn${tab === "system" ? " modal-btn-primary" : ""}" onClick=${() => setTab("system")}>System</button>
 					</div>
 					<div class="dash-range">
-						<button class="modal-btn${range === "24h" ? " modal-btn-primary" : ""}" onClick=${() => setRange("24h")}>24h</button>
-						<button class="modal-btn${range === "7d" ? " modal-btn-primary" : ""}" onClick=${() => setRange("7d")}>7d</button>
-						<button class="modal-btn${range === "30d" ? " modal-btn-primary" : ""}" onClick=${() => setRange("30d")}>30d</button>
+						<button aria-pressed=${range === "24h"} class="modal-btn${range === "24h" ? " modal-btn-primary" : ""}" onClick=${() => setRange("24h")}>24h</button>
+						<button aria-pressed=${range === "7d"} class="modal-btn${range === "7d" ? " modal-btn-primary" : ""}" onClick=${() => setRange("7d")}>7d</button>
+						<button aria-pressed=${range === "30d"} class="modal-btn${range === "30d" ? " modal-btn-primary" : ""}" onClick=${() => setRange("30d")}>30d</button>
 					</div>
 					<button class="modal-close" onClick=${onClose} aria-label="Close"><${icons.xMark} /></button>
 				</div>
