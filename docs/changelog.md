@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.40.1
+
+### Fixed
+
+- **Voice messages can actually record.** The server told browsers the page may not use the microphone, so on a real phone or laptop the voice button failed before any permission prompt. A device with no microphone now says so instead of reporting that access was denied.
+
 ## 0.40.0
 
 ### Added
