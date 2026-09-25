@@ -4,6 +4,26 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.37.0
+
+Web UI, measured end to end in Chromium on desktop and on an emulated touch phone.
+
+### Fixed
+
+- **The web UI can be used from the keyboard.** Every button had its focus ring removed, and session rows, folders, the file tree and the changed-files list only reacted to a mouse click, so from the keyboard you could not switch sessions or leave the starting directory in the folder picker. Focus is visible again, those rows answer Enter and Space, Escape closes the dialog on top (Share, New session and confirm dialogs had none), and hidden panels drop out of the Tab order.
+- **Panels can be resized from the keyboard.** The sidebar and workspace dividers are focusable: arrows move them, Shift for bigger steps, Home and End to the limits.
+- **Screen readers hear what changes.** The end of a reply, connection trouble, toasts and errors are announced; switches, tabs and toggles say their name and state; the command palette reports the highlighted command; fields have labels; dialogs have headings.
+- **Themed buttons are readable.** Labels on accent-filled buttons were always white, down to 1.6:1 on the default theme. That label, and secondary and dimmed text, are now derived from each theme so every one of the 18 palettes meets WCAG AA.
+- **Pinch zoom works on phones**, and iOS no longer zooms into the message field. Buttons are at least 44px on touch screens, and the controls that only appeared on hover (the session menu, copy code, file actions) show on any touch device, including an iPad in landscape.
+- **Long sessions stay fast.** On a 400-turn session, opening a dialog or toggling a panel took 197 ms and dragging a panel edge 411 ms per frame; now 11 ms and 23 ms. Settled messages no longer re-render on unrelated changes, and every finished reply was being kept laid out even off screen.
+- **Diffs mark added and removed lines with + and -**, not only a tint.
+
+### Changed
+
+- **Bold text uses real bold faces.** All six fonts ship a true 600 weight (Latin and Cyrillic, loaded only for the text on screen) instead of the browser's smeared synthetic bold.
+- **Text sizes follow one scale** with a 10px floor, and respect a larger default font size set in the browser.
+- **Reduced motion is respected everywhere**: nothing slides, rotates or pulses, while fades and state colors stay.
+
 ## 0.36.4
 
 ### Fixed
