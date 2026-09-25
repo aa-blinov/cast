@@ -296,9 +296,9 @@ function initTooltips() {
 }
 
 // ── Font ─────────────────────────────────────────────────────────────
-// A compact gallery of proven coding/UI fonts. Their regular faces are served
-// locally so the picker always shows genuine samples without a network-driven
-// reflow; extra weights load only after a user selects a font.
+// A compact gallery of proven coding/UI fonts, all self-hosted (400 and 600
+// faces, see style.css and fonts/README.md): the CSP allows fonts from 'self'
+// only, and a picked family must not depend on a third-party CDN.
 // index.html's inline bootstrap script keeps its own copy of each family
 // string (it runs before this module does, same reasoning as applyTheme's
 // cache) — update both if a family or id here changes.
@@ -308,7 +308,6 @@ function initTooltips() {
 // (see applyFont) — a sans pick only ever touches --font, since --font-mono
 // backs code blocks, tool-arg dumps, tables, and the ASCII banner, all of
 // which depend on real monospace character alignment to not look broken.
-// Google family IDs below provide only the heavier weights after selection.
 const FONT_OPTIONS = [
 	// ── Monospace ──
 	{
@@ -316,21 +315,18 @@ const FONT_OPTIONS = [
 		label: "Fira Code",
 		mono: true,
 		family: "'Fira Code', 'JetBrains Mono', monospace",
-		google: "Fira+Code:wght@500;600;700",
 	},
 	{
 		id: "ibm-plex-mono",
 		label: "IBM Plex Mono",
 		mono: true,
 		family: "'IBM Plex Mono', monospace",
-		google: "IBM+Plex+Mono:wght@500;600;700",
 	},
 	{
 		id: "jetbrains-mono",
 		label: "JetBrains Mono",
 		mono: true,
 		family: "'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace",
-		google: "JetBrains+Mono:wght@500;600;700",
 	},
 	// ── Sans-serif (--font only; --font-mono stays whatever mono font is active) ──
 	{
@@ -338,41 +334,22 @@ const FONT_OPTIONS = [
 		label: "IBM Plex Sans",
 		mono: false,
 		family: "'IBM Plex Sans', sans-serif",
-		google: "IBM+Plex+Sans:wght@500;600;700",
 	},
-	{ id: "inter", label: "Inter", mono: false, family: "'Inter', sans-serif", google: "Inter:wght@500;600;700" },
+	{ id: "inter", label: "Inter", mono: false, family: "'Inter', sans-serif" },
 	{
 		id: "work-sans",
 		label: "Work Sans",
 		mono: false,
 		family: "'Work Sans', sans-serif",
-		google: "Work+Sans:wght@500;600;700",
 	},
 ];
 const DEFAULT_FONT_ID = "jetbrains-mono";
-
-// Injects (once) a <link> for a picked font's Google Fonts family — the same
-// CDN style.css's @import already trusts, just loaded lazily per-pick
-// instead of every family up front. `display=swap` means the UI keeps using
-// the current font (no invisible-text flash) until the new one is ready,
-// then swaps.
-function loadGoogleFont(google) {
-	if (!google) return;
-	const id = `google-font-${google}`;
-	if (document.getElementById(id)) return;
-	const link = document.createElement("link");
-	link.id = id;
-	link.rel = "stylesheet";
-	link.href = `https://fonts.googleapis.com/css2?family=${google}&display=swap`;
-	document.head.appendChild(link);
-}
 
 // Purely client-side (localStorage), unlike applyTheme — there's no
 // equivalent server-side setting to round-trip through, so this applies (and
 // persists) immediately, no `/command` involved.
 function applyFont(fontId) {
 	const font = FONT_OPTIONS.find((f) => f.id === fontId) ?? FONT_OPTIONS.find((f) => f.id === DEFAULT_FONT_ID);
-	loadGoogleFont(font.google);
 	const root = document.documentElement.style;
 	root.setProperty("--font", font.family);
 	// --font-mono backs code blocks/tool args/tables/the ASCII banner — all
