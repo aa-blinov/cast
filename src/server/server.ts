@@ -443,7 +443,9 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
 		}
 		res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-		res.setHeader("Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=(), usb=()");
+		// microphone=(self): voice messages record from this page; an empty
+		// allowlist made getUserMedia fail before the browser even asked.
+		res.setHeader("Permissions-Policy", "camera=(), geolocation=(), microphone=(self), payment=(), usb=()");
 		res.setHeader("Referrer-Policy", "no-referrer");
 		res.setHeader("X-Content-Type-Options", "nosniff");
 		res.setHeader("X-Frame-Options", "DENY");
