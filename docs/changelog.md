@@ -4,6 +4,22 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.38.0
+
+### Added
+
+- **Retry a failed or stopped turn.** A turn that ended in an error or was stopped by hand now shows **Retry turn** in the web UI. It runs the turn again from the saved history without resending your message: a turn that failed before replying picks up from your prompt, and a stopped one continues from where it was cut off. Also `POST /api/sessions/:id/retry` (and `/api/v1`), which answers 409 when the last turn ended normally.
+- **Retries, errors and aborts stay in the thread.** They are saved with the session and shown in the history at the point they happened, so they survive a reload and read the same on any device. Consecutive provider retries collapse into one row listing every attempt with its reason, and that row stays after the reply arrives instead of disappearing. They are kept when old session telemetry is pruned.
+
+### Fixed
+
+- **Stopping a turn or hitting an error no longer wipes the transcript.** Error rows, retry rows and "Run aborted" vanished a moment after appearing: the history refresh at the end of every turn dropped anything the browser had added itself, and it fired on almost every turn because it compared message counts that were never counted the same way. What had already streamed was also discarded when a turn ended without its final message. Measured on a mock provider against 0.37.0: a 400 error never stayed visible, and "Run aborted" was gone after every stop.
+- **A new retry could rewrite an earlier turn's retry row**, and scrolling up then refreshing the latest page dropped system notices from the part already loaded.
+
+### Internal
+
+- The eval scoreboard keeps one row per model *and* reasoning level; certifying a model with and without reasoning used to overwrite the first run. mimo-v2.6-flash and -pro are certified at 92.9% with reasoning, flash at 88.1% without.
+
 ## 0.37.0
 
 Web UI, measured end to end in Chromium on desktop and on an emulated touch phone.
