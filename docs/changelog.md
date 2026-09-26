@@ -4,6 +4,16 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.42.0
+
+### Added
+
+- **cast can create personas for you.** Ask it for a new persona, role or assistant style and it saves one with the new `persona_create` tool: its prompt and, if you want, limits on tools, skills and MCP servers. The persona shows up at once in `/persona` and the persona pickers of the web UI and the TUI, with no `/reload`. Ask it to switch and a new session with the persona opens when the turn ends, so the role starts from a clean context; ask it to keep this conversation and the current session switches from your next message instead. The tool isn't offered in plan mode.
+
+### Fixed
+
+- **The web UI sees persona files as soon as they're saved.** The daemon kept the persona list from startup, so a persona added or edited on disk stayed missing from the pickers until `/reload`.
+
 ## 0.41.1
 
 ### Fixed
