@@ -4,6 +4,16 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.41.0
+
+### Fixed
+
+- **Saving a long session is cheap again.** Every save used to rewrite the reasoning of every earlier reply: on 400–600 message sessions that was about 200–260 database writes per save, and it grew with the session. Each save now writes only what changed, about 11 rows and roughly a millisecond, however long the session is.
+- **Reasoning stays with the reply it belongs to.** After a compaction, or when a session was reopened, reasoning could be saved onto a neighbouring message, including your own messages and tool results. That no longer happens, and the upgrade clears reasoning that had landed on the wrong messages.
+- **Finished background agents no longer keep a copy of the conversation.** Each one kept the full transcript it started from, about 56MB on one real store, and a running one rewrote that copy every 15 seconds. The upgrade clears the old copies. Run `VACUUM` on the sessions database with the daemon stopped if you want the file itself to shrink.
+- **Compaction is counted correctly.** The summarizing call now appears under its own kind in the dashboard, including after a manual `/compact` in the web UI, where its cost used to be missing from the totals. It no longer stands in for the session's context size, and the size is reset after a compaction, so the next turn doesn't compact again right away.
+- **Turn metrics include every turn.** Turns started from `cast run`, the API or a retry are now grouped as turns too, along with their retries and errors.
+
 ## 0.40.1
 
 ### Fixed
