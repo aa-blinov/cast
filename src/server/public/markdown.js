@@ -61,6 +61,11 @@ function safeUrl(href) {
 	return SAFE_URL_RE.test(url) ? url : null;
 }
 
+function codeBlockHtml(text, lang) {
+	const label = lang ? `<div class="code-lang">${escapeHtml(lang)}</div>` : "";
+	return `<pre>${CODE_COPY_BUTTON}${label}<code>${escapeHtml(text)}</code></pre>`;
+}
+
 const marked = new Marked({ gfm: true, breaks: true });
 marked.use({
 	renderer: {
@@ -69,8 +74,7 @@ marked.use({
 		// in a data attribute — simpler, and avoids escaping a large block into
 		// an HTML attribute.
 		code(text, lang) {
-			const label = lang ? `<div class="code-lang">${escapeHtml(lang)}</div>` : "";
-			return `<pre>${CODE_COPY_BUTTON}${label}<code>${escapeHtml(text)}</code></pre>`;
+			return codeBlockHtml(text, lang);
 		},
 		link(href, title, text) {
 			const url = safeUrl(href);
@@ -132,4 +136,18 @@ function renderMarkdown(text, useCache = true) {
 	return out;
 }
 
-export { escapeHtml, renderMarkdown };
+/**
+ * Stores HTML the streaming view already built for `text`, so the finished
+ * message renders from it instead of parsing and sanitizing the whole answer
+ * again in one long task the moment the stream ends. `replacing` is the
+ * previous frame's text, dropped so a stream holds one entry, not hundreds.
+ * The HTML must come from renderMarkdown (it is sanitized there).
+ */
+function rememberMarkdown(text, html, replacing) {
+	if (replacing !== undefined && replacing !== text) markdownCache.delete(replacing);
+	markdownCache.delete(text);
+	if (markdownCache.size >= MARKDOWN_CACHE_LIMIT) markdownCache.delete(markdownCache.keys().next().value);
+	markdownCache.set(text, html);
+}
+
+export { codeBlockHtml, escapeHtml, rememberMarkdown, renderMarkdown };

@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
+import { latestPageUrl } from "./history-merge.js";
 
 function setUrlSessionId(id, { push } = {}) {
 	const url = id ? `${window.location.pathname}?session=${encodeURIComponent(id)}` : window.location.pathname;
@@ -207,7 +208,7 @@ export function useSessionController({
 				// URL names a session up front, saving a full round trip on a
 				// reload landing on ?session=<id>. Falls through to a normal fetch
 				// for every other caller (sidebar clicks, popstate, ...).
-				const data = prefetch ? await prefetch : await api("GET", `/api/sessions/${id}`);
+				const data = prefetch ? await prefetch : await api("GET", latestPageUrl(id));
 				if (!data) throw new Error("Not found");
 				// The stream's onopen must not refetch what this just fetched —
 				// see freshlyFetchedSessionRef in app.js.
@@ -475,7 +476,7 @@ export function useSessionController({
 			// point it's had the personas+session-list fetch time to resolve in
 			// the background — usually free.
 			const urlId = sessionIdFromUrl();
-			const sessionPrefetch = urlId ? api("GET", `/api/sessions/${urlId}`).catch(() => null) : null;
+			const sessionPrefetch = urlId ? api("GET", latestPageUrl(urlId)).catch(() => null) : null;
 
 			if (!staticResourcesLoadedRef.current) {
 				const p = await api("GET", "/api/personas");

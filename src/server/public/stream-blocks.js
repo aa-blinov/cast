@@ -95,3 +95,56 @@ export function flushInterval(blocks) {
 	const ramp = Math.min(1, length / FLUSH_RAMP_CHARS);
 	return MIN_FLUSH_MS + (MAX_FLUSH_MS - MIN_FLUSH_MS) * ramp;
 }
+
+const FENCE_LINE_RE = /^ {0,3}(```|~~~)/;
+
+/**
+ * How much of a streaming markdown answer can be rendered once and left
+ * alone: up to the last blank line outside a code fence whose next line has
+ * started and isn't indented (an indented one may continue a list item or
+ * code above it). Everything before the returned index renders the same no
+ * matter what streams in after it. -1 when nothing is stable yet.
+ *
+ * Re-rendering the whole answer on every frame made each frame cost the full
+ * answer: parse, sanitize and a DOM rebuild. On a long reply that kept the
+ * main thread busy for most of the stream.
+ */
+export function stableMarkdownBoundary(text) {
+	let inFence = false;
+	let boundary = -1;
+	let start = 0;
+	for (let nl = text.indexOf("\n"); nl !== -1; nl = text.indexOf("\n", start)) {
+		const line = text.slice(start, nl);
+		if (FENCE_LINE_RE.test(line)) inFence = !inFence;
+		else if (!inFence && line.trim() === "") {
+			const next = text[nl + 1];
+			if (next !== undefined && next !== " " && next !== "\t" && next !== "\n") boundary = nl + 1;
+		}
+		start = nl + 1;
+	}
+	return boundary;
+}
+
+/**
+ * Splits off a code fence the text leaves open: `{ before, lang, code }`, or
+ * null when every fence is closed. A still-growing code block is shown as
+ * escaped text instead of going through the markdown parser and sanitizer on
+ * every frame, which for a long block cost as much as re-rendering it all.
+ */
+export function splitOpenFence(text) {
+	let open = null;
+	let start = 0;
+	while (start <= text.length) {
+		const nl = text.indexOf("\n", start);
+		const end = nl === -1 ? text.length : nl;
+		const line = text.slice(start, end);
+		if (nl !== -1 && FENCE_LINE_RE.test(line)) {
+			open = open ? null : { at: start, lang: line.trim().replace(/^(```|~~~)/, "").trim(), codeAt: nl + 1 };
+		}
+		if (nl === -1) break;
+		start = nl + 1;
+	}
+	if (!open) return null;
+	return { before: text.slice(0, open.at), lang: open.lang, code: text.slice(open.codeAt) };
+}
+

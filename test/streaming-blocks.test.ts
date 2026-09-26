@@ -6,6 +6,8 @@ import {
 	MAX_FLUSH_MS,
 	MIN_FLUSH_MS,
 	reduceStreamEvent,
+	splitOpenFence,
+	stableMarkdownBoundary,
 } from "../src/server/public/stream-blocks.js";
 import { type StreamBlock, settledPrefixLength, splitCompleteLines } from "../src/ui/useAgentSession.ts";
 
@@ -205,5 +207,54 @@ describe("flushInterval", () => {
 			{ kind: "content" as const, text: "z".repeat(6000) },
 		];
 		expect(flushInterval(blocks)).toBe(MAX_FLUSH_MS);
+	});
+});
+
+describe("stableMarkdownBoundary", () => {
+	it("settles up to the last blank line once the next block has started", () => {
+		const text = "# Title\n\nFirst paragraph.\n\nSecond, still stream";
+		expect(text.slice(0, stableMarkdownBoundary(text))).toBe("# Title\n\nFirst paragraph.\n\n");
+	});
+
+	it("settles nothing while the only blank line is the last thing received", () => {
+		expect(stableMarkdownBoundary("Paragraph.\n\n")).toBe(-1);
+		expect(stableMarkdownBoundary("no blank line yet")).toBe(-1);
+	});
+
+	it("never cuts inside a code fence, where a blank line is part of the code", () => {
+		const text = "Intro.\n\n```ts\nconst a = 1;\n\nconst b = 2;\n";
+		expect(text.slice(0, stableMarkdownBoundary(text))).toBe("Intro.\n\n");
+		const closed = `${text}\`\`\`\n\nAfter.`;
+		expect(closed.slice(stableMarkdownBoundary(closed))).toBe("After.");
+	});
+
+	it("does not cut before an indented line that may continue the block above", () => {
+		const text = "- item\n\n  continued item text";
+		expect(stableMarkdownBoundary(text)).toBe(-1);
+	});
+});
+
+describe("splitOpenFence", () => {
+	it("splits off a code block that is still streaming, with its language", () => {
+		expect(splitOpenFence("Here:\n```ts\nconst a = 1;\nconst b")).toEqual({
+			before: "Here:\n",
+			lang: "ts",
+			code: "const a = 1;\nconst b",
+		});
+	});
+
+	it("returns null once every fence is closed, or before a fence line is complete", () => {
+		expect(splitOpenFence("```\ncode\n```\nafter")).toBeNull();
+		expect(splitOpenFence("plain text")).toBeNull();
+		// The opener's own line hasn't ended: it may still turn out to be text.
+		expect(splitOpenFence("Here:\n```ts")).toBeNull();
+	});
+
+	it("finds the open one after closed blocks, tilde fences included", () => {
+		expect(splitOpenFence("```\na\n```\ntext\n~~~\nb")).toEqual({
+			before: "```\na\n```\ntext\n",
+			lang: "",
+			code: "b",
+		});
 	});
 });

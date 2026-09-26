@@ -1,3 +1,4 @@
+import { latestPageUrl } from "./history-merge.js";
 import { blocksFromAssistantCompletion } from "./stream-blocks.js";
 
 function normalizeUserContent(content) {
@@ -300,7 +301,7 @@ export function handleSseEvent(event, context) {
 			setSession((prev) => {
 				if (!prev) return prev;
 				if (event.messageCount === countTurnMessages(prev.messages)) return { ...prev, usage: event.usage };
-				api("GET", `/api/sessions/${streamSessionId}`)
+				api("GET", latestPageUrl(streamSessionId))
 					.then((data) => {
 						if (!data || !isCurrent()) return;
 						setSession((inner) =>
