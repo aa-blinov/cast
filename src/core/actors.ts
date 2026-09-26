@@ -139,6 +139,9 @@ export interface AgentActorStore {
 	 * `load()`. */
 	loadRecoverable?(): AgentActorPersistedState[];
 	save(snapshot: AgentActorSnapshot, ownership: AgentActorOwnership): boolean;
+	/** Heartbeat write: timestamp and lease only. Optional; a store without it
+	 * gets a full save. */
+	renewLease?(actorId: string, updatedAt: string, ownership: AgentActorOwnership): boolean;
 	claimRecovery(actorId: string, previousToken: string | undefined, ownership: AgentActorOwnership): boolean;
 	prune(limit: number): void;
 }
@@ -353,6 +356,9 @@ function ownershipFromRow(row: SqliteActorRow): AgentActorOwnership {
 	};
 }
 
+/** Statuses a restart can still pick up, and so still need the fork (stalled included). */
+const RESUMABLE_STATUSES = new Set<AgentActorStatus>(["pending", "running", "stalled"]);
+
 /** Durable actor metadata with a lease so two daemon processes cannot mutate one actor row. */
 export class SqliteAgentActorStore implements AgentActorStore {
 	// A terminal actor's fork context can never be used again — nothing can
@@ -426,9 +432,10 @@ export class SqliteAgentActorStore implements AgentActorStore {
 				snapshot.updatedAt,
 				snapshot.completedAt ?? null,
 				// Ephemeral task actors keep their fork in memory for the active run;
-				// duplicating a whole transcript into SQLite on every heartbeat would
-				// make actor telemetry compete with the session history itself.
-				snapshot.lifecycle === "persistent" && snapshot.forkContext
+				// duplicating a whole transcript into SQLite would make actor
+				// telemetry compete with the session history itself. An actor no
+				// restart can resume has no use for its fork, so it is dropped.
+				snapshot.lifecycle === "persistent" && snapshot.forkContext && RESUMABLE_STATUSES.has(snapshot.status)
 					? JSON.stringify(serializableForkContext(snapshot.forkContext))
 					: null,
 				snapshot.recovery ? JSON.stringify(snapshot.recovery) : null,
@@ -436,6 +443,16 @@ export class SqliteAgentActorStore implements AgentActorStore {
 				ownership.pid,
 				ownership.leaseUntil,
 			);
+		return result.changes > 0;
+	}
+
+	renewLease(actorId: string, updatedAt: string, ownership: AgentActorOwnership): boolean {
+		const result = getDb()
+			.prepare(
+				`UPDATE agent_actors SET updated_at = ?, lease_until = ?, revision = revision + 1
+         WHERE id = ? AND owner_token IS ?`,
+			)
+			.run(updatedAt, ownership.leaseUntil, actorId, ownership.token);
 		return result.changes > 0;
 	}
 
@@ -737,7 +754,15 @@ export class AgentActorRegistry {
 			// while the original's own final save was rejected by the
 			// owner-token check and silently lost.
 			record.ownership = { ...record.ownership, leaseUntil: this.leaseExpiry() };
-			this.persist(record);
+			// Only the lease moved. A full save re-serialized and rewrote the
+			// whole fork transcript, up to 7MB, every 15 seconds.
+			if (this.store?.renewLease) {
+				try {
+					this.store.renewLease(record.id, record.updatedAt, record.ownership);
+				} catch {
+					// Same contract as persist(): durability never fails the run.
+				}
+			} else this.persist(record);
 		}, this.heartbeatIntervalMs);
 		heartbeat.unref();
 		return heartbeat;

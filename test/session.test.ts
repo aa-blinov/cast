@@ -10,6 +10,8 @@ import {
 	appendCheckpoint,
 	appendMessage,
 	appendSessionEvent,
+	attachReasoning,
+	attachTurnMeta,
 	clearSessionMessages,
 	commitCheckpointWatermark,
 	compactMessages,
@@ -77,6 +79,32 @@ describe("addUsage subagent attribution", () => {
 		addUsage(s, mkUsage({ promptTokens: 999 }), { background: true });
 		expect(s.usage.totalTokens).toBe(150);
 		expect(s.usage.subagentTokens).toBe(0);
+		expect(s.lastPromptTokens).toBe(100);
+	});
+
+	// The summarizer's prompt is the history being compacted away; as the
+	// context size it made a freshly compacted session look full.
+	it("drops the pre-compaction prompt size once a compaction is recorded", () => {
+		const s = createSession("gpt-4o", tmpdir());
+		s.messages = [
+			{ role: "user", content: "x".repeat(40_000) },
+			{ role: "assistant", content: "ok" },
+		];
+		saveSession(s);
+		s.lastPromptTokens = 36_000;
+		const compacted: Message[] = [{ role: "user", content: "summary" }];
+
+		recordCompaction(s, s.messages, compacted);
+
+		expect(s.lastPromptTokens).toBe(estimateTokens(compacted));
+	});
+
+	it("bills the compaction summarizer without taking its prompt as the context size", () => {
+		const s = createSession("gpt-4o", tmpdir());
+		s.lastPromptTokens = 100;
+		addUsage(s, mkUsage({ promptTokens: 60_000, totalTokens: 60_050, cost: 0.5 }), { compaction: true });
+		expect(s.usage.totalTokens).toBe(60_050);
+		expect(s.usage.cost).toBe(0.5);
 		expect(s.lastPromptTokens).toBe(100);
 	});
 });
@@ -1881,9 +1909,9 @@ describe("session persistence", () => {
 			{ role: "user", content: "explain" },
 			{ role: "assistant", content: "because X" },
 		];
-		// Web bridge sets this keyed by index into session.messages right
-		// before saving (see bridge.ts's post-turn reasoning zip).
-		s.reasoning = { 1: "thinking about X..." };
+		// Web bridge attaches it to the assistant message right before
+		// saving (see bridge.ts's post-turn reasoning zip).
+		attachReasoning(s.messages[1]!, "thinking about X...");
 		saveSession(s);
 
 		const { messages, reasoning } = getFullHistoryWithReasoning(s.id);
@@ -1896,17 +1924,72 @@ describe("session persistence", () => {
 		expect(reloaded.reasoning?.[1]).toBe("thinking about X...");
 	});
 
+	it("writes a message's reasoning once, not again on every later save", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "user", content: "explain" },
+			{ role: "assistant", content: "because X" },
+		];
+		attachReasoning(s.messages[1]!, "thinking about X...");
+		saveSession(s);
+		// Stand-in for "the row was left alone": a rewrite would restore it.
+		getDb()
+			.prepare("UPDATE messages SET reasoning = 'untouched' WHERE session_id = ? AND role = 'assistant'")
+			.run(s.id);
+		s.messages.push({ role: "user", content: "next" });
+		saveSession(s);
+
+		expect(getFullHistoryWithReasoning(s.id).reasoning[1]).toBe("untouched");
+	});
+
+	it("carries reasoning into a fork", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "user", content: "explain" },
+			{ role: "assistant", content: "because X" },
+		];
+		attachReasoning(s.messages[1]!, "thinking about X...");
+		saveSession(s);
+
+		const fork = forkSession(loadSession(s.id)!);
+		expect(getFullHistoryWithReasoning(fork.id).reasoning[1]).toBe("thinking about X...");
+	});
+
+	it("keeps reasoning on its own message when the array shifts between saves", () => {
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "user", content: "explain" },
+			{ role: "assistant", content: "because X" },
+		];
+		attachReasoning(s.messages[1]!, "thinking about X...");
+		saveSession(s);
+		// The loop puts the persona prompt in front when messages[0] isn't one,
+		// and compaction replaces the array outright: every index moves.
+		s.messages.unshift({ role: "system", content: "SYS" });
+		s.messages.push({ role: "user", content: "and Y?" });
+		saveSession(s);
+
+		const { messages, reasoning } = getFullHistoryWithReasoning(s.id);
+		const byContent = Object.fromEntries(messages.map((m, i) => [String(m.content), reasoning[i]]));
+		expect(byContent["because X"]).toBe("thinking about X...");
+		expect(byContent.explain).toBeUndefined();
+		expect(byContent["and Y?"]).toBeUndefined();
+	});
+
 	it("persists per-turn provider/model/timing and survives a reload, re-keyed to full-history indices", () => {
 		const s = createSession("gpt-4o", projectA);
 		s.messages = [
 			{ role: "user", content: "explain" },
 			{ role: "assistant", content: "because X" },
 		];
-		// Web bridge sets this keyed by index into session.messages right
-		// before saving (see bridge.ts's post-turn write, mirrors reasoning above).
-		s.turnMeta = {
-			1: { provider: "minimax", model: "MiniMax-M3", totalMs: 11700, completedAt: "2026-01-01T00:00:00.000Z" },
-		};
+		// Web bridge attaches it to the turn-ending message right before
+		// saving (see bridge.ts's post-turn write, mirrors reasoning above).
+		attachTurnMeta(s.messages[1]!, {
+			provider: "minimax",
+			model: "MiniMax-M3",
+			totalMs: 11700,
+			completedAt: "2026-01-01T00:00:00.000Z",
+		});
 		saveSession(s);
 
 		const { messages, turnMeta } = getFullHistoryWithReasoning(s.id);

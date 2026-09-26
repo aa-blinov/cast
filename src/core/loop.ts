@@ -705,7 +705,7 @@ async function performCompaction(
 		model,
 		signal,
 		(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
-		(usage) => onEvent({ type: "usage", usage }),
+		(usage) => onEvent({ type: "usage", usage, compaction: true }),
 		loopConfig.planState?.enabled ? PLAN_COMPACTION_PROMPT : undefined,
 		reminderStateFromPlan(loopConfig.planState),
 		loopConfig.modelProvider,
@@ -820,7 +820,16 @@ export type AgentEvent =
 	// generationMs is only set for the main completion's usage — compaction's
 	// own summarization call reports usage too (for cumulative cost tracking)
 	// but isn't a user-facing turn, so there's no "last request" TPS to show for it.
-	| { type: "usage"; usage: Usage; generationMs?: number; ttftMs?: number; subagent?: boolean; background?: boolean }
+	| {
+			type: "usage";
+			usage: Usage;
+			generationMs?: number;
+			ttftMs?: number;
+			subagent?: boolean;
+			background?: boolean;
+			/** The compaction summarizer: its prompt is the old history, not the context size. */
+			compaction?: boolean;
+	  }
 	| { type: "end"; reason: string }
 	| { type: "error"; message: string };
 

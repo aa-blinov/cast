@@ -104,6 +104,17 @@ describe("llm telemetry", () => {
 		expect(reliability.errorTypes.some((t) => t.errorType === "other" && t.count >= 1)).toBe(true);
 	});
 
+	it("counts a compaction summarizer call as a billed request of its own kind", () => {
+		recordLlmRequest({ provider: "mimo", model: "flash", kind: "main", promptTokens: 100, cost: 0.001 });
+		recordLlmRequest({ provider: "mimo", model: "flash", kind: "compaction", promptTokens: 5_000, cost: 0.01 });
+
+		expect(queryTelemetryOverview(0).find((r) => r.provider === "mimo")).toMatchObject({
+			requests: 2,
+			promptTokens: 5_100,
+			cost: 0.011,
+		});
+	});
+
 	it("series buckets by resolution and fills empty buckets", () => {
 		const now = Date.now();
 		// Force rows into the current bucket regardless of test timing.

@@ -105,7 +105,8 @@ describe("AgentActorRegistry", () => {
 		// meant 21MB rows holding 7.8MB of distinct data and 140MB of a 547MB
 		// database.
 		const store = new SqliteAgentActorStore();
-		const registry = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		// Expired lease, so the second registry below may take the unfinished actor over.
+		const registry = new AgentActorRegistry({ store, watchdogIntervalMs: 0, leaseMs: -1 });
 		const longFork = {
 			...spec.forkContext!,
 			messages: [
@@ -125,8 +126,8 @@ describe("AgentActorRegistry", () => {
 			tail: [{ role: "user" as const, content: "three" }],
 			boundaryIndex: 1,
 		};
+		// Not run: a finished actor keeps no fork at all (see below).
 		const actor = registry.spawn({ ...spec, lifecycle: "persistent", forkContext: longFork });
-		await actor.run(async () => "done");
 
 		const stored = getDb().prepare("SELECT fork_json FROM agent_actors WHERE id = ?").get(actor.id) as {
 			fork_json: string;
@@ -139,10 +140,6 @@ describe("AgentActorRegistry", () => {
 		expect(stored.fork_json.match(/"two"/g)).toHaveLength(1);
 
 		// ...and a reader still sees every view, split at the same boundary.
-		// Read back from a non-terminal row: a finished actor's fork context is
-		// deliberately never loaded (nothing can resume it, and it is the
-		// largest thing in the row).
-		getDb().prepare("UPDATE agent_actors SET status = 'stalled' WHERE id = ?").run(actor.id);
 		const restored = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
 		const fork = restored.list().find((item) => item.id === actor.id)?.forkContext;
 		expect(fork?.messages).toEqual(longFork.messages);
@@ -237,6 +234,56 @@ describe("AgentActorRegistry", () => {
 			}
 		).lease_until;
 		expect(Date.parse(leaseAfter)).toBeGreaterThan(Date.parse(leaseBefore));
+	});
+
+	it("drops the fork transcript once an actor finishes", async () => {
+		// Nothing can resume a finished actor, yet each kept its transcript:
+		// 56MB over 379 rows on a real store.
+		const store = new SqliteAgentActorStore();
+		const registry = new AgentActorRegistry({ store, watchdogIntervalMs: 0 });
+		const actor = registry.spawn({ ...spec, lifecycle: "persistent" });
+		const forkOf = () =>
+			(
+				getDb().prepare("SELECT fork_json FROM agent_actors WHERE id = ?").get(actor.id) as {
+					fork_json: string | null;
+				}
+			).fork_json;
+		expect(forkOf()).not.toBeNull();
+
+		await actor.run(async () => "done");
+
+		expect(forkOf()).toBeNull();
+	});
+
+	it("renews the lease on a heartbeat without rewriting the fork transcript", async () => {
+		// A full save on every heartbeat rewrote a fork of up to 7MB every 15s.
+		const store = new SqliteAgentActorStore();
+		const registry = new AgentActorRegistry({
+			store,
+			watchdogIntervalMs: 0,
+			heartbeatIntervalMs: 5,
+			leaseMs: 20_000,
+		});
+		const actor = registry.spawn({ ...spec, lifecycle: "persistent" });
+		const row = () =>
+			getDb().prepare("SELECT fork_json, lease_until FROM agent_actors WHERE id = ?").get(actor.id) as {
+				fork_json: string | null;
+				lease_until: string;
+			};
+		let during: { fork_json: string | null; lease_until: string } | undefined;
+		let leaseAtStart = "";
+
+		await actor.run(async () => {
+			// A marker a full save would overwrite with the serialized fork.
+			getDb().prepare("UPDATE agent_actors SET fork_json = '\"marker\"' WHERE id = ?").run(actor.id);
+			leaseAtStart = row().lease_until;
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			during = row();
+			return "done";
+		});
+
+		expect(during?.fork_json).toBe('"marker"');
+		expect(Date.parse(during!.lease_until)).toBeGreaterThan(Date.parse(leaseAtStart));
 	});
 
 	it("the watchdog pass does not re-read finished actor rows", async () => {

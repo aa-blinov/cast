@@ -5115,7 +5115,12 @@ describe("runAgentLoop — compaction", () => {
 					toolCalls: [{ id: "t1", name: "read", arguments: JSON.stringify({ path: "small.txt" }) }],
 					usage: { promptTokens: 1_400, completionTokens: 5, totalTokens: 1_405 },
 				}))
-				.mockImplementationOnce(async () => ({ content: "SUMMARY", thinking: "", finishReason: "stop" }))
+				.mockImplementationOnce(async () => ({
+					content: "SUMMARY",
+					thinking: "",
+					finishReason: "stop",
+					usage: { promptTokens: 900, completionTokens: 40, totalTokens: 940 },
+				}))
 				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
 
 			await runAgentLoop([...seedHistory(6), { role: "user", content: "read the small file" }], {
@@ -5127,6 +5132,9 @@ describe("runAgentLoop — compaction", () => {
 			});
 
 			expect(events.filter((e) => e.type === "compaction")).toHaveLength(1);
+			// The summarizer's usage is marked, so no surface takes its prompt
+			// (the old history) for the context size.
+			expect(events).toContainEqual(expect.objectContaining({ type: "usage", compaction: true }));
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
 		}

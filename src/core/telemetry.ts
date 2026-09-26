@@ -8,7 +8,8 @@ import { getDb } from "./db.ts";
 // `messages` or `session_events`. Rows are pruned by age.
 // ============================================================================
 
-export type LlmRequestKind = "main" | "subagent" | "background" | "retry" | "error";
+/** `compaction`: the summarizer call, billed like any request but not a turn of the conversation. */
+export type LlmRequestKind = "main" | "subagent" | "background" | "compaction" | "retry" | "error";
 
 /** Coarse classification of retry/error rows, derived from the message text. */
 export type LlmErrorType =
@@ -210,7 +211,7 @@ export function queryTelemetryOverview(sinceMs?: number): TelemetryOverviewRow[]
 	const rows = db
 		.prepare(
 			`SELECT provider, model,
-				SUM(CASE WHEN kind IN ('main','subagent','background') THEN 1 ELSE 0 END) AS requests,
+				SUM(CASE WHEN kind IN ('main','subagent','background','compaction') THEN 1 ELSE 0 END) AS requests,
 				SUM(CASE WHEN kind = 'error' THEN 1 ELSE 0 END) AS errors,
 				SUM(prompt_tokens) AS prompt_tokens,
 				SUM(completion_tokens) AS completion_tokens,
@@ -257,7 +258,7 @@ export function queryTelemetrySeries(sinceMs: number, resolutionMs: number): Tel
 		.prepare(
 			`SELECT
 				CAST(((ts - ?) / ?) AS INTEGER) AS bucket,
-				SUM(CASE WHEN kind IN ('main','subagent','background') THEN 1 ELSE 0 END) AS requests,
+				SUM(CASE WHEN kind IN ('main','subagent','background','compaction') THEN 1 ELSE 0 END) AS requests,
 				SUM(CASE WHEN kind = 'error' THEN 1 ELSE 0 END) AS errors,
 				SUM(prompt_tokens) AS prompt_tokens,
 				SUM(completion_tokens) AS completion_tokens,
@@ -343,7 +344,7 @@ export function queryLlmAvgLatency(sinceMs: number): number | null {
 	const row = getDb()
 		.prepare(
 			`SELECT AVG(latency_ms) AS a FROM llm_requests
-			 WHERE ts >= ? AND kind IN ('main','subagent','background') AND latency_ms IS NOT NULL`,
+			 WHERE ts >= ? AND kind IN ('main','subagent','background','compaction') AND latency_ms IS NOT NULL`,
 		)
 		.get(sinceMs);
 	const v = (row as { a: number | null }).a;
@@ -534,7 +535,9 @@ export function queryReliabilityOverview(sinceMs: number): ReliabilityOverview {
 		.prepare(`SELECT COUNT(*) AS n FROM llm_requests WHERE ts >= ? AND kind = 'error' AND error_type = 'moderation'`)
 		.get(sinceMs);
 	const requests = db
-		.prepare(`SELECT COUNT(*) AS n FROM llm_requests WHERE ts >= ? AND kind IN ('main','subagent','background')`)
+		.prepare(
+			`SELECT COUNT(*) AS n FROM llm_requests WHERE ts >= ? AND kind IN ('main','subagent','background','compaction')`,
+		)
 		.get(sinceMs);
 	return {
 		errorTypes: (types as Array<{ t: string; n: number }>).map((r) => ({ errorType: r.t, count: r.n })),
@@ -628,7 +631,7 @@ export function queryLlmLatencyPercentiles(sinceMs: number): {
 		.prepare(
 			`WITH l AS (
 				SELECT latency_ms FROM llm_requests
-				WHERE ts >= ? AND kind IN ('main','subagent','background') AND latency_ms IS NOT NULL
+				WHERE ts >= ? AND kind IN ('main','subagent','background','compaction') AND latency_ms IS NOT NULL
 				ORDER BY latency_ms
 			)
 			SELECT
@@ -676,7 +679,7 @@ export function queryTokensPerSecond(sinceMs: number): number | null {
 	const row = getDb()
 		.prepare(
 			`SELECT AVG(completion_tokens * 1000.0 / latency_ms) AS tps
-			 FROM llm_requests WHERE ts >= ? AND kind IN ('main','subagent','background')
+			 FROM llm_requests WHERE ts >= ? AND kind IN ('main','subagent','background','compaction')
 			   AND latency_ms IS NOT NULL AND latency_ms > 0`,
 		)
 		.get(sinceMs);
@@ -804,7 +807,7 @@ export interface TurnMetrics {
 	avgDurationMs: number | null;
 }
 
-const TURN_KINDS = "('main','subagent','background')";
+const TURN_KINDS = "('main','subagent','background','compaction')";
 
 /** Per-user-request aggregates: one turn spans several LLM completions and
  * tool calls, grouped by turn_id (the client message id). */

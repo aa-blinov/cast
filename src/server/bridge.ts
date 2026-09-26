@@ -4,7 +4,7 @@
  * background. SSE listeners receive AgentEvent broadcasts in real time.
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -64,6 +64,8 @@ import {
 	appendCheckpoint,
 	appendMessage,
 	appendSessionEvent,
+	attachReasoning,
+	attachTurnMeta,
 	type SessionSummary as CoreSessionSummary,
 	countTurnMessages,
 	createSession,
@@ -251,9 +253,11 @@ export interface WebAgentSession {
 	 * messages are checked as well, so a lost HTTP response can be retried
 	 * without creating a duplicate turn. */
 	acceptedClientMessageIds: Set<string>;
-	/** The clientMessageId of the turn currently being processed — telemetry
-	 * groups llm_requests and tool_calls by it (turn-level aggregates). */
-	currentClientMessageId?: string;
+	/** Id of the turn being processed: telemetry groups llm_requests and
+	 * tool_calls by it. The client's message id when it sent one, otherwise a
+	 * fresh one — `cast run`, the API and retries send none, and their turns
+	 * used to fall out of every per-turn metric. */
+	currentTurnId?: string;
 	/** Rebuilt whenever persona or model changes — see `computeSystemPrompt`. */
 	systemPrompt: string;
 	/** Directory rules with `applyMode: "auto"` that have latched on because a
@@ -1354,7 +1358,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const lease = ws.runner.startRun(ac);
 		const automaticMemoryMaintenance = ws.session.messages.length === 0;
 		const automaticMemoryMessages = ws.session.messages.slice();
-		ws.currentClientMessageId = clientMessageId;
+		ws.currentTurnId = clientMessageId ?? randomUUID();
 		ws.status = "running";
 		ws.error = null;
 		ws.turnStartedAt = Date.now();
@@ -1369,7 +1373,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			ws.runner.endRun(lease);
 			ws.activeStream = undefined;
 			ws.turnStartedAt = undefined;
-			ws.currentClientMessageId = undefined;
+			ws.currentTurnId = undefined;
 			// Undo the early id claim so a retry of the same message can be
 			// delivered on the next attempt (the message was never persisted).
 			if (clientMessageId) ws.acceptedClientMessageIds.delete(clientMessageId);
@@ -1802,7 +1806,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 								t.name,
 								t.result?.isError === true,
 								started !== undefined ? Date.now() - started : undefined,
-								ws.currentClientMessageId,
+								ws.currentTurnId,
 							);
 							appendSessionEvent(sessionId, event.type, event);
 							break;
@@ -1816,7 +1820,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 								kind: "error",
 								error: `doom loop: ${d.tool} x${d.attempts}`,
 								errorType: "doom-loop",
-								turnId: ws.currentClientMessageId,
+								turnId: ws.currentTurnId,
 							});
 							appendSessionEvent(sessionId, event.type, event);
 							break;
@@ -1855,6 +1859,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 									retries: event.attempt,
 									error: event.reason,
 									errorType: classifyLlmError(event.reason),
+									turnId: ws.currentTurnId,
 								});
 							} else if (event.type === "error") {
 								recordLlmRequest({
@@ -1864,6 +1869,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 									kind: "error",
 									error: event.message,
 									errorType: classifyLlmError(event.message),
+									turnId: ws.currentTurnId,
 								});
 							}
 							break;
@@ -1931,7 +1937,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 							kind: "error",
 							error: "empty response",
 							errorType: "empty-response",
-							turnId: ws.currentClientMessageId,
+							turnId: ws.currentTurnId,
 						});
 					}
 					thinkingByCompletion.push(event.thinking ?? "");
@@ -1947,7 +1953,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				}
 				if (event.type === "todos_updated") ws.session.todos = event.todos;
 				if (event.type === "usage") {
-					addUsage(ws.session, event.usage, { subagent: event.subagent, background: event.background });
+					addUsage(ws.session, event.usage, {
+						subagent: event.subagent,
+						background: event.background,
+						compaction: event.compaction,
+					});
 					// One row per LLM request — the loop emits this event exactly
 					// once per completion (main / subagent aggregate / background /
 					// compaction), so telemetry can't double-count. Cheap single
@@ -1956,7 +1966,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						sessionId: ws.id,
 						provider: runProviderName,
 						model: runModel,
-						kind: event.background ? "background" : event.subagent ? "subagent" : "main",
+						kind: event.background
+							? "background"
+							: event.subagent
+								? "subagent"
+								: event.compaction
+									? "compaction"
+									: "main",
 						promptTokens: event.usage.promptTokens,
 						completionTokens: event.usage.completionTokens,
 						cacheReadTokens: event.usage.cacheReadTokens,
@@ -1965,7 +1981,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						latencyMs: event.generationMs,
 						ttftMs: event.ttftMs,
 						contextWindow: runConfig.contextWindow,
-						turnId: ws.currentClientMessageId,
+						turnId: ws.currentTurnId,
 					});
 					if (event.background) {
 						saveSession(ws.session);
@@ -2002,10 +2018,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				for (let i = startCount; i < finalMessages.length; i++) {
 					if (finalMessages[i]!.role !== "assistant") continue;
 					const thinking = thinkingByCompletion[completionIndex++];
-					if (thinking) {
-						ws.session.reasoning ??= {};
-						ws.session.reasoning[i] = thinking;
-					}
+					if (thinking) attachReasoning(finalMessages[i]!, thinking);
 				}
 
 				ws.status = "idle";
@@ -2022,15 +2035,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				// never a tool/user message.
 				const turnEndIndex = finalMessages.length - 1;
 				if (finalMessages[turnEndIndex]?.role === "assistant") {
-					ws.session.turnMeta ??= {};
-					ws.session.turnMeta[turnEndIndex] = {
+					attachTurnMeta(finalMessages[turnEndIndex]!, {
 						provider: runProviderName,
 						model: runModel,
 						totalMs: Date.now() - turnStart,
 						generationMs: ws.lastTurn?.generationMs,
 						tokensPerSecond: ws.lastTurn?.tokensPerSecond,
 						completedAt: new Date().toISOString(),
-					} satisfies TurnMeta;
+					} satisfies TurnMeta);
 				}
 				saveSession(ws.session);
 				ws.turnStartedAt = undefined;
