@@ -922,6 +922,23 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return personas.find((p) => p.name === name);
 	}
 
+	/** Re-reads the persona files. The list was only rescanned on /reload, so a
+	 * persona the agent (or anyone) saved stayed unknown to /persona and to the
+	 * pickers until then. Cheap enough for user actions; resolvePersona above
+	 * stays on the snapshot because session listings call it per row. */
+	function refreshPersonas(forCwd: string): Persona[] {
+		personas = resolvePersonasForCwd(forCwd, trustForSessionCwd(forCwd)).personas;
+		return personas;
+	}
+
+	/** Every connected client refreshes its persona list: a persona saved in one
+	 * session is available in all of them. */
+	function announcePersonasChanged(persona: string): void {
+		for (const ws of sessions.values()) {
+			broadcaster.broadcast(ws, { type: "personas_changed", persona });
+		}
+	}
+
 	/** Rebuilds every live session's system prompt from current bridge-level
 	 * project state — needed after /reload, /mcp, or /skills, since those
 	 * change resources shared by every session, not just the one that issued
@@ -1753,6 +1770,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					}),
 			personas: turnPersonas,
 			currentPersona: persona.name,
+			onPersonaCreated: (created, activate) => {
+				refreshPersonas(sessionCwd);
+				announcePersonasChanged(created.name);
+				// "new" is the client's move: it opens the session once this turn
+				// ends (a daemon-made one would duplicate a TUI's own).
+				if (activate !== "here") return;
+				// Takes effect with the next turn: this one keeps the prompt and
+				// tools it started with.
+				ws.session.persona = created.name;
+				ws.systemPrompt = computeSystemPrompt(created, ws.session.model, sessionCwd, ws.session.mode);
+				saveSession(ws.session);
+				broadcaster.broadcastSessionUpdate(ws);
+			},
 			subagentPrompts: subPrompts,
 			subagentModel,
 			// Subagents build their own prompt from this cwd (task.ts's
@@ -2943,7 +2973,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			setQuickSessionPersona: (name) => {
 				quickSessionPersona = name;
 			},
-			personas,
+			personas: refreshPersonas(ws.session.cwd ?? cwd),
 			currentPersona,
 			computeSystemPrompt,
 			modelInfoFor,
@@ -3112,7 +3142,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	function getPersonas() {
-		return personas.map((p) => ({
+		return refreshPersonas(cwd).map((p) => ({
 			name: p.name,
 			label: p.label,
 			description: p.description,

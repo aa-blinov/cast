@@ -121,7 +121,7 @@ function builtinPersonasDir(): string {
 	return join(PROMPTS_DIR, "personas");
 }
 
-function loadPersonaFromFile(filePath: string, source: PersonaSource): Persona | null {
+export function loadPersonaFromFile(filePath: string, source: PersonaSource): Persona | null {
 	let raw: string;
 	try {
 		raw = readFileSync(filePath, "utf-8");

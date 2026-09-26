@@ -414,7 +414,13 @@ export function App(props: AppProps): JSX.Element {
 		planMode,
 	]);
 
+	// A persona the agent saved with activate: applied through /persona once
+	// the turn it was saved in is over, the same as switching by hand.
+	const pendingPersonaRef = useRef<{ name: string; mode: "new" | "here" } | null>(null);
 	const agent = useAgentSession({
+		onPersonaActivated: (name, mode) => {
+			pendingPersonaRef.current = { name, mode };
+		},
 		session,
 		config,
 		cwd,
@@ -449,6 +455,13 @@ export function App(props: AppProps): JSX.Element {
 	// populate the ref setPlanMode reads after the agent hook exists.
 	daemonModeSyncRef.current = agent.setMode;
 	const running = agent.status === "running";
+	useEffect(() => {
+		const pending = pendingPersonaRef.current;
+		if (running || !pending) return;
+		pendingPersonaRef.current = null;
+		const flag = pending.mode === "new" ? "--new-session" : "--here";
+		void handleInput(`/persona ${pending.name} ${flag}`, undefined, depsRef.current);
+	}, [running]);
 	// Recomputed when the transcript changes so a prompt is recallable on the
 	// turn right after it was sent.
 	const promptHistory = useMemo(() => submittedPrompts(agent.messages), [agent.messages]);

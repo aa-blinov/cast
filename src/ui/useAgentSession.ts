@@ -37,6 +37,7 @@ import { loadSettings, type PermissionMode, updateSettings } from "../core/setti
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import { extractSystemReminders } from "../core/system-reminder.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
+import type { PersonaActivation } from "../core/tools/persona.ts";
 import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
 import {
 	abortServerSession,
@@ -362,6 +363,9 @@ interface UseAgentSessionParams {
 	confirmBash: (command: string, reason: string) => Promise<boolean>;
 	/** Per-turn system prompt rebuild for sticky rules + @-mention. */
 	rebuildSystemPrompt?: (context: { userText: string; contextFiles: string[] }) => string;
+	/** The agent saved a persona and asked to switch to it (persona_create with
+	 *  activate); the host applies it like /persona once the turn is over. */
+	onPersonaActivated?: (name: string, mode: PersonaActivation) => void;
 	/** Re-read persona overrides before a new turn so chat-created changes apply immediately. */
 	refreshPersonasForTurn?: () => Promise<{ persona: Persona; personas: Persona[]; systemPrompt: string }>;
 	/** Available personas for the task tool. */
@@ -525,6 +529,9 @@ export function buildDisplayMessages(sessionMessages: SessionState["messages"]):
 }
 
 export function useAgentSession(params: UseAgentSessionParams): UseAgentSession {
+	// Read at event time, so a re-created host callback isn't one render stale.
+	const onPersonaActivatedRef = useRef(params.onPersonaActivated);
+	onPersonaActivatedRef.current = params.onPersonaActivated;
 	const {
 		session,
 		config,
@@ -1102,6 +1109,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				const activePersonaObj = activePersonas?.find((p) => p.name === activePersonaName);
 				const result = await runAgentLoop(session.messages, {
 					config,
+					// Enables persona_create; switching (activate) arrives as the
+					// personas_changed event handled below.
+					onPersonaCreated: () => {},
 					model: modelOverride ?? session.model,
 					modelProvider: resolvedModelProvider,
 					subagentModelProvider: resolvedSubagentProvider,
@@ -1276,6 +1286,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								refresh();
 								break;
 							case "compaction_failed":
+								break;
+							case "personas_changed":
+								if (event.activate) onPersonaActivatedRef.current?.(event.persona, event.activate);
 								break;
 							case "doom_loop":
 								pendingDoomWarningsRef.current.push(
@@ -1558,6 +1571,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				return;
 			}
 			switch (event.type) {
+				case "personas_changed":
+					if (event.activate) onPersonaActivatedRef.current?.(event.persona, event.activate);
+					break;
 				case "user_message":
 					setMessages((msgs) => {
 						const clientMessageId = event.message.clientMessageId;

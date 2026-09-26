@@ -105,7 +105,7 @@ export function projectMcpPath(targetCwd: string): string | undefined {
 	return path !== globalMcpPath() ? path : undefined;
 }
 
-function projectPersonasDir(targetCwd: string): string | undefined {
+export function projectPersonasDir(targetCwd: string): string | undefined {
 	const dir = join(targetCwd, ".cast", "personas");
 	return dir !== globalPersonasDir() ? dir : undefined;
 }

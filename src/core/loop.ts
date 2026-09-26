@@ -100,7 +100,7 @@ import {
 	type OpenWorkGateConfig,
 } from "./open-work-gate.ts";
 import type { Persona } from "./personas.ts";
-import { checkReadOnlyCommand, listPlanNames, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
+import { checkReadOnlyCommand, listPlanNames, type PlanState, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
 import { type ProjectResolverDeps, resolveMcpForCwd } from "./project.ts";
 import { findProjectRoot } from "./project-root.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
@@ -137,11 +137,13 @@ import {
 	loadSettings,
 	memoryPromptBudget,
 } from "./settings.ts";
+import type { Skill } from "./skills.ts";
 import { resolveSshHosts, type SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { recordLlmRequest } from "./telemetry.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
+import type { PersonaActivation } from "./tools/persona.ts";
 import {
 	type CompletedToolCallStatus,
 	completedToolCallStatus,
@@ -812,6 +814,8 @@ export type AgentEvent =
 	| { type: "interrupt_reminder" }
 	/** skill_install changed the installed set; hosts refresh slash commands. */
 	| { type: "skills_changed" }
+	/** persona_create saved a persona; hosts refresh their persona lists. */
+	| { type: "personas_changed"; persona: string; activate?: PersonaActivation }
 	/** Build-mode todo_write call landed — carries the full replacement list. */
 	| { type: "todos_updated"; todos: TodoItem[] }
 	/** Session crossed local midnight; a date-rollover `<system-reminder>` was appended. */
@@ -906,7 +910,7 @@ export interface LoopConfig {
 	/** Parent `--skill` paths — forwarded into task subagent skill catalogs. */
 	cliSkillPaths?: string[];
 	/** Plan mode state — when enabled, injects plan system prompt block. */
-	planState?: import("./plan.ts").PlanState;
+	planState?: PlanState;
 	/** Hooks config (see resolveHooksForCwd in project.ts). */
 	hooks?: HooksFile;
 	/** Current session id — included in every hook payload/env (CAST_SESSION_ID). */
@@ -914,11 +918,14 @@ export interface LoopConfig {
 	/** Permission mode — included in hook payloads as permission_mode. */
 	permissionMode?: string;
 	/** Loaded skills — for the skill tool. */
-	skills?: import("./skills.ts").Skill[];
+	skills?: Skill[];
 	/** Re-reads the installed skills for this run's cwd, bypassing any host
 	 *  cache. Enables skill_install and lets a skill installed mid-turn be
 	 *  loaded in the same turn. Omitted by hosts that can't rescan (subagents). */
-	reloadSkills?: () => import("./skills.ts").Skill[];
+	reloadSkills?: () => Skill[];
+	/** Enables persona_create. Called with the saved persona; `activate` asks
+	 *  the host to switch this session to it from the next turn. */
+	onPersonaCreated?: (persona: Persona, activate: PersonaActivation | undefined) => void;
 	/** Restrict bash to the read-only allowlist without the rest of plan mode.
 	 * Used for subagents spawned from a plan-mode parent: they inherit the
 	 * inspection-only bash but not the authoring tools or the plan prompt
@@ -1866,7 +1873,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// restriction can't be routed around by delegating, anything it spawns
 	// via `task`) may invoke — same glob semantics as `tools:`. Omitted =
 	// every discovered skill stays available.
-	const personaSkillFilter = (list: import("./skills.ts").Skill[]) =>
+	const personaSkillFilter = (list: Skill[]) =>
 		currentPersonaObj?.skills !== undefined
 			? list.filter((s) => matchesToolsAllowlist(s.name, currentPersonaObj.skills!))
 			: // A copy either way: the skill tool swaps a reloaded list into this
@@ -1876,6 +1883,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// stays out of plan mode and read-only runs like the other writing tools.
 	const skillInstallAllowed =
 		Boolean(loopConfig.reloadSkills) && !loopConfig.planState?.enabled && loopConfig.readOnlyBash !== true;
+	// Same gate: saving a persona writes outside the project.
+	const personaToolAllowed =
+		Boolean(loopConfig.onPersonaCreated) && !loopConfig.planState?.enabled && loopConfig.readOnlyBash !== true;
 	// With install available the skill tool has to exist even when nothing is
 	// installed yet, or the skill just installed could not be loaded.
 	const allowedSkills = loopConfig.skills
@@ -1932,6 +1942,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		Boolean(activeGoal),
 		Boolean(activeReview),
 		skillInstallAllowed,
+		personaToolAllowed,
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
@@ -2162,6 +2173,17 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 			: undefined,
 		loopConfig.beforeFileWrite,
+		personaToolAllowed
+			? {
+					cwd,
+					projectTrusted: loopConfig.projectTrusted === true,
+					confirmWrite: loopConfig.confirmWrite,
+					onPersonaCreated: (persona, activate) => {
+						loopConfig.onPersonaCreated!(persona, activate);
+						onEvent({ type: "personas_changed", persona: persona.name, activate });
+					},
+				}
+			: undefined,
 	);
 	const executeTool = async (
 		name: string,

@@ -95,9 +95,10 @@ describe("builtin skills", () => {
 		expect(personasReference).toContain("## Create a persona from chat");
 		expect(personasReference).toContain("Default to a global persona");
 		expect(personasReference).toContain("Never write a user-created persona under `prompts/personas/`");
-		expect(personasReference).toContain("never guess or substitute it");
+		expect(personasReference).toContain("`persona_create` tool");
+		expect(personasReference).toContain("never a literal `~`");
 		expect(personasReference).toContain("constructor areas");
-		expect(personasReference).toContain("next user message");
+		expect(personasReference).toContain("from the next message on");
 	});
 
 	it("does not advertise tools or script paths unavailable in Cast", () => {

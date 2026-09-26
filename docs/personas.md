@@ -41,7 +41,7 @@ You can ask the agent to create a persona or customize the currently effective o
 
 For a new persona, cast normally defaults to the global scope (`~/.cast/personas/`). Use the project scope (`.cast/personas/`) only when the persona is explicitly intended for one project. A built-in persona is never edited in place: a same-name global or project persona overrides it according to the priority rules below.
 
-Before writing, cast shows the proposed name, scope, description, and behavior summary. If the active persona is customized, the current turn keeps its original prompt and tool set; the override is loaded automatically for the next user message. `/reload` is not required for that chat flow.
+Before writing, cast shows the proposed name, scope, description, and behavior summary. It saves the persona with its `persona_create` tool, which checks the fields and makes the persona available at once: in `/persona`, in the persona pickers of the web UI and the TUI, and for new sessions. No `/reload` or restart is needed. Ask it to "switch to it" and a new session with the persona opens once the current turn ends, so the role starts from a clean context. Ask it to continue this conversation as the persona and the current session switches instead, from your next message; the current turn keeps its original prompt and tool set. Editing the active persona works the same way, from the next message. The tool isn't offered in plan mode, and it asks before writing when the session's permissions ask before file writes.
 
 ## Custom Personas
 

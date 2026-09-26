@@ -19,6 +19,7 @@ import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
 import { type BashBackgroundDeps, execBashKill, execBashOutput } from "./tools/bash-background.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
+import { execPersonaCreate, PERSONA_CREATE_TOOL_DESCRIPTION, type PersonaToolDeps } from "./tools/persona.ts";
 import { execGlob, execGrep, execLs } from "./tools/search.ts";
 import {
 	type ConfirmBash,
@@ -58,6 +59,7 @@ export function getToolDefinitions(
 	goalActive = false,
 	reviewActive = false,
 	includeSkillInstallTool = false,
+	includePersonaTool = false,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -746,6 +748,63 @@ export function getToolDefinitions(
 					},
 				]
 			: []),
+		...(includePersonaTool
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "persona_create",
+							description: PERSONA_CREATE_TOOL_DESCRIPTION,
+							parameters: {
+								type: "object",
+								properties: {
+									name: { type: "string", description: "Lowercase id with dashes, e.g. code-reviewer" },
+									label: { type: "string", description: "Display name shown in pickers" },
+									description: { type: "string", description: "One line on what the persona is for" },
+									prompt: { type: "string", description: "The persona's full system prompt" },
+									tools: {
+										type: "array",
+										items: { type: "string" },
+										description: "Built-in tools allowed (names or *-globs); omit for all, [] for none",
+									},
+									skills: {
+										type: "array",
+										items: { type: "string" },
+										description: "Skills allowed; omit for all",
+									},
+									mcp: {
+										type: "array",
+										items: { type: "string" },
+										description: "MCP servers allowed; omit for all",
+									},
+									subagents: { type: "boolean", description: "May delegate to sub-agents with task" },
+									agentsMd: {
+										type: "boolean",
+										description: "Include AGENTS.md/CLAUDE.md in its prompt (default true)",
+									},
+									model: { type: "string", description: "Model to pin for new sessions with this persona" },
+									scope: {
+										type: "string",
+										enum: ["global", "project"],
+										description: "global (~/.cast/personas, default) or this project's .cast/personas",
+									},
+									overwrite: {
+										type: "boolean",
+										description: "Replace or override an existing persona of this name",
+									},
+									activate: {
+										type: "string",
+										enum: ["new", "here"],
+										description:
+											"Use it now: new = open a fresh session with it after this turn (default choice); here = this session continues as it",
+									},
+								},
+								required: ["name", "prompt"],
+							},
+						},
+					},
+				]
+			: []),
 	];
 }
 
@@ -763,6 +822,7 @@ export function createToolExecutor(
 	backgroundBash?: BashBackgroundDeps,
 	skillDeps?: SkillToolDeps,
 	beforeFileWrite?: (path: string) => void,
+	personaDeps?: PersonaToolDeps,
 ): ToolExecutor {
 	return async (
 		name: string,
@@ -882,6 +942,9 @@ export function createToolExecutor(
 					case "skill_install":
 						if (!skillDeps?.reload) return { content: "Skill install not available.", isError: true };
 						return execSkillInstall(args, skillDeps, confirmBash);
+					case "persona_create":
+						if (!personaDeps) return { content: "Persona creation not available.", isError: true };
+						return await execPersonaCreate(args, personaDeps);
 					default:
 						return { content: `Unknown tool: ${name}`, isError: true };
 				}
