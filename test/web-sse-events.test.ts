@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { handleSseEvent } from "../src/server/public/sse-events.js";
+import { getSubagentProgress, subscribeSubagentProgress } from "../src/server/public/tool-card-state.js";
 
 function createContext() {
 	return {
@@ -241,6 +242,26 @@ describe("web SSE events", () => {
 		expect(updater({ messages: [] }).messages).toEqual([
 			{ role: "user", content: "", audios: ["data:audio/wav;base64,UklGRg=="] },
 		]);
+	});
+
+	it("keeps a task card's live subagent progress where a settled card can read it", () => {
+		const progress = {
+			type: "subagent_progress",
+			toolCallId: "call-7",
+			taskId: "child-1",
+			subagent: "explore",
+			description: "Map auth",
+			background: true,
+			status: "running",
+			tool: { name: "read", summary: "src/auth.ts" },
+			toolCount: 3,
+		};
+		const heard: string[] = [];
+		const stop = subscribeSubagentProgress((id) => heard.push(id));
+		handleSseEvent(progress, createContext());
+		stop();
+		expect(getSubagentProgress("call-7")).toMatchObject({ taskId: "child-1", toolCount: 3 });
+		expect(heard).toEqual(["call-7"]);
 	});
 
 	it("refreshes the persona list when the agent saves one, and shows the switch it asked for", () => {

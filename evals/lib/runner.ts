@@ -390,7 +390,7 @@ async function runAttempt(
 			planState.activePlanPath = planPath;
 		}
 		const personas = resolvePersonasForCwd(cwd, false, false).personas;
-		const subagentPrompts = evalCase.persona === "coder-with-subagents" ? loadSubagentPrompts() : undefined;
+		const subagentPrompts = persona.subagents ? loadSubagentPrompts() : undefined;
 		const skills = evalCase.withSkills
 			? loadSkills({ builtinDir: builtinSkillsDir, extraPaths: [] }).skills
 			: undefined;
@@ -416,7 +416,10 @@ async function runAttempt(
 			config,
 			model,
 			cwd,
-			sessionId: goalSessionId,
+			// Subagents are saved as child sessions of this one, which is what a
+			// task_id follow-up continues; the eval HOME keeps them throwaway.
+			sessionId:
+				goalSessionId ?? (subagentPrompts ? `eval-task-${evalCase.id}-${randomUUID().slice(0, 8)}` : undefined),
 			systemPrompt,
 			disabledTools: planState ? new Set(modeDisabledTools(planState.enabled)) : undefined,
 			personas,

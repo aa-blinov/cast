@@ -54,6 +54,8 @@ export interface TurnMeta {
 	completedAt: string;
 }
 
+export type SessionKind = "conversation" | "background" | "subagent";
+
 export interface SessionState {
 	id: string;
 	messages: Message[];
@@ -117,9 +119,10 @@ export interface SessionState {
 	 * there, same as before this field existed).
 	 */
 	providerName?: string;
-	/** Conversation sessions are user-facing; background sessions are maintenance runs. */
-	sessionKind?: "conversation" | "background";
-	/** Parent conversation for a background session. */
+	/** Conversation sessions are user-facing; background sessions are maintenance
+	 *  runs; subagent sessions are `task` children, opened from their parent. */
+	sessionKind?: SessionKind;
+	/** Parent conversation for a background or subagent session. */
 	parentSessionId?: string;
 	/** Maintenance kind for a background session. */
 	backgroundKind?: "memory-dream" | "memory-distill" | "checkpoint-writer";
@@ -1432,7 +1435,7 @@ interface SessionRow {
 	last_announced_local_date: string | null;
 	provider_url: string | null;
 	provider_name: string | null;
-	session_kind: "conversation" | "background" | null;
+	session_kind: SessionKind | null;
 	parent_session_id: string | null;
 	background_kind: "memory-dream" | "memory-distill" | null;
 	usage_json: string;
@@ -1482,18 +1485,21 @@ export function loadSession(id: string): SessionState | null {
 }
 
 /** Read the mutable session identity without loading its messages. The daemon
- * uses this at turn boundaries to notice model/provider changes made by TUI
- * or another web surface while it was idle. */
+ * uses this at turn boundaries to notice model/provider/persona changes made
+ * by TUI or another web surface while it was idle. */
 export function loadSessionMeta(
 	id: string,
-): Pick<SessionState, "id" | "model" | "providerUrl" | "providerName" | "updatedAt"> | null {
+): Pick<SessionState, "id" | "model" | "providerUrl" | "providerName" | "persona" | "updatedAt"> | null {
 	const row = getDb()
-		.prepare("SELECT id, model, updated_at, provider_url, provider_name FROM sessions WHERE id = ?")
-		.get(id) as Pick<SessionRow, "id" | "model" | "updated_at" | "provider_url" | "provider_name"> | undefined;
+		.prepare("SELECT id, model, persona, updated_at, provider_url, provider_name FROM sessions WHERE id = ?")
+		.get(id) as
+		| Pick<SessionRow, "id" | "model" | "persona" | "updated_at" | "provider_url" | "provider_name">
+		| undefined;
 	if (!row) return null;
 	return {
 		id: row.id,
 		model: row.model ?? "",
+		persona: row.persona ?? undefined,
 		updatedAt: row.updated_at,
 		providerUrl: row.provider_url ?? undefined,
 		providerName: row.provider_name ?? undefined,
@@ -1702,62 +1708,6 @@ export function getRunNotices(sessionId: string): RunNoticeEvent[] {
 	return notices;
 }
 
-// ----------------------------------------------------------------------------
-// Subagent (task tool) transcripts — the child run's full message chain,
-// persisted so a subagent's work survives the process that ran it.
-// ----------------------------------------------------------------------------
-
-export interface SubagentRunRecord {
-	sessionId: string;
-	toolCallId: string;
-	persona: string | undefined;
-	model: string | undefined;
-	startedAt: string;
-	endReason: string;
-	messages: Message[];
-}
-
-export function saveSubagentRun(run: SubagentRunRecord): void {
-	getDb()
-		.prepare(
-			`INSERT INTO subagent_runs (session_id, seq, tool_call_id, persona, model, started_at, end_reason, messages_json)
-			 VALUES (?, (SELECT COALESCE(MAX(seq), -1) + 1 FROM subagent_runs WHERE session_id = ?), ?, ?, ?, ?, ?, ?)`,
-		)
-		.run(
-			run.sessionId,
-			run.sessionId,
-			run.toolCallId,
-			run.persona ?? null,
-			run.model ?? null,
-			run.startedAt,
-			run.endReason,
-			JSON.stringify(run.messages),
-		);
-}
-export function loadSubagentRuns(sessionId: string): SubagentRunRecord[] {
-	const rows = getDb()
-		.prepare(
-			"SELECT tool_call_id, persona, model, started_at, end_reason, messages_json FROM subagent_runs WHERE session_id = ? ORDER BY seq",
-		)
-		.all(sessionId) as Array<{
-		tool_call_id: string;
-		persona: string | null;
-		model: string | null;
-		started_at: string;
-		end_reason: string;
-		messages_json: string;
-	}>;
-	return rows.map((r) => ({
-		sessionId,
-		toolCallId: r.tool_call_id,
-		persona: r.persona ?? undefined,
-		model: r.model ?? undefined,
-		startedAt: r.started_at,
-		endReason: r.end_reason,
-		messages: JSON.parse(r.messages_json) as Message[],
-	}));
-}
-
 /**
  * Vision fallback cleanup: once a model has rejected image_url message parts
  * (400/404), those user messages are useless to it. saveSession only upserts
@@ -1817,8 +1767,17 @@ function withMessageFtsClearedFor<T>(db: DatabaseSync, sessionIds: readonly stri
 
 export function deleteSession(id: string, cwd?: string): boolean {
 	const db = getDb();
+	// A subagent session is part of its parent's history: it goes with it.
+	const children = (
+		db.prepare("SELECT id FROM sessions WHERE parent_session_id = ? AND session_kind = 'subagent'").all(id) as Array<{
+			id: string;
+		}>
+	).map((row) => row.id);
 	const remove = () =>
-		withMessageFtsClearedFor(db, [id], () => db.prepare("DELETE FROM sessions WHERE id = ?").run(id));
+		withMessageFtsClearedFor(db, [id, ...children], () => {
+			for (const child of children) db.prepare("DELETE FROM sessions WHERE id = ?").run(child);
+			return db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+		});
 	let result: { changes: number | bigint };
 	if (db.isTransaction) {
 		result = remove();
@@ -2339,7 +2298,7 @@ function generateSessionId(): string {
 export interface SessionCreationOptions {
 	id?: string;
 	title?: string;
-	sessionKind?: "conversation" | "background";
+	sessionKind?: SessionKind;
 	parentSessionId?: string;
 	backgroundKind?: "memory-dream" | "memory-distill" | "checkpoint-writer";
 }
@@ -2520,6 +2479,32 @@ export function pruneSessionEvents(now: number = Date.now(), retentionMs: number
 		db.exec("ROLLBACK");
 		throw error;
 	}
+}
+
+/** A conversation's `task` children, newest first, without their messages. */
+export function listSubagentSessions(
+	parentSessionId: string,
+): Array<Pick<SessionState, "id" | "title" | "persona" | "model" | "createdAt" | "updatedAt">> {
+	const rows = getDb()
+		.prepare(
+			"SELECT id, title, persona, model, created_at, updated_at FROM sessions WHERE session_kind = 'subagent' AND parent_session_id = ? ORDER BY created_at DESC",
+		)
+		.all(parentSessionId) as Array<{
+		id: string;
+		title: string | null;
+		persona: string | null;
+		model: string | null;
+		created_at: string;
+		updated_at: string;
+	}>;
+	return rows.map((r) => ({
+		id: r.id,
+		title: r.title ?? undefined,
+		persona: r.persona ?? undefined,
+		model: r.model ?? "",
+		createdAt: r.created_at,
+		updatedAt: r.updated_at,
+	}));
 }
 
 export function listBackgroundSessions(parentSessionId?: string): SessionState[] {

@@ -39,6 +39,7 @@ import { extractSystemReminders } from "../core/system-reminder.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import type { PersonaActivation } from "../core/tools/persona.ts";
 import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
+import type { SubagentProgress } from "../core/tools/task.ts";
 import {
 	abortServerSession,
 	answerServerBashConfirm,
@@ -80,6 +81,8 @@ export interface ToolCallEntry {
 	args: string;
 	status: ToolCallStatus;
 	result?: string;
+	/** A running `task` call's latest subagent progress. */
+	progress?: SubagentProgress;
 }
 
 /**
@@ -620,7 +623,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	useEffect(() => {
 		if (isClient) return;
 		return subscribeAgentActorNotifications((actor) => {
-			if (actor.parentSessionId !== session.id) return;
+			// A subagent's outcome is already on its task row.
+			if (actor.parentSessionId !== session.id || actor.mode === "subagent") return;
 			const status = actor.status === "success" ? "completed" : actor.status;
 			setMessages((msgs) => [...msgs, { role: "warning", content: `${actor.agent} ${status}` }]);
 		});
@@ -1207,6 +1211,11 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 									true,
 								);
 								break;
+							case "subagent_progress":
+								updateStreaming((s) =>
+									s ? reduceStreamEvent(s, { type: "subagent_progress", progress: event }) : s,
+								);
+								break;
 							case "tool_end":
 								updateStreaming((s) => {
 									if (!s) return s;
@@ -1635,6 +1644,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								: s,
 						true,
 					);
+					break;
+				case "subagent_progress":
+					updateStreaming((s) => (s ? reduceStreamEvent(s, { type: "subagent_progress", progress: event }) : s));
 					break;
 				case "tool_end": {
 					updateStreaming((s) => {

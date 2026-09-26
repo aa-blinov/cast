@@ -4,15 +4,18 @@
 
 ## Overview
 
-A sub-agent is a background instance of the agent loop running in an isolated context:
-- **Isolated Context**: The main conversation context avoids clutter from intermediate tool calls, raw logs, or exploratory search results. Only the final summary or answer returns.
-- **Parallel Execution**: The main agent can spawn multiple sub-agents in a single turn (`Promise.all`) to explore different parts of a codebase simultaneously.
+A sub-agent is a separate instance of the agent loop running in an isolated context:
+- **Isolated Context**: The main conversation context avoids clutter from intermediate tool calls, raw logs, or exploratory search results. Only the final report returns, wrapped as `<task id="…" subagent="…" state="…">…</task>` and cut at 30,000 characters.
+- **Parallel Execution**: Several `task` calls in one model response run at the same time, up to 4 per session; the rest wait for a free slot.
+- **A session of its own**: Each sub-agent is saved as a child session of the conversation (hidden from the session list). Its task id is that session's id.
+- **Follow-ups**: Calling `task` again with `task_id` continues the same sub-agent with its full history instead of starting over. For a sub-agent that is still running, the new assignment is steered into it.
+- **Background**: `background: true` returns at once; the report arrives as a message when the sub-agent finishes, and starts a new turn if the session is idle. Offered where the host can deliver it (TUI and web).
 - **Dedicated System Prompts**: Sub-agents load specialized prompts from `prompts/subagents/` (`worker`, `explore`, `review`).
 - **Model Overrides**: Sub-agents can use a different model via `/subagent-model` or `/subagent-model-provider`.
 
 ## Enabling Delegation (`subagents` field)
 
-The `task` tool is **persona-gated**. By default, built-in personas like `senior` or `qa` do **not** have access to `task`.
+The `task` tool is **persona-gated**. Among the built-ins, `senior` (the default) and `coder-with-subagents` have it; `qa`, `analyst`, `pm`, `assistant` and `researcher` do not.
 
 To enable delegation, a persona's frontmatter must specify:
 
@@ -20,7 +23,7 @@ To enable delegation, a persona's frontmatter must specify:
 subagents: true
 ```
 
-The built-in `coder-with-subagents` persona has `subagents: true` set by default.
+`senior` delegates sparingly — wide exploration, independent areas in parallel, an independent review. `coder-with-subagents` leans on delegation much harder.
 
 ### Restricting Subagent Roles (`subagentTypes`)
 
@@ -40,14 +43,14 @@ If `subagentTypes` is omitted, the persona can spawn any configured sub-agent ro
 | Role | Description | Allowed Built-in Tools | Usage |
 |------|-------------|-----------------------|-------|
 | `worker` | Default catch-all role | All built-in tools (except `task`) | Edits, refactoring, mixed tasks |
-| `explore` | Read-only codebase exploration | `read`, `grep`, `glob`, `ls`, `bash` | Structural research, finding symbols/files |
+| `explore` | Read-only codebase exploration | `read`, `grep`, `glob`, `ls`, inspection-only `bash` | Structural research, finding symbols/files |
 | `review` | Independent code validation | `read`, `grep`, `glob`, `ls`, `bash` | Verification of changes before reporting done |
 
 Sub-agents cannot delegate further: the `task` tool is stripped from all sub-agents to prevent infinite recursive spawning.
 
-## Frontmatter Configuration
+## Custom Sub-agents
 
-Custom sub-agent prompts live in `prompts/subagents/<name>.md` or can be loaded dynamically. Frontmatter supports tool allowlists and context rules:
+Beyond the built-ins in `prompts/subagents/`, cast loads `~/.cast/subagents/*.md` and, for a trusted project, `.cast/subagents/*.md`. A later source replaces a same-named earlier one (project over global over built-in). Frontmatter supports tool allowlists and context rules:
 
 ```markdown
 ---
@@ -63,6 +66,13 @@ You explore the codebase and report findings. You cannot edit files.
 
 - **`tools`**: Allowlist of built-in tools. (MCP tools are not restricted by this list).
 - **`agentsMd`**: `true` (default) injects project `AGENTS.md` / `CLAUDE.md` context files into the sub-agent prompt.
+- **`readOnly`**: `true` takes `write`/`edit` away and makes `bash` inspection-only, enforced by the harness rather than asked for in the prompt. The built-in `explore` sets it.
+
+## Watching Sub-agents
+
+- **Web UI**: a `task` card shows the sub-agent, its title, the tool call it is on and how many it has made. **Open** shows its session (view only, with a way back to the thread); **Stop** ends a running one.
+- **TUI**: a running `task` row leads with `[explore ↳ read src/auth.ts · 3]`. `/agents` lists the session's sub-agents: pick one to see its session as a digest (the assignment, each tool call, the report), or stop a running one.
+- **API**: `GET /api/sessions/:id/agents` lists them; `POST /api/sessions/:id/agents/:taskId/cancel` stops one.
 
 ## Inherited Restrictions & Security
 

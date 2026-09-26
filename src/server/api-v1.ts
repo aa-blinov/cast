@@ -777,6 +777,15 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 							"Whether the model of the next turn accepts voice messages (`data:audio/wav` in `images`).",
 					},
 					shareToken: { type: ["string", "null"], description: "Public share token, when the session is shared." },
+					sessionKind: {
+						type: "string",
+						enum: ["conversation", "background", "subagent"],
+						description: '"subagent" for a task subagent\'s session, which opens view-only.',
+					},
+					parentSessionId: {
+						type: ["string", "null"],
+						description: "The conversation a subagent session belongs to.",
+					},
 					turnStartedAt: { type: ["integer", "null"], description: "Epoch ms the in-flight turn began." },
 					question: { type: ["object", "null"], description: "Pending question awaiting an answer." },
 					planTransition: { type: ["object", "null"] },

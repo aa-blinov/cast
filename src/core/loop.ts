@@ -150,6 +150,7 @@ import {
 	normalizeToolResultError,
 	relativeToCwd,
 } from "./tools/shared.ts";
+import type { SubagentProgress } from "./tools/task.ts";
 import {
 	type BashBackgroundDeps,
 	type ConfirmBash,
@@ -834,6 +835,8 @@ export type AgentEvent =
 			/** The compaction summarizer: its prompt is the old history, not the context size. */
 			compaction?: boolean;
 	  }
+	/** A running `task` child's progress; its raw events go to onSubagentEvent. */
+	| ({ type: "subagent_progress" } & SubagentProgress)
 	| { type: "end"; reason: string }
 	| { type: "error"; message: string };
 
@@ -1015,6 +1018,9 @@ export interface LoopConfig {
 	 * shallow copy is enough to capture the current state.
 	 */
 	onMessagesChanged?: (messages: Message[]) => void;
+	/** Raw events of a `task` child, keyed by its task id (= its session id),
+	 *  for a host that shows the child session live. */
+	onSubagentEvent?: (taskId: string, event: AgentEvent) => void;
 	/**
 	 * Fired synchronously right after a successful compaction builds its
 	 * replacement array but before it's spliced into the live `messages`
@@ -2138,17 +2144,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					sshHosts: loopConfig.sshHosts,
 					hooks: activeHooks,
 					sessionId: loopConfig.sessionId,
-					forkContext: () =>
-						createAgentForkContext(messages, checkpointBoundary, {
-							systemPrompt: loopConfig.systemPrompt,
-							toolNames: tools.map((tool) => tool.function.name),
-							toolDefinitions: structuredClone(tools),
-							allowedTools,
-							disabledTools: [...disabledTools],
-							readOnlyBash: loopConfig.readOnlyBash,
-							permissionMode: loopConfig.permissionMode,
-							model: initialModel,
-						}),
+					onProgress: (progress) => {
+						onEvent({ type: "subagent_progress", ...progress });
+						if (progress.usage) onEvent({ type: "usage", usage: progress.usage, subagent: true });
+					},
+					onChildEvent: loopConfig.onSubagentEvent,
+					background: loopConfig.backgroundBash,
 					skills: allowedSkills,
 					runAgentLoop,
 				}
@@ -3574,13 +3575,15 @@ async function executeToolCalls(
 			break;
 		}
 		const group: typeof prepared = [prepared[cursor]!];
-		if (PARALLEL_SAFE_TOOL_NAMES.has(prepared[cursor]!.name)) {
-			while (
-				cursor + group.length < prepared.length &&
-				PARALLEL_SAFE_TOOL_NAMES.has(prepared[cursor + group.length]!.name)
-			) {
-				group.push(prepared[cursor + group.length]!);
-			}
+		// Read-only tools share a group; so do sibling `task` calls — each child
+		// is its own loop, the model is told they run at once, and execTask caps
+		// how many actually do. Workers are told to keep to separate areas.
+		const groupable = (name: string) =>
+			PARALLEL_SAFE_TOOL_NAMES.has(prepared[cursor]!.name)
+				? PARALLEL_SAFE_TOOL_NAMES.has(name)
+				: prepared[cursor]!.name === "task" && name === "task";
+		while (cursor + group.length < prepared.length && groupable(prepared[cursor + group.length]!.name)) {
+			group.push(prepared[cursor + group.length]!);
 		}
 		const groupSettled = new Map<string, ToolCallResult>();
 		const toolPromises = group.map(async (tc): Promise<ToolCallResult> => {

@@ -4827,6 +4827,53 @@ describe("runAgentLoop — persona subagentTypes: filtering", () => {
 		expect(m?.[1].trim()).toBe("explore");
 	});
 
+	it("runs sibling task calls at the same time and streams their progress", async () => {
+		let childActive = 0;
+		let childPeak = 0;
+		let parentCalls = 0;
+		vi.mocked(streamAndCollect).mockImplementation(async (_c, _m, msgs) => {
+			if (JSON.stringify(msgs).includes("CHILD ROLE")) {
+				childActive++;
+				childPeak = Math.max(childPeak, childActive);
+				await new Promise((r) => setTimeout(r, 30));
+				childActive--;
+				return { content: "child report", thinking: "", finishReason: "stop" };
+			}
+			parentCalls++;
+			if (parentCalls > 1) return { content: "final", thinking: "", finishReason: "stop" };
+			return {
+				content: "",
+				thinking: "",
+				finishReason: "tool_calls",
+				toolCalls: ["a", "b"].map((area) => ({
+					id: `task-${area}`,
+					name: "task",
+					arguments: JSON.stringify({ assignment: `map ${area}`, description: `Map ${area}` }),
+				})),
+			};
+		});
+		const events: AgentEvent[] = [];
+
+		await runAgentLoop([{ role: "user", content: "map a and b in parallel" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "SYS",
+			personas: personaWith({ name: "delegator", subagents: true }),
+			currentPersona: "delegator",
+			subagentPrompts: [
+				{ name: "worker", label: "Worker", description: "", systemPrompt: "CHILD ROLE", agentsMd: false },
+			],
+			onEvent: (e) => events.push(e),
+		});
+
+		expect(childPeak).toBe(2);
+		const done = events.filter((e) => e.type === "subagent_progress" && e.status === "completed");
+		expect(done.map((e) => (e.type === "subagent_progress" ? e.description : "")).sort()).toEqual(["Map a", "Map b"]);
+		const toolEnds = events.filter((e) => e.type === "tool_end" && e.name === "task");
+		expect(toolEnds).toHaveLength(2);
+	});
+
 	it("rejects a task call to a subagent type outside the allowlist", async () => {
 		const { execTask } = await import("../src/core/tools/task.ts");
 		const result = await execTask({ assignment: "review this", subagent: "review" }, "/tmp", testConfig, {

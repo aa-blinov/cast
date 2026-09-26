@@ -72,7 +72,13 @@ import {
 import { setModelsCache } from "../../core/readline.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
-import { addUsage, clearSessionMessages, dropLastCheckpoint, recordCompaction } from "../../core/session.ts";
+import {
+	addUsage,
+	clearSessionMessages,
+	dropLastCheckpoint,
+	listSubagentSessions,
+	recordCompaction,
+} from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import {
 	checkpointFork,
@@ -87,6 +93,7 @@ import { isUninstallableSkill, renderSkillInvocation, uninstallUserSkill } from 
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../../core/skills-sh.ts";
 import type { SshHost, saveSshConfig } from "../../core/ssh.ts";
 import { recordLlmRequest } from "../../core/telemetry.ts";
+import { cancelTask, runningTaskIds } from "../../core/tools/task.ts";
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
 import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { createSessionWorktree, listWorktrees, removeSessionWorktree } from "../../core/worktree.ts";
@@ -94,6 +101,8 @@ import { ALL_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
+
+const WHITESPACE_RE = /\s+/;
 
 /**
  * Public result shape of `bridge.executeCommand`. Defined here (not imported
@@ -1128,6 +1137,28 @@ const commandHandlers: Record<string, CommandHandler> = {
 				},
 			};
 		})();
+	},
+	"/agents": ({ ws, arg }) => {
+		// `/agents` lists this session's subagents; `/agents stop <id>` ends a
+		// running one. They run in this process, so a TUI attached as a thin
+		// client can only learn which are live, or stop one, by asking here.
+		const [action, taskId] = arg.split(WHITESPACE_RE);
+		const live = runningTaskIds(ws.id);
+		if (action === "stop") {
+			if (!taskId || !live.includes(taskId)) return { ok: false, error: "No such running subagent" };
+			cancelTask(taskId);
+			return { ok: true, result: { stopped: taskId } };
+		}
+		return {
+			ok: true,
+			result: listSubagentSessions(ws.id).map((child) => ({
+				id: child.id,
+				title: child.title,
+				subagent: child.persona ?? "worker",
+				updatedAt: child.updatedAt,
+				running: live.includes(child.id),
+			})),
+		};
 	},
 	"/rules": ({ ws, cwd, rulesForSessionCwd }) => {
 		// `sticky` is what the *daemon* has latched this session. The agent

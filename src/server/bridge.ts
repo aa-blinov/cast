@@ -76,6 +76,7 @@ import {
 	hasRecentClientMessageId,
 	lastPersistedSeq,
 	listSessionSummaries,
+	listSubagentSessions,
 	loadSession,
 	loadSessionByShareToken,
 	loadSessionMeta,
@@ -98,8 +99,10 @@ import {
 import { formatSkillsForPrompt, isUninstallableSkill, type Skill } from "../core/skills.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig } from "../core/ssh.ts";
 import type { StartupResult } from "../core/startup.ts";
+import { loadSubagentPrompts } from "../core/subagents.ts";
 import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
+import { cancelTask, runningTaskIds } from "../core/tools/task.ts";
 import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
 import {
 	buildReasoningParams,
@@ -322,6 +325,16 @@ export const SANDBOX_CWD = "sandbox";
 
 const AUDIO_DATA_URL_RE = /^data:audio\/(wav);base64,(.+)$/s;
 
+export interface SubagentSummary {
+	id: string;
+	title?: string;
+	subagent: string;
+	model: string;
+	createdAt: string;
+	updatedAt: string;
+	running: boolean;
+}
+
 export interface ServerBridge {
 	createSession(
 		personaName?: string,
@@ -338,6 +351,10 @@ export interface ServerBridge {
 	): WebAgentSession;
 	/** Creates an idle copy of the current safe context and registers it as a new session. */
 	forkSession(sessionId: string): WebAgentSession | undefined;
+	/** The session's `task` children, newest first, running ones marked. */
+	listAgents(sessionId: string): SubagentSummary[];
+	/** Stops a running child of this session; false when it isn't running. */
+	cancelAgent(sessionId: string, taskId: string): boolean;
 	getSession(id: string): WebAgentSession | undefined;
 	listSessions(): SessionSummary[];
 	/**
@@ -490,7 +507,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	// of only refreshing on a full page reload.
 	const sessionListListeners = new Set<(event: WebEvent) => void>();
 	const unsubscribeActorNotifications = subscribeAgentActorNotifications((actor) => {
-		if (!actor.parentSessionId) return;
+		// A subagent's outcome is on its task card (and a background one reports
+		// back as a message); a second "worker completed" line is just noise.
+		if (!actor.parentSessionId || actor.mode === "subagent") return;
 		const ws = sessions.get(actor.parentSessionId);
 		if (!ws) return;
 		broadcaster.broadcast(ws, { type: "agent_actor", actor });
@@ -774,7 +793,6 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	// /permissions actually take effect without a server restart.
 	let sshHosts = result.sshHosts;
 	let permissionMode = result.permissionMode;
-	const subPrompts = result.subagentPrompts;
 	// The model a brand-new session should start on. Seeded from the very
 	// first session built at startup, but /model updates it too — otherwise a
 	// mid-run model switch never reached new sessions, which kept defaulting
@@ -847,11 +865,24 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	function syncExternalSessionModel(ws: WebAgentSession): boolean {
 		const stored = loadSessionMeta(ws.id);
-		if (!stored || (stored.model === ws.session.model && stored.providerUrl === ws.session.providerUrl)) return false;
+		// A persona switched from an attached TUI lands in the store only; one
+		// that no longer resolves is left alone rather than dropped.
+		const persona =
+			stored?.persona && stored.persona !== ws.session.persona && resolvePersona(stored.persona)
+				? stored.persona
+				: ws.session.persona;
+		if (
+			!stored ||
+			(stored.model === ws.session.model &&
+				stored.providerUrl === ws.session.providerUrl &&
+				persona === ws.session.persona)
+		)
+			return false;
 
 		ws.session.model = stored.model;
 		ws.session.providerUrl = stored.providerUrl;
 		ws.session.providerName = stored.providerName;
+		ws.session.persona = persona;
 		ws.systemPrompt = computeSystemPrompt(
 			resolvePersona(ws.session.persona ?? "") ?? currentPersona,
 			ws.session.model,
@@ -1325,6 +1356,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	): Promise<void> {
 		const ws = sessions.get(sessionId);
 		if (!ws) throw new Error("Session not found");
+		if (ws.session.sessionKind === "subagent") {
+			throw new Error("This is a subagent's session: continue it from its parent session.");
+		}
 		if (clientMessageId) {
 			if (ws.acceptedClientMessageIds.has(clientMessageId)) return;
 			const alreadyPersisted = hasRecentClientMessageId(ws.id, clientMessageId);
@@ -1783,7 +1817,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				saveSession(ws.session);
 				broadcaster.broadcastSessionUpdate(ws);
 			},
-			subagentPrompts: subPrompts,
+			// Read per turn: a session's own project may bring subagents of its own.
+			subagentPrompts: loadSubagentPrompts({ cwd: sessionCwd, projectTrusted: trustForSessionCwd(sessionCwd) }),
+			onSubagentEvent: (taskId, event) => {
+				// Only a child someone has open gets its events live; the rest
+				// read the saved transcript when opened.
+				const child = sessions.get(taskId);
+				if (child) broadcaster.broadcast(child, event);
+			},
 			subagentModel,
 			// Subagents build their own prompt from this cwd (task.ts's
 			// buildTaskSystemPrompt loads AGENTS.md, rules and skills through it),
@@ -2021,7 +2062,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 						contextWindow: runConfig.contextWindow,
 						turnId: ws.currentTurnId,
 					});
-					if (event.background) {
+					// A background subagent reports its spend after the turn ended:
+					// nothing else would save it.
+					if (event.background || (event.subagent && ws.status !== "running")) {
 						saveSession(ws.session);
 						broadcaster.broadcastSessionUpdate(ws);
 					}
@@ -2540,6 +2583,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// never touched. For a session already unloaded from memory (closed in
 		// an earlier process run), load it from disk first.
 		const sessionCwd = ws?.session.cwd ?? loadSession(sessionId)?.cwd;
+		// Background subagents outlive turns, not their thread: a late save would
+		// write the deleted child back.
+		for (const taskId of runningTaskIds(sessionId)) cancelTask(taskId, { discard: true });
 		if (ws) {
 			if (ws.status === "running") ws.runner.abort();
 			ws.backgroundBash.registry.killAll();
@@ -2627,6 +2673,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
+		// A subagent session is only ever viewed here — its runs belong to the
+		// parent's turns, so nothing starts in it.
+		if (session.sessionKind === "subagent") return ws;
 		ensureProjectMcpForCwd(session.cwd ?? cwd);
 		void runHooksForEvent(resolveHooksForCwd(session.cwd ?? cwd, trustForSessionCwd(session.cwd ?? cwd)), {
 			event: "SessionStart",
@@ -3379,6 +3428,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	return {
 		createSession: createSessionInstance,
 		forkSession: forkSessionInstance,
+		listAgents: (sessionId) => {
+			const live = new Set(runningTaskIds(sessionId));
+			return listSubagentSessions(sessionId).map((child) => ({
+				id: child.id,
+				title: child.title,
+				subagent: child.persona ?? "worker",
+				model: child.model,
+				createdAt: child.createdAt,
+				updatedAt: child.updatedAt,
+				running: live.has(child.id),
+			}));
+		},
+		cancelAgent: (sessionId, taskId) => runningTaskIds(sessionId).includes(taskId) && cancelTask(taskId),
 		getSession,
 		isFullyIdle,
 		lastActivityAt: () => lastActivityAtRef.value,

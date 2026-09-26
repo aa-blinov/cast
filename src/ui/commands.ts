@@ -6,6 +6,7 @@ import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } fr
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
 import { clearGoal, editGoalObjective, readGoal, startGoal } from "../core/goal.ts";
 import { runHooksForEvent } from "../core/hooks.ts";
+import type { Message } from "../core/llm.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult, mcpServerToolBlurbs } from "../core/mcp.ts";
 import {
@@ -46,6 +47,7 @@ import {
 	createSession,
 	dropLastCheckpoint,
 	listSessionSummaries,
+	listSubagentSessions,
 	loadCheckpoints,
 	loadSession,
 	recordCompaction,
@@ -71,6 +73,7 @@ import {
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
+import { cancelTask, runningTaskIds, summarizeToolArgs } from "../core/tools/task.ts";
 import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,
@@ -167,6 +170,7 @@ const MEMORY_CANCEL_RUN_COMMAND_RE = /^\/memory cancel ([a-f0-9-]+)$/;
 // name (enforced by a test) so the list is scannable as it grows.
 export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArgs?: boolean }> = [
 	{ name: "/abort", description: "Abort the current run" },
+	{ name: "/agents", description: "This session's subagents: show one, or stop a running one" },
 	{ name: "/build", description: "Exit plan mode, restore full toolset" },
 	{ name: "/clear", description: "Clear context (and save)" },
 	{
@@ -965,6 +969,23 @@ function restoreSessionState(session: SessionState, source: SessionState): void 
 // `personaName` override exists because the persona-switch flow calls this
 // right after setCurrentPersona — deps.currentPersona still reads the OLD
 // persona for the rest of this call (see the render-snapshot note above).
+/** A subagent's session as a read-only digest: what it was asked, each tool
+ *  call on one line, and what it answered. */
+export function formatSubagentTranscript(messages: Message[]): string {
+	const lines: string[] = [];
+	for (const m of messages) {
+		const text = typeof m.content === "string" ? m.content.trim() : "";
+		if (m.role === "user" && text) lines.push(`› ${text.length > 300 ? `${text.slice(0, 299)}…` : text}`);
+		if (m.role !== "assistant") continue;
+		for (const call of m.tool_calls ?? []) {
+			if (call.type !== "function") continue;
+			lines.push(`  → ${call.function.name} ${summarizeToolArgs(call.function.arguments)}`.trimEnd());
+		}
+		if (text) lines.push(text);
+	}
+	return lines.join("\n");
+}
+
 async function startNewSession(ctx: CommandContext, personaName?: string): Promise<void> {
 	const { deps, agent, session, config, showNotice } = ctx;
 	if (session.messages.length > 0) saveSession(session);
@@ -3168,6 +3189,67 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				deps.agent.addDisplayMessage({ role: "warning", content: `Rules\n${lines.join("\n")}${issuesBlock}` });
 			}
 			return;
+		},
+	},
+	{
+		match: (input) => input === "/agents",
+		run: async ({ deps, session, showNotice }) => {
+			// Subagents run where the agent loop runs: the daemon when attached,
+			// so ask it which are live; their saved sessions are shared either way.
+			type Row = { id: string; title?: string; subagent: string; running: boolean };
+			let rows: Row[];
+			if (deps.agent.daemonMode) {
+				rows = ((await deps.agent.runCommand("/agents")) as Row[] | undefined) ?? [];
+			} else {
+				const live = runningTaskIds(session.id);
+				rows = listSubagentSessions(session.id).map((child) => ({
+					id: child.id,
+					title: child.title,
+					subagent: child.persona ?? "worker",
+					running: live.includes(child.id),
+				}));
+			}
+			if (rows.length === 0) {
+				showNotice("[No subagents in this session yet.]");
+				return;
+			}
+			const chosen = await deps.pickers.pickOption(
+				rows.map((row) => ({
+					value: row,
+					label: `${row.running ? "● " : "  "}${row.subagent} · ${row.title ?? row.id}`,
+				})),
+				{ title: "Subagents of this session" },
+			);
+			if (!chosen) return;
+			const action = chosen.running
+				? await deps.pickers.pickOption(
+						[
+							{ value: "open" as const, label: "Show its session so far" },
+							{ value: "stop" as const, label: "Stop it" },
+						],
+						{ title: `${chosen.subagent} · ${chosen.title ?? chosen.id}` },
+					)
+				: "open";
+			if (!action) return;
+			if (action === "stop") {
+				const stopped = deps.agent.daemonMode
+					? await deps.agent.runCommand(`/agents stop ${chosen.id}`).then(
+							() => true,
+							() => false,
+						)
+					: cancelTask(chosen.id);
+				showNotice(stopped ? `[Stopped ${chosen.subagent}.]` : "[It had already finished.]");
+				return;
+			}
+			const child = loadSession(chosen.id);
+			if (!child) {
+				showNotice("[That subagent's session is gone.]");
+				return;
+			}
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: `${chosen.subagent} · ${chosen.title ?? chosen.id}${chosen.running ? " (running)" : ""}\n${formatSubagentTranscript(child.messages)}`,
+			});
 		},
 	},
 	{

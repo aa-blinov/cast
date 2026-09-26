@@ -5,20 +5,23 @@
  * runAgentLoop is injected to avoid a circular import with loop.ts.
  */
 
-import { type AgentActorRegistry, type AgentForkContext, agentActorRegistry } from "../actors.ts";
+import { type AgentActorHandle, type AgentActorRegistry, agentActorRegistry } from "../actors.ts";
 import type { AppConfig } from "../config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../context-files.ts";
 import { type HooksFile, runHooksForEvent } from "../hooks.ts";
 import { EMPTY_ASSISTANT_PLACEHOLDER, type Message, type Tool, type Usage } from "../llm.ts";
-import type { LoopConfig } from "../loop.ts";
+import { type AgentEvent, type LoopConfig, MessageQueue } from "../loop.ts";
 import type { McpToolHandle } from "../mcp.ts";
 import { writeTaskProgress } from "../memory-files.ts";
-import { PLAN_TOOL_NAMES, QUESTION_TOOL_NAME } from "../plan.ts";
+import { PLAN_TOOL_NAMES, type PlanState, QUESTION_TOOL_NAME } from "../plan.ts";
 import { formatSystemEnvironmentBlock, resolvePromptContextForCwd } from "../project.ts";
-import { saveSubagentRun } from "../session.ts";
+import { createSession, loadSession, type SessionState, saveSession } from "../session.ts";
 import { isMemoryEnabled } from "../settings.ts";
+import type { Skill } from "../skills.ts";
 import type { SshHost } from "../ssh.ts";
 import type { SubagentPrompt } from "../subagents.ts";
+import { escapeSystemReminderTags } from "../system-reminder.ts";
+import type { BashBackgroundDeps } from "./bash-background.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
 
 /**
@@ -38,19 +41,111 @@ export function extractTaskResult(messages: Message[]): string {
 	return "";
 }
 
-/**
- * Subagents are not run in parallel, so nothing here bounds their number.
- *
- * There used to be a 10-slot semaphore, added when a batch of `task` calls in
- * one model response was executed with Promise.all. That is no longer how the
- * loop works: `task` is deliberately absent from PARALLEL_SAFE_TOOL_NAMES
- * (see loop.ts), so sibling task calls run one after another, and a subagent
- * cannot delegate further — the `task` tool is only advertised when
- * `subagentPrompts` is non-empty, and a child is given none. At most one
- * subagent per session is therefore in flight at a time. The only thing the
- * shared limit could still do was make one session's subagent wait on ten
- * *other* sessions' — throttling independent work for no benefit.
- */
+/** Sibling `task` calls in one model response run concurrently (see
+ * executeToolCalls); this caps how many of one session's subagents run at
+ * once, so a model that fans out ten tasks doesn't open ten provider streams. */
+export const MAX_CONCURRENT_TASKS = 4;
+const TASK_RESULT_MAX_CHARS = 30_000;
+const WHITESPACE_RUN_RE = /\s+/g;
+
+const slots = new Map<string, { active: number; waiters: Array<() => void> }>();
+async function acquireSlot(key: string, signal?: AbortSignal): Promise<() => void> {
+	let slot = slots.get(key);
+	if (!slot) {
+		slot = { active: 0, waiters: [] };
+		slots.set(key, slot);
+	}
+	const s = slot;
+	if (s.active >= MAX_CONCURRENT_TASKS) {
+		if (signal?.aborted) throw new Error("aborted");
+		await new Promise<void>((resolveWait, rejectWait) => {
+			const onAbort = () => {
+				s.waiters = s.waiters.filter((w) => w !== wake);
+				rejectWait(new Error("aborted"));
+			};
+			const wake = () => {
+				signal?.removeEventListener("abort", onAbort);
+				resolveWait();
+			};
+			s.waiters.push(wake);
+			signal?.addEventListener("abort", onAbort, { once: true });
+		});
+	}
+	s.active++;
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		s.active--;
+		const next = s.waiters.shift();
+		if (next) next();
+		else if (s.active === 0) slots.delete(key);
+	};
+}
+
+/** Subagents still running, by task id (= child session id): a `task_id`
+ *  call for one of them steers it instead of starting a second run, and the
+ *  hosts cancel them from here. */
+const running = new Map<
+	string,
+	{ actor: AgentActorHandle; steering: MessageQueue; parentSessionId?: string; agent: string; discard?: boolean }
+>();
+
+export function isTaskRunning(taskId: string): boolean {
+	return running.has(taskId);
+}
+
+/** `discard`: its thread is being deleted, so the child must not save itself
+ *  back on the way out. */
+export function cancelTask(taskId: string, opts: { discard?: boolean } = {}): boolean {
+	const entry = running.get(taskId);
+	if (!entry) return false;
+	if (opts.discard) entry.discard = true;
+	entry.actor.cancel();
+	return true;
+}
+
+export function runningTaskIds(parentSessionId: string): string[] {
+	return [...running].filter(([, e]) => e.parentSessionId === parentSessionId).map(([id]) => id);
+}
+
+export interface SubagentProgress {
+	toolCallId: string;
+	taskId: string;
+	parentSessionId?: string;
+	subagent: string;
+	description: string;
+	background: boolean;
+	status: "running" | "completed" | "failed" | "cancelled";
+	/** The child's latest tool call. */
+	tool?: { name: string; summary: string };
+	toolCount: number;
+	/** Only on a background task's final update: its spend, which has no tool
+	 *  result to ride on. */
+	usage?: Usage;
+}
+
+const ARG_KEYS = ["path", "file_path", "pattern", "command", "url", "query", "assignment"];
+export function summarizeToolArgs(raw: string): string {
+	let args: Record<string, unknown>;
+	try {
+		args = JSON.parse(raw) as Record<string, unknown>;
+	} catch {
+		return "";
+	}
+	const key = ARG_KEYS.find((k) => typeof args[k] === "string");
+	const text = key ? String(args[key]).replace(WHITESPACE_RUN_RE, " ").trim() : "";
+	return text.length > 80 ? `${text.slice(0, 79)}…` : text;
+}
+
+function taskBlock(taskId: string, subagent: string, state: string, body: string): string {
+	return `<task id="${taskId}" subagent="${subagent}" state="${state}">\n${body}\n</task>`;
+}
+
+function capResult(text: string, taskId: string): string {
+	if (text.length <= TASK_RESULT_MAX_CHARS) return text;
+	return `${text.slice(0, TASK_RESULT_MAX_CHARS)}\n\n[report cut at ${TASK_RESULT_MAX_CHARS} characters; the full transcript is in subagent session ${taskId}]`;
+}
 
 /**
  * Serializes bash-confirmation prompts across concurrently running subagents.
@@ -89,7 +184,7 @@ export interface TaskExecutorDeps {
 	disabledTools?: Set<string>;
 	/** Parent's plan state — lets build-mode subagents inherit the approved
 	 * plan (mirror block) and plan-mode subagents inherit the bash block. */
-	planState?: import("../plan.ts").PlanState;
+	planState?: PlanState;
 	/**
 	 * Whether the project cwd is trusted — gates the cwd AGENTS.md file when
 	 * the subagent has `agentsMd: true` (the default).
@@ -110,10 +205,15 @@ export interface TaskExecutorDeps {
 	sessionId?: string;
 	/** Actor registry used to track this child independently from the parent turn. */
 	actorRegistry?: AgentActorRegistry;
-	/** Captures the parent's fork at the exact task spawn boundary. */
-	forkContext?: () => AgentForkContext;
+	/** Live progress of a running child, for the parent's UI. */
+	onProgress?: (progress: SubagentProgress) => void;
+	/** Every raw child event, for a host showing the child session live. */
+	onChildEvent?: (taskId: string, event: AgentEvent) => void;
+	/** Present when the host can deliver a notice after the turn ends —
+	 *  required for `background: true`. */
+	background?: BashBackgroundDeps;
 	/** Loaded skills — for the skill tool. */
-	skills?: import("../skills.ts").Skill[];
+	skills?: Skill[];
 	/** Injected to avoid circular dependency with loop.ts. */
 	runAgentLoop: (messages: Message[], config: LoopConfig) => Promise<Message[]>;
 }
@@ -173,8 +273,31 @@ export async function execTask(
 ): Promise<ToolResult & { subagentUsage?: Usage }> {
 	const assignment = typeof args.assignment === "string" ? args.assignment.trim() : "";
 	if (!assignment) return { content: "Missing `assignment`.", isError: true };
+	const taskIdArg = typeof args.task_id === "string" ? args.task_id.trim() : "";
 
-	const subagentName = typeof args.subagent === "string" ? args.subagent.trim() : "";
+	// A task id names an earlier child of this session: carry on with it.
+	let resumed: SessionState | undefined;
+	if (taskIdArg) {
+		const live = running.get(taskIdArg);
+		if (live && live.parentSessionId === deps.sessionId) {
+			live.steering.enqueue({ role: "user", content: assignment });
+			return {
+				content: taskBlock(
+					taskIdArg,
+					live.agent,
+					"running",
+					"Sent to the running task; its result arrives when it finishes. Do not poll it.",
+				),
+			};
+		}
+		const loaded = deps.sessionId ? loadSession(taskIdArg) : null;
+		if (!loaded || loaded.sessionKind !== "subagent" || loaded.parentSessionId !== deps.sessionId) {
+			return { content: `No task "${taskIdArg}" in this session. Omit task_id to start a new one.`, isError: true };
+		}
+		resumed = loaded;
+	}
+
+	const subagentName = resumed?.persona ?? (typeof args.subagent === "string" ? args.subagent.trim() : "");
 	// Default (no subagent given): prefer the general-purpose "worker" explicitly
 	// rather than "first in the sorted list", so adding another subagent whose
 	// name sorts earlier can't silently steal the default.
@@ -185,6 +308,12 @@ export async function execTask(
 		const available = deps.subagentPrompts?.map((p) => p.name).join(", ") ?? "(none)";
 		return { content: `Unknown subagent "${subagentName}". Available: ${available}`, isError: true };
 	}
+	const agentName = subagent?.name ?? "worker";
+	const description =
+		(typeof args.description === "string" && args.description.trim()) ||
+		resumed?.title ||
+		(assignment.split("\n")[0] ?? "").slice(0, 60);
+	const background = args.background === true && deps.background !== undefined;
 
 	// Assignment stays in the user message only. System prompt = role + the
 	// same project grounding the parent gets (AGENTS, rules, skills, MCP
@@ -194,21 +323,52 @@ export async function execTask(
 		agentsMd: subagent?.agentsMd !== false,
 		projectTrusted: deps.projectTrusted === true,
 		model: deps.model,
-		subagentName: subagent?.name ?? "worker",
+		subagentName: agentName,
 		subagentLabel: subagent?.label ?? "Worker",
 		mcpPromptSuffix: deps.mcpPromptSuffix,
 		noSkills: deps.noSkills,
 		cliSkillPaths: deps.cliSkillPaths,
 	});
 
-	const childMessages: Message[] = [{ role: "user", content: assignment }];
-
-	// Capture usage from subagent events
-	const subagentUsage: Usage = {
-		promptTokens: 0,
-		completionTokens: 0,
-		totalTokens: 0,
+	// The child is a session of its own: its transcript is saved as it goes,
+	// the UIs open it, and a later task_id call continues it.
+	const child =
+		resumed ??
+		createSession(deps.model, cwd, {
+			sessionKind: "subagent",
+			parentSessionId: deps.sessionId,
+			title: description,
+		});
+	child.persona = agentName;
+	child.model = deps.model;
+	const taskId = child.id;
+	const persist = () => {
+		if (!deps.sessionId || running.get(taskId)?.discard) return;
+		try {
+			saveSession(child);
+		} catch (err) {
+			// Losing the saved copy is not a reason to lose the answer.
+			console.error("[cast] failed to save subagent session:", err);
+		}
 	};
+	const childMessages: Message[] = [...child.messages, { role: "user", content: assignment }];
+
+	const subagentUsage: Usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+	const readOnly = subagent?.readOnly === true || deps.planState?.enabled === true;
+	const steering = new MessageQueue();
+	let toolCount = 0;
+	const progress = (status: SubagentProgress["status"], extra: Partial<SubagentProgress> = {}) =>
+		deps.onProgress?.({
+			toolCallId: toolCallId ?? "",
+			taskId,
+			parentSessionId: deps.sessionId,
+			subagent: agentName,
+			description,
+			background,
+			status,
+			toolCount,
+			...extra,
+		});
 
 	// Reason from the subagent's final `end` event. Anything other than "stop"
 	// (aborted, disconnected, error) means the run did not complete cleanly and
@@ -217,14 +377,15 @@ export async function execTask(
 	const actor = (deps.actorRegistry ?? agentActorRegistry).spawn(
 		{
 			parentSessionId: deps.sessionId,
-			sessionId: deps.sessionId,
-			agent: subagent?.name ?? "worker",
+			sessionId: taskId,
+			agent: agentName,
 			mode: "subagent",
-			background: false,
+			background,
 			lifecycle: "ephemeral",
-			forkContext: deps.forkContext?.(),
 		},
-		signal,
+		// A background task outlives the turn that started it; only an explicit
+		// cancel (or the process) ends it.
+		background ? undefined : signal,
 	);
 
 	// A turn cancelled between the spawn above and the run below must not start
@@ -242,10 +403,10 @@ export async function execTask(
 		try {
 			await runHooksForEvent(deps.hooks, {
 				event: "SubagentStart",
-				matchTarget: subagent?.name ?? "worker",
+				matchTarget: agentName,
 				cwd,
 				sessionId: deps.sessionId,
-				payload: { agent_type: subagent?.name ?? "worker", actor_id: actor.id, assignment },
+				payload: { agent_type: agentName, actor_id: actor.id, assignment },
 				signal: actor.signal,
 			});
 		} catch (error) {
@@ -256,160 +417,194 @@ export async function execTask(
 			};
 		}
 	}
-	let finalMessages: Message[];
-	const startedAt = new Date().toISOString();
-	try {
-		finalMessages = await actor.run(
-			(actorSignal) =>
-				deps.runAgentLoop(childMessages, {
-					config,
-					model: deps.model,
-					modelProvider: deps.subagentModelProvider,
-					cwd,
-					systemPrompt: childSystemPrompt,
-					onEvent: (event) => {
-						if (event.type === "usage") {
-							subagentUsage.promptTokens += event.usage.promptTokens;
-							subagentUsage.completionTokens += event.usage.completionTokens;
-							subagentUsage.totalTokens += event.usage.totalTokens;
-							if (event.usage.cacheReadTokens) {
-								subagentUsage.cacheReadTokens =
-									(subagentUsage.cacheReadTokens ?? 0) + event.usage.cacheReadTokens;
+
+	const runChild = async (): Promise<ToolResult & { subagentUsage?: Usage }> => {
+		let release: (() => void) | undefined;
+		try {
+			release = await acquireSlot(deps.sessionId ?? "", actor.signal);
+		} catch {
+			actor.cancel();
+			return { content: "Subagent did not complete successfully (aborted).", isError: true, subagentUsage };
+		}
+		running.set(taskId, { actor, steering, parentSessionId: deps.sessionId, agent: agentName });
+		progress("running");
+		let finalMessages: Message[];
+		try {
+			finalMessages = await actor.run(
+				(actorSignal) =>
+					deps.runAgentLoop(childMessages, {
+						config,
+						model: deps.model,
+						modelProvider: deps.subagentModelProvider,
+						cwd,
+						systemPrompt: childSystemPrompt,
+						onMessagesChanged: (messages) => {
+							child.messages = [...messages];
+						},
+						onEvent: (event) => {
+							deps.onChildEvent?.(taskId, event);
+							if (event.type === "usage") {
+								addUsage(subagentUsage, event.usage);
+							} else if (event.type === "tool_start") {
+								toolCount++;
+								progress("running", {
+									tool: { name: event.name, summary: summarizeToolArgs(event.args) },
+								});
+							} else if (event.type === "turn_end") {
+								persist();
+							} else if (event.type === "end") {
+								endReason = event.reason;
 							}
-							if (event.usage.cacheWriteTokens) {
-								subagentUsage.cacheWriteTokens =
-									(subagentUsage.cacheWriteTokens ?? 0) + event.usage.cacheWriteTokens;
-							}
-							if (event.usage.uncachedTokens) {
-								subagentUsage.uncachedTokens = (subagentUsage.uncachedTokens ?? 0) + event.usage.uncachedTokens;
-							}
-							// Provider-reported cost (e.g. OpenRouter) must be folded in too,
-							// otherwise the subagent's spend silently vanishes from the
-							// session's cost total — tokens were propagated but dollars weren't.
-							if (event.usage.cost) {
-								subagentUsage.cost = (subagentUsage.cost ?? 0) + event.usage.cost;
-							}
-						} else if (event.type === "end") {
-							endReason = event.reason;
-						}
-					},
-					signal: actorSignal,
-					// Serialize confirmations so parallel subagents don't race the terminal.
-					confirmBash: serializeConfirm(deps.confirmBash),
-					mcpTools: deps.mcpTools,
-					mcpToolIndex: deps.mcpToolIndex,
-					hooks: deps.hooks,
-					sessionId: deps.sessionId,
-					// Same-process nested run: the parent holds the turn-runner lock
-					// for this session, so acquiring it again would throw "Session
-					// already running in another process" and fail every subagent.
-					skipTurnRunnerLock: true,
-					// The parent alone owns the plan artifact. Passing enabled=false below
-					// avoids giving the child plan-authoring tools, so write/edit must be
-					// denied explicitly or a plan-mode child could edit the project.
-					disabledTools: new Set([
-						...(deps.disabledTools ?? []),
-						...PLAN_TOOL_NAMES,
-						QUESTION_TOOL_NAME,
-						...(deps.planState?.enabled ? ["write", "edit"] : []),
-					]),
-					// Frontmatter `tools:` on the subagent — undefined means all (minus
-					// disabledTools above); when set, only listed names are advertised
-					// and executable.
-					allowedTools: subagent?.tools,
-					projectTrusted: deps.projectTrusted,
-					// Handoff, not authority: the child sees the plan (mirror block in
-					// build mode, or the current draft during planning) but always runs
-					// with enabled=false — the plan-mode restriction block references
-					// authoring tools the child doesn't have. The parent's inspection-only
-					// bash gate is inherited explicitly instead: explorers can run git
-					// log/grep pipelines but still can't write.
-					planState: deps.planState ? { ...deps.planState, enabled: false } : undefined,
-					readOnlyBash: deps.planState?.enabled === true,
-					sshHosts: deps.sshHosts,
-					// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
-				}),
-			() => (endReason === "stop" ? "success" : "failure"),
-		);
-		// Persist the subagent's full transcript — it used to be in-memory only
-		// and was lost when the process died. Saved even for aborted/error runs
-		// so nothing the model did is unrecoverable.
-		//
-		// Best-effort, in its own try: this ran inside the outer try, so a
-		// failing write discarded the work the subagent had already done and
-		// billed for. `subagent_runs.session_id` has a foreign key to
-		// `sessions`, so a session whose row isn't on disk yet made every
-		// subagent in it report "Subagent failed with an error: FOREIGN KEY
-		// constraint failed" instead of its answer (verified). A full disk or a
-		// locked database did the same. Losing the archive copy is not a reason
-		// to lose the result.
-		if (deps.sessionId) {
-			try {
-				saveSubagentRun({
-					sessionId: deps.sessionId,
-					toolCallId: toolCallId ?? "",
-					persona: subagent?.name ?? "worker",
-					model: deps.model,
-					startedAt,
-					endReason,
-					messages: finalMessages,
-				});
-			} catch (err) {
-				console.error("[cast] failed to persist subagent transcript:", err);
-			}
-			if (isMemoryEnabled()) {
+						},
+						signal: actorSignal,
+						steeringQueue: steering,
+						// Serialize confirmations so parallel subagents don't race the terminal.
+						confirmBash: serializeConfirm(deps.confirmBash),
+						mcpTools: deps.mcpTools,
+						mcpToolIndex: deps.mcpToolIndex,
+						hooks: deps.hooks,
+						sessionId: deps.sessionId,
+						skills: deps.skills,
+						// Same-process nested run: the parent holds the turn-runner lock
+						// for this session, so acquiring it again would throw "Session
+						// already running in another process" and fail every subagent.
+						skipTurnRunnerLock: true,
+						// The parent alone owns the plan artifact. Passing enabled=false below
+						// avoids giving the child plan-authoring tools, so write/edit must be
+						// denied explicitly or a plan-mode child could edit the project.
+						disabledTools: new Set([
+							...(deps.disabledTools ?? []),
+							...PLAN_TOOL_NAMES,
+							QUESTION_TOOL_NAME,
+							...(readOnly ? ["write", "edit"] : []),
+						]),
+						// Frontmatter `tools:` on the subagent — undefined means all (minus
+						// disabledTools above); when set, only listed names are advertised
+						// and executable.
+						allowedTools: subagent?.tools,
+						projectTrusted: deps.projectTrusted,
+						// Handoff, not authority: the child sees the plan (mirror block in
+						// build mode, or the current draft during planning) but always runs
+						// with enabled=false — the plan-mode restriction block references
+						// authoring tools the child doesn't have. A read-only subagent, or
+						// any child of a planning parent, gets inspection-only bash instead:
+						// explorers can run git log/grep pipelines but still can't write.
+						planState: deps.planState ? { ...deps.planState, enabled: false } : undefined,
+						readOnlyBash: readOnly,
+						sshHosts: deps.sshHosts,
+						// ponytail: no personas/currentPersona/subagentModel — child can't delegate further
+					}),
+				() => (endReason === "stop" ? "success" : "failure"),
+			);
+			child.messages = finalMessages;
+			persist();
+			if (deps.sessionId && isMemoryEnabled()) {
 				try {
-					const taskId = (toolCallId || `task-${Date.now()}`).replace(/[^a-zA-Z0-9._-]+/g, "-");
+					const progressId = (toolCallId || `task-${Date.now()}`).replace(/[^a-zA-Z0-9._-]+/g, "-");
 					writeTaskProgress(
 						deps.sessionId,
-						taskId,
-						`# Task progress\n\n- Assignment: ${assignment}\n- Persona: ${subagent?.name ?? "worker"}\n- End reason: ${endReason}\n\n## Result\n${extractTaskResult(finalMessages) || "(no output)"}`,
+						progressId,
+						`# Task progress\n\n- Assignment: ${assignment}\n- Persona: ${agentName}\n- End reason: ${endReason}\n\n## Result\n${extractTaskResult(finalMessages) || "(no output)"}`,
 					);
 				} catch (err) {
 					console.error("[cast] failed to write subagent task progress:", err);
 				}
 			}
+		} catch (error) {
+			// A genuine runtime failure (network error, provider outage, …) mid-run
+			// — as opposed to a clean-but-unsuccessful "end" event, handled below.
+			// subagentUsage is the ONLY channel loop.ts uses to fold a subagent's
+			// spend into the session total — letting this exception propagate
+			// would discard usage already billed before the failure.
+			persist();
+			progress(actor.signal.aborted ? "cancelled" : "failed");
+			const message = error instanceof Error ? error.message : String(error);
+			return {
+				content: taskBlock(taskId, agentName, "failed", `Subagent failed with an error: ${message}`),
+				isError: true,
+				subagentUsage,
+			};
+		} finally {
+			running.delete(taskId);
+			release();
+			// Observation-only (the child's own recursive runLoop already handles
+			// blocking/continuation via its own `Stop` hook — this is a distinct
+			// "a subagent finished" signal for logging/notification, not a second
+			// gate on the same decision).
+			if (deps.hooks) {
+				void runHooksForEvent(deps.hooks, {
+					event: "SubagentStop",
+					matchTarget: agentName,
+					cwd,
+					sessionId: deps.sessionId,
+					payload: { agent_type: agentName, actor_id: actor.id, end_reason: endReason },
+					signal: actor.signal,
+				});
+			}
 		}
-	} catch (error) {
-		// A genuine runtime failure (network error, provider outage, …) mid-run
-		// — as opposed to a clean-but-unsuccessful "end" event, handled below.
-		// subagentUsage is the ONLY channel loop.ts uses to fold a subagent's
-		// spend into the session total (see its `r.result.subagentUsage`
-		// check) — letting this exception propagate uncaught used to discard
-		// any usage/cost already accumulated from real, billed LLM calls the
-		// subagent made before failing.
-		const message = error instanceof Error ? error.message : String(error);
-		return { content: `Subagent failed with an error: ${message}`, isError: true, subagentUsage };
-	} finally {
-		// Observation-only (the child's own recursive runLoop already handles
-		// blocking/continuation via its own `Stop` hook — this is a distinct
-		// "a subagent finished" signal for logging/notification, not a second
-		// gate on the same decision).
-		if (deps.hooks) {
-			void runHooksForEvent(deps.hooks, {
-				event: "SubagentStop",
-				matchTarget: subagent?.name ?? "worker",
-				cwd,
-				sessionId: deps.sessionId,
-				payload: { agent_type: subagent?.name ?? "worker", actor_id: actor.id, end_reason: endReason },
-				signal: actor.signal,
-			});
+
+		// A resumed child answers after its old history; a compaction inside the
+		// run can shorten that history, so fall back to the whole transcript.
+		const text = extractTaskResult(finalMessages.slice(childMessages.length - 1)) || extractTaskResult(finalMessages);
+		// Surface failures instead of passing them off as a clean (but empty) result.
+		if (endReason !== "stop") {
+			progress(endReason === "aborted" ? "cancelled" : "failed");
+			const detail = capResult(text, taskId) || "(no output produced)";
+			return {
+				content: taskBlock(
+					taskId,
+					agentName,
+					"failed",
+					`Subagent did not complete successfully (${endReason}):\n\n${detail}`,
+				),
+				isError: true,
+				subagentUsage,
+			};
 		}
-	}
+		if (!text) {
+			progress("failed");
+			return {
+				content: taskBlock(taskId, agentName, "failed", "Subagent completed but produced no output."),
+				isError: true,
+				subagentUsage,
+			};
+		}
+		progress("completed");
+		return { content: taskBlock(taskId, agentName, "completed", capResult(text, taskId)), subagentUsage };
+	};
 
-	const text = extractTaskResult(finalMessages);
+	if (!background) return runChild();
 
-	// Surface failures instead of passing them off as a clean (but empty) result.
-	if (endReason !== "stop") {
-		const detail = text || "(no output produced)";
-		return {
-			content: `Subagent did not complete successfully (${endReason}):\n\n${detail}`,
-			isError: true,
-			subagentUsage,
-		};
-	}
-	if (!text) {
-		return { content: "Subagent completed but produced no output.", isError: true, subagentUsage };
-	}
-	return { content: text, subagentUsage };
+	const deliver = deps.background!;
+	void runChild().then((result) => {
+		// The turn that started it may be long over: usage and the result
+		// travel as a final progress update and a notice for the model.
+		progress(result.isError ? "failed" : "completed", { usage: subagentUsage });
+		const notice =
+			"<system-reminder>\n" +
+			`Background task ${taskId} (${agentName}: ${escapeSystemReminderTags(description)}) finished. Relay what matters to the user.\n\n` +
+			`${escapeSystemReminderTags(result.content)}\n` +
+			"</system-reminder>";
+		deliver.registry.deliver(notice, deliver);
+	});
+	return {
+		content: taskBlock(
+			taskId,
+			agentName,
+			"running",
+			"Started in the background. Its result arrives on its own when it finishes: do not poll it, wait for it, or redo its work. Carry on with other work, or end your turn.",
+		),
+	};
+}
+
+function addUsage(total: Usage, usage: Usage): void {
+	total.promptTokens += usage.promptTokens;
+	total.completionTokens += usage.completionTokens;
+	total.totalTokens += usage.totalTokens;
+	if (usage.cacheReadTokens) total.cacheReadTokens = (total.cacheReadTokens ?? 0) + usage.cacheReadTokens;
+	if (usage.cacheWriteTokens) total.cacheWriteTokens = (total.cacheWriteTokens ?? 0) + usage.cacheWriteTokens;
+	if (usage.uncachedTokens) total.uncachedTokens = (total.uncachedTokens ?? 0) + usage.uncachedTokens;
+	// Provider-reported cost (e.g. OpenRouter) must be folded in too, otherwise
+	// the subagent's spend silently vanishes from the session's cost total.
+	if (usage.cost) total.cost = (total.cost ?? 0) + usage.cost;
 }

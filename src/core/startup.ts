@@ -646,7 +646,7 @@ export async function runStartup(
 		persona,
 		personaOptions: personaOpts,
 		personas: allPersonas,
-		subagentPrompts: loadSubagentPrompts(),
+		subagentPrompts: loadSubagentPrompts({ cwd, projectTrusted }),
 		subagentModel: settings.subagentModel,
 		subagentModelProvider: settings.subagentModelProvider,
 		planModel: settings.planModel,

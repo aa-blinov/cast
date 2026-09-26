@@ -359,10 +359,10 @@ describe("subagents field", () => {
 		expect(p.subagents).toBe(false);
 	});
 
-	it("only the delegating coder persona has subagents: true among builtins", () => {
+	it("only the coding personas delegate among builtins", () => {
 		const personas = loadPersonas();
 		const withSub = personas.filter((p) => p.subagents);
-		expect(withSub.map((p) => p.name).sort()).toEqual(["coder-with-subagents"]);
+		expect(withSub.map((p) => p.name).sort()).toEqual(["coder-with-subagents", "senior"]);
 	});
 });
 
@@ -407,8 +407,8 @@ describe("getToolDefinitions + subagents", () => {
 });
 
 describe("subagents integration with getToolDefinitions", () => {
-	it("senior persona (subagents: false) produces no task tool", () => {
-		const persona = findPersona("senior")!;
+	it("a persona without subagents (qa) produces no task tool", () => {
+		const persona = findPersona("qa")!;
 		const subagentNames = persona.subagents ? ["worker"] : undefined;
 		const tools = getToolDefinitions(subagentNames);
 		expect(tools.some((t) => t.function.name === "task")).toBe(false);

@@ -23,6 +23,7 @@ import { searchThenRead } from "./search-then-read.ts";
 import { skillLoadsMatchingWorkflow } from "./skill-loads-matching-workflow.ts";
 import { skillNotLoadedForGenericRequest } from "./skill-not-loaded-for-generic-request.ts";
 import { taskDelegatesScopedInvestigation } from "./task-delegates-scoped-investigation.ts";
+import { taskFollowUpWithTaskId } from "./task-follow-up-with-task-id.ts";
 import { taskParallelDelegation } from "./task-parallel-delegation.ts";
 import { taskReviewFollowsNontrivialChange } from "./task-review-follows-nontrivial-change.ts";
 import { taskWorkerDelegatesRealEdit } from "./task-worker-delegates-real-edit.ts";
@@ -48,6 +49,7 @@ export const chainCases: EvalCase[] = [
 	mcpReleaseLookupChain,
 	editAmbiguousNotWriteFallback,
 	backgroundBashExplicitTimeout,
+	taskFollowUpWithTaskId,
 	taskParallelDelegation,
 	todoWriteMarksStepDone,
 	mcpLookupReportsNotFound,

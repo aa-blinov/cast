@@ -197,6 +197,75 @@ describe("web bridge", () => {
 		expect(bridge.listSessions()).toHaveLength(sessionsBefore);
 	});
 
+	it("lists a session's subagents, relays a child's live events, and keeps the child view-only", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		saveSession(ws.session);
+		const child = createSession("gpt-4o", cwd, {
+			sessionKind: "subagent",
+			parentSessionId: ws.id,
+			title: "Map auth",
+		});
+		child.persona = "explore";
+		child.messages.push({ role: "user", content: "map auth" });
+		saveSession(child);
+
+		expect(bridge.listAgents(ws.id)).toEqual([
+			expect.objectContaining({ id: child.id, title: "Map auth", subagent: "explore", running: false }),
+		]);
+		expect(bridge.cancelAgent(ws.id, child.id)).toBe(false);
+		bridge.getSession(child.id);
+		await expect(bridge.submit(child.id, "hi")).rejects.toThrow("subagent");
+
+		await bridge.submit(ws.id, "delegate");
+		const { onSubagentEvent } = runAgentLoop.mock.calls.at(-1)![1] as {
+			onSubagentEvent: (taskId: string, event: unknown) => void;
+		};
+		const seen: unknown[] = [];
+		bridge.subscribe(child.id, (event) => seen.push(event));
+		onSubagentEvent(child.id, { type: "token", text: "live" });
+		expect(seen).toContainEqual({ type: "token", text: "live" });
+	});
+
+	it("leaves a subagent's finish to its task card, but still reports other agents", async () => {
+		const { agentActorRegistry } = await import("../src/core/actors.ts");
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const events: Array<{ type: string; actor?: { agent: string } }> = [];
+		bridge.subscribe(ws.id, (event) => events.push(event as { type: string; actor?: { agent: string } }));
+
+		for (const [agent, mode] of [
+			["worker", "subagent"],
+			["checkpoint-writer", "main"],
+		] as const) {
+			const actor = agentActorRegistry.spawn({
+				parentSessionId: ws.id,
+				agent,
+				mode,
+				background: true,
+				lifecycle: "ephemeral",
+			});
+			await actor.run(async () => "done");
+		}
+
+		expect(events.filter((e) => e.type === "agent_actor").map((e) => e.actor?.agent)).toEqual(["checkpoint-writer"]);
+	});
+
+	it("/agents lists the session's subagents for a thin client, and refuses to stop one that isn't running", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		saveSession(ws.session);
+		const child = createSession("gpt-4o", cwd, { sessionKind: "subagent", parentSessionId: ws.id, title: "Audit" });
+		child.messages.push({ role: "user", content: "audit" });
+		saveSession(child);
+
+		await expect(bridge.executeCommand(ws.id, "/agents")).resolves.toMatchObject({
+			ok: true,
+			result: [expect.objectContaining({ id: child.id, title: "Audit", running: false })],
+		});
+		await expect(bridge.executeCommand(ws.id, `/agents stop ${child.id}`)).resolves.toMatchObject({ ok: false });
+	});
+
 	it("evicts an idle session with no listeners and hydrates it again on demand", () => {
 		vi.useFakeTimers();
 		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
@@ -496,6 +565,29 @@ describe("web bridge", () => {
 		expect(res.ok).toBe(true);
 		expect(ws.session.persona).toBe("senior");
 		expect(ws.systemPrompt).toContain("You are the senior persona.");
+	});
+
+	it("runs the next turn under a persona an attached TUI switched in the store", async () => {
+		// The TUI writes the thread's persona to the shared store; the daemon
+		// kept its in-memory one, ran the next turn under it, and saved it back
+		// over the TUI's choice.
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		saveSession(ws.session);
+		mkdirSync(join(fakeHome, ".cast", "personas"), { recursive: true });
+		writeFileSync(
+			join(fakeHome, ".cast", "personas", "senior.md"),
+			"---\nname: senior\nlabel: Senior\n---\n\nYou are the senior persona.\n",
+		);
+		const fromTui = loadSession(ws.id)!;
+		fromTui.persona = "senior";
+		saveSession(fromTui);
+
+		await bridge.submit(ws.id, "hi");
+
+		expect(ws.session.persona).toBe("senior");
+		const { systemPrompt } = runAgentLoop.mock.calls.at(-1)![1] as { systemPrompt: string };
+		expect(systemPrompt).toContain("You are the senior persona.");
 	});
 
 	it("/persona <unknown> fails without mutating session state", async () => {

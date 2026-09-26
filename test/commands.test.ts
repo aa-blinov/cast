@@ -469,6 +469,50 @@ describe("handleInput", () => {
 		expect(here.deps.session.persona).toBe("senior");
 	});
 
+	it("/agents lists this session's subagents and shows one's session as a digest", async () => {
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async (options) => options[0]!.value,
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ pickers });
+		saveSession(deps.session);
+		const child = createSession("test-model", "/tmp", {
+			sessionKind: "subagent",
+			parentSessionId: deps.session.id,
+			title: "Map auth",
+		});
+		child.persona = "explore";
+		child.messages.push(
+			{ role: "user", content: "map the auth flow" },
+			{
+				role: "assistant",
+				content: "",
+				tool_calls: [
+					{ id: "c1", type: "function", function: { name: "read", arguments: '{"path":"src/auth.ts"}' } },
+				],
+			},
+			{ role: "tool", tool_call_id: "c1", content: "..." },
+			{ role: "assistant", content: "Auth starts in src/auth.ts:12." },
+		);
+		saveSession(child);
+
+		await handleInput("/agents", undefined, deps);
+
+		const shown = String(calls["agent.addDisplayMessage"]?.at(-1)?.[0]?.content ?? "");
+		expect(shown).toContain("explore · Map auth");
+		expect(shown).toContain("› map the auth flow");
+		expect(shown).toContain("→ read src/auth.ts");
+		expect(shown).toContain("Auth starts in src/auth.ts:12.");
+	});
+
+	it("/agents says so when the session has none", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/agents", undefined, deps);
+		expect(String(calls.showNotice?.at(-1)?.[0])).toContain("No subagents");
+	});
+
 	it("/model cancelled (Escape) leaves the model unchanged and doesn't exit the process", async () => {
 		// Same underlying bug as /persona above, but for selectModel — reached
 		// via /model, and also (unfixed until now) via /provider after a
@@ -1776,6 +1820,7 @@ describe("every routed command dispatches", () => {
 		"/older",
 		"/permissions",
 		"/permissions default",
+		"/agents",
 		"/persona",
 		"/persona senior",
 		"/plan",

@@ -377,3 +377,25 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 .md-body .md-table-wrap { overflow-x: auto; margin: 8px 0; }
 
 .message-audio { display: block; width: min(320px, 100%); height: 36px; margin-top: 6px; }
+
+/* A subagent's session opens view-only: this stands where the composer would. */
+.subagent-banner {
+	display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+	padding: 10px 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-surface);
+	color: var(--text-dim);
+	font-size: var(--fs-ui);
+}
+.subagent-banner strong { color: var(--blue); font-weight: 500; }
+.subagent-banner-back {
+	font: inherit;
+	color: var(--text);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 4px 10px;
+	cursor: pointer;
+}
+.subagent-banner-back:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }

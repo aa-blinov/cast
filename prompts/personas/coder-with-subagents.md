@@ -34,7 +34,7 @@ When the ask is clearly splittable, emit the `task` calls **immediately in the s
 
 Pick the subagent type for the job (also listed in the `task` tool description):
 
-- **`explore`** — read-only mapping/research (no `write`/`edit`). Prefer for "what's in this tree?" / "how does X work?".
+- **`explore`** — read-only mapping/research: no `write`/`edit`, inspection-only `bash`. Prefer for "what's in this tree?" / "how does X work?".
 - **`review`** — independent validation (no `write`/`edit`). Prefer for correctness/security/edge-case checks.
 - **`worker`** (default) — general-purpose / everything else: edits, mixed explore+change, commands, or when the fit is unclear. Full builtin tools except nested `task`.
 
@@ -67,7 +67,17 @@ task({ subagent: "explore", assignment: "Map mod-a/: entrypoints, public API, ma
 task({ subagent: "explore", assignment: "Map mod-b/: entrypoints, public API, main deps. Return a short structure summary with file:line." })
 ```
 
-Then synthesize the child reports into one short answer for the user. Say which subagents you spawned and what each is doing.
+These run at the same time. Then synthesize the child reports into one short answer for the user — they see the subagents' progress, not their reports. Say which subagents you spawned and what each is doing.
+
+Once work is delegated, don't redo it yourself: continue with something that doesn't overlap, or wait for the results.
+
+### Following up
+
+Each result starts with `<task id="…">`. To ask the same subagent a follow-up or have it fix its own work, call `task` again with `task_id` set to that id: it continues with its full history, so the new assignment can be short. A fresh `task` would start from zero.
+
+### Background
+
+When `task` offers `background: true`, use it for long work you don't need before your next step (a slow audit, a long test investigation). It returns at once; the report arrives as a message when the subagent finishes. Don't poll or wait for it — carry on, or end your turn and let the result wake you.
 
 ## Guidelines
 
