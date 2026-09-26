@@ -1,12 +1,21 @@
 import htm from "htm";
 import { h } from "preact";
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
+import { api } from "./api.js";
 import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
 import { pressable } from "./modal-focus.js";
-import { getToolCardOpen, getToolCardPreviewSrc, setToolCardOpen, setToolCardPreviewSrc } from "./tool-card-state.js";
+import {
+	getSubagentProgress,
+	getToolCardOpen,
+	getToolCardPreviewSrc,
+	setToolCardOpen,
+	setToolCardPreviewSrc,
+	subscribeSubagentProgress,
+} from "./tool-card-state.js";
 
 const UNICODE_ESCAPE_RE = /\\u[\dA-Fa-f]{4}/;
+const TASK_RESULT_RE = /^<task id="([^"]+)" subagent="([^"]*)" state="([^"]*)">/;
 
 const html = htm.bind(h);
 
@@ -72,6 +81,53 @@ function formatToolResult(name, result) {
 	return value;
 }
 
+function parseArgs(args) {
+	try {
+		return JSON.parse(args) ?? {};
+	} catch {
+		return {};
+	}
+}
+
+/** The task card's live line: who is working on what, what it's doing now,
+ *  and the way into its session. */
+function TaskLine({ call }) {
+	const [progress, setProgress] = useState(() => getSubagentProgress(call.id));
+	useEffect(
+		() =>
+			subscribeSubagentProgress((id) => {
+				if (id === call.id) setProgress(getSubagentProgress(id));
+			}),
+		[call.id],
+	);
+	const args = parseArgs(call.args);
+	const fromResult = TASK_RESULT_RE.exec(call.result ?? "");
+	const taskId = progress?.taskId ?? fromResult?.[1] ?? args.task_id;
+	const subagent = progress?.subagent ?? (fromResult?.[2] || args.subagent || "worker");
+	const state = progress?.status ?? fromResult?.[3] ?? (call.status === "running" ? "running" : "");
+	const running = state === "running";
+	const doing = progress?.tool ? `${progress.tool.name} ${progress.tool.summary}`.trim() : "";
+	const count = progress?.toolCount ? `${progress.toolCount} tool${progress.toolCount === 1 ? "" : "s"}` : "";
+	const detail = running ? [doing && `↳ ${doing}`, count].filter(Boolean).join(" · ") : [state, count].filter(Boolean).join(" · ");
+	return html`
+		<div class="tool-card-task">
+			<span class="tool-card-task-agent">${subagent}${progress?.background || args.background ? " · background" : ""}</span>
+			<span class="tool-card-task-title">${args.description || progress?.description || ""}</span>
+			${detail && html`<span class="tool-card-task-detail">${detail}</span>`}
+			${
+				taskId &&
+				html`<button type="button" class="tool-card-task-btn" onClick=${() => window.dispatchEvent(new CustomEvent("cast:open-session", { detail: taskId }))}>Open</button>`
+			}
+			${
+				running &&
+				taskId &&
+				progress?.parentSessionId &&
+				html`<button type="button" class="tool-card-task-btn" onClick=${() => void api("POST", `/api/sessions/${progress.parentSessionId}/agents/${taskId}/cancel`).catch(() => {})}>Stop</button>`
+			}
+		</div>
+	`;
+}
+
 export function ToolCard({ call, renderMarkdown }) {
 	// Local useState wraps reads from the shared map: the initializer pulls
 	// the saved value on mount (so a ToolCard that re-mounts inside a
@@ -117,6 +173,7 @@ export function ToolCard({ call, renderMarkdown }) {
 				<span class="tool-card-status ${statusClass}" role="img" aria-label=${statusClass} />
 				${hasResult && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
 			</div>
+			${call.name === "task" && html`<${TaskLine} call=${call} />`}
 			${args && html`<div class="tool-card-body">${args}</div>`}
 			${
 				open &&

@@ -1,4 +1,5 @@
 import type { ToolCallStatus } from "../../core/tools/shared.ts";
+import type { SubagentProgress } from "../../core/tools/task.ts";
 
 export interface StreamToolCall {
 	id: string;
@@ -7,6 +8,8 @@ export interface StreamToolCall {
 	status: ToolCallStatus;
 	result?: string;
 	images?: string[];
+	/** A `task` call's latest subagent progress. */
+	progress?: SubagentProgress;
 }
 
 export type StreamBlock =
@@ -29,7 +32,8 @@ export type StreamEvent =
 	| { type: "thinking"; text: string }
 	| { type: "content"; text: string }
 	| { type: "tool_start"; call: StreamToolCall }
-	| { type: "tool_end"; id: string; status: ToolCallStatus; result?: string; images?: string[] };
+	| { type: "tool_end"; id: string; status: ToolCallStatus; result?: string; images?: string[] }
+	| { type: "subagent_progress"; progress: SubagentProgress };
 
 export function appendTextBlock(blocks: StreamBlock[], kind: "thinking" | "content", text: string): StreamBlock[];
 export function blocksFromAssistantCompletion(completion: AssistantCompletion): StreamBlock[];

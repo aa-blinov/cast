@@ -239,9 +239,12 @@ export function useSessionController({
 				hydrateStreamingNow(data.streaming);
 				setRunning(data.status === "running");
 				wasRunningRef.current = data.status === "running";
-				try {
-					localStorage.setItem("cast:lastSessionId", id);
-				} catch {}
+				// A subagent's session is a detour: a reload returns to the thread.
+				if (data.sessionKind !== "subagent") {
+					try {
+						localStorage.setItem("cast:lastSessionId", id);
+					} catch {}
+				}
 				setUrlSessionId(id, { push });
 				undismiss(id);
 				// Clear only if no newer selectSession has overwritten selectingId.

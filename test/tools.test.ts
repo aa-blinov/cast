@@ -389,6 +389,23 @@ describe("background bash tool definitions", () => {
 	});
 });
 
+describe("task tool definition", () => {
+	it("offers task_id always and background only where the host can deliver a late report", () => {
+		const taskTool = (backgroundBash: boolean) =>
+			getToolDefinitions(["explore", "worker"], "main", "small", undefined, backgroundBash).find(
+				(t) => t.function.name === "task",
+			);
+		const foreground = taskTool(false);
+		expect(foreground?.function.parameters.properties).toHaveProperty("task_id");
+		expect(foreground?.function.parameters.properties).not.toHaveProperty("background");
+		expect(foreground?.function.description).toContain("Subagent model: small.");
+
+		const withBackground = taskTool(true);
+		expect(withBackground?.function.parameters.properties).toHaveProperty("background");
+		expect(withBackground?.function.description).toContain("background: true");
+	});
+});
+
 describe("todo_write tool definition — build-mode only", () => {
 	it("is omitted by default (plan mode / not passed)", () => {
 		const tools = getToolDefinitions();
@@ -1859,37 +1876,25 @@ describe("task", () => {
 		expect(result.content).toContain("no output");
 	});
 
-	it("runs sibling task calls one at a time, without an artificial slot limit", async () => {
-		// `task` is deliberately absent from the loop's PARALLEL_SAFE_TOOL_NAMES,
-		// so sibling task calls are executed in order rather than with
-		// Promise.all — that sequencing, not a semaphore, is what bounds
-		// subagent concurrency. A 10-slot semaphore used to sit here as well; it
-		// could only ever make one session's subagent wait on ten *other*
-		// sessions', so it was removed. This pins both halves: concurrency is
-		// not capped at some magic number, and each call still runs to
-		// completion on its own.
-		const { PARALLEL_SAFE_TOOL_NAMES } = await import("../src/core/loop.ts");
-		expect(PARALLEL_SAFE_TOOL_NAMES.has("task")).toBe(false);
-
+	it("caps how many of one session's subagents run at once, and runs them all", async () => {
+		const { MAX_CONCURRENT_TASKS } = await import("../src/core/tools/task.ts");
 		let active = 0;
 		let peak = 0;
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, {
 			model: "test",
 			subagentPrompts: [{ name: "worker", label: "Worker", description: "test", systemPrompt: "worker prompt" }],
-			runAgentLoop: async () => {
+			runAgentLoop: async (messages) => {
 				active++;
 				peak = Math.max(peak, active);
 				await new Promise((r) => setTimeout(r, 5));
 				active--;
-				return [{ role: "assistant", content: "done" }];
+				return [...messages, { role: "assistant", content: "done" }];
 			},
 		});
 
-		// Driven concurrently on purpose: nothing queues them behind a limit any
-		// more, and all 12 must still complete.
 		const results = await Promise.all(Array.from({ length: 12 }, () => exec("task", { assignment: "work" })));
-		expect(results.every((r) => r.content === "done")).toBe(true);
-		expect(peak).toBeGreaterThan(10);
+		expect(results.every((r) => r.content.includes("\ndone\n"))).toBe(true);
+		expect(peak).toBe(MAX_CONCURRENT_TASKS);
 	});
 
 	it("does not start a subagent whose turn was already cancelled", async () => {

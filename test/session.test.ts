@@ -35,10 +35,10 @@ import {
 	lastPersistedSeq,
 	listSessionSummaries,
 	listSessions,
+	listSubagentSessions,
 	loadCheckpoints,
 	loadSession,
 	loadSessionByShareToken,
-	loadSubagentRuns,
 	markImageMessagesOutOfContext,
 	migrateLegacySessionsToDb,
 	pruneBackgroundSessions,
@@ -46,7 +46,6 @@ import {
 	recordCompaction,
 	resetSessionContext,
 	saveSession,
-	saveSubagentRun,
 	searchSessionSummaries,
 	sessionHasMessages,
 	shouldCompact,
@@ -1011,59 +1010,37 @@ describe("session persistence", () => {
 		expect(notices.every((n) => n.afterSeq === anchor)).toBe(true);
 	});
 
-	it("persists subagent transcripts and loads them back in order", () => {
-		const session = createSession("gpt-4o", projectA);
-		saveSession(session);
-
-		saveSubagentRun({
-			sessionId: session.id,
-			toolCallId: "call_1",
-			persona: "worker",
-			model: "gpt-4o",
-			startedAt: "2026-01-01T00:00:00.000Z",
-			endReason: "stop",
-			messages: [
-				{ role: "user", content: "do the thing" },
-				{ role: "assistant", content: "done" },
-			],
+	it("keeps subagent sessions out of the session lists and lists them under their parent", () => {
+		const parent = createSession("gpt-4o", projectA);
+		saveSession(parent);
+		const child = createSession("gpt-4o", projectA, {
+			sessionKind: "subagent",
+			parentSessionId: parent.id,
+			title: "map the auth flow",
 		});
-		saveSubagentRun({
-			sessionId: session.id,
-			toolCallId: "call_2",
-			persona: "explorer",
-			model: "gpt-4o",
-			startedAt: "2026-01-01T00:00:01.000Z",
-			endReason: "stop",
-			messages: [{ role: "user", content: "explore" }],
-		});
+		child.persona = "explore";
+		child.messages.push({ role: "user", content: "map it" }, { role: "assistant", content: "done" });
+		saveSession(child);
 
-		const runs = loadSubagentRuns(session.id);
-		expect(runs).toHaveLength(2);
-		expect(runs[0]?.toolCallId).toBe("call_1");
-		expect(runs[0]?.persona).toBe("worker");
-		expect(runs[0]?.messages).toEqual([
-			{ role: "user", content: "do the thing" },
-			{ role: "assistant", content: "done" },
+		expect(listSessions().map((s) => s.id)).not.toContain(child.id);
+		expect(listSubagentSessions(parent.id)).toEqual([
+			expect.objectContaining({ id: child.id, title: "map the auth flow", persona: "explore" }),
 		]);
-		expect(runs[1]?.toolCallId).toBe("call_2");
+		expect(loadSession(child.id)?.messages).toHaveLength(2);
 	});
 
-	it("cascades checkpoints and subagent runs when the session is deleted", () => {
+	it("cascades checkpoints and subagent sessions when the session is deleted", () => {
 		const session = createSession("gpt-4o", projectA);
 		saveSession(session);
 		appendCheckpoint(session.id, { id: "c1", timestamp: "t", cwd: projectA });
-		saveSubagentRun({
-			sessionId: session.id,
-			toolCallId: "call_1",
-			startedAt: "t",
-			endReason: "stop",
-			messages: [],
-		});
+		const child = createSession("gpt-4o", projectA, { sessionKind: "subagent", parentSessionId: session.id });
+		child.messages.push({ role: "user", content: "x" });
+		saveSession(child);
 
 		deleteSession(session.id);
 
 		expect(loadCheckpoints(session.id)).toEqual([]);
-		expect(loadSubagentRuns(session.id)).toEqual([]);
+		expect(loadSession(child.id)).toBeNull();
 	});
 
 	it("markImageMessagesOutOfContext drops rejected image_url messages from the session", () => {

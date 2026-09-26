@@ -23,18 +23,20 @@ export const globArgumentIsGrounded: EvalCase = {
 		// to TypeScript specs. Grading the argument *shape* instead kept failing
 		// calls that answered the question correctly: a brace pattern
 		// (`**/*.{spec,test}.ts`), an absolute pattern carrying its own scope,
-		// and `path` on the fixture root with `tests/` in the pattern. What
-		// matters is where the two arguments point once joined.
+		// and `path` on the fixture root with `tests/` in the pattern — and
+		// `**/*.ts` scoped to tests/, which lists the specs and nothing else here,
+		// with the answer (graded above) picking them out. What matters is where
+		// the two arguments point once joined, narrowed to TypeScript.
 		verify: ({ toolCalls }) => {
 			const dir = fixturePath("behavior-glob-args", "tests");
 			return toolCalls.some((call) => {
 				if (call.name !== "glob" || typeof call.args.pattern !== "string") return false;
 				const pattern = call.args.pattern;
 				const scope = typeof call.args.path === "string" ? join(call.args.path, pattern) : pattern;
-				return scope.startsWith(dir) && pattern.includes("spec") && pattern.endsWith(".ts");
+				return scope.startsWith(dir) && pattern.endsWith(".ts");
 			})
 				? undefined
-				: "glob did not use a scoped TypeScript spec pattern";
+				: "glob did not use a TypeScript pattern scoped to the tests directory";
 		},
 	},
 };

@@ -124,6 +124,8 @@ export interface AgentActorNotification {
 	parentActorId?: string;
 	sessionId?: string;
 	agent: string;
+	/** "subagent" for a `task` child — its tool card already shows the outcome. */
+	mode?: AgentActorMode;
 	status: AgentActorTerminalStatus;
 	ts: string;
 }
@@ -784,6 +786,7 @@ export class AgentActorRegistry {
 			parentActorId: record.parentActorId,
 			sessionId: record.sessionId,
 			agent: record.agent,
+			mode: record.mode,
 			status,
 			ts: record.completedAt ?? now(),
 		};

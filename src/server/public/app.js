@@ -1004,6 +1004,12 @@ function App() {
 		pendingPersonaSessionRef.current = null;
 		void commitSession(pending.persona, pending.cwd);
 	}, [running, commitSession]);
+	// Task cards open their subagent's session through this (see tool-card.js).
+	useEffect(() => {
+		const open = (e) => void selectSession(e.detail);
+		window.addEventListener("cast:open-session", open);
+		return () => window.removeEventListener("cast:open-session", open);
+	}, [selectSession]);
 	/**
 	 * Resolves once the daemon is reachable again, kicking the reconnect loop
 	 * instead of waiting for its next scheduled attempt. A phone whose screen
@@ -2285,7 +2291,16 @@ function App() {
 						</button>
 					`
 					}
-					<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} audioInput=${Boolean(session?.audioInput)} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />
+					${
+						session?.sessionKind === "subagent"
+							? html`
+						<div class="subagent-banner" role="status">
+							<span><strong>${session.persona || "worker"}</strong> subagent · ${session.title || "task"} · view only</span>
+							${session.parentSessionId && html`<button type="button" class="subagent-banner-back" onClick=${() => selectSession(session.parentSessionId)}>← Back to the thread</button>`}
+						</div>
+					`
+							: html`<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} audioInput=${Boolean(session?.audioInput)} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />`
+					}
 				</div>
 			</main>
 

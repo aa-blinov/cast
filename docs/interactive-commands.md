@@ -32,6 +32,7 @@ Removing files created during the turn also removes any *you* created in that wi
 |---------|-------------|
 | `/model` | Open model picker (shows current model) |
 | `/model <name>` | Switch to a specific model (validated) |
+| `/agents` | This session's sub-agents: see one's session, or stop a running one |
 | `/subagent-model` | Open model picker for sub-agents |
 | `/subagent-model <name>` | Switch sub-agent model |
 | `/subagent-model-provider [name\|off]` | Show/change the saved provider used for the sub-agent model |

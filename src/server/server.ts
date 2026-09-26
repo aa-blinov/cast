@@ -1275,6 +1275,16 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { id: ws.id, session: ws.session }, 201);
 	});
 
+	route("GET", "/api/sessions/:id/agents", (_req, res, params) => {
+		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
+		json(res, { agents: bridge.listAgents(params.id) });
+	});
+
+	route("POST", "/api/sessions/:id/agents/:taskId/cancel", (_req, res, params) => {
+		if (!bridge.cancelAgent(params.id, params.taskId)) return json(res, { error: "Not running" }, 404);
+		json(res, { ok: true });
+	});
+
 	route("POST", "/api/sessions/:id/fork", (_req, res, params) => {
 		const source = bridge.getSession(params.id);
 		if (!source) return json(res, { error: "Not found" }, 404);
@@ -1356,6 +1366,9 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			title: ws.session.title,
 			pinned: ws.session.pinned,
 			shareToken: ws.session.shareToken ?? null,
+			// A subagent's session opens view-only, with a way back to its parent.
+			sessionKind: ws.session.sessionKind ?? "conversation",
+			parentSessionId: ws.session.parentSessionId ?? null,
 			status: ws.status,
 			turnStartedAt: ws.turnStartedAt ?? null,
 			streaming: reconciled.streaming,

@@ -2,6 +2,7 @@
 name: explore
 label: Explore
 description: Read-only codebase explorer — maps structure and returns a compressed summary without editing files.
+readOnly: true
 tools: [read, grep, glob, ls, bash]
 ---
 

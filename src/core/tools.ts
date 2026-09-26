@@ -202,7 +202,11 @@ export function getToolDefinitions(
 					type: "object",
 					properties: {
 						path: { type: "string", description: "Path to the file to write (relative or absolute)" },
-						content: { type: "string", description: "Content to write to the file" },
+						content: {
+							type: "string",
+							description:
+								"Content to write to the file, byte for byte. When the user gives the exact text, add no trailing newline they didn't include",
+						},
 					},
 					required: ["path", "content"],
 				},
@@ -384,23 +388,48 @@ export function getToolDefinitions(
 						function: {
 							name: "task",
 							description:
-								"Start a subagent that works on a task independently and reports back. " +
-								"Child tool calls stay out of your context — only the final result is returned. " +
-								"When the user asks for parallel/independent/concurrent work across separate areas, " +
-								"emit multiple task calls in the same turn (one assignment per area) instead of doing all the reads yourself. " +
-								`Also use for isolated research, review, or exploration. ${personaList}${modelInfo}`,
+								"Start a subagent: a separate agent that works on one assignment in its own context and reports back once. " +
+								"Its tool calls stay out of your context — only its final report is returned.\n" +
+								"When NOT to use it: reading a known file, finding a specific symbol, or searching 2-3 files — do that yourself, it's faster.\n" +
+								"- Several task calls in one message run at the same time: fan out independent areas that way, one assignment per area. Workers editing code must get separate files.\n" +
+								"- Each subagent starts with no knowledge of this conversation. Put everything it needs in the assignment — paths, constraints, what's already known — and say exactly what its report must contain, and whether it should change code or only research.\n" +
+								"- Once work is delegated, don't redo it yourself: carry on with something else or wait for the result.\n" +
+								"- The user doesn't see the report: tell them what matters from it.\n" +
+								'- The result starts with <task id="…">. Pass that id as task_id to continue the same subagent with its full history (a follow-up question, a fix to its work) instead of starting over.' +
+								(backgroundBashEnabled
+									? "\n- background: true starts it and returns at once; its report arrives as a message when it finishes. Use it only for work you don't need before your next step. Don't poll or wait for it."
+									: "") +
+								`\n${personaList}${modelInfo}`,
 							parameters: {
 								type: "object",
 								properties: {
+									description: {
+										type: "string",
+										description: "A short (3-5 words) title shown to the user",
+									},
 									assignment: {
 										type: "string",
-										description: "Complete, self-contained task description for the subagent",
+										description:
+											"Complete, self-contained task description, including what the report must contain",
 									},
 									subagent: {
 										type: "string",
 										description:
 											"Subagent name (optional). Prefer 'explore' for read-only mapping, 'review' for independent validation; 'worker' (default) for everything else — edits, mixed work, or unclear fit.",
 									},
+									task_id: {
+										type: "string",
+										description:
+											"Continue an earlier subagent of this session (the id from its <task id> result) instead of starting a new one",
+									},
+									...(backgroundBashEnabled
+										? {
+												background: {
+													type: "boolean",
+													description: "Run without waiting; the report arrives as a message when done",
+												},
+											}
+										: {}),
 								},
 								required: ["assignment"],
 							},

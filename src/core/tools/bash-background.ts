@@ -46,7 +46,6 @@ function loadPty(): typeof import("node-pty") | null {
 }
 
 import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD } from "../config.ts";
-import type { Message } from "../llm.ts";
 import type { MessageQueue } from "../loop.ts";
 import { escapeSystemReminderTags } from "../system-reminder.ts";
 import { formatBashResult, getBashResolution, stripAnsi } from "./bash.ts";
@@ -195,6 +194,14 @@ export class BackgroundTaskRegistry {
 
 	setOnIdleWake(fn: (text: string) => void): void {
 		this.onIdleWake = fn;
+	}
+
+	/** Hands a finished background job's notice to the model: into the running
+	 *  turn when there is one, otherwise as a new turn. Background subagents
+	 *  report through the same door. */
+	deliver(text: string, deps: BashBackgroundDeps): void {
+		if (deps.isRunning()) deps.followUpQueue.enqueue({ role: "user", content: text });
+		else this.onIdleWake(text);
 	}
 
 	get(id: string): BackgroundTask | undefined {
@@ -368,13 +375,7 @@ export class BackgroundTaskRegistry {
 	private settle(task: BackgroundTask, config: AppConfig, deps: BashBackgroundDeps): void {
 		this.pruneFinished();
 		if (!task.notifyOnCompletion) return;
-		const reminderText = buildCompletionReminder(task, config);
-		const message: Message = { role: "user", content: reminderText };
-		if (deps.isRunning()) {
-			deps.followUpQueue.enqueue(message);
-		} else {
-			this.onIdleWake(reminderText);
-		}
+		this.deliver(buildCompletionReminder(task, config), deps);
 	}
 }
 

@@ -1,16 +1,14 @@
 /**
  * Subagent prompts — dedicated system prompts for worker agents spawned by
- * the `task` tool. Loaded from `prompts/subagents/*.md` (builtin) with the
- * same frontmatter format as personas (name, label, description, tools,
- * agentsMd).
- *
- * Unlike personas, subagent prompts are not user-facing and have no
- * trust-gated project/global sources — they ship with cast and are
- * selected by the task tool at spawn time.
+ * the `task` tool. Same frontmatter format as personas (name, label,
+ * description, tools, agentsMd, readOnly). Loaded from the builtin
+ * `prompts/subagents/`, then `~/.cast/subagents/`, then a trusted project's
+ * `.cast/subagents/`; a later source replaces a same-named earlier one.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { parseAgentsMd, parseFrontmatter, parseToolsAllowlist } from "./frontmatter.ts";
 import { promptsDir, withSharedToolPrompt } from "./prompts.ts";
 
@@ -31,11 +29,15 @@ export interface SubagentPrompt {
 	 * Defaults to true; set `agentsMd: false` in frontmatter to disable.
 	 */
 	agentsMd: boolean;
+	/** `readOnly: true`: the child gets no write/edit and inspection-only bash —
+	 *  enforced by the harness, not just asked for in the prompt. */
+	readOnly?: boolean;
+	source?: "builtin" | "global" | "project";
 }
 
 const SUBAGENTS_DIR = join(promptsDir, "subagents");
 
-function loadSubagentFromFile(filePath: string): SubagentPrompt | null {
+function loadSubagentFromFile(filePath: string, source: SubagentPrompt["source"]): SubagentPrompt | null {
 	let raw: string;
 	try {
 		raw = readFileSync(filePath, "utf-8");
@@ -58,25 +60,37 @@ function loadSubagentFromFile(filePath: string): SubagentPrompt | null {
 		systemPrompt: withSharedToolPrompt(body, parseToolsAllowlist(frontmatter)),
 		tools: parseToolsAllowlist(frontmatter),
 		agentsMd: parseAgentsMd(frontmatter),
+		...(frontmatter.readOnly === true ? { readOnly: true } : {}),
+		source,
 	};
 }
 
-/**
- * Load all .md subagent prompts from prompts/subagents/. Returns them
- * sorted by name. Silently returns an empty array if the directory
- * doesn't exist.
- */
-export function loadSubagentPrompts(): SubagentPrompt[] {
+function loadDir(dir: string, source: SubagentPrompt["source"]): SubagentPrompt[] {
 	let files: string[];
 	try {
-		files = readdirSync(SUBAGENTS_DIR).filter((f) => f.endsWith(".md"));
+		files = readdirSync(dir).filter((f) => f.endsWith(".md"));
 	} catch {
 		return [];
 	}
-	return files
-		.map((f) => loadSubagentFromFile(join(SUBAGENTS_DIR, f)))
-		.filter((p): p is SubagentPrompt => p !== null)
-		.sort((a, b) => a.name.localeCompare(b.name));
+	return files.map((f) => loadSubagentFromFile(join(dir, f), source)).filter((p): p is SubagentPrompt => p !== null);
+}
+
+/**
+ * All subagent prompts, sorted by name. Project ones load only for a trusted
+ * project, like every other project resource. Missing directories are fine.
+ */
+export function loadSubagentPrompts(opts: { cwd?: string; projectTrusted?: boolean } = {}): SubagentPrompt[] {
+	const globalDir = join(homedir(), ".cast", "subagents");
+	const projectDir = opts.cwd ? resolve(opts.cwd, ".cast", "subagents") : undefined;
+	const byName = new Map<string, SubagentPrompt>();
+	for (const p of [
+		...loadDir(SUBAGENTS_DIR, "builtin"),
+		...loadDir(globalDir, "global"),
+		...(projectDir && opts.projectTrusted && projectDir !== globalDir ? loadDir(projectDir, "project") : []),
+	]) {
+		byName.set(p.name, p);
+	}
+	return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**

@@ -54,6 +54,31 @@
 	max-height: 340px;
 	overflow-y: auto;
 }
+.tool-card-task {
+	display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+	padding: 6px 10px;
+	border-top: 1px solid var(--border);
+	color: var(--text-dim);
+}
+.tool-card-task-agent { color: var(--blue); }
+.tool-card-task-title { color: var(--text); }
+.tool-card-task-detail {
+	color: var(--text-muted);
+	min-width: 0;
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+	flex: 1 1 12ch;
+}
+.tool-card-task-btn {
+	font: inherit;
+	color: var(--text-dim);
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	padding: 1px 8px;
+	cursor: pointer;
+}
+.tool-card-task-btn:hover { color: var(--text); }
+.tool-card-task-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 .tool-card-images {
 	padding: 8px 10px;
 	border-top: 1px solid var(--border);

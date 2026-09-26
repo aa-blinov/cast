@@ -254,6 +254,10 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 	// itself is never dimmed — see MarkdownBody.
 	const failed = call.status === "error";
 	const running = call.status === "running";
+	// A running subagent's current step leads the row, ahead of its (long)
+	// assignment, so it survives the one-line truncation and adds no height.
+	const progress = running && call.name === "task" ? call.progress : undefined;
+	const step = progress?.tool ? `↳ ${progress.tool.name} ${progress.tool.summary}`.trim() : "";
 	return (
 		<Box flexDirection="column">
 			<Text>
@@ -261,6 +265,12 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 				<Text color={colors.muted} dimColor>
 					{isMcpTool(call.name) ? mcpToolLabel(call.name) : call.name}{" "}
 				</Text>
+				{progress && (
+					<Text color={colors.accent}>
+						[{progress.subagent}
+						{step ? ` ${step}` : ""} · {progress.toolCount}]{" "}
+					</Text>
+				)}
 				<Text color={failed ? colors.error : colors.muted} dimColor={!failed && !running}>
 					<ToolSummary name={call.name} args={call.args} compact={compact} muted />
 				</Text>

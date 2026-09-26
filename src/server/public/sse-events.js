@@ -1,5 +1,6 @@
 import { latestPageUrl } from "./history-merge.js";
 import { blocksFromAssistantCompletion } from "./stream-blocks.js";
+import { setSubagentProgress } from "./tool-card-state.js";
 
 function normalizeUserContent(content) {
 	if (typeof content === "string") return { text: content, images: [], audios: [] };
@@ -205,6 +206,9 @@ export function handleSseEvent(event, context) {
 				const messages = dropSettledToolCard(prev.messages, event.id);
 				return messages === prev.messages ? prev : { ...prev, messages };
 			});
+			break;
+		case "subagent_progress":
+			setSubagentProgress(event);
 			break;
 		case "tool_end":
 			updateStreaming({

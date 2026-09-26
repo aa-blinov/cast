@@ -9,7 +9,7 @@ import type { LoopConfig } from "../src/core/loop.ts";
 import { findSubagentPrompt, loadSubagentPrompts, type SubagentPrompt } from "../src/core/subagents.ts";
 import { execTask } from "../src/core/tools/task.ts";
 
-// execTask can persist subagent runs (saveSubagentRun) — keep that on a
+// execTask saves subagent sessions — keep that on a
 // throwaway DB so a real sessions.db is never written during tests.
 let fakeDb: string;
 let realDb: string | undefined;
@@ -95,6 +95,42 @@ describe("execTask — plan state handoff", () => {
 });
 
 describe("loadSubagentPrompts", () => {
+	it("adds ~/.cast/subagents and, for a trusted project, .cast/subagents over the builtins", () => {
+		const realHome = process.env.HOME;
+		const home = mkdtempSync(join(tmpdir(), "cast-subagents-home-"));
+		const project = mkdtempSync(join(tmpdir(), "cast-subagents-project-"));
+		process.env.HOME = home;
+		try {
+			mkdirSync(join(home, ".cast", "subagents"), { recursive: true });
+			writeFileSync(
+				join(home, ".cast", "subagents", "doc-writer.md"),
+				"---\nname: doc-writer\nlabel: Docs\n---\n\nYou write docs.\n",
+			);
+			mkdirSync(join(project, ".cast", "subagents"), { recursive: true });
+			writeFileSync(
+				join(project, ".cast", "subagents", "explore.md"),
+				"---\nname: explore\nreadOnly: true\n---\n\nProject explorer.\n",
+			);
+
+			const untrusted = loadSubagentPrompts({ cwd: project, projectTrusted: false });
+			expect(untrusted.find((p) => p.name === "doc-writer")?.source).toBe("global");
+			expect(untrusted.find((p) => p.name === "explore")?.source).toBe("builtin");
+
+			const trusted = loadSubagentPrompts({ cwd: project, projectTrusted: true });
+			expect(trusted.find((p) => p.name === "explore")).toMatchObject({ source: "project", readOnly: true });
+			expect(trusted.map((p) => p.name)).toEqual([...trusted.map((p) => p.name)].sort());
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(home, { recursive: true, force: true });
+			rmSync(project, { recursive: true, force: true });
+		}
+	});
+
+	it("marks the builtin explorer read-only", () => {
+		expect(loadSubagentPrompts().find((p) => p.name === "explore")?.readOnly).toBe(true);
+	});
+
 	it("loads the built-in worker subagent", () => {
 		const prompts = loadSubagentPrompts();
 		expect(prompts.length).toBeGreaterThanOrEqual(1);

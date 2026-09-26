@@ -38,3 +38,24 @@ export function setToolCardPreviewSrc(id, value) {
 	const s = getState(id);
 	s.previewSrc = typeof value === "function" ? value(s.previewSrc) : value;
 }
+
+// Live `subagent_progress` of task cards, by tool-call id. A background task
+// keeps reporting after its card has settled into the transcript, so this
+// lives outside both the streaming and the settled trees, like the state
+// above; cards subscribe to hear about their own id.
+const progressById = new Map();
+const progressListeners = new Set();
+
+export function setSubagentProgress(progress) {
+	progressById.set(progress.toolCallId, progress);
+	for (const listener of progressListeners) listener(progress.toolCallId);
+}
+
+export function getSubagentProgress(id) {
+	return progressById.get(id);
+}
+
+export function subscribeSubagentProgress(listener) {
+	progressListeners.add(listener);
+	return () => progressListeners.delete(listener);
+}

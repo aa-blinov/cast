@@ -45,6 +45,16 @@ export function reduceStreamEvent(state, event) {
 	if (event.type === "tool_start") {
 		return { blocks: [...state.blocks, { kind: "tool", call: event.call }] };
 	}
+	if (event.type === "subagent_progress") {
+		const id = event.progress.toolCallId;
+		if (!state.blocks.some((block) => block.kind === "tool" && block.call.id === id)) return state;
+		return {
+			...state,
+			blocks: state.blocks.map((block) =>
+				block.kind === "tool" && block.call.id === id ? { ...block, call: { ...block.call, progress: event.progress } } : block,
+			),
+		};
+	}
 	return {
 		blocks: state.blocks.map((block) =>
 			block.kind === "tool" && block.call.id === event.id
