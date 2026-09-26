@@ -69,7 +69,9 @@ export type AgentStatus = "idle" | "running" | "error";
 // web client pages by 30): a single turn can contain dozens of tool messages,
 // and a handful of turns must still fit inside a typical terminal scrollback.
 // Older turns are fetched on demand via loadOlder (/older, PageUp).
-export const TUI_HISTORY_PAGE_TURNS = 5;
+export /** Live-region redraw interval while an answer streams (~25 fps). */
+const STREAM_FRAME_MS = 40;
+const TUI_HISTORY_PAGE_TURNS = 5;
 
 export interface ToolCallEntry {
 	id: string;
@@ -591,9 +593,23 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	if (initialPageRef.current === null) {
 		initialPageRef.current = getHistoryPage(session.id, undefined, TUI_HISTORY_PAGE_TURNS);
 	}
-	const [messages, setMessages] = useState<ChatMessage[]>(() =>
+	const [messages, setMessagesState] = useState<ChatMessage[]>(() =>
 		buildDisplayMessages(initialPageRef.current!.messages),
 	);
+	// Streamed lines that settled since the last frame, waiting to join
+	// <Static>. They are appended in the same render as the streaming state
+	// they left, so a settle no longer forces a frame of its own; and every
+	// other write goes through setMessages below, which appends them first, so
+	// nothing can land ahead of text that streamed before it.
+	const pendingSettledRef = useRef<ChatMessage[]>([]);
+	const setMessages = useCallback((update: ChatMessage[] | ((msgs: ChatMessage[]) => ChatMessage[])) => {
+		const settled = pendingSettledRef.current;
+		pendingSettledRef.current = [];
+		setMessagesState((msgs) => {
+			const base = settled.length > 0 ? [...msgs, ...settled] : msgs;
+			return typeof update === "function" ? update(base) : update;
+		});
+	}, []);
 	useEffect(() => {
 		if (isClient) return;
 		return subscribeAgentActorNotifications((actor) => {
@@ -601,7 +617,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			const status = actor.status === "success" ? "completed" : actor.status;
 			setMessages((msgs) => [...msgs, { role: "warning", content: `${actor.agent} ${status}` }]);
 		});
-	}, [isClient, session.id]);
+	}, [isClient, session.id, setMessages]);
 	const [hasOlder, setHasOlder] = useState(() => initialPageRef.current!.hasMore);
 	const oldestSeqRef = useRef<number | undefined>(initialPageRef.current!.oldestSeq);
 	const [streaming, setStreaming] = useState<StreamingState | null>(null);
@@ -719,18 +735,20 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			: frozenElapsedRef.current;
 	}, [status]);
 
-	// Flush pending streaming state to React immediately.
+	// Flush pending streaming state (and the lines that settled out of it) to
+	// React immediately, as one render.
 	const flushStreaming = useCallback(() => {
 		if (flushTimerRef.current !== null) {
 			clearTimeout(flushTimerRef.current);
 			flushTimerRef.current = null;
 		}
+		if (pendingSettledRef.current.length > 0) setMessages((msgs) => msgs);
 		setStreaming(streamingRef.current);
-	}, []);
+	}, [setMessages]);
 
 	// Accumulate streaming updates in the ref and schedule a deferred flush.
-	// Rapid per-token events (thinking, token) batch into one React render
-	// per ~16 ms frame instead of one per token. Structural changes (tool_start,
+	// Rapid per-token events (thinking, token) batch into one React render per
+	// STREAM_FRAME_MS instead of one per token. Structural changes (tool_start,
 	// turn_end, etc.) call flushStreaming() directly for immediate UI feedback.
 	const updateStreaming = useCallback(
 		(updater: (prev: StreamingState | null) => StreamingState | null, immediate?: boolean) => {
@@ -741,10 +759,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// this the whole turn accumulates in Ink's live region; once it grows
 			// past the terminal height, log-update's erase can't reach the rows
 			// that scrolled off and frames stack instead of overwriting (duplicated
-			// [reasoning] lines, spinner-per-line). A settle is a structural
-			// boundary, so flush the frame immediately when one happens rather than
-			// leaving the drained blocks visible in the live region for up to 16ms.
-			let settledNow = false;
+			// [reasoning] lines, spinner-per-line). The drained blocks wait in
+			// pendingSettledRef and join <Static> in the same render the live
+			// region drops them, so they are never shown twice or not at all.
 			if (next && next.blocks.length > 0) {
 				const boundarySettled = settledPrefixLength(next.blocks);
 				let promoted = next.blocks.slice(0, boundarySettled);
@@ -760,18 +777,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				}
 				if (promoted.length > 0) {
 					next = { blocks: rest };
-					setMessages((msgs) => [...msgs, { role: "assistant", content: "", blocks: promoted }]);
-					settledNow = true;
+					pendingSettledRef.current.push({ role: "assistant", content: "", blocks: promoted });
 				}
 			}
 			streamingRef.current = next;
-			if (immediate || settledNow) {
+			if (immediate) {
 				flushStreaming();
 			} else if (flushTimerRef.current === null) {
-				flushTimerRef.current = setTimeout(() => {
-					flushTimerRef.current = null;
-					setStreaming(streamingRef.current);
-				}, 16);
+				// A settle used to force its own frame, and a markdown answer settles
+				// a line with nearly every chunk: ~70 frames a second, each running
+				// Ink's whole output pipeline (ANSI tokenizing, string widths, diff).
+				flushTimerRef.current = setTimeout(flushStreaming, STREAM_FRAME_MS);
 			}
 		},
 		[flushStreaming],
@@ -797,7 +813,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			setMessages((msgs) => [...msgs, { role: "assistant", content: "", blocks: s.blocks }]);
 		}
 		updateStreaming(() => ({ blocks: [] }), true);
-	}, [updateStreaming]);
+	}, [updateStreaming, setMessages]);
 
 	// Rebuild-from-session must never run mid-turn: <Static> permanently
 	// commits items by index and never revisits them, so replacing the
@@ -824,7 +840,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		setHasOlder(page.hasMore);
 		setUsage({ ...session.usage });
 		setLastTurnUsage(null);
-	}, [session]);
+	}, [session, setMessages]);
 
 	// Loads the page of history older than the currently-loaded window and
 	// prepends it to the transcript. Returned boolean: true when more history
@@ -842,7 +858,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		oldestSeqRef.current = page.oldestSeq;
 		setHasOlder(page.hasMore);
 		return true;
-	}, [session]);
+	}, [session, setMessages]);
 
 	/** Lightweight refresh for metadata-only changes (/model, /persona, /provider).
 	 *  Skips the full message rebuild since no messages changed. */
@@ -1413,6 +1429,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			effectiveDaemonUrl,
 			effectiveDaemonToken,
 			serverClient,
+			setMessages,
 		],
 	);
 
@@ -1760,6 +1777,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		planState,
 		onPlanSignal,
 		serverClient,
+		setMessages,
 	]);
 
 	const steer = useCallback(
@@ -1923,9 +1941,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		setPendingSteers([]);
 	}, [runner]);
 
-	const addDisplayMessage = useCallback((message: ChatMessage) => {
-		setMessages((msgs) => [...msgs, message]);
-	}, []);
+	const addDisplayMessage = useCallback(
+		(message: ChatMessage) => {
+			setMessages((msgs) => [...msgs, message]);
+		},
+		[setMessages],
+	);
 
 	useEffect(() => {
 		refresh();

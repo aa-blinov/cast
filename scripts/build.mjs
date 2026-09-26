@@ -62,6 +62,11 @@ import { build, transform } from "esbuild";
 	// ajv unconditionally; minifying cuts the unminified ~1.4mb bundle back
 	// down to ~800kb without touching what actually ships behaviorally.
 	minify: true,
+	// React picks its build from process.env.NODE_ENV at runtime, and nothing
+	// sets it for a user's `cast`: the TUI shipped running development React
+	// (owner stacks via console.createTask, DEV fiber checks on every render).
+	// Profiled on a long streamed answer that was ~a third of the TUI's CPU.
+	define: { "process.env.NODE_ENV": '"production"' },
 	// A CJS dependency pulled in transitively by openai (node-fetch, used by
 	// its bundled fetch polyfill path) calls require() with an argument
 	// esbuild can't statically resolve at bundle time, and ESM output has no
