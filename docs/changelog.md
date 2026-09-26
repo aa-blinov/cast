@@ -4,6 +4,17 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.41.1
+
+### Fixed
+
+- **A provider that stops answering no longer hangs the turn.** If a provider sent the start of a response and then went quiet without closing the connection, the turn stayed "running" until you pressed Esc. Now, after 180 seconds with no data (`CAST_STREAM_IDLE_TIMEOUT_MS` to change it), cast retries if nothing had arrived yet. If the answer had already started, the turn ends with "Provider sent nothing for 180s", which you can retry.
+- **A turn in a big repository no longer freezes cast.** Every turn saves a snapshot for `/undo`, and that snapshot ran git while blocking everything else: every session, the web UI and the TUI waited. On a 20,000-file repository that was about 0.4s per turn. The snapshot now runs in the background and is about ten times faster: it reuses git's file cache instead of hashing every file again. On a machine where git has no user name configured, these snapshots used to fail silently; they now work.
+- **Long answers stream smoothly in the web UI.** Every update re-rendered the whole answer so far, so a long reply kept the page busy for most of the stream. On a slow CPU it dropped to about 5 frames a second. Only the part still being written is re-rendered now. The finished answer appears without a pause, and a long code block no longer slows the stream down.
+- **Big threads open faster in the web UI.** History loads 15 turns at a time and shows the newest messages first. A thread whose first page doesn't fill the screen now loads older turns on its own; before, you couldn't scroll up to them.
+- **The TUI uses about half the CPU while streaming.** Release builds ran React's development build, and the TUI redrew the screen for almost every piece of streamed text. Opening a large session is also faster, 2.8s down to 1.9s in our measurement.
+- **Long sessions respond faster.** Saving no longer re-writes details of every earlier reply each time.
+
 ## 0.41.0
 
 ### Fixed
