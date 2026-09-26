@@ -27,7 +27,7 @@ describe("checkpoint module", () => {
 		const targetFile = join(TEST_DIR, "original.txt");
 		writeFileSync(targetFile, "initial content", "utf8");
 
-		const chk = createCheckpoint(TEST_DIR, true);
+		const chk = await createCheckpoint(TEST_DIR, true);
 		expect(chk.gitCommitSha).toBeUndefined();
 
 		const execute = createToolExecutor(
@@ -57,7 +57,7 @@ describe("checkpoint module", () => {
 		expect(existsSync(createdFile)).toBe(false);
 	});
 
-	it("creates git plumbing commit and restores git workspace", () => {
+	it("creates git plumbing commit and restores git workspace", async () => {
 		// Initialize temporary git repo
 		execFileSync("git", ["init"], { cwd: TEST_DIR, stdio: "ignore" });
 		execFileSync("git", ["config", "user.name", "Test"], { cwd: TEST_DIR, stdio: "ignore" });
@@ -77,7 +77,7 @@ describe("checkpoint module", () => {
 			encoding: "utf8",
 		});
 
-		const chk = createCheckpoint(TEST_DIR);
+		const chk = await createCheckpoint(TEST_DIR);
 		expect(chk.gitCommitSha).toBeDefined();
 		expect(execFileSync("git", ["diff", "--cached", "--name-only"], { cwd: TEST_DIR, encoding: "utf8" })).toBe(
 			indexBefore,
@@ -100,7 +100,30 @@ describe("checkpoint module", () => {
 			indexBefore,
 		);
 	});
-	it("restores a file whose bytes are not valid UTF-8", () => {
+	it("makes a git checkpoint on a machine with no git identity configured", async () => {
+		// commit-tree refused without user.name/user.email, and the checkpoint
+		// fell back to shadow mode after hashing the whole tree for nothing.
+		const noIdentity = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+		execFileSync("git", ["init"], { cwd: TEST_DIR, stdio: "ignore", env: noIdentity });
+		writeFileSync(join(TEST_DIR, "a.ts"), "v1", "utf8");
+		const saved = { global: process.env.GIT_CONFIG_GLOBAL, nosystem: process.env.GIT_CONFIG_NOSYSTEM };
+		process.env.GIT_CONFIG_GLOBAL = "/dev/null";
+		process.env.GIT_CONFIG_NOSYSTEM = "1";
+		try {
+			const chk = await createCheckpoint(TEST_DIR);
+			expect(chk.gitCommitSha).toBeDefined();
+			writeFileSync(join(TEST_DIR, "a.ts"), "v2", "utf8");
+			expect(restoreCheckpoint(chk).ok).toBe(true);
+			expect(readFileSync(join(TEST_DIR, "a.ts"), "utf8")).toBe("v1");
+		} finally {
+			if (saved.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+			else process.env.GIT_CONFIG_GLOBAL = saved.global;
+			if (saved.nosystem === undefined) delete process.env.GIT_CONFIG_NOSYSTEM;
+			else process.env.GIT_CONFIG_NOSYSTEM = saved.nosystem;
+		}
+	});
+
+	it("restores a file whose bytes are not valid UTF-8", async () => {
 		// The shadow path read and wrote "utf8", so every byte outside UTF-8
 		// came back as U+FFFD: /undo "restored" a PNG as replacement characters
 		// and reported success.
@@ -108,7 +131,7 @@ describe("checkpoint module", () => {
 		const original = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x80, 0x81]);
 		writeFileSync(file, original);
 
-		const chk = createCheckpoint(TEST_DIR, true);
+		const chk = await createCheckpoint(TEST_DIR, true);
 		backupFileForCheckpoint(chk, file);
 		writeFileSync(file, "the agent overwrote it", "utf8");
 		const res = restoreCheckpoint(chk);
@@ -122,7 +145,7 @@ describe("checkpoint module", () => {
 		// checkpoint are deleted and cannot be recovered — that includes anything
 		// the user wrote themselves while the agent worked. Files untracked *at*
 		// checkpoint time are in its tree and come back, so they are not losses.
-		it("names only the untracked files the restore cannot bring back", () => {
+		it("names only the untracked files the restore cannot bring back", async () => {
 			execFileSync("git", ["init", "-q", "-b", "main"], { cwd: TEST_DIR, stdio: "ignore" });
 			execFileSync("git", ["config", "user.email", "t@e.com"], { cwd: TEST_DIR, stdio: "ignore" });
 			execFileSync("git", ["config", "user.name", "t"], { cwd: TEST_DIR, stdio: "ignore" });
@@ -131,7 +154,7 @@ describe("checkpoint module", () => {
 			execFileSync("git", ["commit", "-m", "init"], { cwd: TEST_DIR, stdio: "ignore" });
 			writeFileSync(join(TEST_DIR, "untracked-before.txt"), "written before the checkpoint", "utf8");
 
-			const chk = createCheckpoint(TEST_DIR);
+			const chk = await createCheckpoint(TEST_DIR);
 			expect(chk.gitCommitSha).toBeDefined();
 
 			writeFileSync(join(TEST_DIR, "tracked.ts"), "v2", "utf8");
@@ -145,7 +168,7 @@ describe("checkpoint module", () => {
 			expect(existsSync(join(TEST_DIR, "written-during-the-turn.txt"))).toBe(false);
 		});
 
-		it("names the same files when the session runs from a subdirectory", () => {
+		it("names the same files when the session runs from a subdirectory", async () => {
 			// `git clean -nd` prints cwd-relative paths (prefixed with `./`) and
 			// notices like "Would refuse to remove current working directory",
 			// while ls-tree was listing cwd-scoped paths — so from a subdirectory
@@ -161,7 +184,7 @@ describe("checkpoint module", () => {
 			mkdirSync(sub, { recursive: true });
 			writeFileSync(join(sub, "untracked-before.txt"), "written before the checkpoint", "utf8");
 
-			const chk = createCheckpoint(sub);
+			const chk = await createCheckpoint(sub);
 			expect(chk.gitCommitSha).toBeDefined();
 			writeFileSync(join(sub, "written-during-the-turn.txt"), "the user's own note", "utf8");
 
@@ -172,8 +195,8 @@ describe("checkpoint module", () => {
 			expect(existsSync(join(sub, "written-during-the-turn.txt"))).toBe(false);
 		});
 
-		it("reports nothing for a shadow checkpoint, which never cleans", () => {
-			const chk = createCheckpoint(TEST_DIR, true);
+		it("reports nothing for a shadow checkpoint, which never cleans", async () => {
+			const chk = await createCheckpoint(TEST_DIR, true);
 			expect(filesLostByRestore(chk)).toEqual([]);
 		});
 	});

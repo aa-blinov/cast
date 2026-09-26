@@ -1449,7 +1449,7 @@ describe("/undo", () => {
 	// Restoring runs `git clean -fd`, which deletes untracked files created
 	// after the checkpoint — including whatever the user wrote themselves while
 	// the agent worked. Those cannot be recovered, so the command asks first.
-	function repoWithCheckpoint(): { cwd: string; checkpoint: unknown } {
+	async function repoWithCheckpoint(): Promise<{ cwd: string; checkpoint: unknown }> {
 		const cwd = mkdtempSync(join(tmpdir(), "cast-undo-cmd-"));
 		execFileSync("git", ["init", "-q", "-b", "main"], { cwd, stdio: "ignore" });
 		execFileSync("git", ["config", "user.email", "t@e.com"], { cwd, stdio: "ignore" });
@@ -1457,13 +1457,13 @@ describe("/undo", () => {
 		writeFileSync(join(cwd, "tracked.txt"), "v1", "utf-8");
 		execFileSync("git", ["add", "-A"], { cwd, stdio: "ignore" });
 		execFileSync("git", ["commit", "-qm", "init"], { cwd, stdio: "ignore" });
-		const checkpoint = createCheckpoint(cwd);
+		const checkpoint = await createCheckpoint(cwd);
 		writeFileSync(join(cwd, "user-file.txt"), "the user's own note", "utf-8");
 		return { cwd, checkpoint };
 	}
 
 	it("asks before deleting files created since the checkpoint, and cancelling keeps them", async () => {
-		const { cwd, checkpoint } = repoWithCheckpoint();
+		const { cwd, checkpoint } = await repoWithCheckpoint();
 		try {
 			const { deps, calls } = createFakeDeps({ cwd });
 			deps.session.checkpoints = [checkpoint as never];
@@ -1486,7 +1486,7 @@ describe("/undo", () => {
 		// session is loaded. So /undo right after a change reported
 		// "[No checkpoint available to undo]" and only began working after a
 		// restart — the one moment nobody needs it.
-		const { cwd, checkpoint } = repoWithCheckpoint();
+		const { cwd, checkpoint } = await repoWithCheckpoint();
 		try {
 			const { deps, calls } = createFakeDeps({ cwd });
 			saveSession(deps.session);
@@ -1505,7 +1505,7 @@ describe("/undo", () => {
 	});
 
 	it("--force skips the question and restores", async () => {
-		const { cwd, checkpoint } = repoWithCheckpoint();
+		const { cwd, checkpoint } = await repoWithCheckpoint();
 		try {
 			const { deps } = createFakeDeps({ cwd });
 			deps.session.checkpoints = [checkpoint as never];

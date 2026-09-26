@@ -718,7 +718,7 @@ const messageMessageId = new WeakMap<Message, string>();
  * rewrote each stale entry into whatever row now sat at that index — 893
  * user/tool rows in one real database carried a neighbour's reasoning. */
 const messageExtras = new WeakMap<Message, { reasoning?: string; turnMeta?: TurnMeta }>();
-const writtenExtras = new WeakMap<Message, { reasoning: string | null; turnMeta: string | null }>();
+const writtenExtras = new WeakMap<Message, WrittenExtras>();
 
 /** Records a completion's reasoning for its assistant message; the next save writes it. */
 export function attachReasoning(message: Message, reasoning: string): void {
@@ -804,7 +804,10 @@ export function saveSession(session: SessionState): void {
 /** The row writes behind saveSession, split out so the transaction wrapper
  *  above stays readable. Returns the message→seq/id mappings to record once
  *  the transaction commits, rather than setting them as it goes. */
-type WrittenExtras = { reasoning: string | null; turnMeta: string | null };
+/** What a message's row holds, and the extras object it was written from:
+ *  attach* replaces that object on every change, so an unchanged reference
+ *  means nothing to write (no per-save JSON of every turn footer). */
+type WrittenExtras = { reasoning: string | null; turnMeta: string | null; source?: object };
 
 function writeSessionRows(
 	db: DatabaseSync,
@@ -859,22 +862,25 @@ function writeSessionRows(
 	let seq = nextSeqFor(session.id);
 	(Array.isArray(session.messages) ? session.messages : []).forEach((m) => {
 		const extras = messageExtras.get(m);
+		const existing = messageSeq.get(m);
+		const written = writtenExtras.get(m);
+		if (existing !== undefined && (!extras || written?.source === extras)) return;
 		const reasoning = extras?.reasoning ?? null;
 		const turnMetaJson = extras?.turnMeta ? JSON.stringify(extras.turnMeta) : null;
-		const existing = messageSeq.get(m);
 		if (existing !== undefined) {
 			// Only what changed since the row was written: rewriting every
 			// message's reasoning on every save made each save cost the whole
 			// history.
-			const written = writtenExtras.get(m);
-			if (reasoning && reasoning !== written?.reasoning) {
-				updateReasoning.run(reasoning, session.id, existing);
-				pendingExtras.push([m, { reasoning, turnMeta: written?.turnMeta ?? null }]);
-			}
-			if (turnMetaJson && turnMetaJson !== written?.turnMeta) {
-				updateTurnMeta.run(turnMetaJson, session.id, existing);
-				pendingExtras.push([m, { reasoning: reasoning ?? written?.reasoning ?? null, turnMeta: turnMetaJson }]);
-			}
+			if (reasoning && reasoning !== written?.reasoning) updateReasoning.run(reasoning, session.id, existing);
+			if (turnMetaJson && turnMetaJson !== written?.turnMeta) updateTurnMeta.run(turnMetaJson, session.id, existing);
+			pendingExtras.push([
+				m,
+				{
+					reasoning: reasoning ?? written?.reasoning ?? null,
+					turnMeta: turnMetaJson ?? written?.turnMeta ?? null,
+					source: extras,
+				},
+			]);
 			return;
 		}
 		if (m.role === "system" && typeof m.content === "string" && !m.content.startsWith(COMPACTION_MARKER_PREFIX)) {
@@ -902,7 +908,7 @@ function writeSessionRows(
 			turnMetaJson,
 		);
 		pending.push([m, seq, messageId]);
-		pendingExtras.push([m, { reasoning, turnMeta: turnMetaJson }]);
+		pendingExtras.push([m, { reasoning, turnMeta: turnMetaJson, source: extras }]);
 		seq++;
 	});
 	return { pending, pendingExtras };
@@ -1539,11 +1545,12 @@ function loadSessionByRow(row: SessionRow | undefined): SessionState | null {
 		if (r.reasoning) reasoning[i] = r.reasoning;
 		if (r.turn_meta) turnMeta[i] = JSON.parse(r.turn_meta) as TurnMeta;
 		if (r.reasoning || r.turn_meta) {
-			messageExtras.set(m, {
+			const extras = {
 				...(r.reasoning ? { reasoning: r.reasoning } : {}),
 				...(r.turn_meta ? { turnMeta: turnMeta[i] } : {}),
-			});
-			writtenExtras.set(m, { reasoning: r.reasoning, turnMeta: r.turn_meta });
+			};
+			messageExtras.set(m, extras);
+			writtenExtras.set(m, { reasoning: r.reasoning, turnMeta: r.turn_meta, source: extras });
 		}
 	});
 	normalizeStoredMessages(messages);
