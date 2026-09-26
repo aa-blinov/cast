@@ -606,6 +606,13 @@ describe("ACP adapter", () => {
 		expect(typeof first.rebuildSystemPrompt).toBe("function");
 		expect(first.contextFiles).toBe(second.contextFiles);
 		expect(first.announcedLocalDate.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		first.announcedLocalDate.value = "2031-01-02";
+		expect(session.state.lastAnnouncedLocalDate).toBe("2031-01-02");
+
+		const prompt = first.rebuildSystemPrompt({ userText: "@anything hello", contextFiles: [] });
+		expect(typeof prompt).toBe("string");
+		expect(prompt).toContain("/tmp/test");
+		expect(session.activeAutoRules).toEqual([]);
 	});
 });
 

@@ -1942,6 +1942,30 @@ describe("session persistence", () => {
 		expect(getFullHistoryWithReasoning(s.id).reasoning[1]).toBe("untouched");
 	});
 
+	it("adds reasoning and the turn footer to a reply an earlier save already wrote", () => {
+		// The bridge's order: progress snapshots write the reply first, and the
+		// end-of-turn save attaches its reasoning and footer afterwards.
+		const s = createSession("gpt-4o", projectA);
+		s.messages = [
+			{ role: "user", content: "explain" },
+			{ role: "assistant", content: "because X" },
+		];
+		saveSession(s);
+		attachReasoning(s.messages[1]!, "thinking about X...");
+		attachTurnMeta(s.messages[1]!, {
+			provider: "p",
+			model: "m",
+			totalMs: 5,
+			completedAt: "2026-01-01T00:00:00.000Z",
+		});
+		saveSession(s);
+
+		const { reasoning, turnMeta } = getFullHistoryWithReasoning(s.id);
+		expect(reasoning[1]).toBe("thinking about X...");
+		expect(turnMeta[1]?.model).toBe("m");
+		expect(reasoning[0]).toBeUndefined();
+	});
+
 	it("carries reasoning into a fork", () => {
 		const s = createSession("gpt-4o", projectA);
 		s.messages = [

@@ -286,6 +286,43 @@ describe("AgentActorRegistry", () => {
 		expect(Date.parse(during!.lease_until)).toBeGreaterThan(Date.parse(leaseAtStart));
 	});
 
+	it("heartbeats through a full save when the store has no lease-only write, and survives a failing one", async () => {
+		const saves: string[] = [];
+		const legacyStore = {
+			load: () => [],
+			save: (snapshot: { status: string }) => {
+				saves.push(snapshot.status);
+				return true;
+			},
+			claimRecovery: () => true,
+			prune: () => {},
+		};
+		const legacy = new AgentActorRegistry({ store: legacyStore, watchdogIntervalMs: 0, heartbeatIntervalMs: 5 });
+		await legacy.spawn({ ...spec, lifecycle: "persistent" }).run(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 30));
+			return "done";
+		});
+		// More running saves than spawn + start alone: the heartbeat fell back to save().
+		expect(saves.filter((status) => status === "running").length).toBeGreaterThan(1);
+
+		const failing = new AgentActorRegistry({
+			store: {
+				...legacyStore,
+				renewLease: () => {
+					throw new Error("disk full");
+				},
+			},
+			watchdogIntervalMs: 0,
+			heartbeatIntervalMs: 5,
+		});
+		await expect(
+			failing.spawn({ ...spec, lifecycle: "persistent" }).run(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 30));
+				return "done";
+			}),
+		).resolves.toBeDefined();
+	});
+
 	it("the watchdog pass does not re-read finished actor rows", async () => {
 		// scanStalled re-read the whole table every few seconds just to find
 		// actors a crashed process left behind — 697ms per pass on a real

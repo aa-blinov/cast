@@ -56,6 +56,11 @@ check` would have caught. Lesson: always run *all three* before
 
 Other:
 - `npm run format` — `biome format --write` (tabs, width 3, 120-col)
+- `npm run coverage && npm run coverage:check` — the per-file coverage floor CI
+  enforces. `coverage:check` only reads the last report, so on its own it
+  passes against a stale one; run `coverage` first. A green `npm test` with a
+  red CI "Coverage + per-file floor" step means a file dropped below its
+  baseline: add tests rather than lowering the baseline.
 - `npx vitest run test/<file>.test.ts` — run one test file
 
 ## Testing
