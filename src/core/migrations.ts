@@ -802,6 +802,33 @@ DROP TABLE IF EXISTS messages_fts;
 `);
 		},
 	},
+	{
+		version: 36,
+		name: "drop-terminal-actor-fork-json",
+		up: (db) => {
+			// A finished actor can never be resumed, yet every one kept its fork
+			// transcript: 56MB across 379 rows on a real store, 49MB of it in 24
+			// successful runs. Writes now drop it at the terminal status.
+			if (!tableExists(db, "agent_actors")) return;
+			db.exec(
+				"UPDATE agent_actors SET fork_json = NULL WHERE fork_json IS NOT NULL AND status NOT IN ('pending', 'running', 'stalled')",
+			);
+		},
+	},
+	{
+		version: 37,
+		name: "drop-misplaced-reasoning",
+		up: (db) => {
+			// Reasoning and the turn footer were saved by array index, and a
+			// shifted array wrote them onto whatever row now sat there: 893
+			// user/tool/system rows on a real store carried a neighbour's
+			// reasoning. Only assistant rows can own either.
+			if (!columnExists(db, "messages", "reasoning") || !columnExists(db, "messages", "turn_meta")) return;
+			db.exec(
+				"UPDATE messages SET reasoning = NULL, turn_meta = NULL WHERE role != 'assistant' AND (reasoning IS NOT NULL OR turn_meta IS NOT NULL)",
+			);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

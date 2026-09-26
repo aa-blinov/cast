@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
+import { getDb } from "../src/core/db.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
 import { getModelsCache, setModelsCache } from "../src/core/readline.ts";
@@ -1015,6 +1016,33 @@ describe("web bridge", () => {
 
 		const runConfig = runAgentLoop.mock.calls[0]![1] as { config: AppConfig };
 		expect(runConfig.config.apiKey).toBe("second-key");
+	});
+
+	it("records the compaction summarizer as its own kind, keeps the context size, and ties both to one turn", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		// No clientMessageId, like `cast run` or the API: the turn still gets an id.
+		await bridge.submit(ws.id, "hello");
+		const { onEvent } = runAgentLoop.mock.calls[0]![1] as { onEvent: (event: unknown) => void };
+
+		onEvent({ type: "usage", usage: { promptTokens: 1_000, completionTokens: 5, totalTokens: 1_005 } });
+		onEvent({
+			type: "usage",
+			usage: { promptTokens: 60_000, completionTokens: 900, totalTokens: 60_900 },
+			compaction: true,
+		});
+
+		const rows = getDb()
+			.prepare("SELECT kind, prompt_tokens, turn_id FROM llm_requests WHERE session_id = ? ORDER BY id")
+			.all(ws.id) as Array<{ kind: string; prompt_tokens: number; turn_id: string | null }>;
+		expect(rows.map((r) => [r.kind, r.prompt_tokens])).toEqual([
+			["main", 1_000],
+			["compaction", 60_000],
+		]);
+		expect(rows[0]!.turn_id).toBeTruthy();
+		expect(rows[1]!.turn_id).toBe(rows[0]!.turn_id);
+		expect(ws.session.lastPromptTokens).toBe(1_000);
+		expect(ws.session.usage.totalTokens).toBe(61_905);
 	});
 
 	it("compacts against the session model's context window, not the one the daemon started with", async () => {

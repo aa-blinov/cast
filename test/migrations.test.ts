@@ -203,4 +203,48 @@ describe("schema migrations", () => {
 		expect(warnings).toEqual([]);
 		db.close();
 	});
+
+	const runOne = (db: DatabaseSync, name: string) => MIGRATIONS.find((m) => m.name === name)!.up(db);
+
+	it("drops the fork transcript of actors no restart can resume, keeping resumable ones", () => {
+		const db = openDb("actors.db");
+		runMigrations(db);
+		const insert = db.prepare(
+			"INSERT INTO agent_actors (id, agent, mode, background, lifecycle, status, created_at, updated_at, fork_json) VALUES (?, 'a', 'fork', 1, 'persistent', ?, 't', 't', '{}')",
+		);
+		for (const status of ["success", "failure", "cancelled", "stalled", "running", "pending"])
+			insert.run(status, status);
+
+		runOne(db, "drop-terminal-actor-fork-json");
+
+		const kept = (
+			db.prepare("SELECT id FROM agent_actors WHERE fork_json IS NOT NULL ORDER BY id").all() as Array<{
+				id: string;
+			}>
+		).map((r) => r.id);
+		expect(kept).toEqual(["pending", "running", "stalled"]);
+		db.close();
+	});
+
+	it("clears reasoning and turn footers saved onto rows other than assistant replies", () => {
+		const db = openDb("reasoning.db");
+		runMigrations(db);
+		db.prepare("INSERT INTO sessions (id, created_at, updated_at, usage_json) VALUES ('s1', 't', 't', '{}')").run();
+		const insert = db.prepare(
+			"INSERT INTO messages (session_id, seq, role, content_json, reasoning, turn_meta) VALUES ('s1', ?, ?, '{}', 'R', '{}')",
+		);
+		["user", "assistant", "tool", "system"].forEach((role, seq) => {
+			insert.run(seq, role);
+		});
+
+		runOne(db, "drop-misplaced-reasoning");
+
+		const rows = db.prepare("SELECT role, reasoning, turn_meta FROM messages ORDER BY seq").all() as Array<{
+			role: string;
+			reasoning: string | null;
+			turn_meta: string | null;
+		}>;
+		expect(rows.filter((r) => r.reasoning || r.turn_meta).map((r) => r.role)).toEqual(["assistant"]);
+		db.close();
+	});
 });

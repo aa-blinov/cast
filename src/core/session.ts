@@ -135,6 +135,9 @@ export interface SessionState {
 	 * its prior behavior on resume.
 	 */
 	reasoning?: Record<number, string>;
+	// Both maps are a read-only snapshot taken at load, keyed by that moment's
+	// indices. Writes go through attachReasoning/attachTurnMeta, which follow
+	// the message itself.
 	/**
 	 * Per-turn "provider – model – Ns" summary, keyed by the index of the
 	 * assistant message that concluded that turn — same sidecar-map shape and
@@ -181,7 +184,7 @@ const safe = (v: number | undefined) => Math.max(0, v ?? 0);
 export function addUsage(
 	session: SessionState,
 	usage: Usage,
-	opts?: { subagent?: boolean; background?: boolean },
+	opts?: { subagent?: boolean; background?: boolean; compaction?: boolean },
 ): void {
 	session.usage.promptTokens += safe(usage.promptTokens);
 	session.usage.completionTokens += safe(usage.completionTokens);
@@ -194,7 +197,9 @@ export function addUsage(
 		session.usage.subagentTokens += usage.totalTokens;
 		return;
 	}
-	if (opts?.background) return;
+	// A summarizer's prompt is the history being compacted away: taking it as
+	// the context size left a session looking full right after /compact.
+	if (opts?.background || opts?.compaction) return;
 	// Track the latest promptTokens as the authoritative context size.
 	session.lastPromptTokens = usage.promptTokens;
 }
@@ -707,6 +712,23 @@ export async function compactMessages(
  *  as already-persisted instead of being re-inserted as new rows. */
 const messageSeq = new WeakMap<Message, number>();
 const messageMessageId = new WeakMap<Message, string>();
+/** Reasoning and turn footer per message object, and what its row holds.
+ * Keyed by object, not by index: an index map went stale whenever the array
+ * moved (compaction, the persona prompt put back in front), and every save
+ * rewrote each stale entry into whatever row now sat at that index — 893
+ * user/tool rows in one real database carried a neighbour's reasoning. */
+const messageExtras = new WeakMap<Message, { reasoning?: string; turnMeta?: TurnMeta }>();
+const writtenExtras = new WeakMap<Message, { reasoning: string | null; turnMeta: string | null }>();
+
+/** Records a completion's reasoning for its assistant message; the next save writes it. */
+export function attachReasoning(message: Message, reasoning: string): void {
+	messageExtras.set(message, { ...messageExtras.get(message), reasoning });
+}
+
+/** Records the turn footer for the assistant message that ended a turn. */
+export function attachTurnMeta(message: Message, turnMeta: TurnMeta): void {
+	messageExtras.set(message, { ...messageExtras.get(message), turnMeta });
+}
 
 function nextSeqFor(sessionId: string): number {
 	const db = getDb();
@@ -772,17 +794,24 @@ export function saveSession(session: SessionState): void {
 	// Applied only once the rows are committed: mapping a message to a seq
 	// that got rolled back would make every later save treat it as already
 	// persisted and skip it forever.
-	for (const [message, seq, messageId] of pending) {
+	for (const [message, seq, messageId] of pending.pending) {
 		messageSeq.set(message, seq);
 		if (messageId !== undefined) messageMessageId.set(message, messageId);
 	}
+	for (const [message, written] of pending.pendingExtras) writtenExtras.set(message, written);
 }
 
 /** The row writes behind saveSession, split out so the transaction wrapper
  *  above stays readable. Returns the message→seq/id mappings to record once
  *  the transaction commits, rather than setting them as it goes. */
-function writeSessionRows(db: DatabaseSync, session: SessionState): Array<[Message, number, string | undefined]> {
+type WrittenExtras = { reasoning: string | null; turnMeta: string | null };
+
+function writeSessionRows(
+	db: DatabaseSync,
+	session: SessionState,
+): { pending: Array<[Message, number, string | undefined]>; pendingExtras: Array<[Message, WrittenExtras]> } {
 	const pending: Array<[Message, number, string | undefined]> = [];
+	const pendingExtras: Array<[Message, WrittenExtras]> = [];
 	const meta = sessionMetaRow(session);
 	db.prepare(
 		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, version)
@@ -828,14 +857,24 @@ function writeSessionRows(db: DatabaseSync, session: SessionState): Array<[Messa
 	);
 
 	let seq = nextSeqFor(session.id);
-	(Array.isArray(session.messages) ? session.messages : []).forEach((m, i) => {
-		const reasoning = session.reasoning?.[i] ?? null;
-		const turnMetaEntry = session.turnMeta?.[i];
-		const turnMetaJson = turnMetaEntry ? JSON.stringify(turnMetaEntry) : null;
+	(Array.isArray(session.messages) ? session.messages : []).forEach((m) => {
+		const extras = messageExtras.get(m);
+		const reasoning = extras?.reasoning ?? null;
+		const turnMetaJson = extras?.turnMeta ? JSON.stringify(extras.turnMeta) : null;
 		const existing = messageSeq.get(m);
 		if (existing !== undefined) {
-			if (reasoning) updateReasoning.run(reasoning, session.id, existing);
-			if (turnMetaJson) updateTurnMeta.run(turnMetaJson, session.id, existing);
+			// Only what changed since the row was written: rewriting every
+			// message's reasoning on every save made each save cost the whole
+			// history.
+			const written = writtenExtras.get(m);
+			if (reasoning && reasoning !== written?.reasoning) {
+				updateReasoning.run(reasoning, session.id, existing);
+				pendingExtras.push([m, { reasoning, turnMeta: written?.turnMeta ?? null }]);
+			}
+			if (turnMetaJson && turnMetaJson !== written?.turnMeta) {
+				updateTurnMeta.run(turnMetaJson, session.id, existing);
+				pendingExtras.push([m, { reasoning: reasoning ?? written?.reasoning ?? null, turnMeta: turnMetaJson }]);
+			}
 			return;
 		}
 		if (m.role === "system" && typeof m.content === "string" && !m.content.startsWith(COMPACTION_MARKER_PREFIX)) {
@@ -863,9 +902,10 @@ function writeSessionRows(db: DatabaseSync, session: SessionState): Array<[Messa
 			turnMetaJson,
 		);
 		pending.push([m, seq, messageId]);
+		pendingExtras.push([m, { reasoning, turnMeta: turnMetaJson }]);
 		seq++;
 	});
-	return pending;
+	return { pending, pendingExtras };
 }
 
 /** Return the message id covered by the last successful checkpoint. */
@@ -1097,6 +1137,10 @@ export function recordCompaction(
 	fullHistoryBeforeCompaction: Message[],
 	compacted: Message[],
 ): void {
+	// The last measured prompt was the history before compaction. Kept, it
+	// made the next turn compact again at once; an estimate holds until the
+	// next request measures the real size.
+	session.lastPromptTokens = estimateTokens(compacted);
 	const db = getDb();
 	if (db.isTransaction) {
 		recordCompactionInTransaction(session, fullHistoryBeforeCompaction, compacted);
@@ -1494,6 +1538,13 @@ function loadSessionByRow(row: SessionRow | undefined): SessionState | null {
 		messages.push(m);
 		if (r.reasoning) reasoning[i] = r.reasoning;
 		if (r.turn_meta) turnMeta[i] = JSON.parse(r.turn_meta) as TurnMeta;
+		if (r.reasoning || r.turn_meta) {
+			messageExtras.set(m, {
+				...(r.reasoning ? { reasoning: r.reasoning } : {}),
+				...(r.turn_meta ? { turnMeta: turnMeta[i] } : {}),
+			});
+			writtenExtras.set(m, { reasoning: r.reasoning, turnMeta: r.turn_meta });
+		}
 	});
 	normalizeStoredMessages(messages);
 
@@ -2487,6 +2538,10 @@ export function listBackgroundSessions(parentSessionId?: string): SessionState[]
 export function forkSession(source: SessionState): SessionState {
 	const fork = createSession(source.model, source.cwd ?? process.cwd());
 	fork.messages = JSON.parse(JSON.stringify(source.messages)) as Message[];
+	source.messages.forEach((message, i) => {
+		const extras = messageExtras.get(message);
+		if (extras) messageExtras.set(fork.messages[i]!, { ...extras });
+	});
 	fork.persona = source.persona;
 	fork.mode = source.mode;
 	fork.providerUrl = source.providerUrl;

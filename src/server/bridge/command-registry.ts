@@ -76,6 +76,7 @@ import { addUsage, clearSessionMessages, dropLastCheckpoint, recordCompaction } 
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import {
 	checkpointFork,
+	loadSettings,
 	memoryDistillAuto,
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
@@ -85,6 +86,7 @@ import {
 import { isUninstallableSkill, renderSkillInvocation, uninstallUserSkill } from "../../core/skills.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../../core/skills-sh.ts";
 import type { SshHost, saveSshConfig } from "../../core/ssh.ts";
+import { recordLlmRequest } from "../../core/telemetry.ts";
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
 import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { createSessionWorktree, listWorktrees, removeSessionWorktree } from "../../core/worktree.ts";
@@ -849,9 +851,23 @@ const commandHandlers: Record<string, CommandHandler> = {
 		ws.status = "running";
 		syncFsWatcher(ws);
 		broadcaster.broadcast(ws, { type: "status", status: "running" });
-		compactSessionMessages(ws.session.messages, config, ws.session.model, undefined, undefined, (usage) =>
-			addUsage(ws.session, usage),
-		)
+		compactSessionMessages(ws.session.messages, config, ws.session.model, undefined, undefined, (usage) => {
+			addUsage(ws.session, usage, { compaction: true });
+			// Billed like any request; without a row the dashboard's spend fell
+			// short of the session's own total by every manual compaction.
+			recordLlmRequest({
+				sessionId: ws.id,
+				provider: ws.session.providerName ?? loadSettings().modelProvider ?? "default",
+				model: ws.session.model,
+				kind: "compaction",
+				promptTokens: usage.promptTokens,
+				completionTokens: usage.completionTokens,
+				cacheReadTokens: usage.cacheReadTokens,
+				cacheWriteTokens: usage.cacheWriteTokens,
+				cost: usage.cost,
+				contextWindow: config.contextWindow,
+			});
+		})
 			.then((result) => {
 				ws.status = "idle";
 				syncFsWatcher(ws);

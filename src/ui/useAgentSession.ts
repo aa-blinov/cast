@@ -1281,11 +1281,16 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								clearRetryOnNextChunk.current = true;
 								break;
 							case "usage": {
-								addUsage(session, event.usage, { subagent: event.subagent, background: event.background });
+								addUsage(session, event.usage, {
+									subagent: event.subagent,
+									background: event.background,
+									compaction: event.compaction,
+								});
 								setUsage({ ...session.usage });
 								// A subagent's usage isn't a user-facing turn — don't let it
-								// overwrite the main agent's last-turn / tok-s readout.
-								if (event.subagent || event.background) break;
+								// overwrite the main agent's last-turn / tok-s readout. Nor the
+								// compaction summarizer's.
+								if (event.subagent || event.background || event.compaction) break;
 								const tokensPerSecond =
 									event.generationMs && event.generationMs > 0 && event.usage.completionTokens > 0
 										? event.usage.completionTokens / (event.generationMs / 1000)

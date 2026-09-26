@@ -1616,7 +1616,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					session.model,
 					undefined,
 					(attempt, reason) => showNotice(`[Retry ${attempt}: ${reason}]`),
-					(usage) => addUsage(session, usage),
+					(usage) => addUsage(session, usage, { compaction: true }),
 					deps.planMode ? PLAN_COMPACTION_PROMPT : undefined,
 					reminderStateFromPlan(planState),
 				);
