@@ -4,6 +4,23 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.43.0
+
+### Added
+
+- **Subagents run in parallel.** Several `task` calls in one reply now work at the same time (up to 4 per session) instead of one after another.
+- **Follow up with a subagent.** Each subagent is kept as a session of its own. The agent can ask it a follow-up or have it fix its work with `task_id`, and it continues with its full history instead of starting over.
+- **Background subagents.** With `background: true` a subagent works on while the conversation goes on; its report arrives as a message when it finishes, and starts a new turn if the session is idle.
+- **Watch subagents work.** In the web UI a task card shows what the subagent is doing right now; **Open** shows its session (view only), **Stop** ends it. In the TUI a running task row shows the current step, and `/agents` lists the session's subagents: see one's steps and report, or stop it.
+- **Custom subagents** load from `~/.cast/subagents/` and a trusted project's `.cast/subagents/`.
+- **The default `senior` persona can delegate** — for wide exploration, independent areas in parallel, and independent review.
+
+### Fixed
+
+- **The `explore` subagent really is read-only.** It had full `bash` and was only asked not to change anything; now it can't write or edit, and `bash` is inspection-only.
+- **A persona switched in the TUI takes effect when a daemon is attached.** The daemon kept running the thread under its old persona and saved that back over the switch.
+- **"Write exactly X" writes exactly X.** Some models added a trailing newline the user never asked for.
+
 ## 0.42.0
 
 ### Added
