@@ -5,9 +5,9 @@
 
 import htm from "htm";
 import { h, render } from "preact";
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
-import { mergeHistoryPage } from "./history-merge.js";
+import { HISTORY_PAGE_TURNS, latestPageUrl, mergeHistoryPage } from "./history-merge.js";
 import { escapeHtml, renderMarkdown } from "./markdown.js";
 import { CastLogo } from "./cast-logo.js";
 import { isNearTop, scrollTopAfterPrepend, shouldFollow } from "./chat-scroll.js";
@@ -429,29 +429,28 @@ function viewFromPath() {
 
 // ── App (root) ───────────────────────────────────────────────────────
 
-// Stable render key per message object, independent of its position in the
-// array. Needed because loadOlderMessages() prepends to the front of
+// Stable render key per message, independent of its position in the array.
+// Needed because loadOlderMessages() prepends to the front of
 // session.messages — an index-based key would make every already-mounted
 // message look "changed" (its index shifted) and force Preact to remount
-// each one instead of just inserting the new items above them. Message
-// objects are only ever created once and then carried by reference through
-// spreads (`[...prev.messages, x]`), never cloned, so a WeakMap keyed by
-// that reference is a correct, zero-touch-site way to give every message a
-// permanent identity — no need to stamp an id at each of the many places a
-// message enters the array (initial fetch, scroll-up page, live SSE events,
-// steering/queue injections, ...).
-const messageKeys = new WeakMap();
+// each one instead of just inserting the new items above them.
+//
+// Stored on the message rather than in a WeakMap by object: a message is
+// sometimes replaced by an updated copy (`{ ...msg, turnMeta }` when the turn
+// footer arrives, `pending: false` when a send is acknowledged), and a key
+// tied to the old object remounted the row — for a long answer that rebuilt
+// its whole DOM in one task right as the stream ended. The copy inherits the
+// field, so the row is patched in place.
 let nextMessageKey = 0;
 function keyForMessage(msg) {
 	if (typeof msg !== "object" || msg === null) return String(msg);
+	if (msg._key !== undefined) return msg._key;
 	if (typeof msg.seq === "number") return `seq:${msg.seq}`;
-	let k = messageKeys.get(msg);
-	if (k === undefined) {
-		k = ++nextMessageKey;
-		messageKeys.set(msg, k);
-	}
-	return k;
+	msg._key = `k${++nextMessageKey}`;
+	return msg._key;
 }
+
+const FIRST_PAINT_MESSAGES = 8;
 
 function HistoryBoundary({ status, atEnd, onRetry }) {
 	if (status === "loading") {
@@ -1435,7 +1434,7 @@ function App() {
 			// advanced while we were disconnected (e.g. mobile tab was
 			// backgrounded). This catches messages missed between the last
 			// SSE event we received and the reconnect.
-			api("GET", `/api/sessions/${streamSessionId}`)
+			api("GET", latestPageUrl(streamSessionId))
 				.then((data) => {
 					if (!data || !isCurrent()) return;
 					const isRunning = data.status === "running";
@@ -1583,13 +1582,18 @@ function App() {
 	// with a concurrent selectSession by checking prev.id === activeId in the
 	// setSession updater, since the fetch is async and the user could switch
 	// threads while it's in flight.
+	// Set below, once the first-paint pass is known: with only the newest rows
+	// mounted the thread looks short and scrolled to the top, and both the
+	// scroll handler and the fill check read that as "load older now".
+	const firstPaintOnlyRef = useRef(false);
 	const loadOlderMessages = useCallback(async () => {
+		if (firstPaintOnlyRef.current) return;
 		if (loadingOlderRef.current || !session?.hasMoreHistory || session.oldestSeq == null) return;
 		const forId = activeId;
 		loadingOlderRef.current = true;
 		setOlderHistoryStatus({ sessionId: forId, status: "loading" });
 		try {
-			const res = await api("GET", `/api/sessions/${forId}/history?before=${session.oldestSeq}`);
+			const res = await api("GET", `/api/sessions/${forId}/history?before=${session.oldestSeq}&turns=${HISTORY_PAGE_TURNS}`);
 			const cached = readOlderPages(olderPagesCacheRef, forId);
 			if (cached) {
 				cached.messages = [...res.messages, ...cached.messages];
@@ -1620,7 +1624,10 @@ function App() {
 	// behavior would make the view jump downward by the height of what just
 	// got inserted, reading as the thread suddenly scrolling on its own.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: session?.messages isn't read in the body — it's the trigger, so this re-runs exactly when loadOlderMessages just prepended content (the only place pendingScrollRestoreRef gets set).
-	useEffect(() => {
+	// Layout effect: restored before the frame paints, in the same layout pass
+	// as the insertion. After paint, it cost a second full layout of the new
+	// rows and showed the thread jumping for a frame.
+	useLayoutEffect(() => {
 		const delta = pendingScrollRestoreRef.current;
 		if (delta == null || !messagesRef.current) return;
 		const el = messagesRef.current;
@@ -1660,6 +1667,7 @@ function App() {
 		});
 	}, [loadOlderMessages, setAtBottom]);
 	useEffect(() => () => { if (scrollRafRef.current != null) cancelAnimationFrame(scrollRafRef.current); }, []);
+
 
 	// Toggle diff — reset the selected file so switching sessions (or
 	// reopening) doesn't leave a stale selection that no longer matches any
@@ -1833,6 +1841,37 @@ function App() {
 		}
 		return processed;
 	}, [session?.messages]);
+
+	// Opening a session mounts its newest messages first and the rest a frame
+	// later: the whole first page in one render was the longest task left in
+	// opening a big thread on a slow CPU (~260ms at 4x throttling). Keys are
+	// stable, so the second pass only adds the older rows above.
+	const [fullyMountedId, setFullyMountedId] = useState(null);
+	const firstPaintOnly = !!session?.id && fullyMountedId !== session.id && messages.length > FIRST_PAINT_MESSAGES;
+	const shownMessages = firstPaintOnly ? messages.slice(-FIRST_PAINT_MESSAGES) : messages;
+	firstPaintOnlyRef.current = firstPaintOnly;
+	useEffect(() => {
+		if (!session?.id || fullyMountedId === session.id) return;
+		const id = session.id;
+		let timer;
+		const frame = requestAnimationFrame(() => {
+			timer = setTimeout(() => setFullyMountedId(id), 0);
+		});
+		return () => {
+			cancelAnimationFrame(frame);
+			clearTimeout(timer);
+		};
+	}, [session?.id, fullyMountedId]);
+
+	// A first page that doesn't reach the load-older threshold even when
+	// scrolled to the bottom can never be scrolled to it: fetch older turns
+	// until the thread fills the view or runs out.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: session?.messages is the trigger, re-checking after each page lands.
+	useEffect(() => {
+		const el = messagesRef.current;
+		if (!el || !session?.hasMoreHistory || firstPaintOnly) return;
+		if (isNearTop(el.scrollHeight - el.clientHeight)) loadOlderMessages();
+	}, [session?.messages, session?.hasMoreHistory, loadOlderMessages, firstPaintOnly]);
 	// Each thread can run under a different persona — shown right above the
 	// composer (not the header, which is shared chrome) so it's always clear
 	// which role a message is about to go to, especially when switching
@@ -2145,6 +2184,7 @@ function App() {
 							${
 								activeId &&
 								messages.length > 0 &&
+								!firstPaintOnly &&
 								h(HistoryBoundary, {
 									status: olderHistoryStatusForSession,
 									atEnd:
@@ -2153,7 +2193,7 @@ function App() {
 									onRetry: loadOlderMessages,
 								})
 							}
-							${messages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} />`)}
+							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} />`)}
 							${
 								!running &&
 								(messages[messages.length - 1]?.notice === "error" ||

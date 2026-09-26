@@ -1,3 +1,11 @@
+/** Turns per history page, the one a session opens with and each older one
+ * loaded on the way up. Rendering 30 long turns at once was the longest task
+ * in opening a big session, and the same again every time scrolling reached
+ * the top. Every fetch of the latest page uses this size, so merges line up. */
+export const HISTORY_PAGE_TURNS = 15;
+
+export const latestPageUrl = (sessionId) => `/api/sessions/${sessionId}?turns=${HISTORY_PAGE_TURNS}`;
+
 const isTurnMessage = (message) => message.role === "user" || message.role === "assistant";
 
 /**

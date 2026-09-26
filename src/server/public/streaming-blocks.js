@@ -2,7 +2,8 @@ import htm from "htm";
 import { h } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { collapseMidWordBoundaries } from "./reasoning-split.js";
-import { flushInterval, reduceStreamEvent } from "./stream-blocks.js";
+import { codeBlockHtml, rememberMarkdown } from "./markdown.js";
+import { flushInterval, reduceStreamEvent, splitOpenFence, stableMarkdownBoundary } from "./stream-blocks.js";
 import { ToolCard } from "./tool-card.js";
 
 const html = htm.bind(h);
@@ -23,13 +24,39 @@ function StreamingText({ text, className }) {
 
 function StreamingMarkdown({ text, renderMarkdown }) {
 	const elRef = useRef(null);
+	// The source already rendered for good, the HTML it made and how many
+	// child nodes that is. Only the text after it is rendered again per frame.
+	const settledRef = useRef({ text: "", html: "", nodes: 0 });
+	const rememberedRef = useRef(undefined);
 	const paint = (el) => {
-		const fenceCount = (text.match(/```/g) || []).length;
-		const patched = fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text;
+		if (!text.startsWith(settledRef.current.text)) {
+			el.textContent = "";
+			settledRef.current = { text: "", html: "", nodes: 0 };
+		}
+		while (el.childNodes.length > settledRef.current.nodes) el.lastChild.remove();
 		// `false`: every frame's text is a new string, so caching these
 		// intermediate versions only evicts the finished messages the cache
 		// exists for (see markdown.js).
-		el.innerHTML = renderMarkdown(patched, false);
+		const boundary = stableMarkdownBoundary(text);
+		if (boundary > settledRef.current.text.length) {
+			const chunkHtml = renderMarkdown(text.slice(settledRef.current.text.length, boundary), false);
+			el.insertAdjacentHTML("beforeend", chunkHtml);
+			settledRef.current = {
+				text: text.slice(0, boundary),
+				html: settledRef.current.html + chunkHtml,
+				nodes: el.childNodes.length,
+			};
+		}
+		const tail = text.slice(settledRef.current.text.length);
+		const open = splitOpenFence(tail);
+		const tailHtml = open
+			? renderMarkdown(open.before, false) + codeBlockHtml(open.code, open.lang)
+			: renderMarkdown(tail, false);
+		el.insertAdjacentHTML("beforeend", tailHtml);
+		// Hand the finished message what is already built, so the frame the
+		// stream settles in doesn't parse the whole answer again.
+		rememberMarkdown(text, settledRef.current.html + tailHtml, rememberedRef.current);
+		rememberedRef.current = text;
 	};
 	const setRef = (el) => {
 		if (el && !elRef.current) elRef.current = el;
