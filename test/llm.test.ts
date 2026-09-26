@@ -12,6 +12,7 @@ import {
 	promptCacheRequestBody,
 	resolvePromptCacheStrategy,
 	retryDelayMs,
+	StreamStalledError,
 	streamAndCollect,
 	streamChat,
 	stripHermesToolCalls,
@@ -1037,5 +1038,59 @@ describe("describeTurnError", () => {
 
 	it("falls back to 'Unknown error' for an empty message", () => {
 		expect(describeTurnError(new Error(""))).toBe("Unknown error");
+	});
+});
+
+describe("streamChat — a provider that goes silent", () => {
+	// Chunks, then silence with the connection held open; the only way out is
+	// the abort signal. Like the real SDK, the iterator then just ends — it
+	// swallows the AbortError rather than throwing it.
+	function stallingClient(attempts: Array<Array<Record<string, unknown>>>): OpenAI {
+		let call = 0;
+		return {
+			chat: {
+				completions: {
+					create: async (_params: unknown, opts: { signal?: AbortSignal }) => {
+						const chunks = attempts[Math.min(call++, attempts.length - 1)]!;
+						return {
+							async *[Symbol.asyncIterator]() {
+								for (const c of chunks) yield c;
+								if (chunks.some((c) => (c.choices as Array<{ finish_reason?: string }>)?.[0]?.finish_reason))
+									return;
+								await new Promise<void>((resolve) =>
+									opts.signal?.addEventListener("abort", () => resolve(), { once: true }),
+								);
+							},
+						};
+					},
+				},
+			},
+		} as unknown as OpenAI;
+	}
+	beforeEach(() => {
+		process.env.CAST_STREAM_IDLE_TIMEOUT_MS = "50";
+	});
+	afterEach(() => {
+		delete process.env.CAST_STREAM_IDLE_TIMEOUT_MS;
+	});
+
+	it("retries an attempt that went silent before sending anything", async () => {
+		const client = stallingClient([[], [{ choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] }]]);
+		const seen: string[] = [];
+		for await (const chunk of streamChat(client, "m", [], [], 100)) {
+			if (chunk.retrying) seen.push(`retry:${chunk.retrying.reason}`);
+			if (chunk.content) seen.push(chunk.content);
+		}
+		expect(seen).toEqual(["retry:Provider sent nothing for 0s", "hello"]);
+	});
+
+	it("ends a turn whose stream went silent partway instead of hanging it", async () => {
+		const client = stallingClient([[{ choices: [{ delta: { content: "partial" } }] }]]);
+		const run = async () => {
+			for await (const _ of streamChat(client, "m", [], [], 100)) {
+				// drain
+			}
+		};
+		await expect(run()).rejects.toBeInstanceOf(StreamStalledError);
 	});
 });

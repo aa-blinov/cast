@@ -953,7 +953,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			const lease = runner.startRun(ac);
 			const automaticMemoryMaintenance = session.messages.length === 0;
 			const automaticMemoryMessages = session.messages.slice();
-			let chk: ReturnType<typeof createCheckpoint>;
+			let chk: Awaited<ReturnType<typeof createCheckpoint>>;
 			let activeSystemPrompt = systemPrompt;
 			let activePersonas = personas;
 			let activePersonaName = currentPersona;
@@ -1017,7 +1017,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// (session_checkpoints has an FK to sessions) — the first turn of a
 			// fresh session has no row yet otherwise.
 			saveSession(session);
-			chk = createCheckpoint(cwd);
+			chk = await createCheckpoint(cwd);
 			if (!session.checkpoints) session.checkpoints = [];
 			session.checkpoints.push(chk);
 			// Persist alongside the in-memory array (session.checkpoints isn't in

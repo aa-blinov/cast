@@ -2706,7 +2706,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/steer hello");
 		expect(res).toEqual({ ok: true, result: "Sent" });
-		expect(runAgentLoop).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
 	});
 
 	it("/steer while running enqueues into the steering queue instead of starting a new turn", async () => {
@@ -2792,9 +2792,9 @@ describe("web bridge", () => {
 					finishTurn = () => resolve(messages);
 				}),
 		);
-		bridge.submit(ws.id, "first message");
+		await bridge.submit(ws.id, "first message");
 		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
-		bridge.submit(ws.id, "run this as a goal", undefined, undefined, undefined, { maxOuterIterations: 40 });
+		await bridge.submit(ws.id, "run this as a goal", undefined, undefined, undefined, { maxOuterIterations: 40 });
 
 		expect(notices.join("\n")).toContain("iteration budget (40)");
 		finishTurn();
@@ -2821,9 +2821,9 @@ describe("web bridge", () => {
 					finishTurn = () => resolve(messages);
 				}),
 		);
-		bridge.submit(ws.id, "first message");
+		await bridge.submit(ws.id, "first message");
 		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
-		bridge.submit(ws.id, "steer that races the end of the turn");
+		await bridge.submit(ws.id, "steer that races the end of the turn");
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 		finishTurn();
 
@@ -2834,7 +2834,7 @@ describe("web bridge", () => {
 		expect(runAgentLoop.mock.calls.length).toBeGreaterThan(1);
 	});
 
-	it("submit() while a turn is already running steers instead of racing a second runAgentLoop", () => {
+	it("submit() while a turn is already running steers instead of racing a second runAgentLoop", async () => {
 		// Two browser tabs on the same session both hitting "send" hit this
 		// same code path — without the guard, both would call runAgentLoop
 		// concurrently against the same ws.session, scrambling/interleaving
@@ -2842,12 +2842,23 @@ describe("web bridge", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
-		bridge.submit(ws.id, "first message");
+		// A turn that stays running until the test ends it, so the next send
+		// meets it mid-flight.
+		let endTurn!: () => void;
+		runAgentLoop.mockImplementationOnce(
+			(messages: unknown) =>
+				new Promise((resolve) => {
+					endTurn = () => resolve(messages);
+				}),
+		);
+		await bridge.submit(ws.id, "first message");
 		expect(runAgentLoop).toHaveBeenCalledTimes(1);
 
-		bridge.submit(ws.id, "second message, from another tab");
+		await bridge.submit(ws.id, "second message, from another tab");
 		expect(runAgentLoop).toHaveBeenCalledTimes(1); // still just the one run
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+		endTurn();
+		await new Promise<void>((resolve) => setImmediate(resolve));
 	});
 
 	it("dedupes a thin-client retry re-send with the same clientMessageId while the first submit is in flight", async () => {
@@ -2857,8 +2868,8 @@ describe("web bridge", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
-		bridge.submit(ws.id, "first message", undefined, "client-id-1");
-		bridge.submit(ws.id, "first message (retried)", undefined, "client-id-1");
+		await bridge.submit(ws.id, "first message", undefined, "client-id-1");
+		await bridge.submit(ws.id, "first message (retried)", undefined, "client-id-1");
 
 		expect(runAgentLoop).toHaveBeenCalledTimes(1);
 		expect(ws.runner.steeringQueue.hasItems()).toBe(false);
@@ -2870,7 +2881,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-		bridge.submit(ws.id, "first turn");
+		await bridge.submit(ws.id, "first turn");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		mkdirSync(join(cwd, ".cast", "personas"), { recursive: true });
 		writeFileSync(
@@ -2879,7 +2890,7 @@ describe("web bridge", () => {
 			"utf-8",
 		);
 
-		bridge.submit(ws.id, "second turn");
+		await bridge.submit(ws.id, "second turn");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		const secondRun = runAgentLoop.mock.calls[1]?.[1] as {
 			systemPrompt: string;
@@ -2896,17 +2907,28 @@ describe("web bridge", () => {
 		});
 	});
 
-	it("publishes a backend-owned request start time with running status", () => {
+	it("publishes a backend-owned request start time with running status", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const events: Array<{ type: string; status?: string; startedAt?: number }> = [];
 		bridge.subscribe(ws.id, (event) => events.push(event));
 
-		bridge.submit(ws.id, "measure this request");
+		// A turn that stays running until the test ends it, so the next send
+		// meets it mid-flight.
+		let endTurn!: () => void;
+		runAgentLoop.mockImplementationOnce(
+			(messages: unknown) =>
+				new Promise((resolve) => {
+					endTurn = () => resolve(messages);
+				}),
+		);
+		await bridge.submit(ws.id, "measure this request");
 
 		const status = events.find((event) => event.type === "status" && event.status === "running");
 		expect(status?.startedAt).toEqual(expect.any(Number));
 		expect(ws.turnStartedAt).toBe(status?.startedAt);
+		endTurn();
+		await new Promise<void>((resolve) => setImmediate(resolve));
 	});
 
 	it("records web answers to multiple questions and resumes the conversation", async () => {
@@ -3105,7 +3127,7 @@ describe("web bridge", () => {
 			const ws = bridge.createSession(undefined, undefined, projectDir);
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
 				rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
@@ -3144,7 +3166,7 @@ describe("web bridge", () => {
 			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-			bridge.submit(ws.id, "clean up");
+			await bridge.submit(ws.id, "clean up");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 
 			const pending = confirmFromLoop()("rm -rf build", "recursive/force delete (rm -rf)");
@@ -3168,7 +3190,7 @@ describe("web bridge", () => {
 			const events: Array<{ type: string; id?: string }> = [];
 			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
-			bridge.submit(ws.id, "push it");
+			await bridge.submit(ws.id, "push it");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 
 			const pending = confirmFromLoop()("git push --force", "force push (rewrites remote history)");
@@ -3185,7 +3207,7 @@ describe("web bridge", () => {
 			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
-			bridge.submit(ws.id, "delete things");
+			await bridge.submit(ws.id, "delete things");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 
 			await expect(confirmFromLoop()("sudo rm -rf /", "elevated privileges (sudo)")).resolves.toBe(false);
@@ -3225,7 +3247,7 @@ describe("web bridge", () => {
 			// The connect resolves on a microtask; the turn after it lands carries
 			// the tools.
 			await new Promise<void>((resolve) => setImmediate(resolve));
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 
 			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
@@ -3250,8 +3272,8 @@ describe("web bridge", () => {
 			const persona = makePersona({ agentsMd: true });
 			const bridge = createServerBridge(makeResult({ persona, personas: [persona] }));
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
-			const promptFor = (sessionId: string, text: string): string => {
-				bridge.submit(sessionId, text);
+			const promptFor = async (sessionId: string, text: string): Promise<string> => {
+				await bridge.submit(sessionId, text);
 				const opts = runAgentLoop.mock.calls.at(-1)![1] as {
 					rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
 				};
@@ -3260,14 +3282,14 @@ describe("web bridge", () => {
 
 			const first = bridge.createSession(undefined, undefined, projectDir);
 			await new Promise<void>((resolve) => setImmediate(resolve));
-			expect(promptFor(first.id, "hello")).toContain("FIRST_AGENTS_TEXT");
+			expect(await promptFor(first.id, "hello")).toContain("FIRST_AGENTS_TEXT");
 
 			expect(bridge.closeSession(first.id)).toBe(true);
 			writeFileSync(agentsPath, "SECOND_AGENTS_TEXT\n", "utf-8");
 
 			const second = bridge.createSession(undefined, undefined, projectDir);
 			await new Promise<void>((resolve) => setImmediate(resolve));
-			const prompt = promptFor(second.id, "hello again");
+			const prompt = await promptFor(second.id, "hello again");
 			expect(prompt).toContain("SECOND_AGENTS_TEXT");
 			expect(prompt).not.toContain("FIRST_AGENTS_TEXT");
 		} finally {
@@ -3339,7 +3361,7 @@ describe("web bridge", () => {
 			const ws = bridge.createSession(undefined, undefined, projectDir);
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			const opts = runAgentLoop.mock.calls.at(-1)![1] as { sshHosts?: Array<{ name: string }> };
 			const names = (opts.sshHosts ?? []).map((h) => h.name);
@@ -3372,7 +3394,7 @@ describe("web bridge", () => {
 			const ws = bridge.createSession(undefined, undefined, projectDir);
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
 				rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
@@ -3416,7 +3438,7 @@ describe("web bridge", () => {
 			const ws = bridge.createSession(undefined, undefined, projectDir);
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
 				skills?: Array<{ name: string }>;
@@ -3441,7 +3463,7 @@ describe("web bridge", () => {
 			const ws = bridge.createSession(undefined, undefined, untrusted);
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			const opts = runAgentLoop.mock.calls.at(-1)![1] as { projectTrusted?: boolean };
 			expect(opts.projectTrusted).toBe(false);
@@ -3467,7 +3489,7 @@ describe("web bridge", () => {
 			const ws = bridge.createSession(undefined, undefined, projectDir);
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
 				rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
@@ -3511,7 +3533,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-		bridge.submit(ws.id, "look at main.py");
+		await bridge.submit(ws.id, "look at main.py");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		const firstCall = runAgentLoop.mock.calls[0]![1] as {
 			rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
@@ -3524,7 +3546,7 @@ describe("web bridge", () => {
 
 		// Sticky: a later turn with no .py file in its own contextFiles still
 		// carries the rule, because it latched onto the session earlier.
-		bridge.submit(ws.id, "now do something unrelated");
+		await bridge.submit(ws.id, "now do something unrelated");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		const secondCall = runAgentLoop.mock.calls[1]![1] as {
 			rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
@@ -3559,7 +3581,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-		bridge.submit(ws.id, "touch something outside apps/web");
+		await bridge.submit(ws.id, "touch something outside apps/web");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		const call = runAgentLoop.mock.calls[0]![1] as {
 			rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
@@ -3583,7 +3605,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-		bridge.submit(ws.id, "touch something outside apps/web");
+		await bridge.submit(ws.id, "touch something outside apps/web");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		const call = runAgentLoop.mock.calls[0]![1] as {
 			rebuildSystemPrompt?: (ctx: { userText: string; contextFiles: string[] }) => string;
@@ -3625,12 +3647,12 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-		bridge.submit(ws.id, "first turn");
+		await bridge.submit(ws.id, "first turn");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		const firstCall = runAgentLoop.mock.calls[0]![1] as { contextFiles?: string[] };
 		firstCall.contextFiles!.push("apps/web/index.tsx");
 
-		bridge.submit(ws.id, "second turn");
+		await bridge.submit(ws.id, "second turn");
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		const secondCall = runAgentLoop.mock.calls[1]![1] as { contextFiles?: string[] };
 
@@ -3794,8 +3816,8 @@ describe("web bridge", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
-		bridge.submit(ws.id, "first message");
-		bridge.submit(ws.id, "second message");
+		void bridge.submit(ws.id, "first message");
+		void bridge.submit(ws.id, "second message");
 
 		expect(ws.status).toBe("running");
 		expect(runAgentLoop).not.toHaveBeenCalled();
@@ -3819,8 +3841,8 @@ describe("web bridge", () => {
 				}),
 		);
 
-		bridge.submit(ws.id, "first message");
-		bridge.submit(ws.id, "second message");
+		void bridge.submit(ws.id, "first message");
+		void bridge.submit(ws.id, "second message");
 
 		// The claim is synchronous, so the second send can only queue.
 		expect(runAgentLoop).not.toHaveBeenCalled();
@@ -3851,7 +3873,7 @@ describe("web bridge", () => {
 			},
 		);
 
-		bridge.submit(ws.id, "hello");
+		await bridge.submit(ws.id, "hello");
 		await vi.waitFor(() => expect(readFileSync(join(cwd, ".cast", "message-display"), "utf8")).toBe("displayed"));
 	});
 
@@ -3971,11 +3993,11 @@ describe("web bridge", () => {
 		expect(runAgentLoop).not.toHaveBeenCalled();
 	});
 
-	it("submit with images builds a [text, image_url...] content array, always including the text part", () => {
+	it("submit with images builds a [text, image_url...] content array, always including the text part", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
-		bridge.submit(ws.id, "is this a Bengal?", ["data:image/jpeg;base64,ONE", "data:image/jpeg;base64,TWO"]);
+		await bridge.submit(ws.id, "is this a Bengal?", ["data:image/jpeg;base64,ONE", "data:image/jpeg;base64,TWO"]);
 
 		const sent = ws.session.messages.at(-1);
 		expect(sent?.role).toBe("user");
@@ -3986,11 +4008,11 @@ describe("web bridge", () => {
 		]);
 	});
 
-	it("submit sends a voice note as input_audio beside the text", () => {
+	it("submit sends a voice note as input_audio beside the text", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
-		bridge.submit(ws.id, "", ["data:audio/wav;base64,UklGRg=="]);
+		await bridge.submit(ws.id, "", ["data:audio/wav;base64,UklGRg=="]);
 
 		expect(ws.session.messages.at(-1)?.content).toEqual([
 			{ type: "text", text: "" },
@@ -4014,22 +4036,31 @@ describe("web bridge", () => {
 		}
 	});
 
-	it("submit with no images stays a plain string (unchanged behavior)", () => {
+	it("submit with no images stays a plain string (unchanged behavior)", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
-		bridge.submit(ws.id, "hello");
+		await bridge.submit(ws.id, "hello");
 
 		expect(ws.session.messages.at(-1)?.content).toBe("hello");
 	});
 
-	it("submit with images while a turn is running steers with the same array content instead of dropping the images", () => {
+	it("submit with images while a turn is running steers with the same array content instead of dropping the images", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
-		bridge.submit(ws.id, "first message");
+		// A turn that stays running until the test ends it, so the next send
+		// meets it mid-flight.
+		let endTurn!: () => void;
+		runAgentLoop.mockImplementationOnce(
+			(messages: unknown) =>
+				new Promise((resolve) => {
+					endTurn = () => resolve(messages);
+				}),
+		);
+		await bridge.submit(ws.id, "first message");
 		expect(runAgentLoop).toHaveBeenCalledTimes(1);
 
-		bridge.submit(ws.id, "and this photo", ["data:image/png;base64,X"]);
+		await bridge.submit(ws.id, "and this photo", ["data:image/png;base64,X"]);
 
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 		const [queued] = ws.runner.steeringQueue.drain();
@@ -4037,6 +4068,8 @@ describe("web bridge", () => {
 			{ type: "text", text: "and this photo" },
 			{ type: "image_url", image_url: { url: "data:image/png;base64,X" } },
 		]);
+		endTurn();
+		await new Promise<void>((resolve) => setImmediate(resolve));
 	});
 
 	it("session_end's messageCount stays a raw per-completion count, not the turn count shown elsewhere", async () => {
@@ -4064,7 +4097,7 @@ describe("web bridge", () => {
 		const events: Array<{ type: string; messageCount?: number }> = [];
 		bridge.subscribe(ws.id, (e) => events.push(e as { type: string; messageCount?: number }));
 
-		bridge.submit(ws.id, "read a file");
+		await bridge.submit(ws.id, "read a file");
 		await new Promise((r) => setTimeout(r, 0));
 
 		const sessionEnd = events.find((e) => e.type === "session_end");
@@ -4085,7 +4118,7 @@ describe("web bridge", () => {
 		const events: Array<{ type: string; model?: string; provider?: string; totalMs?: number }> = [];
 		bridge.subscribe(ws.id, (e) => events.push(e as (typeof events)[number]));
 
-		bridge.submit(ws.id, "hi");
+		await bridge.submit(ws.id, "hi");
 		await new Promise((r) => setTimeout(r, 0));
 
 		const turnMeta = events.find((e) => e.type === "turn_meta");
@@ -4126,7 +4159,7 @@ describe("web bridge", () => {
 
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
-		bridge.submit(ws.id, "first");
+		await bridge.submit(ws.id, "first");
 		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
 
 		bridge.followUp(ws.id, "after the turn");
@@ -4223,7 +4256,7 @@ describe("web bridge", () => {
 	});
 
 	describe("SSE broadcast synchronicity", () => {
-		it("delivers events to two listeners in the same synchronous tick", () => {
+		it("delivers events to two listeners in the same synchronous tick", async () => {
 			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 
@@ -4233,10 +4266,6 @@ describe("web bridge", () => {
 			// different tick values for at least one event.
 			const counter = { value: 0 };
 			let ticking = true;
-			Promise.resolve().then(function tick() {
-				counter.value++;
-				if (ticking) Promise.resolve().then(tick);
-			});
 
 			const ticksAtListener1: number[] = [];
 			const ticksAtListener2: number[] = [];
@@ -4254,11 +4283,17 @@ describe("web bridge", () => {
 
 			// submit() fires runAgentLoop and broadcasts a status event —
 			// grab the onEvent callback it passes in.
-			bridge.submit(ws.id, "trigger");
+			await bridge.submit(ws.id, "trigger");
 			const loopConfig = runAgentLoop.mock.calls[0]?.[1] as {
 				onEvent: (event: unknown) => void;
 			};
 			const onEvent = loopConfig.onEvent;
+			// Started only now: a microtask loop running across submit()'s awaits
+			// starves the macrotasks (the checkpoint's git calls) it waits on.
+			Promise.resolve().then(function tick() {
+				counter.value++;
+				if (ticking) Promise.resolve().then(tick);
+			});
 
 			// Clear the initial "status: running" event that submit() broadcast
 			ticksAtListener1.length = 0;
@@ -4297,7 +4332,7 @@ describe("web bridge", () => {
 			expect(ticksAtListener1).toEqual(ticksAtListener2);
 		});
 
-		it("a disconnected listener does not block delivery to remaining listeners", () => {
+		it("a disconnected listener does not block delivery to remaining listeners", async () => {
 			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
 
@@ -4310,7 +4345,7 @@ describe("web bridge", () => {
 			// Second listener is healthy
 			bridge.subscribe(ws.id, (e) => goodEvents.push(e));
 
-			bridge.submit(ws.id, "trigger");
+			await bridge.submit(ws.id, "trigger");
 			const loopConfig = runAgentLoop.mock.calls[0]?.[1] as {
 				onEvent: (event: unknown) => void;
 			};
@@ -4373,10 +4408,10 @@ describe("web bridge", () => {
 	});
 
 	describe("background bash tasks", () => {
-		it("submit() threads backgroundBash into the LoopConfig passed to runAgentLoop", () => {
+		it("submit() threads backgroundBash into the LoopConfig passed to runAgentLoop", async () => {
 			const bridge = createServerBridge(makeResult());
 			const ws = bridge.createSession();
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			expect(runAgentLoop).toHaveBeenCalledTimes(1);
 			const loopConfig = runAgentLoop.mock.calls[0]?.[1] as { backgroundBash?: unknown };
 			expect(loopConfig.backgroundBash).toBe(ws.backgroundBash);
@@ -4407,7 +4442,7 @@ describe("web bridge", () => {
 			const ws = bridge.createSession();
 
 			runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
-			bridge.submit(ws.id, "hello");
+			await bridge.submit(ws.id, "hello");
 			await new Promise((r) => setTimeout(r, 0));
 			expect(ws.status).toBe("idle");
 

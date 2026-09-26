@@ -226,7 +226,23 @@ export function isContextOverflow(error: unknown): boolean {
  * content already arrived can throw from deep inside undici with no pending
  * read to reject, bypassing this file's own try/catch entirely.
  */
+/** The provider stopped sending mid-request without closing the stream. */
+export class StreamStalledError extends Error {}
+
+/**
+ * Longest silence a streaming response may keep before the attempt is given
+ * up. A provider that sent headers (or a few chunks) and then went quiet with
+ * the connection open held the turn "running" until someone pressed Esc —
+ * nothing else ever ended it. Generous, so a model that thinks without
+ * streaming reasoning isn't cut off. CAST_STREAM_IDLE_TIMEOUT_MS overrides it.
+ */
+function streamIdleTimeoutMs(): number {
+	const fromEnv = Number(process.env.CAST_STREAM_IDLE_TIMEOUT_MS);
+	return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 180_000;
+}
+
 export function isRetryableStreamError(error: unknown): boolean {
+	if (error instanceof StreamStalledError) return true;
 	if (error instanceof APIUserAbortError) return false;
 
 	const code = (error as { code?: string } | undefined)?.code;
@@ -596,9 +612,25 @@ export async function* streamChat(
 
 	// Stream reads are inherently sequential — the next chunk depends on server push.
 	while (true) {
+		// Per attempt: the caller's abort plus a watchdog that fires when the
+		// provider goes silent, reset by every chunk.
+		const attemptAbort = new AbortController();
+		const forwardAbort = () => attemptAbort.abort(signal?.reason);
+		signal?.addEventListener("abort", forwardAbort, { once: true });
+		const idleMs = streamIdleTimeoutMs();
+		let stalled = false;
+		const onIdle = () => {
+			stalled = true;
+			attemptAbort.abort(new StreamStalledError(`Provider sent nothing for ${Math.round(idleMs / 1000)}s`));
+		};
+		let idleTimer = setTimeout(onIdle, idleMs);
+		const stillAlive = () => {
+			clearTimeout(idleTimer);
+			idleTimer = setTimeout(onIdle, idleMs);
+		};
 		try {
 			// biome-ignore lint/performance/noAwaitInLoops: streaming requires sequential read
-			const stream = await client.chat.completions.create(params, { signal });
+			const stream = await client.chat.completions.create(params, { signal: attemptAbort.signal });
 
 			const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
 			const thinkParser = new ThinkBlockParser();
@@ -608,6 +640,7 @@ export async function* streamChat(
 			let previousReasoningDetails = "";
 
 			for await (const chunk of stream) {
+				stillAlive();
 				const result: StreamChunk = {};
 
 				// Usage arrives on its own trailing chunk with empty `choices` for
@@ -750,6 +783,10 @@ export async function* streamChat(
 				yieldedAny = true;
 				yield result;
 			}
+			// The SDK ends its iterator quietly on abort instead of throwing, so a
+			// stalled stream looked like one that finished (or was cut short) and
+			// the turn closed as if the answer were complete.
+			if (stalled) throw new StreamStalledError(`Provider sent nothing for ${Math.round(idleMs / 1000)}s`);
 
 			// Flush whatever the tag-boundary holdback buffer was still sitting
 			// on — the stream ended, so it was never a split tag after all;
@@ -760,7 +797,10 @@ export async function* streamChat(
 				yield { thinking: remaining.thinking, content: remaining.content };
 			}
 			return;
-		} catch (error) {
+		} catch (caught) {
+			const error = stalled
+				? new StreamStalledError(`Provider sent nothing for ${Math.round(idleMs / 1000)}s`)
+				: caught;
 			// Never retry a context overflow at the stream level: some gateways
 			// wrap it in a 5xx, which is otherwise classified retryable, and the
 			// fruitless retries would swallow the real error until the deadline —
@@ -811,6 +851,9 @@ export async function* streamChat(
 			// Abortable: Esc during a backoff must cancel the retry immediately,
 			// not wait out the timer and fail on the next request.
 			await abortableSleep(Math.min(wait, Math.max(0, remaining)), signal);
+		} finally {
+			clearTimeout(idleTimer);
+			signal?.removeEventListener("abort", forwardAbort);
 		}
 	}
 }

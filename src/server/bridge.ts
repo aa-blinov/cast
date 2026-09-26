@@ -1365,7 +1365,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		fsWatcher.syncFsWatcher(ws);
 		broadcaster.broadcast(ws, { type: "status", status: "running", startedAt: ws.turnStartedAt });
 		broadcaster.broadcastSessionUpdate(ws);
-		let chk: ReturnType<typeof createCheckpoint>;
+		let chk: Awaited<ReturnType<typeof createCheckpoint>>;
 		const failSetup = (error: unknown): void => {
 			ws.status = "error";
 			ws.error = error instanceof Error ? error.message : String(error);
@@ -1520,12 +1520,20 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 		// Workspace checkpoint for /undo — after saveSession above so the
 		// session row already exists (session_checkpoints has an FK to it).
-		chk = createCheckpoint(sessionCwd);
-		if (!ws.session.checkpoints) ws.session.checkpoints = [];
-		ws.session.checkpoints.push(chk);
-		// Persist alongside the in-memory array (session.checkpoints isn't in
-		// the session row — see session.ts) so /undo survives a daemon restart.
-		appendCheckpoint(ws.session.id, chk);
+		// Inside the setup guard: it awaits git now, and a throw here (the
+		// session deleted meanwhile) used to leave the run claimed forever —
+		// the session stuck "running", every later send steered into nothing.
+		try {
+			chk = await createCheckpoint(sessionCwd);
+			if (!ws.session.checkpoints) ws.session.checkpoints = [];
+			ws.session.checkpoints.push(chk);
+			// Persist alongside the in-memory array (session.checkpoints isn't in
+			// the session row — see session.ts) so /undo survives a daemon restart.
+			appendCheckpoint(ws.session.id, chk);
+		} catch (error) {
+			failSetup(error);
+			return;
+		}
 
 		// Read fresh each run (not captured once) so a mid-session /web toggle
 		// takes effect on the very next turn — matches core/run.ts's headless
