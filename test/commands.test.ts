@@ -442,6 +442,33 @@ describe("handleInput", () => {
 		}
 	});
 
+	it("/persona <name> --new-session / --here settle the new-session question without asking", async () => {
+		// The TUI runs these after the agent saved a persona with activate new/here.
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async () => {
+				throw new Error("the flag already answered this");
+			},
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const fresh = createFakeDeps({ pickers });
+		fresh.deps.session.messages.push({ role: "user", content: "hi" });
+		const idBefore = fresh.deps.session.id;
+		await handleInput("/persona senior --new-session", undefined, fresh.deps);
+		expect(fresh.deps.session.id).not.toBe(idBefore);
+		expect(fresh.deps.session.messages).toHaveLength(0);
+		expect(fresh.deps.session.persona).toBe("senior");
+
+		const here = createFakeDeps({ pickers });
+		here.deps.session.messages.push({ role: "user", content: "hi" });
+		const hereId = here.deps.session.id;
+		await handleInput("/persona senior --here", undefined, here.deps);
+		expect(here.deps.session.id).toBe(hereId);
+		expect(here.deps.session.messages).toHaveLength(1);
+		expect(here.deps.session.persona).toBe("senior");
+	});
+
 	it("/model cancelled (Escape) leaves the model unchanged and doesn't exit the process", async () => {
 		// Same underlying bug as /persona above, but for selectModel — reached
 		// via /model, and also (unfixed until now) via /provider after a

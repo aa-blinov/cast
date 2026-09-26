@@ -539,6 +539,18 @@ function App() {
 	useEffect(() => {
 		if (activeId) refreshCommands(activeId);
 	}, [activeId, refreshCommands]);
+	// The persona list was fetched once per page load, so one the agent saved
+	// mid-session never reached the pickers or /persona's suggestions.
+	const refreshPersonas = useCallback(async () => {
+		const p = await api("GET", "/api/personas").catch(() => null);
+		if (Array.isArray(p)) setPersonas([...p].sort((a, b) => a.label.localeCompare(b.label)));
+	}, [setPersonas]);
+	// A persona the agent saved with activate "new": its session opens once
+	// the turn that made it is over, so that turn's reply isn't left unseen.
+	const pendingPersonaSessionRef = useRef(null);
+	const queuePersonaSession = useCallback((persona, cwd) => {
+		pendingPersonaSessionRef.current = { persona, cwd };
+	}, []);
 	// Warm the click-gated modules once the page is idle: the first paint no
 	// longer pays for them, and a click still opens them without a fetch.
 	useEffect(() => {
@@ -986,6 +998,12 @@ function App() {
 			setBackendUp,
 			applyTheme,
 		});
+	useEffect(() => {
+		const pending = pendingPersonaSessionRef.current;
+		if (running || !pending) return;
+		pendingPersonaSessionRef.current = null;
+		void commitSession(pending.persona, pending.cwd);
+	}, [running, commitSession]);
 	/**
 	 * Resolves once the daemon is reachable again, kicking the reconnect loop
 	 * instead of waiting for its next scheduled attempt. A phone whose screen
@@ -1502,6 +1520,8 @@ function App() {
 					isCurrent,
 					mergeHistoryPage,
 					refreshCommands: () => refreshCommands(streamSessionId),
+					refreshPersonas,
+					queuePersonaSession,
 				});
 			} catch (error) {
 				console.error("[cast] SSE event handling failed", error);

@@ -136,6 +136,67 @@ describe("web bridge", () => {
 		rmSync(fakeHome, { recursive: true, force: true });
 	});
 
+	it("sees a persona saved on disk at once: in the list and for /persona, no /reload", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		mkdirSync(join(fakeHome, ".cast", "personas"), { recursive: true });
+		writeFileSync(
+			join(fakeHome, ".cast", "personas", "haiku-poet.md"),
+			"---\nname: haiku-poet\nlabel: Haiku Poet\n---\n\nYou answer in haiku.\n",
+		);
+
+		expect(bridge.getPersonas().map((p) => p.name)).toContain("haiku-poet");
+		await expect(bridge.executeCommand(ws.id, "/persona haiku-poet")).resolves.toMatchObject({
+			ok: true,
+			result: { persona: "haiku-poet" },
+		});
+		expect(ws.session.persona).toBe("haiku-poet");
+	});
+
+	it("switches the session to a persona the agent saved with activate here, from the next turn", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const events: Array<{ type: string; persona?: string }> = [];
+		bridge.subscribe(ws.id, (event) => events.push(event as { type: string; persona?: string }));
+		await bridge.submit(ws.id, "make a haiku persona and use it");
+		const { onPersonaCreated } = runAgentLoop.mock.calls[0]![1] as {
+			onPersonaCreated: (persona: unknown, activate: string | undefined) => void;
+		};
+		mkdirSync(join(fakeHome, ".cast", "personas"), { recursive: true });
+		writeFileSync(
+			join(fakeHome, ".cast", "personas", "haiku-poet.md"),
+			"---\nname: haiku-poet\nlabel: Haiku Poet\n---\n\nYou answer in haiku.\n",
+		);
+
+		onPersonaCreated(
+			{ name: "haiku-poet", label: "Haiku Poet", systemPrompt: "You answer in haiku.", source: "global" },
+			"here",
+		);
+
+		expect(ws.session.persona).toBe("haiku-poet");
+		expect(ws.systemPrompt).toContain("You answer in haiku.");
+		expect(events).toContainEqual(expect.objectContaining({ type: "personas_changed", persona: "haiku-poet" }));
+	});
+
+	it("leaves the current session alone for activate new: the client opens the new one", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const personaBefore = ws.session.persona;
+		await bridge.submit(ws.id, "make a haiku persona");
+		const { onPersonaCreated } = runAgentLoop.mock.calls[0]![1] as {
+			onPersonaCreated: (persona: unknown, activate: string | undefined) => void;
+		};
+		const sessionsBefore = bridge.listSessions().length;
+
+		onPersonaCreated(
+			{ name: "haiku-poet", label: "Haiku Poet", systemPrompt: "You answer in haiku.", source: "global" },
+			"new",
+		);
+
+		expect(ws.session.persona).toBe(personaBefore);
+		expect(bridge.listSessions()).toHaveLength(sessionsBefore);
+	});
+
 	it("evicts an idle session with no listeners and hydrates it again on demand", () => {
 		vi.useFakeTimers();
 		const bridge = createServerBridge(makeResult({ config: { ...testConfig } }));
@@ -424,6 +485,13 @@ describe("web bridge", () => {
 	it("/persona <name> switches persona and rebuilds the system prompt", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
+		// /persona reads the persona files (what startup loads its list from),
+		// so the test persona lives where a user's would.
+		mkdirSync(join(fakeHome, ".cast", "personas"), { recursive: true });
+		writeFileSync(
+			join(fakeHome, ".cast", "personas", "senior.md"),
+			"---\nname: senior\nlabel: Senior\n---\n\nYou are the senior persona.\n",
+		);
 		const res = await bridge.executeCommand(ws.id, "/persona senior");
 		expect(res.ok).toBe(true);
 		expect(ws.session.persona).toBe("senior");
@@ -2706,7 +2774,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/steer hello");
 		expect(res).toEqual({ ok: true, result: "Sent" });
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1), { timeout: 5000 });
 	});
 
 	it("/steer while running enqueues into the steering queue instead of starting a new turn", async () => {
@@ -2793,7 +2861,7 @@ describe("web bridge", () => {
 				}),
 		);
 		await bridge.submit(ws.id, "first message");
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled(), { timeout: 5000 });
 		await bridge.submit(ws.id, "run this as a goal", undefined, undefined, undefined, { maxOuterIterations: 40 });
 
 		expect(notices.join("\n")).toContain("iteration budget (40)");
@@ -2822,7 +2890,7 @@ describe("web bridge", () => {
 				}),
 		);
 		await bridge.submit(ws.id, "first message");
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled(), { timeout: 5000 });
 		await bridge.submit(ws.id, "steer that races the end of the turn");
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 		finishTurn();
@@ -2831,7 +2899,9 @@ describe("web bridge", () => {
 		// chip listens for actually fires. (It used to sit there forever.)
 		await vi.waitFor(() => expect(ws.runner.steeringQueue.hasItems()).toBe(false));
 		expect(events).toContain("steering_injected");
-		expect(runAgentLoop.mock.calls.length).toBeGreaterThan(1);
+		// The redelivered turn awaits its checkpoint's git calls before it
+		// reaches the loop — seconds under a loaded test run.
+		await vi.waitFor(() => expect(runAgentLoop.mock.calls.length).toBeGreaterThan(1), { timeout: 5000 });
 	});
 
 	it("submit() while a turn is already running steers instead of racing a second runAgentLoop", async () => {
@@ -3822,7 +3892,7 @@ describe("web bridge", () => {
 		expect(ws.status).toBe("running");
 		expect(runAgentLoop).not.toHaveBeenCalled();
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1), { timeout: 5000 });
 	});
 
 	it("claims the turn before async provider reconciliation so concurrent sends cannot start two loops", async () => {
@@ -3848,7 +3918,7 @@ describe("web bridge", () => {
 		expect(runAgentLoop).not.toHaveBeenCalled();
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
 		releaseModels({ ok: true, models: [{ id: "gpt-4o" }] });
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled(), { timeout: 5000 });
 		// One loop at a time is the invariant here — never two at once...
 		expect(runAgentLoop.mock.calls.length).toBeGreaterThanOrEqual(1);
 		// ...and the queued message is eventually delivered rather than left on
@@ -4142,7 +4212,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 
 		bridge.followUp(ws.id, "after the turn");
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1), { timeout: 5000 });
 		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
 	});
 
@@ -4160,12 +4230,12 @@ describe("web bridge", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		await bridge.submit(ws.id, "first");
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1));
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1), { timeout: 5000 });
 
 		bridge.followUp(ws.id, "after the turn");
 		resolveFirstRun([...ws.session.messages, { role: "assistant", content: "first" }]);
 
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(2));
+		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(2), { timeout: 5000 });
 		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
 	});
 

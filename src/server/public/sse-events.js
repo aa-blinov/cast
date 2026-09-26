@@ -123,6 +123,8 @@ export function handleSseEvent(event, context) {
 		isCurrent,
 		mergeHistoryPage,
 		refreshCommands,
+		refreshPersonas,
+		queuePersonaSession,
 	} = context;
 
 	switch (event.type) {
@@ -368,6 +370,18 @@ export function handleSseEvent(event, context) {
 			setSessions((prev) =>
 				prev.map((session) => (session.id === event.session.id ? { ...session, ...event.session } : session)),
 			);
+			break;
+		case "personas_changed":
+			// The agent saved a persona: offer it in the pickers and /persona now.
+			refreshPersonas?.();
+			refreshCommands?.();
+			// Asked to switch to it here: the next turn runs as it, so say so
+			// already. Asked for a new session: that opens when this turn ends.
+			if (event.activate === "here") setSession((prev) => (prev ? { ...prev, persona: event.persona } : prev));
+			else if (event.activate === "new") setSession((prev) => {
+				queuePersonaSession?.(event.persona, prev?.cwd);
+				return prev;
+			});
 			break;
 		case "skills_changed":
 			// The agent installed a skill mid-turn: put its /skill:name in the

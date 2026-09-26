@@ -98,6 +98,8 @@ import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type Stat
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
+const WHITESPACE_RE = /\s+/;
+
 interface ModelWithReasoningSelection {
 	model: string;
 	reasoningMeta?: ModelReasoningMeta;
@@ -1000,26 +1002,34 @@ async function startNewSession(ctx: CommandContext, personaName?: string): Promi
 // choosing "New session" must leave the OLD thread stamped with the persona
 // that actually drove it (stamping before asking rewrote the old thread's
 // persona and broke restore-on-resume for it).
-async function applyPersonaToThread(ctx: CommandContext, persona: Persona, changed: boolean): Promise<void> {
+async function applyPersonaToThread(
+	ctx: CommandContext,
+	persona: Persona,
+	changed: boolean,
+	/** Skips the question: a persona the agent saved already says which. */
+	decided?: "new" | "keep",
+): Promise<void> {
 	const { deps, session } = ctx;
 	if (!changed || session.messages.length === 0) {
 		session.persona = persona.name;
 		saveSession(session);
 		return;
 	}
-	const choice = await deps.pickers.pickOption(
-		[
-			{
-				value: "new" as const,
-				label: "New session — clean context for the new persona (recommended)",
-			},
-			{
-				value: "keep" as const,
-				label: "Continue here — keep the current conversation context",
-			},
-		],
-		{ title: `Start a new session for ${persona.label}?` },
-	);
+	const choice =
+		decided ??
+		(await deps.pickers.pickOption(
+			[
+				{
+					value: "new" as const,
+					label: "New session — clean context for the new persona (recommended)",
+				},
+				{
+					value: "keep" as const,
+					label: "Continue here — keep the current conversation context",
+				},
+			],
+			{ title: `Start a new session for ${persona.label}?` },
+		));
 	if (choice === "new") {
 		await startNewSession(ctx, persona.name);
 	} else {
@@ -1979,7 +1989,10 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		match: (input) => input.startsWith("/persona "),
 		run: async (ctx) => {
 			const { input, deps, showNotice } = ctx;
-			const name = input.slice("/persona ".length).trim();
+			// --new-session / --here answer the new-session question up front.
+			const words = input.slice("/persona ".length).trim().split(WHITESPACE_RE);
+			const decided = words.includes("--new-session") ? "new" : words.includes("--here") ? "keep" : undefined;
+			const name = words.find((word) => !word.startsWith("--")) ?? "";
 			const found = findPersona(name, deps.personaOptions);
 			if (!found) {
 				showNotice(`[Unknown persona "${name}". Use /persona to list available ones.]`);
@@ -1990,7 +2003,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			updateSettings({ persona: found.name });
 			rebuildSystemPrompt(deps, deps.cwd, { persona: found });
 			showNotice(`[Persona: ${found.label}]`);
-			await applyPersonaToThread(ctx, found, changed);
+			await applyPersonaToThread(ctx, found, changed, decided);
 			return;
 		},
 	},

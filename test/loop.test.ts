@@ -2815,6 +2815,72 @@ describe("runAgentLoop — plan mode", () => {
 		expect(await advertised({})).not.toContain("skill_install");
 	});
 
+	it("offers persona_create only in build mode with a host that takes the result", async () => {
+		const advertised = async (extra: Record<string, unknown>) => {
+			let names: string[] = [];
+			vi.mocked(streamAndCollect).mockImplementationOnce(async (_client, _model, _messages, tools) => {
+				names = tools.map((tool) => tool.function.name);
+				return { content: "done", thinking: "", finishReason: "stop" };
+			});
+			await runAgentLoop([{ role: "user", content: "make a persona" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: "/tmp",
+				systemPrompt: "BASE_PROMPT",
+				onEvent: () => {},
+				...extra,
+			});
+			return names;
+		};
+		expect(await advertised({ onPersonaCreated: () => {} })).toContain("persona_create");
+		expect(
+			await advertised({
+				onPersonaCreated: () => {},
+				planState: { enabled: true, plansDir: "/tmp/never-existing-plans-dir" },
+			}),
+		).not.toContain("persona_create");
+		expect(await advertised({})).not.toContain("persona_create");
+	});
+
+	it("saves a persona mid-turn and tells the host, which can switch to it next turn", async () => {
+		const home = mkdtempSync(join(tmpdir(), "cast-loop-persona-"));
+		const realHome = process.env.HOME;
+		process.env.HOME = home;
+		try {
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "tool_calls",
+					toolCalls: [
+						{
+							id: "p1",
+							name: "persona_create",
+							arguments: JSON.stringify({ name: "haiku-poet", prompt: "You answer in haiku.", activate: "new" }),
+						},
+					],
+				}))
+				.mockImplementationOnce(async () => ({ content: "saved", thinking: "", finishReason: "stop" }));
+			const created: Array<[string, string | undefined]> = [];
+			const events: AgentEvent[] = [];
+			await runAgentLoop([{ role: "user", content: "make me a haiku persona and use it" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: "/tmp",
+				systemPrompt: "BASE_PROMPT",
+				onPersonaCreated: (persona, activate) => created.push([persona.name, activate]),
+				onEvent: (e) => events.push(e),
+			});
+
+			expect(created).toEqual([["haiku-poet", "new"]]);
+			expect(events).toContainEqual({ type: "personas_changed", persona: "haiku-poet", activate: "new" });
+		} finally {
+			if (realHome === undefined) delete process.env.HOME;
+			else process.env.HOME = realHome;
+			rmSync(home, { recursive: true, force: true });
+		}
+	});
+
 	it("does not advertise ssh in plan mode, even for a read-only command", async () => {
 		// The prompt's claim is unconditional: ssh can execute arbitrary remote
 		// commands, and the read-only allowlist reasons about *local* binaries —

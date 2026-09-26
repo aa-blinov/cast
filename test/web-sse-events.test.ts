@@ -242,4 +242,25 @@ describe("web SSE events", () => {
 			{ role: "user", content: "", audios: ["data:audio/wav;base64,UklGRg=="] },
 		]);
 	});
+
+	it("refreshes the persona list when the agent saves one, and shows the switch it asked for", () => {
+		const state = {
+			...createContext(),
+			refreshPersonas: vi.fn(),
+			refreshCommands: vi.fn(),
+			queuePersonaSession: vi.fn(),
+		};
+		handleSseEvent({ type: "personas_changed", persona: "haiku-poet" }, state);
+		expect(state.refreshPersonas).toHaveBeenCalledTimes(1);
+		expect(state.setSession).not.toHaveBeenCalled();
+
+		handleSseEvent({ type: "personas_changed", persona: "haiku-poet", activate: "here" }, state);
+		const here = state.setSession.mock.calls[0]![0] as (prev: unknown) => { persona?: string };
+		expect(here({ id: "session-1", persona: "senior" }).persona).toBe("haiku-poet");
+
+		handleSseEvent({ type: "personas_changed", persona: "haiku-poet", activate: "new" }, state);
+		const fresh = state.setSession.mock.calls[1]![0] as (prev: unknown) => { persona?: string };
+		expect(fresh({ id: "session-1", persona: "senior", cwd: "/work" }).persona).toBe("senior");
+		expect(state.queuePersonaSession).toHaveBeenCalledWith("haiku-poet", "/work");
+	});
 });
