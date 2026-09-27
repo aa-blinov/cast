@@ -869,6 +869,52 @@ describe("voice messages on the chat route", () => {
 	});
 });
 
+describe("goal on the chat route", () => {
+	it("makes the message a durable goal, and leaves an already-active goal alone", async () => {
+		const { readGoal, clearGoal } = await import("../src/core/goal.ts");
+		const realHome = process.env.HOME;
+		process.env.HOME = mkdtempSync(join(tmpdir(), "cast-web-goal-home-"));
+		const id = "goal-session";
+		try {
+			await stopTestServer();
+			const submit = vi.fn(async () => {});
+			server = startServer({
+				port: 0,
+				host: "127.0.0.1",
+				bridge: { getSession: () => ({ id, session: {} }), acceptsAudio: () => false, submit } as never,
+				webUser: "cast",
+				serverPassword: "test-password",
+				version: "test",
+			});
+			await once(server, "listening");
+			origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+			const auth = await fetch(`${origin}/api/auth/login`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ username: "cast", password: "test-password" }),
+			});
+			const headers = { Cookie: auth.headers.get("set-cookie")!, "Content-Type": "application/json" };
+			const chat = (body: object) =>
+				fetch(`${origin}/api/sessions/${id}/chat`, { method: "POST", headers, body: JSON.stringify(body) });
+
+			expect((await chat({ text: "ship the release", goal: 7 })).status).toBe(202);
+			expect(readGoal(id)).toMatchObject({ objective: "ship the release", status: "active" });
+			const first = submit.mock.calls[0] as unknown as [string, string, unknown, unknown, unknown, object];
+			expect(first[1]).toContain("ship the release");
+			expect(first[1]).not.toBe("ship the release");
+			expect(first[5]).toEqual({ maxOuterIterations: 7 });
+
+			expect((await chat({ text: "already wrapped by the client", goal: 3 })).status).toBe(202);
+			expect(readGoal(id)?.objective).toBe("ship the release");
+			expect((submit.mock.calls[1] as unknown as [string, string])[1]).toBe("already wrapped by the client");
+			clearGoal(id);
+		} finally {
+			rmSync(process.env.HOME!, { recursive: true, force: true });
+			process.env.HOME = realHome;
+		}
+	});
+});
+
 describe("voice message playback route", () => {
 	it("lets the page play a voice note from its data: URL before the turn is saved", async () => {
 		const res = await fetch(`${origin}/login`, { redirect: "manual" });

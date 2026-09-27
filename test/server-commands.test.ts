@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isCommandBlocking, SLASH_COMMANDS } from "../src/server/commands.ts";
+import {
+	GOAL_MAX_OUTER_ITERATIONS,
+	goalIterationBudget,
+	isCommandBlocking,
+	SLASH_COMMANDS,
+} from "../src/server/commands.ts";
 
 describe("web slash commands", () => {
 	it("advertises /undo and blocks it while a turn is running", () => {
@@ -53,5 +58,14 @@ describe("web slash commands", () => {
 		]) {
 			expect(isCommandBlocking(command), command).toBe(true);
 		}
+	});
+});
+
+describe("goalIterationBudget", () => {
+	it("maps a submit's goal to the turn's iteration budget, the same in the daemon and the TUI", () => {
+		expect(goalIterationBudget(undefined)).toBeUndefined();
+		expect(goalIterationBudget(false)).toBeUndefined();
+		expect(goalIterationBudget(true)).toBe(GOAL_MAX_OUTER_ITERATIONS);
+		expect(goalIterationBudget(10)).toBe(10);
 	});
 });

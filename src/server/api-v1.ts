@@ -840,7 +840,7 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					clientMessageId: { type: "string", maxLength: 200 },
 					goal: {
 						description:
-							"Run the turn as a goal: `true` for the default iteration budget, or a number (1-200) to set it.",
+							"Make the message a goal, like /goal: the text becomes the session's objective, which persists and drives later turns until the agent closes it. `true` gives the goal's first turn the default iteration budget, a number (1-200) sets it. With a goal already active, the message just runs under it.",
 						oneOf: [{ type: "boolean" }, { type: "integer", minimum: 1, maximum: 200 }],
 					},
 				},
