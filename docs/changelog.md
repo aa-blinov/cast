@@ -4,6 +4,24 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.44.0
+
+### Added
+
+- **A second opinion before a goal closes.** When the agent marks a `/goal` complete, an independent check reads the objective, the agent's evidence and what its tools actually returned. It can send the close back once, naming what's missing.
+- **`goal` on the chat API starts a real goal**, the same as `/goal`: the objective persists and drives later turns until the agent closes it.
+
+### Fixed
+
+- **A goal that runs out of iterations stays open.** Hitting the turn's iteration budget used to spend all of the goal's continuations in an instant and mark it budget-limited, leaving unanswered messages behind. The turn now just ends and your next message carries on.
+- **`/goal N` respects N in the TUI without a daemon.** It ran with the 500-step safety cap instead.
+- **A goal stops pushing when nothing changes.** Two passes in a row that did nothing now pause the drive and wait for you, instead of burning the rest of the budget.
+- **A provider failure pauses the goal**, like Esc does, so the next turn re-checks the files before building on a half-finished step.
+- **`/goal clear` and `/goal edit` take effect right away**, even in the middle of a turn.
+- **Your reply starts the blocker count over**, so an earlier stuck spell no longer counts toward giving up after you've helped.
+- **Plan mode is left alone by an active goal**, which no longer pushes the turn on while the plan waits for your approval.
+- **`/goal status` reads the same in the web UI and the TUI**, and deleting a session deletes its goal.
+
 ## 0.43.2
 
 ### Fixed
