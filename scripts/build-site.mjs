@@ -106,11 +106,21 @@ marked.use({ renderer });
 
 // ── CSS ─────────────────────────────────────────────────────────────────────
 // Font/palette here match cast server (src/server/public/tokens.css & style.css) —
-// dark zinc surfaces (#08080a / #131317 / #1e1e24), sharp contrast, and a
-// purple/violet accent gradient with clean mono typography.
-const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
+// dark zinc surfaces (#08080a / #131317 / #1e1e24), sharp contrast, and one
+// violet accent: --accent for fills and borders, --accent-text for text,
+// --action for the primary button.
+// Fonts load from <head> rather than an @import inside the inline CSS, where
+// the browser only found them after parsing the whole stylesheet.
+const FONT_LINKS = `<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap">`;
 
+// Pinned and integrity-checked: a floating @11 let the CDN swap the build
+// under every page. Only pages with a diagram load it; it is ~3.5MB.
+const MERMAID_SCRIPT =
+	'<script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js" integrity="sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2" crossorigin="anonymous"></script>';
+
+const CSS = `
 :root {
 	--bg: #08080a;
 	--bg-surface: #131317;
@@ -124,7 +134,9 @@ const CSS = `
 	--text: #fafafa;
 	--text-dim: #a1a1aa;
 	--text-secondary: #a1a1aa;
-	--text-muted: #71717a;
+	/* Muted still clears 4.5:1 on every surface up to --bg-hover; #71717a was
+	   3.0-4.1:1, under WCAG AA wherever it carried real text. */
+	--text-muted: #8e8e98;
 	--cyan: #8b5cf6;
 	--violet: #8b5cf6;
 	--teal: #2dd4bf;
@@ -136,6 +148,12 @@ const CSS = `
 	--rose: #ef4444;
 	--persona: #c084fc;
 	--accent: #8b5cf6;
+	/* Accent as text: --accent itself drops to 3.9:1 on raised surfaces, so it
+	   stays on fills, borders and scrollbars and text takes the lighter step. */
+	--accent-text: #a78bfa;
+	/* The primary action: white on it is 5.7:1 (7.1:1 on hover). */
+	--action: #7c3aed;
+	--action-hover: #6d28d9;
 	--accent-subtle: rgba(139, 92, 246, 0.12);
 	--accent-muted: rgba(139, 92, 246, 0.2);
 	--gradient: linear-gradient(135deg, #a855f7, #8b5cf6);
@@ -182,6 +200,8 @@ html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, .sideb
 .workspace-ui-personas::-webkit-scrollbar-thumb:hover, .workspace-install .install-block code::-webkit-scrollbar-thumb:hover { background: var(--purple); }
 a { color: var(--purple); text-decoration: none; transition: color .15s ease; }
 a:hover { color: #c084fc; text-decoration: none; }
+:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 2px; border-radius: 2px; }
+::selection { background: var(--accent-muted); color: var(--text); }
 
 /* ── Header (Cast Web UI Bar) ─────────────────────────────────────── */
 .header {
@@ -343,7 +363,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 .content pre.code-block:hover .code-copy,
 .content pre.code-block .code-copy:focus-visible { opacity: 1; }
 .content pre.code-block .code-copy:hover { color: var(--text); border-color: var(--border-active); }
-.content pre.code-block .code-copy.copied { color: var(--accent); border-color: var(--accent); }
+.content pre.code-block .code-copy.copied { color: var(--accent-text); border-color: var(--accent); }
 .content pre.code-block[data-language] .code-copy { right: 86px; }
 .content pre.code-block code,
 .content pre:not(.mermaid):not(.mermaid-code) code {
@@ -393,7 +413,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	font-family: var(--font); line-height: 1;
 }
 .mermaid-toolbar button:hover { color: var(--text); border-color: var(--accent); }
-.mermaid-toolbar button.active { color: var(--accent); border-color: var(--accent); }
+.mermaid-toolbar button.active { color: var(--accent-text); border-color: var(--accent); }
 .mermaid-toolbar .zoom-label {
 	font-size: .75rem; color: var(--text-muted); margin-left: auto;
 }
@@ -470,14 +490,14 @@ a:hover { color: #c084fc; text-decoration: none; }
 	max-width: 100%; height: auto;
 }
 .hero h1 { font-size: 3rem; font-weight: 800; margin: 0 0 16px; }
-.hero h1 .accent { color: #38e0ff; }
+.hero h1 .accent { color: var(--persona); }
 .hero p { font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 32px; }
 .hero-buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 .hero-buttons a {
 	padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 1rem;
 }
-.btn-primary { background: linear-gradient(135deg, #38e0ff, #a855f7); color: #fff; }
-.btn-primary:hover { background: linear-gradient(135deg, #5eead4, #c084fc); color: #fff; text-decoration: none; }
+.btn-primary { background: var(--action); color: #fff; }
+.btn-primary:hover { background: var(--action-hover); color: #fff; text-decoration: none; }
 .btn-secondary {
 	background: var(--bg-tertiary); color: var(--text); border: 1px solid var(--border);
 }
@@ -575,7 +595,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	font-family: var(--font-mono); font-size: .85rem; padding: 16px;
 	line-height: 1.8;
 }
-.roles-terminal-body .prompt { color: var(--accent); }
+.roles-terminal-body .prompt { color: var(--accent-text); }
 .roles-terminal-body .cmd { color: var(--green); }
 .roles-terminal-body .out { color: var(--text-secondary); }
 
@@ -607,7 +627,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 .motivation code {
 	font-family: var(--font-mono); font-size: .875em;
 	background: var(--code-bg); padding: 2px 6px; border-radius: 4px;
-	border: 1px solid var(--border); color: var(--accent);
+	border: 1px solid var(--border); color: var(--accent-text);
 }
 
 /* ── Comparison ────────────────────────────────────────────────────── */
@@ -674,7 +694,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-card p { margin: 0; color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
 .workspace-card-link { display: block; color: inherit; }
 .workspace-card-link:hover { color: inherit; }
-.workspace-card-tag { display: inline-block; margin-bottom: 16px; color: var(--accent); font: 600 .65rem var(--font-mono); text-transform: uppercase; letter-spacing: .1em; }
+.workspace-card-tag { display: inline-block; margin-bottom: 16px; color: var(--accent-text); font: 600 .65rem var(--font-mono); text-transform: uppercase; letter-spacing: .1em; }
 .workspace-card-arrow { display: block; margin-top: 16px; color: var(--purple); font: .72rem var(--font-mono); }
 .workspace-install { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
 .workspace-install .install-block { max-width: none; min-width: 0; margin: 0; padding: 16px; overflow: hidden; }
@@ -687,7 +707,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	transition: color .1s ease, border-color .1s ease, background .1s ease;
 }
 .workspace-copy-btn svg { width: 14px; height: 14px; }
-.workspace-copy-btn:hover, .workspace-copy-btn:focus-visible { color: var(--text); border-color: var(--text-muted); outline: none; }
+.workspace-copy-btn:hover, .workspace-copy-btn:focus-visible { color: var(--text); border-color: var(--text-muted); }
 .workspace-copy-btn.copied { color: var(--teal); border-color: var(--teal); }
 .workspace-docs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .workspace-docs a { color: var(--text-dim); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 13px 14px; font-size: .8rem; transition: border-color .15s, color .15s; }
@@ -728,7 +748,6 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-ui-brand { display: flex; align-items: center; color: var(--text); font-weight: 600; }
 .workspace-ui-status {
 	width: 10px; height: 10px; border-radius: 50%; background: var(--green);
-	box-shadow: 0 0 6px color-mix(in srgb, var(--green) 50%, transparent);
 }
 .workspace-ui-actions { display: flex; gap: 7px; margin-left: auto; }
 .workspace-ui-actions span { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); }
@@ -777,6 +796,7 @@ const LEGACY_LANDING_HTML = `<!DOCTYPE html>
 <title>cast — One agent, many roles</title>
 <meta name="description" content="A role-based terminal agent harness. Seven built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+${FONT_LINKS}
 <style>${CSS}</style>
 </head>
 <body>
@@ -913,6 +933,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 <title>cast — Agent workspace</title>
 <meta name="description" content="cast is a role-based agent workspace for your repository and OpenAI-compatible model.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+${FONT_LINKS}
 <style>${CSS}</style>
 </head>
 <body>
@@ -1067,6 +1088,7 @@ function docPage(title, bodyHtml, activeFile) {
 <title>${title} — cast</title>
 <meta name="description" content="${title} documentation for cast, a role-based terminal agent harness.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+${FONT_LINKS}
 <style>${CSS}</style>
 </head>
 <body>
@@ -1110,7 +1132,7 @@ ${sidebarLinks}
 	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 })();
 </script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+${bodyHtml.includes('<pre class="mermaid"') ? MERMAID_SCRIPT : ""}
 <script>
 // ── Mermaid viewer with zoom + diagram/code toggle ──
 document.addEventListener('DOMContentLoaded', () => {
