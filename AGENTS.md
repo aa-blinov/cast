@@ -77,6 +77,17 @@ Other:
 
 - Only commit files changed in the current session. Stage explicit paths (`git add <path>...`), never `git add -A`.
 - Commit message: `type: imperative summary` (`feat|fix|chore|docs|test`), body explains *why*.
+- **After every push, check GitHub Actions before saying it's done** — not only on releases. A green
+  local run is not a green CI: the runner is slower and loaded, and races that never show locally
+  fail there. Watch every run the push started (CI, and Release / Deploy docs on a tag):
+  ```bash
+  gh run list --commit "$(git rev-parse HEAD)"          # all runs for the pushed commit
+  gh run watch <run-id> --exit-status                   # wait for one to finish
+  gh run view <run-id> --log-failed                     # on failure
+  ```
+  A red run is a bug to fix, not a rerun button: find why it failed (a flaky test usually means a
+  real race in the code or a test that counts something shared), fix it, and push again. Rerun only
+  to confirm a fix, and say so.
 
 ## Release Process
 
@@ -140,7 +151,9 @@ gh run view <run-id> --log-failed
 gh release view vX.Y.Z
 ```
 
-If the workflow is still running, wait and re-check. Do not declare the release done until CI passes.
+If the workflow is still running, wait and re-check. Do not declare the release done until **both**
+the Release workflow and the CI run for the release commit pass — a green Release alone has hidden a
+red CI before.
 
 ## Dependency Security
 
