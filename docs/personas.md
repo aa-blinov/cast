@@ -8,13 +8,13 @@ See [Persona Research](persona-research.md) for empirical studies on role framin
 
 | Persona | Label | Description |
 |---------|-------|-------------|
-| `analyst` | Product & Project Analyst | Product, analytical, and project work — turns vague goals into hypotheses, decisions, requirements, priorities, and actionable plans |
-| `assistant` | Assistant | General-purpose everyday help — questions, planning, writing, quick lookups; uses tools when a task actually needs them |
+| `analyst` | Product & Project Analyst | Product, analytical, and project work: turns vague goals into hypotheses, decisions, requirements, priorities, and actionable plans |
+| `assistant` | Assistant | General-purpose everyday help: questions, planning, writing, quick lookups; uses tools when a task actually needs them |
 | `coder-with-subagents` | Coder with subagents | Delegates parallel and isolated work to sub-agents via the task tool |
 | `pm` | Planner | Turns settled decisions into clear project plans, milestones, dependencies, and actionable tasks |
-| `qa` | Reviewer | Functional review — checks behavior against requirements, finds regressions, and produces actionable findings |
-| `researcher` | Researcher | Open-ended questions and investigations — searches, reads sources, cross-checks claims, answers with citations instead of recall |
-| `senior` (default) | Senior Developer | Lazy senior dev — the ladder, root-cause fixes, deletion over addition, verify-then-commit |
+| `qa` | Reviewer | Functional review: checks behavior against requirements, finds regressions, and produces actionable findings |
+| `researcher` | Researcher | Open-ended questions and investigations: searches, reads sources, cross-checks claims, answers with citations instead of recall |
+| `senior` (default) | Senior Developer | Lazy senior dev: the ladder, root-cause fixes, deletion over addition, verify-then-commit |
 
 The `senior` persona is the default. Built-in personas deliberately share the normal built-in, skill, and MCP tool surface, so changing role does not unexpectedly break a workflow. `coder-with-subagents` is the exception: it additionally enables the `task` tool for delegating work to sub-agents. Use a custom persona's allowlists when a role needs least privilege or a smaller tool prompt.
 
@@ -110,7 +110,7 @@ mcp: [staging-*]                    # glob over server names
 subagentTypes: [explore]            # `task` can only spawn the "explore" role
 ```
 
-`skills`/`mcp` restrictions also apply to anything the persona delegates to via `task` — a restriction can't be routed around by spawning a subagent to do the disallowed thing instead. These restrictions are optional: they are not inferred from a persona's label or description, and a persona without an allowlist keeps the normal available surface.
+`skills`/`mcp` restrictions also apply to anything the persona delegates to via `task`: a restriction can't be routed around by spawning a subagent to do the disallowed thing instead. These restrictions are optional: they are not inferred from a persona's label or description, and a persona without an allowlist keeps the normal available surface.
 
 Session policy still applies on top of every allowlist: plan/build mode, the web-tools toggle, and headless `cast run` can disable tools via their own denylist even if the persona listed them. `subagentTypes` has no effect unless `subagents: true`.
 
@@ -122,8 +122,8 @@ By default (`agentsMd: true`, or the field omitted), project context files (`AGE
 
 On a name collision, the first-loaded persona wins:
 
-1. **Project** (`.cast/personas/`) — highest priority
+1. **Project** (`.cast/personas/`), highest priority
 2. **Global** (`~/.cast/personas/`)
-3. **Builtin** (`prompts/personas/`) — lowest priority
+3. **Builtin** (`prompts/personas/`), lowest priority
 
 This lets you override a built-in persona by creating one with the same `name`.

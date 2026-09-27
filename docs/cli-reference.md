@@ -11,7 +11,7 @@ cast server [start|stop|status]       Alias for cast web
 cast upgrade [version] [--force]      Self-update
 ```
 
-TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported — use `cast run` for scripting.
+TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported. Use `cast run` for scripting.
 
 ## Subcommands
 
@@ -52,7 +52,7 @@ cast upgrade --force      # Reinstall even if same version
 
 ### `cast web`
 
-Web UI mode: launches a browser-based control room for managing background agents. The internal `cast server` daemon is the single writer for every session — both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or `CAST_NO_DAEMON=1` is set. `cast server` is a supported alias for scripts and integrations.
+Web UI mode: launches a browser-based control room for managing background agents. The internal `cast server` daemon is the single writer for every session: both the browser and the TUI are thin clients of it over HTTP + SSE, so a session opened in either surface streams live (tokens, tool calls, status) to both. The TUI auto-spawns this daemon on launch unless one is already running or `CAST_NO_DAEMON=1` is set. `cast server` is a supported alias for scripts and integrations.
 
 ```bash
 cast web                 # Start in background (daemon)
@@ -81,11 +81,11 @@ Features:
 - Tool call cards showing arguments and status
 - Git diff viewer (file tree + unified diff) as a resizable side panel, auto-refreshing after each tool call
 - File reader popup with wrapped text/code and source-line numbers; Markdown, CSV/TSV, images, and PDFs use their dedicated previews
-- Settings modal (gear icon) — model & reasoning, color theme, web tools toggle, bash confirmation mode, Quick session persona, and management for MCP servers, skills, hooks, providers, and SSH hosts; shared with the TUI's `~/.cast/settings.json`
-- Status popover (info icon) — persona, model, mode, token usage, and git branch for the active session
-- Keyboard shortcuts — `Ctrl+B` (`⌘B` on Mac) toggles the sidebar, `Ctrl+Shift+D` / `N` / `L` toggle the diff panel / start a new session / clear context, `Ctrl+/` shows the full reference
+- Settings modal (gear icon): model & reasoning, color theme, web tools toggle, bash confirmation mode, Quick session persona, and management for MCP servers, skills, hooks, providers, and SSH hosts; shared with the TUI's `~/.cast/settings.json`
+- Status popover (info icon): persona, model, mode, token usage, and git branch for the active session
+- Keyboard shortcuts: `Ctrl+B` (`⌘B` on Mac) toggles the sidebar, `Ctrl+Shift+D` / `N` / `L` toggle the diff panel / start a new session / clear context, `Ctrl+/` shows the full reference
 - Chat slash commands are available in the composer; provider, MCP, skills, hooks, and SSH are managed through Settings. Non-blocking commands work while an agent runs.
-- Mobile/tablet/desktop responsive — sidebar and diff panel become touch-friendly slide-over drawers on narrow screens
+- Mobile/tablet/desktop responsive: sidebar and diff panel become touch-friendly slide-over drawers on narrow screens
 - Themed sign-in screen with an HttpOnly, SameSite session cookie; repeated failed sign-ins are rate-limited
 
 On Windows, prints the install command to run in a new terminal (can't self-replace running process files).
@@ -140,7 +140,7 @@ See [Tools](tools.md#dangerous-command-gating) for the list of patterns that tri
 | `--mcp <path>` | Load an extra MCP server config file (repeatable) |
 | `--no-mcp` | Skip global/project MCP server discovery |
 
-`--skill` and `--mcp` paths work even with `--no-skills` / `--no-mcp` — they're explicit additions, not discovery.
+`--skill` and `--mcp` paths work even with `--no-skills` / `--no-mcp`: they're explicit additions, not discovery.
 
 ```bash
 cast --skill ./my-skill
@@ -171,9 +171,9 @@ The `run` subcommand accepts a subset of the main flags:
 | `--interactive` | | Persistent JSONL session protocol; no positional message |
 | `--bypass-permissions` | | Skip bash confirmation prompts |
 | `--keep-background` | | Leave background tasks this run started running after it exits |
-| `--skill <directory>` | | Load an extra skill package directory (repeatable) — **not applied under the daemon**, see below |
+| `--skill <directory>` | | Load an extra skill package directory (repeatable). **Not applied under the daemon**, see below |
 | `--no-skills` | | Skip project/agents/global/builtin skill discovery |
-| `--mcp <path>` | | Load extra MCP config (repeatable) — **not applied under the daemon**, see below |
+| `--mcp <path>` | | Load extra MCP config (repeatable). **Not applied under the daemon**, see below |
 | `--no-mcp` | | Skip MCP discovery |
 
 `cast run` executes inside the daemon, and `--skill`/`--mcp` load from a path

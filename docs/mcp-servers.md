@@ -1,6 +1,6 @@
 # MCP Servers
 
-cast supports [Model Context Protocol](https://modelcontextprotocol.io) servers — local (stdio) or remote (streamable HTTP). Their tools appear alongside the built-in ones, no special syntax needed to call them.
+cast supports [Model Context Protocol](https://modelcontextprotocol.io) servers, local (stdio) or remote (streamable HTTP). Their tools appear alongside the built-in ones, no special syntax needed to call them.
 
 ## Configuration
 
@@ -53,7 +53,7 @@ MCP servers are configured in JSON files using the common `mcpServers` shape:
 | `env` | Environment variables (optional) |
 | `cwd` | Working directory (optional) |
 
-Stdio servers inherit cast's **full environment**, with the config's `env` winning on conflicts — an API key exported in your shell reaches the server without duplicating it in the config. (The MCP SDK's default is a minimal whitelist; cast overrides it because a server that works when launched by hand should work identically under cast.)
+Stdio servers inherit cast's **full environment**, with the config's `env` winning on conflicts: an API key exported in your shell reaches the server without duplicating it in the config. (The MCP SDK's default is a minimal whitelist; cast overrides it because a server that works when launched by hand should work identically under cast.)
 
 **remote (`url`):**
 
@@ -61,7 +61,7 @@ Stdio servers inherit cast's **full environment**, with the config's `env` winni
 |-------|-------------|
 | `url` | Server endpoint URL |
 
-Remote servers are connected over **Streamable HTTP** first; if the server rejects it (legacy servers answer the initialize POST with an HTTP error), cast retries once over the deprecated **HTTP+SSE** transport — so old `/sse` endpoints (e.g. Cloudflare's docs server) work with the same one-line config. Timeouts are not retried: a hung endpoint is hung on either transport.
+Remote servers are connected over **Streamable HTTP** first; if the server rejects it (legacy servers answer the initialize POST with an HTTP error), cast retries once over the deprecated **HTTP+SSE** transport, so old `/sse` endpoints (e.g. Cloudflare's docs server) work with the same one-line config. Timeouts are not retried: a hung endpoint is hung on either transport.
 | `headers` | HTTP headers for auth (static header/token only) |
 
 Each server needs either `command` (local) or `url` (remote), not both.
@@ -77,12 +77,12 @@ Non-alphanumeric characters in names are replaced with `_`.
 
 ## Connection
 
-Servers connect in parallel during startup. Each gets a 30-second timeout — enough for `npx -y` cold cache resolution (~12s) without leaving a hung server unnoticed.
+Servers connect in parallel during startup. Each gets a 30-second timeout, enough for `npx -y` cold cache resolution (~12s) without leaving a hung server unnoticed.
 
 Failed connections produce a diagnostic message but don't block other servers or prevent cast from starting.
 
-A server that drops after connecting is retried automatically — five attempts
-over roughly half a minute, backing off 1s/2s/4s/8s/16s — which rides out a
+A server that drops after connecting is retried automatically: five attempts
+over roughly half a minute, backing off 1s/2s/4s/8s/16s, which rides out a
 server restarting itself. A refusal is not retried: when the endpoint answers
 `401`/`403` or "invalid authorization", no amount of retrying changes the
 answer, so cast says once what to fix and waits for
@@ -117,7 +117,7 @@ Extra paths (`--mcp`) work even with `--no-mcp`.
 
 ### Hot-reload
 
-`/mcp` toggle / `enable` / `disable` / `uninstall` reconnect servers **in the current session** — no `/reload`, no restart.
+`/mcp` toggle / `enable` / `disable` / `uninstall` reconnect servers **in the current session** (no `/reload`, no restart).
 
 Use `/reload` after editing `~/.cast/mcp.json` or `.cast/mcp.json` by hand (or adding a new server entry outside `/mcp`). See [Interactive commands](interactive-commands.md#hot-reload-vs-reload).
 
@@ -128,15 +128,15 @@ Use `/reload` after editing `~/.cast/mcp.json` or `.cast/mcp.json` by hand (or a
 Disabled servers:
 
 - Are disconnected immediately (hot-swap, no restart needed)
-- Are hidden from the model — their tools disappear from the system prompt
-- Are persisted in `~/.cast/settings.json` — they stay disabled across sessions and `/reload`
+- Are hidden from the model: their tools disappear from the system prompt
+- Are persisted in `~/.cast/settings.json` (they stay disabled across sessions and `/reload`)
 - Can be re-enabled at any time by running `/mcp` again
 
 The picker shows all servers from all config sources, regardless of connection status:
 
-- `serverName (N tools)` — connected and enabled
-- `serverName (disconnected)` — enabled but failed to connect
-- `serverName (disabled)` — toggled off by the user
+- `serverName (N tools)`: connected and enabled
+- `serverName (disconnected)`: enabled but failed to connect
+- `serverName (disabled)`: toggled off by the user
 
 ## Limitations
 

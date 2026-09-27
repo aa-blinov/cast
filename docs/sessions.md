@@ -4,13 +4,13 @@ Every conversation is automatically saved and can be resumed later.
 
 ## Session Storage
 
-Sessions are stored in a single SQLite database at `~/.cast/sessions/sessions.db` — one row per session (metadata) and one row per message. Every message is kept forever: compaction flags older messages as no longer part of the model's context instead of deleting them, so the full conversation is always there to look back on even in a session that's been compacted many times over. What's sent to the model is only the still-in-context rows; what you see when reopening a session (`/sessions`, `/continue`, `-c`, or the web UI) is everything, regardless of that flag.
+Sessions are stored in a single SQLite database at `~/.cast/sessions/sessions.db`: one row per session (metadata) and one row per message. Every message is kept forever: compaction flags older messages as no longer part of the model's context instead of deleting them, so the full conversation is always there to look back on even in a session that's been compacted many times over. What's sent to the model is only the still-in-context rows; what you see when reopening a session (`/sessions`, `/continue`, `-c`, or the web UI) is everything, regardless of that flag.
 
-Sessions saved by older versions of cast (individual `.json`/`.jsonl` files under `~/.cast/sessions/<encoded-cwd>/`) are imported into the database automatically on first run after upgrading — the original files are left on disk untouched.
+Sessions saved by older versions of cast (individual `.json`/`.jsonl` files under `~/.cast/sessions/<encoded-cwd>/`) are imported into the database automatically on first run after upgrading. The original files are left on disk untouched.
 
 ## Project Memory
 
-> See [Memory](memory.md) for a complete, beginner-friendly guide — what memory
+> See [Memory](memory.md) for a complete, beginner-friendly guide: what memory
 > is, where the files live, how it is written and read, and every command and
 > setting. This section covers the implementation details.
 
@@ -42,15 +42,15 @@ Memory retrieval, file reconciliation, and maintenance are recorded as durable s
 
 Each session tracks:
 
-- **Messages** — full conversation history
-- **Model** — which model was used
-- **Mode** — plan or build (restored on resume)
-- **Usage** — cumulative token/cost metrics:
+- **Messages**: full conversation history
+- **Model**: which model was used
+- **Mode**: plan or build (restored on resume)
+- **Usage**: cumulative token/cost metrics:
   - `promptTokens`, `completionTokens`, `totalTokens`
   - `cost`
   - `cacheReadTokens`, `cacheWriteTokens`, `uncachedTokens`
   - `subagentTokens` (subset of total, tracked separately)
-- **Timestamps** — created and updated
+- **Timestamps**: created and updated
 
 ## Resuming Sessions
 
@@ -85,9 +85,9 @@ When enabled, cast creates (or reuses) a git worktree at `.cast/worktrees/<name>
 /worktree <name>           # Switch current session to a git worktree
 ```
 
-The `/sessions` picker shows each session's project, first message, last-updated time, and message count — and filters as you type. The search matches the project path, session id, and **every user/assistant message in the thread**: substring matches rank first (earlier = higher), then in-order subsequence matches (so minor typos still hit). `Backspace` edits the query, `Esc` closes, `Enter` resumes the highlighted session. Deleting goes through the `Delete a session` row at the bottom (find it by typing its name).
+The `/sessions` picker shows each session's project, first message, last-updated time, and message count, and filters as you type. The search matches the project path, session id, and **every user/assistant message in the thread**: substring matches rank first (earlier = higher), then in-order subsequence matches (so minor typos still hit). `Backspace` edits the query, `Esc` closes, `Enter` resumes the highlighted session. Deleting goes through the `Delete a session` row at the bottom (find it by typing its name).
 
-`/continue` is the quick path: it finds the most recently updated session that isn't the current one and switches to it — autosaving the current session first if it has messages. If there's no other session to resume, it shows a notice. This is the in-session equivalent of `cast -c`.
+`/continue` is the quick path: it finds the most recently updated session that isn't the current one and switches to it, autosaving the current session first if it has messages. If there's no other session to resume, it shows a notice. This is the in-session equivalent of `cast -c`.
 
 `/fork` creates a new session and switches to it, preserving only the context that is currently safe to send to the model. The source session is not changed. Compacted-out history, pending questions and plan approvals, undo checkpoints, and usage counters are not copied. A fork shares the same working directory; use `/worktree` afterwards when file isolation is needed.
 
@@ -101,7 +101,7 @@ The Web UI groups sessions by their working directory. Quick sessions created wi
 /new                       # Start fresh (autosaves current if non-empty)
 ```
 
-A new session starts in build mode — plan mode is per-task state, not a sticky preference.
+A new session starts in build mode: plan mode is per-task state, not a sticky preference.
 
 ## Context Compaction
 
@@ -123,17 +123,17 @@ Default: `(128,000 - 8,192) × 0.75 = ~90,000 tokens`
 2. The split point snaps to a turn boundary (a `user` message) so tool calls and results stay together
 3. Old messages are summarized by the LLM
 4. File paths from read/write/edit operations are extracted deterministically and appended to the summary
-5. The summary replaces the old messages as a system message in what gets sent to the model — the originals stay on disk (see Session Storage above) and are always visible when you reopen the session
+5. The summary replaces the old messages as a system message in what gets sent to the model. The originals stay on disk (see Session Storage above) and are always visible when you reopen the session
 
-If this isn't the first compaction, the previous summary is passed to the LLM as update-in-place context — the running summary improves over time rather than starting from scratch each round.
+If this isn't the first compaction, the previous summary is passed to the LLM as update-in-place context: the running summary improves over time rather than starting from scratch each round.
 
 ### Resilience
 
-If the LLM summarization fails (network error, provider outage), messages are left **untouched** — not pruned. The caller sees `compacted: false` with an error, so the transcript isn't lost. The next turn retries compaction automatically.
+If the LLM summarization fails (network error, provider outage), messages are left **untouched**, not pruned. The caller sees `compacted: false` with an error, so the transcript isn't lost. The next turn retries compaction automatically.
 
 ### Context Overflow
 
-If the provider returns a context overflow error mid-turn, cast automatically compacts and retries — once per turn. If compaction itself fails, the original error surfaces.
+If the provider returns a context overflow error mid-turn, cast automatically compacts and retries, once per turn. If compaction itself fails, the original error surfaces.
 
 ### Plan Mode Compaction
 

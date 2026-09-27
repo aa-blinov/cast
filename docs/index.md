@@ -4,9 +4,9 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 
 **No vendor lock-in.** Swap providers and models without touching your workflow. One config file, one API key, works everywhere.
 
-**Real tools, real work.** Reads files, writes code, runs shell commands, searches your codebase — all in parallel. Delegates sub-tasks to isolated sub-agents.
+**Real tools, real work.** Reads files, writes code, runs shell commands, searches your codebase, all in parallel. Delegates sub-tasks to isolated sub-agents.
 
-**Extensible.** Rules, skills, MCP servers, and personas — add capabilities without touching the codebase.
+**Extensible.** Rules, skills, MCP servers, and personas: add capabilities without touching the codebase.
 
 ## Table of Contents
 

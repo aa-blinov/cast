@@ -22,7 +22,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 
 `/undo` requires a checkpoint from the previous turn. In a Git workspace, every file is restored to its pre-turn tree without changing the user's Git index; files created during the turn are removed, while files that were untracked before the turn are restored. Outside Git, Cast restores files changed through its `write` and `edit` tools from shadow backups. Arbitrary changes made through `bash` or an MCP tool in a non-Git workspace cannot be reversed. `/undo` is refused while the agent is running (use `/abort` first) and is a no-op if there is nothing to undo.
 
-Removing files created during the turn also removes any *you* created in that window — the restore cannot tell them apart, and they cannot be brought back. When there are such files, `/undo` names them and asks before proceeding; over the web API it refuses and asks you to re-run as `/undo --force`. `--force` skips the question.
+Removing files created during the turn also removes any *you* created in that window: the restore cannot tell them apart, and they cannot be brought back. When there are such files, `/undo` names them and asks before proceeding; over the web API it refuses and asks you to re-run as `/undo --force`. `--force` skips the question.
 
 `/fork` leaves the original session unchanged and starts an independent new session with the context currently sent to the model. It deliberately does not restore compacted-out history, copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
 
@@ -39,7 +39,7 @@ Removing files created during the turn also removes any *you* created in that wi
 | `/plan-model [name\|off]` | Show/change the model used in plan mode |
 | `/plan-model-provider [name\|off]` | Show/change the saved provider used for the plan model |
 | `/reasoning` | Change reasoning level (opens picker if model supports it) |
-| `/reasoning-display` (`/rd`) | Toggle reasoning blocks in the transcript — off by default since reasoning models stream a lot of auxiliary thinking that clutters the chat |
+| `/reasoning-display` (`/rd`) | Toggle reasoning blocks in the transcript. Off by default since reasoning models stream a lot of auxiliary thinking that clutters the chat |
 | `/reasoning-format` | Select the reasoning request protocol for the active provider |
 | `/provider` | Open provider picker (switch, add, or delete providers) |
 | `/provider add` | Add a new provider (name → URL → key wizard) |
@@ -60,7 +60,7 @@ See [Personas](personas.md) for the full list.
 | Command | Description |
 |---------|-------------|
 | `/skills` | Toggle skills on/off (multi-select). Also: `list`, `enable`/`disable`, `uninstall`, `help` |
-| `/skills-sh` | skills.sh — search / list-available / install / uninstall universal skills |
+| `/skills-sh` | skills.sh: search / list-available / install / uninstall universal skills |
 | `/skill:<name> [args]` | Force-load and run a skill by name |
 | `/mcp` | Toggle MCP servers on/off. Also: `list`, `enable`/`disable`, `uninstall`, `help` |
 | `/hooks` | List lifecycle hooks; also `enable`/`disable <id>` and `help` |
@@ -78,7 +78,7 @@ You never need to quit cast or start a new session for these changes. The curren
 | `/skills uninstall`, `/mcp uninstall` | Automatic |
 | New/edited files on disk: skills, `mcp.json`, rules, personas, context files (including `npx skills add`) | `/reload` refreshes the current resource catalog; persona overrides created in chat are picked up automatically on the next user message |
 
-`/reload` only re-scans cwd resources — it does **not** reset the conversation.
+`/reload` only re-scans cwd resources. It does **not** reset the conversation.
 
 ## Rules
 
@@ -103,7 +103,7 @@ See [Plan Mode](plan-mode.md) for the full workflow.
 
 | Command | Description |
 |---------|-------------|
-| `/goal <description>` | Work autonomously toward a goal until it's done — bounded, never-ask |
+| `/goal <description>` | Work autonomously toward a goal until it's done (bounded, never-ask) |
 | `/review` | Ask the agent to review and verify its own work |
 | `/code-review [range] [-- path…]` | Review a diff: scope, groups and language rules computed before the model sees it |
 
@@ -113,13 +113,13 @@ See [Plan Mode](plan-mode.md) for the full workflow.
 - **Keeping going.** Where a turn would normally end, an open goal continues it, up to 5 continuations. A pass that changed nothing gets a nudge to change approach; a second one in a row stops the drive and leaves the goal open for your reply. When the continuations run out, the agent sums up what's done and what's left.
 - **Budget.** A leading number (`/goal 10 …`, or `--steps N`) sets the iteration budget of the turn it starts, 25 model calls by default. Hitting it ends that turn and leaves the goal open: your next message carries on with it. Each model call can carry several tool calls, so the budget counts LLM turns, not tools.
 - **Interruptions.** Esc or a provider failure pauses the goal; the next turn picks it up and first re-checks what's on disk. In plan mode the goal doesn't push the turn on: the plan waits for your approval, and the goal drives again once you build.
-- **Managing it.** `/goal status` shows it, `/goal edit <text>` changes the objective, `/goal clear` drops it — both take effect on the agent's next step, even mid-turn. Deleting the session deletes its goal. Over the API, `goal: true` or a step count on a chat message does the same as `/goal`.
+- **Managing it.** `/goal status` shows it, `/goal edit <text>` changes the objective, `/goal clear` drops it. Both take effect on the agent's next step, even mid-turn. Deleting the session deletes its goal. Over the API, `goal: true` or a step count on a chat message does the same as `/goal`.
 
 Use it for start-to-finish tasks: "fix the tests", "set up the project and make the first commit", "implement X and verify it runs". Works in the TUI and the web composer.
 
-**`/code-review [range] [-- path…]`** reviews a change rather than the session. What must not go wrong is computed first, in code: which files are in scope (staged, unstaged and untracked against `HEAD`, or any git range you pass), which are filtered as generated, vendored or binary — each named with its reason so nothing looks silently missed — how they group into review units (a large file alone; a test with its implementation; otherwise by directory, capped), and which language rules apply. Only the judging is left to the model.
+**`/code-review [range] [-- path…]`** reviews a change rather than the session. What must not go wrong is computed first, in code: which files are in scope (staged, unstaged and untracked against `HEAD`, or any git range you pass), which are filtered as generated, vendored or binary (each named with its reason so nothing looks silently missed), how they group into review units (a large file alone; a test with its implementation; otherwise by directory, capped), and which language rules apply. Only the judging is left to the model.
 
-Findings go through a `review_report` tool that checks each one against the file: a line that doesn't hold is moved to where the quoted code actually is, and a finding whose code is nowhere in the file — or whose file is outside the scope — is dropped before you ever read it. A finding on a line the change didn't touch is kept and flagged as context.
+Findings go through a `review_report` tool that checks each one against the file: a line that doesn't hold is moved to where the quoted code actually is, and a finding whose code is nowhere in the file, or whose file is outside the scope, is dropped before you ever read it. A finding on a line the change didn't touch is kept and flagged as context.
 
 ```
 /code-review                          # working tree vs HEAD
@@ -127,13 +127,13 @@ Findings go through a `review_report` tool that checks each one against the file
 /code-review HEAD~3..HEAD -- src/     # narrow a large change to one subtree
 ```
 
-Rules live in `prompts/review-rules/` — one document per language, loaded only for the languages actually in the diff, plus a shared default whose two standing orders are *precision over recall* (a false positive costs the trust you need for the next finding) and *don't duplicate the toolchain* (whatever the linter, formatter, compiler or test run already says is not a review comment). Add your own by dropping a file in that directory.
+Rules live in `prompts/review-rules/`: one document per language, loaded only for the languages actually in the diff, plus a shared default whose two standing orders are *precision over recall* (a false positive costs the trust you need for the next finding) and *don't duplicate the toolchain* (whatever the linter, formatter, compiler or test run already says is not a review comment). Add your own by dropping a file in that directory.
 
-**`/review`** asks the agent to verify its own most recent work: identify what changed (git diff / touched files), find and run the project's test and lint commands, and report honestly what was verified and what remains open — it never claims a check it didn't actually run.
+**`/review`** asks the agent to verify its own most recent work: identify what changed (git diff / touched files), find and run the project's test and lint commands, and report honestly what was verified and what remains open. It never claims a check it didn't actually run.
 
 ## Steering
 
-**Just type.** A plain message sent while the agent is running is steered into the running turn — no command needed, in the TUI and the web UI alike. `/steer` stays for when you want to be explicit (and for scripts).
+**Just type.** A plain message sent while the agent is running is steered into the running turn. No command needed, in the TUI and the web UI alike. `/steer` stays for when you want to be explicit (and for scripts).
 
 These commands work while the agent is running:
 
@@ -144,21 +144,21 @@ These commands work while the agent is running:
 | `/queue-reset` | `/qr` | Clear the message queue |
 | `/abort`, `/stop` | | Stop current agent run |
 
-**`/steer`** interrupts the current turn with new context — the message is injected immediately into the conversation, and the agent sees it on the next tool-call iteration. Useful for correcting course mid-execution.
+**`/steer`** interrupts the current turn with new context: the message is injected immediately into the conversation, and the agent sees it on the next tool-call iteration. Useful for correcting course mid-execution.
 
 **`/queue`** saves a message to run after the agent finishes its current turn. The message becomes a new turn automatically.
 
 If nothing is running, both `/steer` and `/queue` submit the message as a normal prompt.
 
-**`/abort`** stops the current run and clears both the steering and follow-up queues — anything queued before the abort is discarded.
+**`/abort`** stops the current run and clears both the steering and follow-up queues: anything queued before the abort is discarded.
 
-Both steering and follow-up messages reset the doom loop counter — repeating a failing command after user guidance is treated as a new attempt, not a loop.
+Both steering and follow-up messages reset the doom loop counter: repeating a failing command after user guidance is treated as a new attempt, not a loop.
 
 ## Context and Usage
 
 Token usage and context size are shown automatically in the TUI status bar (prompt tokens in, completion tokens out, prompt-cache hit %, cost, context percentage, tokens/second, and sub-agent tokens).
 
-Use `/statusbar` to toggle individual segments on/off and reorder them — useful on narrow terminals where the full bar overflows. Segments can be moved between the left and right sides of the bar with ←/→, and reordered within each side with j/k. Default: persona, mode, model (left) and elapsed (right); enable others via `/statusbar`.
+Use `/statusbar` to toggle individual segments on/off and reorder them (useful on narrow terminals where the full bar overflows). Segments can be moved between the left and right sides of the bar with ←/→, and reordered within each side with j/k. Default: persona, mode, model (left) and elapsed (right); enable others via `/statusbar`.
 
 | Command | Description |
 |---------|-------------|
@@ -187,7 +187,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 | `/repo` | Show cwd, git branch, dirty state, remote, and HEAD |
 | `/keys` | List all keybindings |
 | `/help` | Show the command list |
-| `/ssh` | Manage SSH hosts — list, add, remove (persists to `~/.cast/ssh.json`) |
+| `/ssh` | Manage SSH hosts: list, add, remove (persists to `~/.cast/ssh.json`) |
 
 ## Keybindings
 
@@ -202,7 +202,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 | Delete to line start | Ctrl+U |
 | Delete to line end | Ctrl+K |
 | Submit | Enter |
-| Line break | Shift+Enter or Alt+Enter — or end the line with `\` and press Enter, which works on any terminal |
+| Line break | Shift+Enter or Alt+Enter, or end the line with `\` and press Enter, which works on any terminal |
 | Stop turn (2×) | Esc |
 | Clear the input | Ctrl+L |
 | Exit (2× to confirm) | Ctrl+C |
@@ -211,21 +211,21 @@ Use `/statusbar` to toggle individual segments on/off and reorder them — usefu
 
 **Esc** stops the current turn while generating (twice within 2s); `Ctrl+L` clears the input in any state.
 
-**Tab** completes a slash command in the palette, and a path-shaped token anywhere else (one containing `/`, or starting with `~`) — ambiguous ones list what is left to choose from. Tab in ordinary prose does nothing.
+**Tab** completes a slash command in the palette, and a path-shaped token anywhere else (one containing `/`, or starting with `~`). Ambiguous ones list what is left to choose from. Tab in ordinary prose does nothing.
 
 **Line breaks:** Shift+Enter and Alt+Enter need a terminal that reports modified Enter (the Kitty keyboard protocol or `modifyOtherKeys`); everywhere else, end the line with a backslash and press Enter.
 
-**A long draft wraps** at the terminal's edge, on word boundaries. The composer draws at most three rows and follows the cursor, with `↑`/`↓` in the prompt column where the draft continues past them — ↑/↓ move between rows, wrapped ones included.
+**A long draft wraps** at the terminal's edge, on word boundaries. The composer draws at most three rows and follows the cursor, with `↑`/`↓` in the prompt column where the draft continues past them. ↑/↓ move between rows, wrapped ones included.
 
-**Ctrl+C** — press twice within 2s to exit. Does not stop a turn — use Esc for that.
+**Ctrl+C**: press twice within 2s to exit. Does not stop a turn. Use Esc for that.
 
 ## During a Running Agent
 
-Typing a plain message steers the running turn — no command needed. Besides that, these commands are accepted while the agent is executing:
+Typing a plain message steers the running turn. No command needed. Besides that, these commands are accepted while the agent is executing:
 
-- `/steer` / `/s` — inject context
-- `/queue` / `/q` — queue follow-up
-- `/queue-reset` / `/qr` — clear queue
-- `/abort` / `/stop` — stop the run
+- `/steer` / `/s`: inject context
+- `/queue` / `/q`: queue follow-up
+- `/queue-reset` / `/qr`: clear queue
+- `/abort` / `/stop`: stop the run
 
 All other input is rejected with a notice. Use Esc to stop the current turn (clears input when idle).

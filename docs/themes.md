@@ -42,4 +42,4 @@ Opens a picker showing all themes with the current selection highlighted.
 
 ### CLI
 
-The theme is not settable via CLI flags — use `/theme` in the TUI or edit `settings.json` directly.
+The theme is not settable via CLI flags. Use `/theme` in the TUI or edit `settings.json` directly.

@@ -23,7 +23,7 @@ To enable delegation, a persona's frontmatter must specify:
 subagents: true
 ```
 
-`senior` delegates sparingly — wide exploration, independent areas in parallel, an independent review. `coder-with-subagents` leans on delegation much harder.
+`senior` delegates sparingly: wide exploration, independent areas in parallel, an independent review. `coder-with-subagents` leans on delegation much harder.
 
 ### Restricting Subagent Roles (`subagentTypes`)
 
@@ -86,7 +86,7 @@ Sub-agents inherit security and discovery constraints from the parent session:
 You can run sub-agents on a separate model to save costs or speed up parallel searches:
 
 - **TUI Commands**:
-  - `/subagent-model <model>` — set model for sub-agents (e.g. `/subagent-model gpt-4o-mini`)
-  - `/subagent-model-provider <provider>` — set provider for sub-agents
+  - `/subagent-model <model>`: set model for sub-agents (e.g. `/subagent-model gpt-4o-mini`)
+  - `/subagent-model-provider <provider>`: set provider for sub-agents
 - **Web UI**: Managed under Settings → Model tab (`Subagent Model` slot).
 - **Configuration**: Persisted in `~/.cast/settings.json` under `subagentModel` and `subagentModelProvider`.

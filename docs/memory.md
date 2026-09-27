@@ -5,7 +5,7 @@
 Cast is a coding agent: it reads code, edits files, runs commands, and talks to
 an LLM. By default an agent forgets everything the moment a conversation ends.
 **Memory is what lets Cast keep useful knowledge about your project across
-sessions** — so the next time you open Cast in the same project, it already
+sessions**, so the next time you open Cast in the same project, it already
 knows the decisions you made, the rules you set, and the problems it solved.
 
 Think of it as a **notebook** the agent keeps for your project:
@@ -16,7 +16,7 @@ Think of it as a **notebook** the agent keeps for your project:
   reads the notebook instead of asking you to re-explain everything.
 
 Memory is *durable* (it survives restarts) and *scoped* (per project, per
-session, or global). It is never the source of truth for your code — it is a
+session, or global). It is never the source of truth for your code. It is a
 memory aid. When the current code contradicts a remembered fact, trust the
 code.
 
@@ -26,12 +26,12 @@ Memory has two layers:
 
 | Layer | What it is | Example |
 |-------|-----------|---------|
-| **The files** | Human- and agent-readable markdown documents — the *source of truth*. | `~/.cast/memory/projects/<id>/MEMORY.md` |
+| **The files** | Human- and agent-readable markdown documents, the *source of truth*. | `~/.cast/memory/projects/<id>/MEMORY.md` |
 | **The search index** | A SQLite full-text index derived from those files, for fast lookup. | `~/.cast/sessions/sessions.db` |
 
 The files are what the agent edits (with normal file tools, like a person would
 open a document). The SQLite index is just a copy the search tool can query
-fast — it is rebuilt from the files automatically, never edited by hand.
+fast. It is rebuilt from the files automatically, never edited by hand.
 
 ## What gets remembered
 
@@ -69,11 +69,11 @@ Four things write memory:
 
 1. **The agent itself**, through the `memory` tool. An entry the agent stores
    is written straight into the project's `MEMORY.md` as well as the index, so
-   a fact learned mid-conversation survives in the file a person reads — and
+   a fact learned mid-conversation survives in the file a person reads, and
    survives the next dream, which reconciles the file rather than replacing it.
 2. **The checkpoint writer.** While a conversation grows, Cast keeps a copy of
    the transcript in its context window. When the used context crosses a
-   **threshold** — a percentage of the model's window — Cast quietly launches a
+   **threshold** (a percentage of the model's window), Cast quietly launches a
    background agent that updates `checkpoint.md` and `MEMORY.md`. Default
    thresholds: 20/40/60/80% for windows up to 200K tokens, 10% steps up to
    500K, 5% steps above. Each threshold fires once per session, and thresholds
@@ -98,8 +98,8 @@ off entirely while reading stays available.
 There are two ways memory reaches the agent:
 
 1. **Automatically, after compaction.** When a conversation grows too large,
-   Cast summarizes the old part (compaction) and injects the durable memory —
-   project `MEMORY.md`, the session checkpoint, notes, and task progress — as
+   Cast summarizes the old part (compaction) and injects the durable memory
+   (project `MEMORY.md`, the session checkpoint, notes, and task progress) as
    context for the continuation. That's how a compacted session "remembers".
 2. **On demand, with the `memory` tool.** The agent can search memory mid-
    conversation. File-backed results return a file path plus a snippet; the
@@ -117,12 +117,12 @@ limit      — max results (default 10)
 
 Scopes explained:
 
-- `projects` (default) — the current project's `MEMORY.md` facts, spillover
+- `projects` (default): the current project's `MEMORY.md` facts, spillover
   files, and this project's session files.
-- `sessions` — checkpoint/notes/task files (optionally one session via
+- `sessions`: checkpoint/notes/task files (optionally one session via
   `scope_id`).
-- `cc` — Claude Code memory (requires `memoryCcIndex`).
-- `global` — cross-project `MEMORY.md`.
+- `cc`: Claude Code memory (requires `memoryCcIndex`).
+- `global`: cross-project `MEMORY.md`.
 
 ## Commands
 
@@ -167,16 +167,16 @@ All memory settings live in `~/.cast/settings.json`. The most relevant:
 
 **Session history** (`session_history` tool) is raw conversation: previous
 messages, verbatim. Use it when you need the exact wording of something said
-earlier. Memory is the *distilled* version — durable facts, not transcripts.
+earlier. Memory is the *distilled* version: durable facts, not transcripts.
 They are deliberately separate: history is evidence, memory is conclusions.
 
-Memory is also **not** your code, your git history, or your filesystem — it is
+Memory is also **not** your code, your git history, or your filesystem. It is
 Cast's own notes about them.
 
 ## Common questions
 
 **Can I read/edit the memory myself?** Yes. The files are plain markdown under
-`~/.cast/memory/`. Edit them by hand — the search index picks up the changes on
+`~/.cast/memory/`. Edit them by hand. The search index picks up the changes on
 the next search (or run `/memory reconcile`). The Web UI also shows memory in
 the Memory sidebar. Some entries carry a trailing HTML comment
 (`<!-- cast: type=rule conf=0.9 … -->`) holding the metadata markdown cannot
@@ -189,7 +189,7 @@ project (identified by its path). Only `global/MEMORY.md` is cross-project.
 **Does the agent always see all memory?** No. Memory is injected only when it
 matters: automatically after compaction, and on demand via the `memory` tool.
 In ordinary turns the agent gets a short reminder that memory exists, not the
-whole file — that would waste context.
+whole file. That would waste context.
 
 **Will deleting `~/.cast/memory/` break anything?** It clears memory only; the
 search index is rebuilt from whatever files remain. Your sessions, code, and
