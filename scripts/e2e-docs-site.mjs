@@ -104,6 +104,13 @@ try {
 	assert.equal(await desktop.locator(".workspace-copy-btn").count(), 2, "install commands must have copy buttons");
 	assert.equal(await desktop.locator(".workspace-copy-btn svg").count(), 2, "copy buttons must use project-style SVG icons");
 	await desktop.getByRole("button", { name: "Copy macOS and Linux install command" }).click();
+	// Copying is async (and may fall back to the copy command when the
+	// Clipboard API is refused), so wait for the acknowledgement rather than
+	// reading it the instant the click returns.
+	await desktop
+		.getByRole("button", { name: "Copied" })
+		.waitFor({ timeout: 3000 })
+		.catch(() => {});
 	assert.equal(await desktop.getByRole("button", { name: "Copied" }).count(), 1, "copy button must acknowledge a successful copy");
 	const previewText = await desktop.locator(".workspace-ui").innerText();
 	assert(!previewText.includes("ready"), "preview must not show the ready label");

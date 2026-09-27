@@ -144,10 +144,15 @@ const FONT_LINKS = `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap">`;
 
 // Pinned and integrity-checked: a floating @11 let the CDN swap the build
-// under every page. Only pages with a diagram load it; it is ~3.5MB.
-const MERMAID_SCRIPT =
-	'<script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js" integrity="sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2" crossorigin="anonymous"></script>';
+// under every page. Only pages with a diagram load it (~3.5MB), and only as
+// the diagram nears the screen.
+const MERMAID_SRC = "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js";
+const MERMAID_INTEGRITY = "sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2";
 
+// Inlined on purpose: measured on a throttled connection, a linked (cached)
+// sheet saved ~35KB per page change but pushed first paint from ~380ms to
+// ~630ms, a render-blocking round trip that gzip's ~7KB of inline CSS never
+// costs. Most visits land on one page from a search.
 const CSS = `
 :root {
 	--bg: #08080a;
@@ -198,8 +203,19 @@ const CSS = `
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Smooth anchor scrolling only for those who haven't asked for less motion. */
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+/* First in the Tab order, so a keyboard skips the 27-link sidebar. Hidden
+   until focused. */
+.skip-link {
+	position: fixed; top: 8px; left: 8px; z-index: 200;
+	padding: 10px 14px; border-radius: var(--radius-sm);
+	background: var(--action); color: #fff; font-weight: 600;
+	transform: translateY(-160%);
+}
+.skip-link:focus { transform: none; color: #fff; }
 html {
-	font-size: 15px; scroll-behavior: smooth;
+	font-size: 15px;
 	scrollbar-width: thin; scrollbar-color: var(--accent) var(--bg-surface);
 }
 body {
@@ -506,6 +522,9 @@ a:hover { color: #c084fc; text-decoration: none; }
 	margin-top: 48px; padding-top: 24px;
 	border-top: 1px solid var(--border);
 }
+/* "Previous" / "Next" as a small label over the page name, in place of
+   arrow glyphs. */
+.doc-nav a span { display: block; margin-bottom: 2px; color: var(--text-muted); font-size: .75rem; font-weight: 400; }
 .doc-nav a {
 	padding: 12px 20px; border: 1px solid var(--border); border-radius: 8px;
 	font-size: .9rem; font-weight: 500; color: var(--text-secondary);
@@ -718,7 +737,6 @@ a:hover { color: #c084fc; text-decoration: none; }
 	max-width: 620px; font-size: clamp(2.7rem, 6vw, 5rem); line-height: 1.02;
 	letter-spacing: -.04em; font-weight: 700; margin-bottom: 22px;
 }
-.workspace-title .accent { color: #c084fc; }
 .workspace-copy {
 	max-width: 560px; font-size: 1.05rem; line-height: 1.7; color: var(--text-dim); margin-bottom: 30px;
 }
@@ -730,15 +748,13 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .workspace-section-heading h2 { margin: 0; font-size: 1.55rem; letter-spacing: -.025em; }
 .workspace-section-heading p { max-width: 450px; margin: 0; color: var(--text-muted); font-size: .86rem; }
-.workspace-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
-.workspace-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; transition: border-color .15s, transform .15s, background .15s; }
-.workspace-card:hover { border-color: var(--border-active); background: var(--bg-raised); transform: translateY(-2px); }
-.workspace-card h3 { margin: 0 0 7px; font-size: .98rem; }
-.workspace-card p { margin: 0; color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
-.workspace-card-link { display: block; color: inherit; }
-.workspace-card-link:hover { color: inherit; }
-.workspace-card-tag { display: inline-block; margin-bottom: 16px; color: var(--accent-text); font: 600 .75rem var(--font-mono); text-transform: uppercase; letter-spacing: .1em; }
-.workspace-card-arrow { display: block; margin-top: 16px; color: var(--purple); font: .75rem var(--font-mono); }
+/* Two points, plain: heading, text, link. They used to be cards with a
+   numbered "01 / setup" label, a hover lift and a mono arrow link. */
+.workspace-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; }
+.workspace-point h3 { margin: 0 0 8px; font-size: 1.05rem; }
+.workspace-point p { margin: 0 0 12px; max-width: 48ch; color: var(--text-dim); font-size: .95rem; line-height: 1.6; }
+.workspace-point a { color: var(--accent-text); font-size: .92rem; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--accent-muted); }
+.workspace-point a:hover { text-decoration-color: currentColor; }
 .workspace-install { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
 .workspace-install .install-block { max-width: none; min-width: 0; margin: 0; padding: 16px; overflow: hidden; }
 .workspace-code { position: relative; min-width: 0; padding-right: 34px; }
@@ -750,6 +766,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	transition: color .1s ease, border-color .1s ease, background .1s ease;
 }
 .workspace-copy-btn svg { width: 14px; height: 14px; }
+main:focus { outline: none; }
 .workspace-copy-btn:hover, .workspace-copy-btn:focus-visible { color: var(--text); border-color: var(--text-muted); }
 .workspace-copy-btn.copied { color: var(--teal); border-color: var(--teal); }
 /* Every page, grouped: lists under a heading instead of twelve same-size
@@ -768,7 +785,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	transition: color .15s;
 }
 .workspace-docs-group a:hover { color: var(--purple); }
-.workspace-footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 20px; color: var(--text-muted); font: .75rem var(--font-mono); text-align: center; }
+.workspace-footer { display: flex; align-items: center; justify-content: center; gap: 28px; padding-top: 20px; color: var(--text-muted); font: .75rem var(--font-mono); text-align: center; }
 .workspace-footer a { color: var(--text-muted); transition: color .15s ease; }
 .workspace-footer a:hover { color: var(--purple); }
 @media (max-width: 900px) {
@@ -826,14 +843,14 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-ui-persona.active { color: var(--purple); border-color: color-mix(in srgb, var(--purple) 55%, var(--border)); background: var(--accent-subtle); }
 .workspace-ui-messages { flex: 1; padding: 18px 17px 14px; }
 .workspace-ui-message { display: flex; gap: 9px; margin-bottom: 17px; }
-.workspace-ui-avatar { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 5px; background: var(--teal); color: var(--bg); font: 700 .75rem var(--font-mono); }
-.workspace-ui-avatar.agent { background: var(--purple); }
 .workspace-ui-message-content { min-width: 0; }
 .workspace-ui-message-label { margin-bottom: 4px; color: var(--text-muted); font: .75rem var(--font-mono); text-transform: uppercase; }
 .workspace-ui-message-text { color: var(--text-dim); font-size: .8rem; line-height: 1.55; }
 .workspace-ui-message-text strong { color: var(--text); font-weight: 600; }
-.workspace-ui-tool { margin: -2px 0 15px 33px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); font: .75rem var(--font-mono); }
-.workspace-ui-tool::before { content: "✓"; margin-right: 6px; color: var(--teal); }
+/* Tool calls as the Web UI shows them: the tool's name, then its argument. */
+.workspace-ui-tools { display: grid; gap: 4px; margin: -2px 0 15px; }
+.workspace-ui-tool { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); font: .75rem var(--font-mono); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.workspace-ui-tool-name { padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-raised); color: var(--blue); }
 .workspace-ui-panel[hidden] { display: none; }
 @media (max-width: 640px) {
 	.workspace-ui-body { grid-template-columns: 1fr; min-height: 350px; }
@@ -1009,13 +1026,14 @@ const LANDING_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>cast — Agent workspace</title>
+<title>cast | Agent workspace</title>
 <meta name="description" content="cast is a role-based agent workspace for your repository and OpenAI-compatible model.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 ${FONT_LINKS}
 <style>${CSS}</style>
 </head>
 <body>
+<a class="skip-link" href="#content">Skip to content</a>
 <header class="header">
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
 	<span class="header-badge">v${PACKAGE_VERSION}</span>
@@ -1026,13 +1044,13 @@ ${FONT_LINKS}
 </header>
 
 <div class="main main-landing">
-	<main class="workspace-shell">
+	<main class="workspace-shell" id="content" tabindex="-1">
 		<section class="workspace-hero" aria-labelledby="workspace-title">
 			<div>
-				<h1 id="workspace-title" class="workspace-title">Work with a <span class="accent">different lens.</span></h1>
+				<h1 id="workspace-title" class="workspace-title">Work with a different lens.</h1>
 				<p class="workspace-copy">A focused agent harness for real repositories. Choose the role, keep the same tool surface, and let the work follow the shape of the task.</p>
 				<div class="workspace-actions">
-					<a href="getting-started.html" class="btn-primary">Open the workspace <span aria-hidden="true">→</span></a>
+					<a href="getting-started.html" class="btn-primary">Open the workspace</a>
 					<a href="personas.html" class="btn-secondary">Browse personas</a>
 				</div>
 			</div>
@@ -1040,11 +1058,11 @@ ${FONT_LINKS}
 			<div class="workspace-ui" aria-label="Cast Web UI preview">
 				<div class="workspace-ui-header">
 					<div class="workspace-ui-brand"><span class="workspace-ui-status" role="status" aria-label="Backend connected" title="Backend connected"></span></div>
-					<div class="workspace-ui-actions" aria-hidden="true"><span>◌</span><span>⌘</span><span>⚙</span></div>
+					<div class="workspace-ui-actions" aria-hidden="true"><span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg></span><span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M8 17v-5m5 5v-9m5 9v-3"/></svg></span><span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg></span></div>
 				</div>
 				<div class="workspace-ui-body">
 					<aside class="workspace-ui-sidebar" aria-label="Sessions preview">
-						<button class="workspace-ui-new" type="button">＋ New session</button>
+						<button class="workspace-ui-new" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5v15m7.5-7.5h-15"/></svg>New session</button>
 						<div class="workspace-ui-directory">Directory<strong>~/projects/auth-service</strong></div>
 						<div class="workspace-ui-sidebar-title">Sessions</div>
 						<button class="workspace-ui-session active" type="button">Review auth flow</button>
@@ -1061,11 +1079,11 @@ ${FONT_LINKS}
 							<button class="workspace-ui-persona" type="button" role="tab" aria-selected="false" data-persona-switch="planner">Planner</button>
 						</div>
 						<div class="workspace-ui-messages">
-							<div class="workspace-ui-message"><div class="workspace-ui-avatar">U</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">you</div><div class="workspace-ui-message-text">Audit the auth flow and identify the highest-risk edge cases.</div></div></div>
-							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="senior"><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Senior</div><div class="workspace-ui-message-text">I traced the request path and found <strong>3 places where session state can drift.</strong></div></div></div><div class="workspace-ui-tool">read auth.ts · search session · run tests</div></div>
-							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="analyst" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Analyst</div><div class="workspace-ui-message-text">The biggest uncertainty is the session boundary. I mapped <strong>four assumptions</strong> that need evidence before changing code.</div></div></div><div class="workspace-ui-tool">search auth · inspect config · map assumptions</div></div>
-							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="reviewer" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Reviewer</div><div class="workspace-ui-message-text">The risky paths are the unhappy ones: expired sessions, retries, and <strong>missing coverage around logout.</strong></div></div></div><div class="workspace-ui-tool">inspect tests · check regressions · report gaps</div></div>
-							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="planner" hidden><div class="workspace-ui-message"><div class="workspace-ui-avatar agent">C</div><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Planner</div><div class="workspace-ui-message-text">I split the work into <strong>three verifiable steps</strong>, starting with a trace of the request lifecycle.</div></div></div><div class="workspace-ui-tool">write plan · define checks · sequence work</div></div>
+							<div class="workspace-ui-message"><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">you</div><div class="workspace-ui-message-text">Audit the auth flow and identify the highest-risk edge cases.</div></div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="senior"><div class="workspace-ui-message"><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Senior</div><div class="workspace-ui-message-text">I traced the request path and found <strong>3 places where session state can drift.</strong></div></div></div><div class="workspace-ui-tools"><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">read</span>src/auth.ts</div><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">grep</span>session</div><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">bash</span>npm test</div></div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="analyst" hidden><div class="workspace-ui-message"><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Analyst</div><div class="workspace-ui-message-text">The biggest uncertainty is the session boundary. I mapped <strong>four assumptions</strong> that need evidence before changing code.</div></div></div><div class="workspace-ui-tools"><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">grep</span>auth</div><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">read</span>config/session.ts</div><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">read</span>src/auth.ts</div></div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="reviewer" hidden><div class="workspace-ui-message"><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Reviewer</div><div class="workspace-ui-message-text">The risky paths are the unhappy ones: expired sessions, retries, and <strong>missing coverage around logout.</strong></div></div></div><div class="workspace-ui-tools"><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">read</span>test/auth.test.ts</div><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">grep</span>logout</div><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">bash</span>npm test</div></div></div>
+							<div class="workspace-ui-panel" role="tabpanel" data-persona-panel="planner" hidden><div class="workspace-ui-message"><div class="workspace-ui-message-content"><div class="workspace-ui-message-label">Planner</div><div class="workspace-ui-message-text">I split the work into <strong>three verifiable steps</strong>, starting with a trace of the request lifecycle.</div></div></div><div class="workspace-ui-tools"><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">read</span>src/auth.ts</div><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">grep</span>session</div><div class="workspace-ui-tool"><span class="workspace-ui-tool-name">write</span>.cast/plans/auth.md</div></div></div>
 						</div>
 					</section>
 				</div>
@@ -1075,10 +1093,8 @@ ${FONT_LINKS}
 		<section class="workspace-section" aria-labelledby="start-title">
 			<div class="workspace-section-heading"><h2 id="start-title">Start where the work is</h2></div>
 			<div class="workspace-grid">
-				<a class="workspace-card workspace-card-link" href="getting-started.html">
-					<span class="workspace-card-tag">01 / setup</span><h3>Connect your model</h3><p>Install Cast, point it at OpenRouter, Ollama, vLLM, or any OpenAI-compatible endpoint, and start in your repository.</p><span class="workspace-card-arrow">Read the quick start →</span>
-				</a>
-				<div class="workspace-card"><span class="workspace-card-tag">02 / choose a lens</span><h3>Personas for the moment</h3><p>Switch perspective without changing your tools or context. Use the persona tabs in the workspace preview to see how the investigation changes.</p></div>
+				<div class="workspace-point"><h3>Connect your model</h3><p>Install Cast, point it at OpenRouter, Ollama, vLLM, or any OpenAI-compatible endpoint, and start in your repository.</p><a href="getting-started.html">Read the quick start</a></div>
+				<div class="workspace-point"><h3>Personas for the moment</h3><p>Switch perspective without changing your tools or context. Use the persona tabs in the workspace preview to see how the investigation changes.</p><a href="personas.html">How personas work</a></div>
 			</div>
 		</section>
 
@@ -1098,7 +1114,7 @@ ${FONT_LINKS}
 						`<section class="workspace-docs-group" aria-labelledby="docs-group-${i}"><h3 id="docs-group-${i}">${group.title}</h3><ul>${group.items.map((item) => `<li><a href="${item.file.replace(".md", ".html")}">${item.label}</a></li>`).join("")}</ul></section>`,
 				).join("\n\t\t\t\t")}
 			</nav>
-			<div class="workspace-footer"><a href="https://github.com/aa-blinov/cast">GitHub</a><span aria-hidden="true">·</span><a href="https://github.com/aa-blinov/cast/blob/master/LICENSE">MIT License</a></div>
+			<div class="workspace-footer"><a href="https://github.com/aa-blinov/cast">GitHub</a><a href="https://github.com/aa-blinov/cast/blob/master/LICENSE">MIT License</a></div>
 		</section>
 	</main>
 </div>
@@ -1122,16 +1138,20 @@ document.querySelectorAll('.workspace-copy-btn').forEach((button) => {
 	button.addEventListener('click', async () => {
 		const code = button.closest('.install-block')?.querySelector('code')?.textContent ?? '';
 		try {
-			if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code);
-			else {
+			// The Clipboard API can be refused (a policy, an unfocused or embedded
+			// page) while the old copy command still works; try both first.
+			const viaCommand = () => {
 				const textarea = document.createElement('textarea');
 				textarea.value = code;
 				textarea.style.cssText = 'position:fixed;opacity:0';
 				document.body.appendChild(textarea);
 				textarea.select();
-				document.execCommand('copy');
+				const ok = document.execCommand('copy');
 				textarea.remove();
-			}
+				if (!ok) throw new Error('copy command refused');
+			};
+			if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code).catch(viaCommand);
+			else viaCommand();
 			button.classList.add('copied');
 			button.innerHTML = '${LANDING_CHECK_ICON_SVG}';
 			button.title = 'Copied';
@@ -1176,20 +1196,21 @@ function docPage(title, bodyHtml, activeFile) {
 	const idx = NAV_ORDER.findIndex((item) => item.file === activeFile);
 	const prev = idx > 0 ? NAV_ORDER[idx - 1] : NAV_ORDER[NAV_ORDER.length - 1];
 	const next = idx < NAV_ORDER.length - 1 ? NAV_ORDER[idx + 1] : NAV_ORDER[0];
-	const docNav = `\n\t\t<nav class="doc-nav">\n\t\t\t<a href="${prev.file.replace(".md", ".html")}" class="doc-nav-prev">← ${prev.label}</a>\n\t\t\t<a href="${next.file.replace(".md", ".html")}" class="doc-nav-next">${next.label} →</a>\n\t\t</nav>`;
+	const docNav = `\n\t\t<nav class="doc-nav">\n\t\t\t<a href="${prev.file.replace(".md", ".html")}" class="doc-nav-prev"><span>Previous</span>${prev.label}</a>\n\t\t\t<a href="${next.file.replace(".md", ".html")}" class="doc-nav-next"><span>Next</span>${next.label}</a>\n\t\t</nav>`;
 
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>${title} — cast</title>
+<title>${title} | cast</title>
 <meta name="description" content="${title} documentation for cast, a role-based terminal agent harness.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 ${FONT_LINKS}
 <style>${CSS}</style>
 </head>
 <body>
+<a class="skip-link" href="#content">Skip to content</a>
 <header class="header">
 	<button class="menu-toggle" type="button" aria-label="Documentation menu" aria-expanded="false" aria-controls="doc-sidebar">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
@@ -1206,7 +1227,7 @@ ${sidebarLinks}
 </nav>
 
 <div id="copy-status" class="visually-hidden" role="status" aria-live="polite"></div>
-<main class="main">
+<main class="main" id="content" tabindex="-1">
 	<article class="content">
 		${bodyHtml}
 	</article>${docNav}
@@ -1238,13 +1259,28 @@ ${sidebarLinks}
 	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(true); });
 })();
 </script>
-${bodyHtml.includes('<pre class="mermaid"') ? MERMAID_SCRIPT : ""}
 <script>
 // Sources are base64 of UTF-8 bytes; atob alone yields Latin-1, which turned
 // every "—", "→" or box-drawing line into mojibake on the clipboard and in
 // diagram labels.
 function decodeBase64(value) {
 	return new TextDecoder().decode(Uint8Array.from(atob(value || ''), (c) => c.charCodeAt(0)));
+}
+// The Clipboard API can be refused (a policy, an unfocused or embedded page)
+// while the old copy command still works; only both failing is a failure.
+async function copyText(text) {
+	const viaCommand = () => {
+		const textarea = document.createElement('textarea');
+		textarea.value = text;
+		textarea.style.cssText = 'position:fixed;opacity:0';
+		document.body.appendChild(textarea);
+		textarea.select();
+		const ok = document.execCommand('copy');
+		textarea.remove();
+		if (!ok) throw new Error('copy command refused');
+	};
+	if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text).catch(viaCommand);
+	else viaCommand();
 }
 function announce(message) {
 	const status = document.getElementById('copy-status');
@@ -1257,7 +1293,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 	// Offline, or the CDN is blocked: leave each diagram's source readable
 	// rather than a blank box, and say why.
-	if (typeof mermaid === 'undefined') {
+	const showSource = () => {
 		blocks.forEach((pre) => {
 			pre.textContent = decodeBase64(pre.dataset.raw) || pre.textContent;
 			pre.className = 'mermaid-code visible';
@@ -1266,123 +1302,145 @@ document.addEventListener('DOMContentLoaded', () => {
 			note.textContent = "The diagram viewer couldn't load, so this is the diagram's source.";
 			pre.before(note);
 		});
-		return;
-	}
-
-	mermaid.initialize({ startOnLoad: false, theme: 'dark' });
-
-	blocks.forEach((pre, i) => {
-		const raw = decodeBase64(pre.dataset.raw) || pre.textContent;
-
-		// Build viewer shell
-		const viewer = document.createElement('div');
-		viewer.className = 'mermaid-viewer';
-
-		const toolbar = document.createElement('div');
-		toolbar.className = 'mermaid-toolbar';
-		toolbar.innerHTML =
-			'<button class="active" data-view="diagram">Diagram</button>' +
-			'<button data-view="code">Code</button>' +
-			'<span class="zoom-label">Zoom:</span>' +
-			'<button data-zoom="out">−</button>' +
-			'<button data-zoom="reset">100%</button>' +
-			'<button data-zoom="in">+</button>';
-
-		const diagram = document.createElement('div');
-		diagram.className = 'mermaid-diagram';
-
-		const code = document.createElement('pre');
-		code.className = 'mermaid-code';
-		code.textContent = raw;
-
-		viewer.append(toolbar, diagram, code);
-		pre.replaceWith(viewer);
-
-		// Render mermaid
-		const id = 'mermaid-' + i;
-		mermaid.render(id, raw).then(({ svg }) => {
-			diagram.innerHTML = svg;
-		}).catch(err => {
-			const failure = document.createElement('pre');
-			failure.className = 'mermaid-error';
-			failure.textContent = "This diagram couldn't be drawn: " + err.message;
-			diagram.replaceChildren(failure);
+	};
+	// The ~1MB (compressed) viewer loads only as a diagram nears the screen,
+	// so the text above it isn't waiting on a download it may never need.
+	const loadMermaid = () =>
+		new Promise((resolve, reject) => {
+			const script = document.createElement('script');
+			script.src = '${MERMAID_SRC}';
+			script.integrity = '${MERMAID_INTEGRITY}';
+			script.crossOrigin = 'anonymous';
+			script.onload = resolve;
+			script.onerror = reject;
+			document.head.append(script);
 		});
+	const observer = new IntersectionObserver(
+		(entries) => {
+			if (!entries.some((entry) => entry.isIntersecting)) return;
+			observer.disconnect();
+			loadMermaid().then(() => (typeof mermaid === 'undefined' ? showSource() : draw()), showSource);
+		},
+		{ rootMargin: '800px 0px' },
+	);
+	blocks.forEach((pre) => observer.observe(pre));
 
-		// Zoom + pan state
-		let zoom = 1, panX = 0, panY = 0, dragging = false, startX, startY;
-		const zoomLabel = toolbar.querySelector('[data-zoom="reset"]');
-		const applyTransform = () => {
-			const svg = diagram.querySelector('svg');
-			if (svg) svg.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
-			zoomLabel.textContent = Math.round(zoom * 100) + '%';
-		};
+	function draw() {
+		mermaid.initialize({ startOnLoad: false, theme: 'dark' });
 
-		// Drag to pan (mouse + touch)
-		const getPos = e => e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
-		const onStart = e => {
-			const p = getPos(e); dragging = true;
-			startX = p.x - panX; startY = p.y - panY;
-			diagram.classList.add('dragging');
-		};
-		const onMove = e => {
-			if (!dragging) return;
-			const p = getPos(e);
-			panX = p.x - startX; panY = p.y - startY;
-			applyTransform();
-		};
-		const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
+		blocks.forEach((pre, i) => {
+			const raw = decodeBase64(pre.dataset.raw) || pre.textContent;
 
-diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
-		document.addEventListener('mousemove', onMove);
-		document.addEventListener('mouseup', onEnd);
-		diagram.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e); }, { passive: true });
-		document.addEventListener('touchmove', e => { if (e.touches.length === 1 && dragging) onMove(e); }, { passive: true });
-		document.addEventListener('touchend', onEnd);
+			// Build viewer shell
+			const viewer = document.createElement('div');
+			viewer.className = 'mermaid-viewer';
 
-		// Pinch to zoom (touch)
-		let lastPinchDist = 0;
-		diagram.addEventListener('touchstart', e => {
-			if (e.touches.length === 2) {
-				const dx = e.touches[0].clientX - e.touches[1].clientX;
-				const dy = e.touches[0].clientY - e.touches[1].clientY;
-				lastPinchDist = Math.hypot(dx, dy);
-			}
-		}, { passive: true });
-		diagram.addEventListener('touchmove', e => {
-			if (e.touches.length === 2) {
-				e.preventDefault();
-				const dx = e.touches[0].clientX - e.touches[1].clientX;
-				const dy = e.touches[0].clientY - e.touches[1].clientY;
-				const dist = Math.hypot(dx, dy);
-				if (lastPinchDist > 0) {
-					zoom = Math.min(3, Math.max(0.25, zoom * (dist / lastPinchDist)));
-					applyTransform();
+			const toolbar = document.createElement('div');
+			toolbar.className = 'mermaid-toolbar';
+			toolbar.innerHTML =
+				'<button class="active" data-view="diagram">Diagram</button>' +
+				'<button data-view="code">Code</button>' +
+				'<span class="zoom-label">Zoom:</span>' +
+				'<button data-zoom="out">−</button>' +
+				'<button data-zoom="reset">100%</button>' +
+				'<button data-zoom="in">+</button>';
+
+			const diagram = document.createElement('div');
+			diagram.className = 'mermaid-diagram';
+
+			const code = document.createElement('pre');
+			code.className = 'mermaid-code';
+			code.textContent = raw;
+
+			viewer.append(toolbar, diagram, code);
+			pre.replaceWith(viewer);
+
+			// Render mermaid
+			const id = 'mermaid-' + i;
+			mermaid.render(id, raw).then(({ svg }) => {
+				diagram.innerHTML = svg;
+			}).catch(err => {
+				const failure = document.createElement('pre');
+				failure.className = 'mermaid-error';
+				failure.textContent = "This diagram couldn't be drawn: " + err.message;
+				diagram.replaceChildren(failure);
+			});
+
+			// Zoom + pan state
+			let zoom = 1, panX = 0, panY = 0, dragging = false, startX, startY;
+			const zoomLabel = toolbar.querySelector('[data-zoom="reset"]');
+			const applyTransform = () => {
+				const svg = diagram.querySelector('svg');
+				if (svg) svg.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+				zoomLabel.textContent = Math.round(zoom * 100) + '%';
+			};
+
+			// Drag to pan (mouse + touch)
+			const getPos = e => e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY };
+			const onStart = e => {
+				const p = getPos(e); dragging = true;
+				startX = p.x - panX; startY = p.y - panY;
+				diagram.classList.add('dragging');
+			};
+			const onMove = e => {
+				if (!dragging) return;
+				const p = getPos(e);
+				panX = p.x - startX; panY = p.y - startY;
+				applyTransform();
+			};
+			const onEnd = () => { dragging = false; diagram.classList.remove('dragging'); };
+
+	diagram.addEventListener('mousedown', e => { onStart(e); e.preventDefault(); });
+			document.addEventListener('mousemove', onMove);
+			document.addEventListener('mouseup', onEnd);
+			diagram.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e); }, { passive: true });
+			document.addEventListener('touchmove', e => { if (e.touches.length === 1 && dragging) onMove(e); }, { passive: true });
+			document.addEventListener('touchend', onEnd);
+
+			// Pinch to zoom (touch)
+			let lastPinchDist = 0;
+			diagram.addEventListener('touchstart', e => {
+				if (e.touches.length === 2) {
+					const dx = e.touches[0].clientX - e.touches[1].clientX;
+					const dy = e.touches[0].clientY - e.touches[1].clientY;
+					lastPinchDist = Math.hypot(dx, dy);
 				}
-				lastPinchDist = dist;
-			}
+			}, { passive: true });
+			diagram.addEventListener('touchmove', e => {
+				if (e.touches.length === 2) {
+					e.preventDefault();
+					const dx = e.touches[0].clientX - e.touches[1].clientX;
+					const dy = e.touches[0].clientY - e.touches[1].clientY;
+					const dist = Math.hypot(dx, dy);
+					if (lastPinchDist > 0) {
+						zoom = Math.min(3, Math.max(0.25, zoom * (dist / lastPinchDist)));
+						applyTransform();
+					}
+					lastPinchDist = dist;
+				}
+			});
+			diagram.addEventListener('touchend', e => { if (e.touches.length < 2) lastPinchDist = 0; });
+
+			// Zoom + view toggle buttons
+			toolbar.addEventListener('click', e => {
+				const btn = e.target.closest('button');
+				if (!btn) return;
+
+				if (btn.dataset.view) {
+					toolbar.querySelectorAll('[data-view]').forEach(b => b.classList.remove('active'));
+					btn.classList.add('active');
+					diagram.style.display = btn.dataset.view === 'diagram' ? '' : 'none';
+					code.classList.toggle('visible', btn.dataset.view === 'code');
+					return;
+				}
+
+				if (btn.dataset.zoom === 'in') zoom = Math.min(3, zoom + 0.25);
+				else if (btn.dataset.zoom === 'out') zoom = Math.max(0.25, zoom - 0.25);
+				else if (btn.dataset.zoom === 'reset') { zoom = 1; panX = 0; panY = 0; }
+				applyTransform();
+			});
 		});
-		diagram.addEventListener('touchend', e => { if (e.touches.length < 2) lastPinchDist = 0; });
-
-		// Zoom + view toggle buttons
-		toolbar.addEventListener('click', e => {
-			const btn = e.target.closest('button');
-			if (!btn) return;
-
-			if (btn.dataset.view) {
-				toolbar.querySelectorAll('[data-view]').forEach(b => b.classList.remove('active'));
-				btn.classList.add('active');
-				diagram.style.display = btn.dataset.view === 'diagram' ? '' : 'none';
-				code.classList.toggle('visible', btn.dataset.view === 'code');
-				return;
-			}
-
-			if (btn.dataset.zoom === 'in') zoom = Math.min(3, zoom + 0.25);
-			else if (btn.dataset.zoom === 'out') zoom = Math.max(0.25, zoom - 0.25);
-			else if (btn.dataset.zoom === 'reset') { zoom = 1; panX = 0; panY = 0; }
-			applyTransform();
-		});
-	});
+	}
 });
 // ── Copy button for code blocks ──
 document.addEventListener('DOMContentLoaded', () => {
@@ -1391,7 +1449,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		if (!btn) return;
 		const raw = decodeBase64(btn.dataset.copy);
 		try {
-			await navigator.clipboard.writeText(raw);
+			await copyText(raw);
 			btn.textContent = 'copied';
 			btn.classList.add('copied');
 			announce('Copied to the clipboard');
@@ -1597,7 +1655,10 @@ const NOT_FOUND_BODY = `<h1>Page not found</h1>
 <p>Start from the <a href="index.html">home page</a> or <a href="getting-started.html">Getting Started</a>, or pick a page in the sidebar.</p>`;
 writeFileSync(
 	join(SITE, "404.html"),
-	docPage("Page not found", NOT_FOUND_BODY, "").replace("<head>", '<head>\n<base href="/cast/">'),
+	docPage("Page not found", NOT_FOUND_BODY, "")
+		.replace("<head>", '<head>\n<base href="/cast/">')
+		// Under that base "#content" would resolve to the home page.
+		.replace('href="#content"', 'href="404.html#content"'),
 );
 console.log("  404.html");
 
