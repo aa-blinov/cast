@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.43.1
+
+### Fixed
+
+- **Background commands no longer lose the end of their output.** When a background `bash` command finished on a busy machine, output it printed just before exiting could be dropped, so the agent saw a cut-off result. It now waits for the terminal to deliver everything the command wrote.
+
 ## 0.43.0
 
 ### Added
