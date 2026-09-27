@@ -61,7 +61,7 @@ cast speaks the OpenAI chat completions format. Supported providers include Open
 
 ### Parallel Tool Execution
 
-Read-only tool calls within one assistant message run concurrently via `Promise.all` — `read`, `grep`, `glob`, `ls`, `memory`, `session_history`, `web_search`, `web_fetch` and `bash_output`. Everything else (shells, writes, `task`, plan tools, MCP tools) runs in call order, so a sibling mutation can't race another tool in the same response.
+Read-only tool calls within one assistant message run concurrently via `Promise.all`: `read`, `grep`, `glob`, `ls`, `memory`, `session_history`, `web_search`, `web_fetch` and `bash_output`. Everything else (shells, writes, `task`, plan tools, MCP tools) runs in call order, so a sibling mutation can't race another tool in the same response.
 
 ### Hashline LRU Cache
 
@@ -102,9 +102,9 @@ A turn runs as a bounded outer iteration:
 
 1. **Prompt assembly.** The user message (or a steered/follow-up message injected mid-turn) is appended to `session.messages`. The system prompt is rebuilt per turn via `rebuildSystemPrompt` (sticky rules + `@`-mention context files).
 2. **LLM streaming.** The provider is called in streaming mode. Deltas arrive as `token` (content) and `thinking` (reasoning) events and are folded into the live transcript as they land.
-3. **Tool dispatch.** When the model returns `tool_calls`, each call is dispatched. **Adjacent read-only calls within one assistant message run concurrently** via `Promise.all` — `read` and `grep` requested together execute simultaneously; a `bash`, a write, a `task` or an MCP call runs in order instead, since only tools with an explicit read-only contract are safe to overlap. Each tool emits `tool_start` / `tool_end`; unsuccessful results carry stable `error.code`, `error.retryable`, and `error.suggestedFix` fields as well as their readable diagnostic. Sub-agents (`task` tool) recurse into their own `runAgentLoop` invocation.
+3. **Tool dispatch.** When the model returns `tool_calls`, each call is dispatched. **Adjacent read-only calls within one assistant message run concurrently** via `Promise.all`: `read` and `grep` requested together execute simultaneously; a `bash`, a write, a `task` or an MCP call runs in order instead, since only tools with an explicit read-only contract are safe to overlap. Each tool emits `tool_start` / `tool_end`; unsuccessful results carry stable `error.code`, `error.retryable`, and `error.suggestedFix` fields as well as their readable diagnostic. Sub-agents (`task` tool) recurse into their own `runAgentLoop` invocation.
 4. **Tool results → next iteration.** Results are appended and the loop streams another model call. The iteration continues until the model returns no tool calls (a final answer), hits a stop reason, or is aborted.
-5. **Turn close.** `turn_end` promotes the live streaming blocks into permanent history; `end` carries the stop reason (`stop` / `aborted` / `error` / `disconnected`). The session is persisted to SQLite incrementally as messages and tool results accumulate — not just at turn end.
+5. **Turn close.** `turn_end` promotes the live streaming blocks into permanent history; `end` carries the stop reason (`stop` / `aborted` / `error` / `disconnected`). The session is persisted to SQLite incrementally as messages and tool results accumulate, not only at turn end.
 
 **Queues.** While a turn runs, a `steeringQueue` (injected mid-turn, before the next model call) and a `followUpQueue` (appended after the turn ends) let the user influence or extend the run without starting a parallel writer. The loop checks these at turn boundaries, so a steer typed during a long tool phase lands at the next model call rather than spawning a competing turn.
 
@@ -134,11 +134,11 @@ sequenceDiagram
     D-->>U: SSE: end aborted
 ```
 
-**Abort.** An `AbortController` signal threads through the active LLM stream and tool calls; `abort` (from either surface) flips it, the in-flight stream is cancelled, and the turn closes with `end { reason: "aborted" }`. No partial turn is silently dropped — the already-streamed blocks are promoted to history before close.
+**Abort.** An `AbortController` signal threads through the active LLM stream and tool calls; `abort` (from either surface) flips it, the in-flight stream is cancelled, and the turn closes with `end { reason: "aborted" }`. No partial turn is silently dropped: the already-streamed blocks are promoted to history before close.
 
 **Compaction.** When history exceeds ~75% of the context window, older messages are summarized by the LLM (see Context Compaction below). The split snaps to turn boundaries so tool calls and results stay paired.
 
-For how the TUI, web UI, and the `cast server` daemon are wired around this loop — processes, lifecycles, auth, and the TUI-only `CAST_NO_DAEMON=1` fallback — see [Infrastructure](infrastructure.md).
+For how the TUI, web UI, and the `cast server` daemon are wired around this loop (processes, lifecycles, auth, and the TUI-only `CAST_NO_DAEMON=1` fallback), see [Infrastructure](infrastructure.md).
 
 ### Trust Gating
 
@@ -146,7 +146,7 @@ A single trust decision per project gates local skills, MCP, context files, pers
 
 ### Plan Mode
 
-Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries) — the same gate applies to `ssh`, which is the same primitive aimed at another machine — unrestricted read, and `write`/`edit` narrowed to the session plans directory. Plan files persist as markdown with checkbox tracking.
+Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries), unrestricted read, and `write`/`edit` narrowed to the session plans directory. The same read-only bash gate applies to `ssh`, which is the same primitive aimed at another machine. Plan files persist as markdown with checkbox tracking.
 
 ### System Reminders & Open Work Gate
 

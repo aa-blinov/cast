@@ -3,8 +3,8 @@
 The dashboard is a web-only analytics view of the running cast daemon: LLM
 usage and cost, endpoint performance, error/reliability signals, and
 system-level activity (compactions, turns, tool usage, memory maintenance).
-It reads from the telemetry tables in `~/.cast/sessions/sessions.db` — the
-same database that holds sessions — and never makes provider calls itself.
+It reads from the telemetry tables in `~/.cast/sessions/sessions.db` (the
+same database that holds sessions) and never makes provider calls itself.
 
 ## Opening the dashboard
 

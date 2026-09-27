@@ -6,13 +6,13 @@ Reasoning levels control how much internal reasoning a model does before respond
 
 | Level | Description |
 |-------|-------------|
-| `off` | No reasoning — standard completion |
+| `off` | No reasoning, standard completion |
 | `low` | Minimal reasoning |
 | `medium` | Balanced reasoning (often the default) |
 | `high` | Deep reasoning |
 | `max` | Maximum reasoning effort |
 
-For models that report reasoning as a binary toggle (on/off without effort levels), the options are simply `off` and `on`.
+For models that report reasoning as a binary toggle (on/off without effort levels), the options are `off` and `on`.
 
 ## Setting the Level
 

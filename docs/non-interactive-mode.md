@@ -117,8 +117,8 @@ starting implementation with a fresh model context.
 
 ## Exit Code
 
-- `0` — success
-- `1` — error (the `error` event contains the message)
+- `0`: success
+- `1`: error (the `error` event contains the message)
 
 ## Examples
 

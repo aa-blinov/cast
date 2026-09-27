@@ -7,14 +7,14 @@ cast automatically discovers and loads `AGENTS.md` or `CLAUDE.md` files from you
 `/context` lists the context files in play for the current directory, with
 their size, and names any file cast could not read (wrong permissions, a
 broken symlink) with the reason. One unreadable file never stops the walk, but
-it is not dropped in silence either — otherwise instructions you wrote simply
+it is not dropped in silence either. Otherwise instructions you wrote
 never reach the model, with nothing saying why.
 
 ## Size
 
 Each context file is capped at 64KB, with a note in place of the rest. A
 context file is injected into the system prompt of **every** request, so its
-size is paid over and over — an uncapped one measured at 3.9MB cost roughly a
+size is paid over and over: an uncapped one measured at 3.9MB cost roughly a
 million tokens per request. Keep these files short and let the agent read the
 details on demand (a rule with `globs`, or just a file it can open).
 
@@ -27,9 +27,9 @@ cast searches for these filenames (case-insensitive):
 
 ### Discovery Walk
 
-1. **Global**: `~/.cast/AGENTS.md` (or `CLAUDE.md`) — loaded first, always trusted
+1. **Global**: `~/.cast/AGENTS.md` (or `CLAUDE.md`), loaded first, always trusted
 2. **Ancestor walk**: cast walks from `cwd` to the filesystem root (`/`), loading a context file from each directory. Files are returned root-first so broad organizational guidelines precede project-specific ones.
-3. **cwd**: The file in the current directory is trust-gated — it loads only if the project is trusted.
+3. **cwd**: The file in the current directory is trust-gated: it loads only if the project is trusted.
 
 ### Example
 

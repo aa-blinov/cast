@@ -45,7 +45,7 @@ Worktrees and their branches are left on disk on exit so your work is never lost
 ```
 
 That refuses to delete a worktree holding uncommitted or untracked files, and
-keeps the branch when its commits are merged nowhere else — telling you which
+keeps the branch when its commits are merged nowhere else, telling you which
 happened either way. Add `--force` to discard uncommitted work as well:
 
 ```

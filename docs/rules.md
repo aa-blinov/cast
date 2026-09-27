@@ -2,7 +2,7 @@
 
 Rules are project-specific instructions the agent follows. They use Cursor's rule format, so a project that already has Cursor rules needs no second copy of them.
 
-Rules are resolved from the **project root** — the nearest ancestor with a
+Rules are resolved from the **project root**: the nearest ancestor with a
 `.git` (or, failing that, the topmost one with a `.cast/`). A session started
 in a subdirectory therefore sees the same rules as one started at the root:
 `cd apps/web && cast` gets the repository's rules, not none. The home
@@ -10,13 +10,13 @@ directory is never a root, so `~/.cast` stays global configuration.
 
 cast reads, in this order:
 
-- `~/.cast/rules/` — your global rules
-- `<project>/.cast/rules/` — project rules (trust-gated)
-- `<project>/.cursor/rules/` — a Cursor project's own rules, read as-is
+- `~/.cast/rules/`: your global rules
+- `<project>/.cast/rules/`: project rules (trust-gated)
+- `<project>/.cursor/rules/`: a Cursor project's own rules, read as-is
 - the same directories nested in subdirectories, scoped to that subtree
 
 Both `.md` and Cursor's `.mdc` are read, and subfolders inside a rules
-directory are for organisation — a rule keeps the scope of the rules directory
+directory are for organisation: a rule keeps the scope of the rules directory
 it lives under, however it is filed.
 
 ## Rule Types
@@ -84,7 +84,7 @@ Only activated by `@rule-name` mention in a message or `/rule:<name>` command.
 
 ### Nested Rules
 
-Rules can live in `.cast/rules/` directories at any depth in the project tree (up to 8 levels). A nested rule at `apps/web/.cast/rules/style.md` has scope `apps/web` — its always/auto injection only fires once a context file under `apps/web/` is seen.
+Rules can live in `.cast/rules/` directories at any depth in the project tree (up to 8 levels). A nested rule at `apps/web/.cast/rules/style.md` has scope `apps/web`. Its always/auto injection only fires once a context file under `apps/web/` is seen.
 
 This matches Cursor's nested rules feature: rules are dormant until the agent touches files in their subtree.
 
@@ -111,7 +111,7 @@ description: API endpoint conventions
 |-------|-------------|
 | `name` | Human label (defaults to the filename without its extension) |
 | `always-apply` | `true` for always mode; `false` + globs/description for other modes |
-| `globs` | Glob patterns for auto attach mode — a YAML array, or one comma-separated string (`globs: *.ts, *.tsx`) |
+| `globs` | Glob patterns for auto attach mode: a YAML array, or one comma-separated string (`globs: *.ts, *.tsx`) |
 | `description` | Description for agent-requested (lazy) mode |
 
 ### Glob syntax
@@ -149,7 +149,7 @@ Reference a rule in your message by typing `@rule-name`:
 @api-style review this endpoint
 ```
 
-This activates the rule for the rest of the session, regardless of its apply mode, the same way an auto rule stays attached once its glob matched. Matching is by the bare `name` (case-insensitive). Code fences are skipped — `@name` inside a code block doesn't trigger.
+This activates the rule for the rest of the session, regardless of its apply mode, the same way an auto rule stays attached once its glob matched. Matching is by the bare `name` (case-insensitive). Code fences are skipped: `@name` inside a code block doesn't trigger.
 
 ## Commands
 
@@ -178,7 +178,7 @@ loading, but it is no longer dropped in silence either.
 
 On a name collision (same `id`), the first-loaded rule wins:
 
-1. **Project** (`.cast/rules/`, then `.cursor/rules/`) — highest priority
+1. **Project** (`.cast/rules/`, then `.cursor/rules/`), highest priority
 2. **Global** (`~/.cast/rules/`)
 
 Within one scope, project beats global and the first-loaded file wins.

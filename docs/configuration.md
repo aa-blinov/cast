@@ -18,12 +18,12 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `persona` | string | Last used persona name |
 | `providerUrl` | string | Active provider endpoint URL |
 | `apiKey` | string | Active provider API key |
-| `providers` | Provider[] | Saved providers (`name`, `url`, `apiKey`, optional `reasoningFormat`) — use `/provider` to manage |
+| `providers` | Provider[] | Saved providers (`name`, `url`, `apiKey`, optional `reasoningFormat`); use `/provider` to manage |
 | `cwd` | string | Last working directory |
 | `permissionMode` | `"default"` \| `"bypass"` | Bash confirmation mode |
 | `projectTrust` | Record<string, boolean> | Per-project trust decisions |
 | `theme` | string | Active color theme id |
-| `webTools` | boolean | Whether web tools are enabled (default: `false` — use `/web` to enable) |
+| `webTools` | boolean | Whether web tools are enabled (default: `false`; use `/web` to enable) |
 | `memoryEnabled` | boolean | Whether durable project memory, retrieval, and the Web UI Memory tab are enabled (default: `true`) |
 | `memoryWriteEnabled` | boolean | Whether checkpoint writing, dream, and distill may update memory (default: `true`; reading remains available when this is `false`) |
 | `memoryPromptBudget` | integer | Maximum estimated tokens reserved for memory context inserted during checkpoint rebuild (256–16384, default: `4096`) |
@@ -38,24 +38,24 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `checkpointThresholds` | number[] | Checkpoint writer trigger points as percentages of the context window (default depends on the window: 4 × 20% up to 200K, 9 × 10% up to 500K, 18 × 5% above; a writer fires once per crossed threshold) |
 | `checkpointReserved` | integer | Token safety buffer kept at the end of the window; thresholds are clamped to `window - reserved` (default: `13000`) |
 | `checkpointPushCaps` | object | Per-section token caps for the rebuild context: `{ checkpoint?, memory?, notes?, global?, tasks? }` (defaults: 11000/10000/6000/6000/2000) |
-| `contextWindow` | integer | Override the model's context window in tokens (8000–2000000). Unset (default) uses the model catalog's value for the active model — set it only when the catalog is wrong for your endpoint |
+| `contextWindow` | integer | Override the model's context window in tokens (8000–2000000). Unset (default) uses the model catalog's value for the active model. Set it only when the catalog is wrong for your endpoint |
 | `maxResponseTokens` | integer | Tokens reserved for the model's own reply, subtracted from the window when deciding when to compact (1000–200000, default: `32000`). Capped at half `contextWindow` so a small-window model still gets a usable input budget |
-| `compactionThreshold` | number | Fraction of the usable input budget that triggers automatic compaction (0.05–0.95, default: `0.75`). The budget is `contextWindow` minus the reply reserve, and the reserve is capped at half the window — so a 32k model reserves 16k rather than the full default 32k |
+| `compactionThreshold` | number | Fraction of the usable input budget that triggers automatic compaction (0.05–0.95, default: `0.75`). The budget is `contextWindow` minus the reply reserve, and the reserve is capped at half the window, so a 32k model reserves 16k rather than the full default 32k |
 | `maxToolOutputLines` | integer | Line cap on a single tool result before it is truncated (100–100000, default: `2000`) |
 | `maxToolOutputBytes` | integer | Byte cap on a single tool result before it is truncated (4096–8388608, default: `131072`). Applies to MCP tool results too |
-| `maxTurnIterations` | integer | Safety cap on model calls in a single turn — the backstop against a runaway loop (10–10000, default: `500`). Raise it for long autonomous runs; the turn stops with a warning when it is hit, and the work done so far is already persisted |
-| `showReasoning` | boolean | Whether reasoning blocks are displayed in the transcript (default: `false`, in the TUI and the web UI alike) — toggled with `/reasoning-display` (`/rd`) or the web Settings > Appearance switch, and persisted |
+| `maxTurnIterations` | integer | Safety cap on model calls in a single turn, the backstop against a runaway loop (10–10000, default: `500`). Raise it for long autonomous runs; the turn stops with a warning when it is hit, and the work done so far is already persisted |
+| `showReasoning` | boolean | Whether reasoning blocks are displayed in the transcript (default: `false`, in the TUI and the web UI alike), toggled with `/reasoning-display` (`/rd`) or the web Settings > Appearance switch, and persisted |
 | `retryMaxWaitSeconds` | integer | Longest single wait a provider's own `Retry-After` may buy (30–86400, default: `3600`). A 429 that says "come back in 20 minutes" is telling the truth about its window; the guessed exponential backoff stays capped at 30s regardless |
-| `retryQuotaWaitSeconds` | integer | How long to keep waiting for an exhausted quota to reset (0–604800, default: `0` = off). Off, a quota/billing error fails the turn at once, since credit does not return on its own. Set it when the key's limit is a *window* (daily tokens, hourly requests) and an unattended run should sit through it — cast then re-tests the quota on a 30s→5min backoff (or exactly when `Retry-After` says) until the budget is spent. Esc cancels the wait |
-| `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`) — use `/web-search-provider` to change |
+| `retryQuotaWaitSeconds` | integer | How long to keep waiting for an exhausted quota to reset (0–604800, default: `0` = off). Off, a quota/billing error fails the turn at once, since credit does not return on its own. Set it when the key's limit is a *window* (daily tokens, hourly requests) and an unattended run should sit through it: cast then re-tests the quota on a 30s→5min backoff (or exactly when `Retry-After` says) until the budget is spent. Esc cancels the wait |
+| `searchProvider` | `"ddg"` \| `"tavily"` \| `"brave"` | `web_search` backend (default: `"ddg"`); use `/web-search-provider` to change |
 | `tavilyApiKey` | string | API key for the Tavily backend, from https://app.tavily.com |
 | `braveApiKey` | string | API key for the Brave Search backend, from https://api-dashboard.search.brave.com |
-| `webFetchProvider` | `"jina"` \| `"local"` | `web_fetch` backend (default: `"jina"`) — use `/web-fetch-provider` to change |
+| `webFetchProvider` | `"jina"` \| `"local"` | `web_fetch` backend (default: `"jina"`); use `/web-fetch-provider` to change |
 | `disabledMcpServers` | string[] | MCP server names disabled via `/mcp` toggle |
-| `mcpToolTimeoutSeconds` | integer | How long an MCP tool call may take before it fails, clamped to 5–3600. Unset uses the MCP SDK's own 60s default — raise it for a slow-but-legitimate tool (a browser step, a heavy query). Read per call, so a change applies without reconnecting |
+| `mcpToolTimeoutSeconds` | integer | How long an MCP tool call may take before it fails, clamped to 5–3600. Unset uses the MCP SDK's own 60s default; raise it for a slow-but-legitimate tool (a browser step, a heavy query). Read per call, so a change applies without reconnecting |
 | `disabledSkills` | string[] | Skill names disabled via `/skills` toggle |
 | `disabledHooks` | string[] | Content-derived hook group ids disabled via `/hooks` |
-| `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`) — use `/statusbar` to configure |
+| `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`); use `/statusbar` to configure |
 | `serverToken` | string | Password generated for the server daemon on first start |
 | `webPassword` | string | Deprecated predecessor of `serverToken`; read and migrated for compatibility |
 | `quickSessionPersona` | string | Persona selected by the web UI's Quick session action |
@@ -67,7 +67,7 @@ Settings are written atomically (temp file + rename) to prevent corruption from 
 
 Background tasks live in the daemon, not in the client. A `cast run` that
 created its own session now stops the tasks it started when it exits, and says
-which ones — the TUI has always done the same on exit. A run that attached to
+which ones. The TUI has always done the same on exit. A run that attached to
 an existing session (`--continue` / `--session`) leaves them alone: those tasks
 belong to whoever started them. `--keep-background` opts out for the
 deliberate "start the dev server and leave it running" case, and then the run
@@ -77,8 +77,8 @@ names what it is leaving behind instead. Under `--format json` this is a
 ## The Project Root
 
 Rules, project memory, and project-scoped history search are all keyed on the
-project root: the nearest ancestor directory containing `.git`, or — when there
-is no checkout — the topmost one containing `.cast/`. A nested checkout (a
+project root: the nearest ancestor directory containing `.git`, or (when there
+is no checkout) the topmost one containing `.cast/`. A nested checkout (a
 submodule, a vendored copy) is its own project, since its own `.git` says so,
 while a subdirectory's `.cast/rules` stays what it is documented to be: rules
 scoped to that subtree, not a project of its own.
@@ -93,7 +93,7 @@ otherwise make everything under it one project sharing one memory.
 
 `AGENTS.md` (or `CLAUDE.md`) is read from the working directory and every
 ancestor, and its content goes into the system prompt of **every** request.
-Each file is capped at 64KB — the same ceiling rules use — with a note in
+Each file is capped at 64KB (the same ceiling rules use), with a note in
 place of the rest, so a generated or dumped-into file cannot quietly cost a
 million tokens per request. Keep these files short and let the agent read the
 details on demand.
@@ -102,10 +102,10 @@ details on demand.
 
 `~/.cast/sessions/sessions.db` holds every session's messages and events.
 Sessions, events and background runs are pruned on a retention policy, but
-SQLite never shrinks the file on its own — the freed space stays claimed. At
+SQLite never shrinks the file on its own: the freed space stays claimed. At
 open, cast reclaims it when it is worth the write lock: at least 64MB of free
 pages *and* a fifth of the file. The rebuilt database is then checkpointed out
-of the write-ahead log, without which the space is only moved — a VACUUM in
+of the write-ahead log, without which the space is only moved. A VACUUM in
 WAL mode writes the whole database into the log. Measured on a real store:
 547MB became 324MB in about 2.5 seconds, and the log says so when it happens.
 Below either threshold nothing runs.
@@ -133,7 +133,7 @@ When disabled, Cast does not advertise the `memory` tool, retrieve memory into p
 | `CAST_SERVER_HOST` | Override server daemon bind address (default: `127.0.0.1`) |
 | `CAST_SESSIONS_DB` | Override SQLite session database path |
 
-Provider URL and API key are configured **only** via `~/.cast/settings.json` (first-run prompt, or `/provider` in-session). cast does not read `PROVIDER_BASE_URL` / `PROVIDER_API_KEY` environment variables or a project `.env` — editing those changes nothing.
+Provider URL and API key are configured **only** via `~/.cast/settings.json` (first-run prompt, or `/provider` in-session). cast does not read `PROVIDER_BASE_URL` / `PROVIDER_API_KEY` environment variables or a project `.env`, so editing those changes nothing.
 
 ## .cast/ Directory Structure
 
@@ -166,7 +166,7 @@ Provider URL and API key are configured **only** via `~/.cast/settings.json` (fi
 
 A single trust decision gates all project-local resources: skills (`.cast/skills/` and `.agents/skills/`), MCP servers, context files, personas, rules, hooks, and `.cast/ssh.json`. cast asks once per project; the decision is saved in `settings.json` under `projectTrust`.
 
-Global resources (`~/.cast/`, `~/.agents/skills/`, `~/.config/agents/skills/`) always load without a trust check — you put them there yourself.
+Global resources (`~/.cast/`, `~/.agents/skills/`, `~/.config/agents/skills/`) always load without a trust check: you put them there yourself.
 
 ## Permission Modes
 
@@ -190,7 +190,7 @@ You can save multiple providers and switch between them:
 
 | Command | Action |
 |---------|--------|
-| `/provider` | Open picker — switch between saved providers |
+| `/provider` | Open picker: switch between saved providers |
 | `/provider add` | Add a new provider (name → URL → key wizard) |
 | `/provider delete` | Remove a saved provider |
 | `/provider <name>` | Switch to a named provider directly |

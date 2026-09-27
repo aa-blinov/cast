@@ -7,10 +7,10 @@ Shell commands, HTTP callbacks, MCP tool calls, or one-shot model prompts that f
 | Event | Fires | Blocking? |
 |-------|-------|-----------|
 | `SessionStart` | A session starts (fresh or resumed) | No |
-| `UserPromptSubmit` | You submit a prompt | **Yes** — can reject the prompt outright |
+| `UserPromptSubmit` | You submit a prompt | **Yes**: can reject the prompt outright |
 | `UserPromptExpansion` | A `/skill-name` or `/rule:name` invocation expands into its prompt content | No |
-| `PreToolUse` | Before a tool runs | **Yes** — can deny the call, or rewrite its arguments |
-| `PermissionRequest` | The bash tool is about to ask for interactive confirmation | **Yes** — can approve/deny before the real prompt shows |
+| `PreToolUse` | Before a tool runs | **Yes**: can deny the call, or rewrite its arguments |
+| `PermissionRequest` | The bash tool is about to ask for interactive confirmation | **Yes**: can approve/deny before the real prompt shows |
 | `PermissionDenied` | A bash confirmation was denied (by a hook or by the user) | No |
 | `PostToolUse` | After a tool completes successfully | No (but can rewrite the result) |
 | `PostToolUseFailure` | After a tool completes with an error | No (but can rewrite the result) |
@@ -20,19 +20,19 @@ Shell commands, HTTP callbacks, MCP tool calls, or one-shot model prompts that f
 | `TaskCreated` | A new item is added via the `todo_write` tool | No |
 | `TaskCompleted` | A todo item's status becomes `completed` | No |
 | `Notification` | The agent wants your attention: a turn finished, or it's blocked on you (`notification_type` is `turn_complete` or `input_needed`) | No |
-| `PreCompact` | Automatic or manual (`/compact`) context compaction is about to run | **Yes** — can cancel compaction |
+| `PreCompact` | Automatic or manual (`/compact`) context compaction is about to run | **Yes**: can cancel compaction |
 | `PostCompact` | Automatic or manual context compaction completes | No |
 | `InstructionsLoaded` | AGENTS.md/CLAUDE.md and always-apply rules load for a session | No |
-| `Stop` | The agent would end its turn | **Yes** — can keep it going |
-| `StopFailure` | A turn ends because of an API error | No — observation only |
+| `Stop` | The agent would end its turn | **Yes**: can keep it going |
+| `StopFailure` | A turn ends because of an API error | No, observation only |
 | `FileChanged` | A file is added, changed, or removed while the daemon session is idle | No |
 | `DirectoryAdded` | A directory is added while the daemon session is idle | No |
-| `WorktreeCreate` | Before `/worktree <name>` creates a worktree | **Yes** — can cancel creation |
+| `WorktreeCreate` | Before `/worktree <name>` creates a worktree | **Yes**: can cancel creation |
 | `WorktreeRemove` | After `/worktree remove <name>` succeeds | No |
 | `CwdChanged` | `/worktree <name>` switches the live session to its worktree | No |
 | `MessageDisplay` | A completed assistant message is delivered to a daemon client | No |
 
-"Blocking" means the hook can change what happens next. Every other event is passive — its exit code/output never changes the run, only what gets logged, or (for `UserPromptSubmit`) appended to the prompt as extra context when it *doesn't* block.
+"Blocking" means the hook can change what happens next. Every other event is passive: its exit code/output never changes the run, only what gets logged, or (for `UserPromptSubmit`) appended to the prompt as extra context when it *doesn't* block.
 
 ## Hook types
 
@@ -45,10 +45,10 @@ Each entry in a matcher group's `hooks` array is one of:
 { "type": "prompt", "prompt": "Is this safe? ${tool_input.command}\nRespond yes/no.", "model": "gpt-4.1" }
 ```
 
-- **`command`** (default `type`) — a shell command. Relative paths resolve against the cwd the hook runs for. Set `"async": true` to detach a non-blocking observer; its output is deliberately ignored.
-- **`http`** — POSTs the event envelope as the JSON body; the response body is read the same way stdout is.
-- **`mcp_tool`** — calls an already-connected MCP server's tool (`server`/`tool` unqualified names) and interprets its result the same way as a command hook's stdout. No-ops (fails open) if that server/tool isn't connected.
-- **`prompt`** — a short, tool-free, capped (500 token) model completion. Cast asks it to return `{"ok":true}` to allow or `{"ok":false,"reason":"…"}` to block. Invalid output and unavailable model/config access fail open (see Scope).
+- **`command`** (default `type`): a shell command. Relative paths resolve against the cwd the hook runs for. Set `"async": true` to detach a non-blocking observer; its output is deliberately ignored.
+- **`http`**: POSTs the event envelope as the JSON body; the response body is read the same way stdout is.
+- **`mcp_tool`**: calls an already-connected MCP server's tool (`server`/`tool` unqualified names) and interprets its result the same way as a command hook's stdout. No-ops (fails open) if that server/tool isn't connected.
+- **`prompt`**: a short, tool-free, capped (500 token) model completion. Cast asks it to return `{"ok":true}` to allow or `{"ok":false,"reason":"…"}` to block. Invalid output and unavailable model/config access fail open (see Scope).
 
 `input`/`prompt` support `${field.path}` interpolation against the event's JSON payload (e.g. `${tool_input.command}`, `${cwd}`). Unresolvable paths are left as the literal placeholder.
 
@@ -56,20 +56,20 @@ Each entry in a matcher group's `hooks` array is one of:
 
 ## Config
 
-Three sources, merged (a group from each applies — they don't override each other):
+Three sources, merged (a group from each applies; they don't override each other):
 
 ### Matchers
 
-A group's `matcher` picks which occurrences the hook runs for — the tool name for `PreToolUse`/`PostToolUse`, the trigger for `PreCompact`, the file name for `FileChanged`, and so on.
+A group's `matcher` picks which occurrences the hook runs for: the tool name for `PreToolUse`/`PostToolUse`, the trigger for `PreCompact`, the file name for `FileChanged`, and so on.
 
 - A single plain name (letters, digits, `_`, `:`, `/`, `-`) is compared **literally**, case-insensitively: `bash`.
 - A `|`- or `,`-separated list is a list of **literal names**, so file matchers work as written: `write|edit`, `package.json, README.md`.
-- Anything else — including a single name containing a `.` — is a **regular expression**, case-insensitive and **unanchored**. So `Edit` and `Edit.*` both match `MultiEdit` (anchor it as `^edit$` when you mean exactly one), and `mcp.foo` matches `mcp__foo` because a dot is a regex "any character".
+- Anything else, including a single name containing a `.`, is a **regular expression**, case-insensitive and **unanchored**. So `Edit` and `Edit.*` both match `MultiEdit` (anchor it as `^edit$` when you mean exactly one), and `mcp.foo` matches `mcp__foo` because a dot is a regex "any character".
 - No matcher (or `*`) runs for every occurrence.
 - Some events have nothing to match against (`Stop`, `WorktreeCreate`, `MessageDisplay`, `TaskCreated`, `PostToolBatch`). A matcher there is ignored and the hook runs every time; cast reports this once so it isn't mistaken for a filter.
 
-- `~/.cast/hooks.json` — global, always applies
-- `.cast/hooks.json` — project-local, **trust-gated** the same as `.cast/mcp.json`: only read for a trusted project, since a hook is an arbitrary shell command
+- `~/.cast/hooks.json`: global, always applies
+- `.cast/hooks.json`: project-local, **trust-gated** the same as `.cast/mcp.json`: only read for a trusted project, since a hook is an arbitrary shell command
 
 ```json
 {
@@ -97,7 +97,7 @@ A bare `{ "PreToolUse": [...] }` (no wrapping `"hooks"` key) works too. Unrecogn
 | `SubagentStart`, `SubagentStop` | Subagent persona name |
 | `UserPromptExpansion` | The skill or rule name being invoked |
 | `FileChanged`, `DirectoryAdded` | Basename of the changed path (for example `package.json`) |
-| Everything else | Ignored — matches everything |
+| Everything else | Ignored (matches everything) |
 
 ## Writing a hook
 
@@ -111,15 +111,15 @@ The hook receives one JSON object on **stdin** (or as the HTTP/`mcp_tool` payloa
 
 ### Response contract
 
-- Exit **2**, or `{"decision":"block","reason":"..."}` on stdout — blocks.
-- `{"hookSpecificOutput":{"additionalContext":"..."}}` — appends context for the model without blocking the event.
-- **`PreToolUse` only** — `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"...","updatedInput":{...}}}`:
+- Exit **2**, or `{"decision":"block","reason":"..."}` on stdout: blocks.
+- `{"hookSpecificOutput":{"additionalContext":"..."}}` appends context for the model without blocking the event.
+- **`PreToolUse` only**: `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"...","updatedInput":{...}}}`:
   - `permissionDecision: "deny"` blocks, same as `decision:"block"` (with `permissionDecisionReason` as the reason).
-  - `updatedInput` replaces the tool call's arguments with whatever object you provide, before it runs — works whether or not the call is also allowed/denied.
-  - `permissionDecision: "ask"`/`"defer"` are accepted but resolved as `allow` — cast has no interactive mid-turn prompt to actually honor them (see Scope) — a warning is surfaced instead.
-- **`PostToolUse`/`PostToolUseFailure` only** — `{"hookSpecificOutput":{"updatedToolOutput":"..."}}` replaces the tool's result content outright, instead of the block-appends-feedback behavior.
-- **`Stop`/`SubagentStop` only** — `{"continue":false,"stopReason":"..."}` force-ends the turn/run right now, overriding a block from another hook in the same run.
-- Any other non-zero exit is a non-blocking failure — the hook is ignored and the run continues normally. A hook that never responds is killed after its `timeout`.
+  - `updatedInput` replaces the tool call's arguments with whatever object you provide, before it runs. Works whether or not the call is also allowed/denied.
+  - `permissionDecision: "ask"`/`"defer"` are accepted but resolved as `allow`, since cast has no interactive mid-turn prompt to actually honor them (see Scope). A warning is surfaced instead.
+- **`PostToolUse`/`PostToolUseFailure` only**: `{"hookSpecificOutput":{"updatedToolOutput":"..."}}` replaces the tool's result content outright, instead of the block-appends-feedback behavior.
+- **`Stop`/`SubagentStop` only**: `{"continue":false,"stopReason":"..."}` force-ends the turn/run right now, overriding a block from another hook in the same run.
+- Any other non-zero exit is a non-blocking failure: the hook is ignored and the run continues normally. A hook that never responds is killed after its `timeout`.
 
 A `Stop` block can't loop forever: after 8 continuations in one turn (matching the official cap), the gate is overridden and the turn ends regardless.
 
@@ -131,33 +131,33 @@ A `Stop` block can't loop forever: after 8 continuations in one turn (matching t
 | `CAST_SESSION_ID` | The current session id |
 | `CAST_WORKSPACE_ROOT` | The cwd the hook is running for |
 
-Reserved `CAST_*` keys in a hook's own `env` field are silently stripped — the runner always injects the real values.
+Reserved `CAST_*` keys in a hook's own `env` field are silently stripped; the runner always injects the real values.
 
 ## Managing hooks
 
 `/hooks` lists every merged hook (global/project) with a stable id, its event, matcher, and enabled/disabled state. `/hooks enable <id>` / `/hooks disable <id>` toggles one, `/hooks help` shows a cheat sheet. State is per-user (`~/.cast/settings.json`'s `disabledHooks`), takes effect on the very next message (no restart), and survives edits to unrelated hooks in the same file since the id is derived from the hook's own content. The web UI has the same thing under **Settings → Hooks**.
 
-## Scope — what's implemented vs. not
+## Scope: what's implemented vs. not
 
-This is a **compatible subset** of Claude Code's protocol, not a byte-for-byte clone — built from the official public documentation, deliberately never from any leaked/decompiled source. Everything in the tables above works as described. What's out of scope, and why:
+This is a **compatible subset** of Claude Code's protocol, not a byte-for-byte clone. It is built from the official public documentation, deliberately never from any leaked/decompiled source. Everything in the tables above works as described. What's out of scope, and why:
 
-**Events cast has no infrastructure to fire at all** (not missing wiring — the underlying subsystem doesn't exist). A hook on one of these loads and lists normally, and never runs:
-- `Setup` — no CLI init/maintenance-mode concept.
-- `TeammateIdle` — no persistent "teammate" background agents.
-- `Elicitation`/`ElicitationResult` — cast's MCP client doesn't implement the MCP elicitation capability.
-- `ConfigChange` — settings are not watched as a live config source yet.
+**Events cast has no infrastructure to fire at all** (not missing wiring: the underlying subsystem doesn't exist). A hook on one of these loads and lists normally, and never runs:
+- `Setup`: no CLI init/maintenance-mode concept.
+- `TeammateIdle`: no persistent "teammate" background agents.
+- `Elicitation`/`ElicitationResult`: cast's MCP client doesn't implement the MCP elicitation capability.
+- `ConfigChange`: settings are not watched as a live config source yet.
 
 **Accepted as input but resolved as a fixed choice, not truly honored**, because cast has no interactive mid-turn escalation path a hook can suspend the run for:
 - `PreToolUse`'s and `PermissionRequest`'s `ask`/`defer` permission decisions both resolve as `allow` (with a warning).
 
 **Not implemented for architectural reasons**:
-- The `agent` hook type (spawn a subagent to verify) — `task.ts` (the subagent executor) already imports this module for `HooksFile`; importing it back for the `agent` type would create a real circular module dependency. Use `prompt` (a one-shot completion) or `mcp_tool` instead.
+- The `agent` hook type (spawn a subagent to verify): `task.ts` (the subagent executor) already imports this module for `HooksFile`; importing it back for the `agent` type would create a real circular module dependency. Use `prompt` (a one-shot completion) or `mcp_tool` instead.
 
 **Scope limitations worth knowing about**:
 - `FileChanged`/`DirectoryAdded` are daemon-only. The watcher is active while the session is idle and follows Cast's existing UI ignore rules (`.git`, `node_modules`, build outputs, and virtual environments); it still runs with no browser attached when either hook is configured.
 - `MessageDisplay` is daemon-only and fires once per completed assistant message, not once per streamed token. It is observational: Cast deliberately does not let a hook alter the persisted transcript or the in-flight stream.
 - `WorktreeCreate`, `WorktreeRemove`, and `CwdChanged` fire for the daemon's `/worktree` command. Startup `cast --worktree` is intentionally not hookable yet: project hooks have not been trusted/resolved before that worktree is created.
-- `SubagentStart`/`SubagentStop` are a *separate*, observation-only "a subagent started/finished" signal for logging — a subagent's own turn-ending decision is governed by its own recursive `Stop` handling (hooks are inherited from the parent), not by `SubagentStop`. `SubagentStop` here can't itself block/continue a subagent's turn the way the official `Stop`-style decision control can.
-- `prompt`-type hooks need model/provider config, which not every event has in scope (e.g. `SessionStart`) — they no-op (fail open) rather than error when it's unavailable.
+- `SubagentStart`/`SubagentStop` are a *separate*, observation-only "a subagent started/finished" signal for logging. A subagent's own turn-ending decision is governed by its own recursive `Stop` handling (hooks are inherited from the parent), not by `SubagentStop`. `SubagentStop` here can't itself block/continue a subagent's turn the way the official `Stop`-style decision control can.
+- `prompt`-type hooks need model/provider config, which not every event has in scope (e.g. `SessionStart`), so they no-op (fail open) rather than error when it's unavailable.
 
-Hooks apply to the main agent and are inherited by subagents (`task` tool) — a `PreToolUse` gate on `bash` applies whether `bash` is called by the main agent or a subagent it spawned.
+Hooks apply to the main agent and are inherited by subagents (`task` tool): a `PreToolUse` gate on `bash` applies whether `bash` is called by the main agent or a subagent it spawned.

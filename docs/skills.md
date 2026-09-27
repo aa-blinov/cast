@@ -1,10 +1,10 @@
 # Skills
 
-Skills are self-contained instruction packages the agent loads on demand. They follow the [Agent Skills spec](https://agentskills.io) — a standard for packaging reusable agent capabilities.
+Skills are self-contained instruction packages the agent loads on demand. They follow the [Agent Skills spec](https://agentskills.io), a standard for packaging reusable agent capabilities.
 
 ## How Skills Work
 
-The agent sees a list of available skills (name + description, and `description — whenToUse` when `when_to_use` is set) in its system prompt. When a task matches a skill's description, the agent calls the dedicated `skill` tool with the skill's name to get full instructions — it no longer reads the skill file via the generic `read` tool. Skills with `disable-model-invocation: true` are hidden from the agent and can only be invoked manually via `/skill:<name>`.
+The agent sees a list of available skills (name + description, and `description — whenToUse` when `when_to_use` is set) in its system prompt. When a task matches a skill's description, the agent calls the dedicated `skill` tool with the skill's name to get full instructions. It no longer reads the skill file via the generic `read` tool. Skills with `disable-model-invocation: true` are hidden from the agent and can only be invoked manually via `/skill:<name>`.
 
 ## Built-in Skills
 
@@ -14,18 +14,18 @@ Skills ship with cast in `prompts/skills/`. Use `/skills list` to see what's loa
 
 Skills are discovered from multiple locations. On a name collision, the first-loaded skill wins:
 
-1. **Project (cast)** — `.cast/skills/` (trust-gated)
-2. **Project (agents)** — `.agents/skills/` (trust-gated; skills.sh / `npx skills add` universal path)
-3. **Global (cast)** — `~/.cast/skills/` (always loaded)
-4. **Global (agents)** — `~/.agents/skills/` then the compatible `~/.config/agents/skills/` (skills.sh universal global)
-6. **Builtin** — `prompts/skills/` (ships with cast)
-7. **Extra paths** — `--skill <directory>` flags (loaded even with `--no-skills`)
+1. **Project (cast)**: `.cast/skills/` (trust-gated)
+2. **Project (agents)**: `.agents/skills/` (trust-gated; skills.sh / `npx skills add` universal path)
+3. **Global (cast)**: `~/.cast/skills/` (always loaded)
+4. **Global (agents)**: `~/.agents/skills/` then the compatible `~/.config/agents/skills/` (skills.sh universal global)
+6. **Builtin**: `prompts/skills/` (ships with cast)
+7. **Extra paths**: `--skill <directory>` flags (loaded even with `--no-skills`)
 
 Use `--no-skills` to skip auto-discovery (including `.agents/skills`). Extra paths (`--skill`) still load.
 
 ### skills.sh / `npx skills add`
 
-Install from inside cast — same command in the TUI and the web UI (**Settings
+Install from inside cast; the command is the same in the TUI and the web UI (**Settings
 → Skills.sh**):
 
 ```
@@ -40,7 +40,7 @@ skills.sh copy button, and a `https://github.com/owner/repo` URL. Cast always
 installs into the **universal** scope, and drops an `-a <agent>` flag if you
 pass one: that form installs only into that one agent's directory (e.g.
 `.claude/skills`), which cast never scans, so the skill would silently never
-appear. The catalog refreshes in the same session — no `/reload`.
+appear. The catalog refreshes in the same session (no `/reload`).
 
 Or run the CLI yourself:
 
@@ -57,7 +57,7 @@ restart) for cast to pick it up. Invoke with `/skill:grill-me` (not
 Settings → Skills.sh lists the skills whose provenance `npx skills`' own
 lockfile (`~/.agents/.skill-lock.json`) records, with their source repo. A
 skill you dropped into `.agents/skills/` yourself has no lockfile entry, so it
-appears under Skills rather than Skills.sh — those directories are shared with
+appears under Skills rather than Skills.sh: those directories are shared with
 other tools, and the lockfile is the only thing that establishes where a skill
 came from.
 
@@ -106,10 +106,10 @@ Always check `templates/` for reference material.
 | `allowed-tools` | No | Pre-approved tools, as a space- or comma-separated string **or** a YAML list. Cast retains and exposes the field with the skill but does not act on it: a third-party skill should not be able to waive cast's own bash/write confirmations. `disallowed-tools`, which only ever *removes* tools, is enforced |
 | `disable-model-invocation` | No | Hide from the agent (manual `/skill:<name>` only). Accepts `true`/`yes`/`on`/`1` in any case, as the spec allows |
 | `when_to_use` | No | Extra matching guidance shown to the model as `description — whenToUse` in the skill listing |
-| `user-invocable` | No | `false` keeps the skill out of the slash menu — the model may load it, a person may not. Accepts the same boolean spellings |
+| `user-invocable` | No | `false` keeps the skill out of the slash menu: the model may load it, a person may not. Accepts the same boolean spellings |
 | `argument-hint` | No | Autocomplete hint for the arguments the skill expects, e.g. `[issue-number]` |
 | `hooks` | No | Hooks registered when the skill is invoked, in `hooks.json`'s shape expressed as YAML. They stay active for the rest of the run; a hook with `once: true` is dropped after it fires without blocking |
-| `paths` | No | Globs limiting when the skill is offered — it is listed only while a file matching one of them is in context. Comma-separated string or a YAML list |
+| `paths` | No | Globs limiting when the skill is offered: it is listed only while a file matching one of them is in context. Comma-separated string or a YAML list |
 | `disallowed-tools` | No | Tools removed from the model's pool for the rest of the turn the skill is invoked in; cleared by your next message. Space- or comma-separated string, or a YAML list |
 | `arguments` | No | Named positional arguments, as a space-separated string or a YAML list. `arguments: [issue, branch]` makes `$issue` the first argument and `$branch` the second |
 
@@ -122,7 +122,7 @@ Per the Agent Skills spec:
 - Must not contain consecutive hyphens (`--`)
 - Maximum 64 characters
 
-A malformed `name`, an over-long `description` or `compatibility`, and invalid YAML prevent the skill from loading. A name that differs from its directory does not — the spec treats `name` as a display name. Cast warns when the body exceeds the spec's recommended 500 lines but still loads it. In the skill listing, `description` and `when_to_use` are combined and truncated at 1,536 characters, as the spec specifies.
+A malformed `name`, an over-long `description` or `compatibility`, and invalid YAML prevent the skill from loading. A name that differs from its directory does not. The spec treats `name` as a display name. Cast warns when the body exceeds the spec's recommended 500 lines but still loads it. In the skill listing, `description` and `when_to_use` are combined and truncated at 1,536 characters, as the spec specifies.
 
 ### Hooks in a Skill
 
@@ -145,7 +145,7 @@ hooks:
 
 They join the session's own hooks for the rest of the run and cover every
 event cast supports. `once: true` removes the hook after it fires without
-blocking — a blocked or failed run leaves it in place, so a gate keeps
+blocking. A blocked or failed run leaves it in place, so a gate keeps
 gating.
 
 ### Inline Commands
@@ -158,7 +158,7 @@ is about to work in:
 Node: !`node --version 2>/dev/null || echo "not installed"`
 ```
 
-These run for every skill, whatever its source — most of them only probe the
+These run for every skill, whatever its source: most of them only probe the
 environment, and a skill can already tell the model to run anything in prose.
 What a skill body must not be is a way *around* the checks a plain `bash` call
 faces, so each command goes through the same two gates:
@@ -193,7 +193,7 @@ Disabled names are stored in `~/.cast/settings.json` as `disabledSkills`. `/skil
 
 ### Hot-reload
 
-`/skills` toggle / `enable` / `disable` / `uninstall` update the skill catalog **in the current session** — no `/reload`, no restart.
+`/skills` toggle / `enable` / `disable` / `uninstall` update the skill catalog **in the current session** (no `/reload`, no restart).
 
 Use `/reload` only after dropping or editing skill files on disk yourself (e.g. `npx skills add`, copy into `.cast/skills/`). See [Interactive commands](interactive-commands.md#hot-reload-vs-reload).
 
@@ -222,12 +222,12 @@ Skill bodies can reference invocation arguments and their own directory:
 |-------------|-------------------|
 | `$ARGUMENTS` | The full argument string |
 | `$<name>` | A named argument declared in `arguments` frontmatter |
-| `$ARGUMENTS[0]`, `$ARGUMENTS[1]`, ... / `$0`, `$1`, ... | An individual argument (shell-quote-style parsing — quoted strings stay intact) |
+| `$ARGUMENTS[0]`, `$ARGUMENTS[1]`, ... / `$0`, `$1`, ... | An individual argument (shell-quote-style parsing, quoted strings stay intact) |
 | `${CLAUDE_SKILL_DIR}` | Absolute path to the skill's own directory, for resolving relative paths |
 | `${CLAUDE_PROJECT_DIR}` (`${CAST_PROJECT_DIR}`) | The project root |
 | `${CLAUDE_SESSION_ID}` (`${CAST_SESSION_ID}`) | The current session id |
 
-If arguments are supplied but the skill body contains no `$ARGUMENTS` placeholder, they're appended as a trailing `User: <args>` line instead of being silently dropped. If the skill is invoked *without* arguments, every placeholder is replaced with an empty string — an unsubstituted `$ARGUMENTS` reaching the model reads as an instruction rather than as "there were none".
+If arguments are supplied but the skill body contains no `$ARGUMENTS` placeholder, they're appended as a trailing `User: <args>` line instead of being silently dropped. If the skill is invoked *without* arguments, every placeholder is replaced with an empty string: an unsubstituted `$ARGUMENTS` reaching the model reads as an instruction rather than as "there were none".
 
 ### The `skill` Tool
 
@@ -245,7 +245,7 @@ cast --skill ./my-project-skill
 cast --no-skills --skill ~/.cast/skills/arxiv
 ```
 
-Extra paths (`--skill`) work even with `--no-skills` — they're explicit additions, not auto-discovery.
+Extra paths (`--skill`) work even with `--no-skills`: they're explicit additions, not auto-discovery.
 
 ## Discovery Rules
 

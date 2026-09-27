@@ -112,9 +112,9 @@ The checklist (`- [ ]`) format identifies the steps projected into the build-mod
 | `/build` | Exit plan mode, restore full toolset |
 | `/plan-model [name\|off]` | Model used while plan mode is active |
 
-Mode switching is rejected while a run is active — modes flip only between runs.
+Mode switching is rejected while a run is active. Modes flip only between runs.
 
-`/build` with an existing plan is the approval gesture — the plan is injected into the build-mode system prompt so the agent's next message starts implementation guided by it.
+`/build` with an existing plan is the approval gesture: the plan is injected into the build-mode system prompt so the agent's next message starts implementation guided by it.
 
 ## What the Model Sees
 
@@ -151,7 +151,7 @@ An approved plan exists for this task. It was written in plan mode and reviewed 
 Follow the plan step by step. Its steps are projected into the task list; update the matching task after completing and verifying each step.
 ```
 
-The plan stays in the system prompt across turns and survives compaction — it's re-read from disk on each run.
+The plan stays in the system prompt across turns and survives compaction: it's re-read from disk on each run.
 
 ### Plan Fully Executed
 

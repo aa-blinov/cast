@@ -1,6 +1,6 @@
 # Eval Methodology
 
-How `evals/` debugs and benchmarks `cast`'s own harness — what it measures, why it's built this
+How `evals/` debugs and benchmarks `cast`'s own harness: what it measures, why it's built this
 way, and how to read the output. This is an internal/development doc (see `AGENTS.md`'s project
 layout: `evals/` is not part of the shipped package), not end-user documentation.
 
@@ -11,7 +11,7 @@ A coding agent's behavior is a product of two things that are easy to conflate: 
 (does the tool schema communicate the constraint clearly, does the system prompt bias it toward
 the right tool, does a documented protocol like plan-mode's RE-ENTRY step actually get followed).
 When a case fails, "the model is dumb" and "the harness set the model up to fail" produce the same
-visible symptom — a wrong tool call, a skipped step — but call for opposite fixes.
+visible symptom (a wrong tool call, a skipped step) but call for opposite fixes.
 
 `evals/` exists to pull those two apart. Every case runs the real agent loop (`runAgentLoop`, not a
 mock) against a real model through a real provider, so a passing case is evidence about the actual
@@ -62,34 +62,34 @@ evals/
   run.ts                     CLI entrypoint
 ```
 
-`evals/benches/index.ts` is what wires a bench into the CLI — currently a single `behavior` bench
+`evals/benches/index.ts` is what wires a bench into the CLI. It is currently a single `behavior` bench
 combining `core` and `chain` cases, since `DEFAULT_BENCH_IDS` includes every bench with a static
 `cases` list and there's only the one. Adding a second bench means adding a subdirectory under
-`evals/benches/` and one entry in that registry's `BENCHES` array — nothing in `run.ts` itself
+`evals/benches/` and one entry in that registry's `BENCHES` array; nothing in `run.ts` itself
 needs to change.
 
 ## The independence thesis
 
 The reason model-vs-harness separation is achievable at all: **hold the harness fixed, vary the
 model** (`--compare model1,model2`), and any behavior difference that shows up is attributable to
-the model, because every other variable — tool schemas, system prompt, loop, grading logic — is
+the model, because every other variable (tool schemas, system prompt, loop, grading logic) is
 byte-for-byte identical between the two runs. Conversely, **hold the model fixed, vary the
 harness** (a change to `tools.ts`'s schema wording, a prompt edit) and re-run the same case set: any
 behavior difference is now attributable to the harness.
 
 `compareModels`/`compareModelsRepeated` flatten model×case (×repeat) into a single job list and run
-it through one `--concurrency`-limited pool, not one model's full suite followed by the next —
-every request across every model is independent, so there was never a reason to serialize models
+it through one `--concurrency`-limited pool, not one model's full suite followed by the next.
+Every request across every model is independent, so there was never a reason to serialize models
 behind each other. A 2-model compare over N cases takes roughly as long as running N cases against
 one model, not 2N; the `[k/total]` progress lines are labeled `<model> :: <case id>` since jobs from
 both models interleave in the log instead of appearing as two back-to-back blocks.
 
 ## Statistical validity: why `--repeat` exists
 
-A single run of a stochastic model against a case set produces a pass/fail — but a model that
+A single run of a stochastic model against a case set produces a pass/fail, but a model that
 "passes" a case 2 times out of 3 will, on any single run, produce either a pass or a fail with no
 way to tell which one you got. Treating a single-run result as a stable signal silently assumes
-attempts are deterministic, which they aren't — this session's own work on `plan-done-signal` and
+attempts are deterministic, which they aren't. This session's own work on `plan-done-signal` and
 `plan-open-question-blocks-done` hit exactly this: the same model, same case, disagreeing with
 itself across consecutive runs on a genuine judgment call.
 
@@ -99,7 +99,7 @@ state between attempts, so an attempt's outcome can't be contaminated by convers
 a prior one), and reports `passed/N` per case plus a consistency flag:
 `consistent: passed === 0 || passed === attempts.length`. A case where every attempt agreed is a
 stable result. A case where attempts split is flagged with `⚠` in the report and counted into
-`inconsistentCases` in the recorded JSON — visible at a glance instead of silently averaged away.
+`inconsistentCases` in the recorded JSON, visible at a glance instead of silently averaged away.
 Concurrency spans the full case×repeat job list (not case-then-repeat sequentially), so N repeats
 of one case don't serialize behind each other while unrelated cases sit idle.
 
@@ -109,17 +109,17 @@ scoreboard or baseline credit only when every attempt passes. A split is an inst
 a partial pass.
 
 Practical rule: before calling a change a regression (or a model gap a real finding), run
-`--repeat 3`. A split result is evidence of instability, not a partial pass — investigate the
+`--repeat 3`. A split result is evidence of instability, not a partial pass: investigate the
 disagreeing attempts with `--trace` (see below) before concluding anything.
 
 ## Recording results
 
-Every run — `-m`, `--compare`, with or without `--repeat` — is auto-recorded to
+Every run (`-m`, `--compare`, with or without `--repeat`) is auto-recorded to
 `evals/results/runs/<timestamp>_<kind>_<models>.json` (full per-case detail, including every
 attempt's individual pass/fail under `--repeat`) with a one-line summary appended to
 `evals/results/index.json` (`evals/lib/results.ts`). `evals/run.ts --history` prints the index as a
 compact log, newest last, including the `⚠N inconsistent` marker for repeated runs and the short
-commit hash the run was recorded at (`git rev-parse --short HEAD`) — enough to correlate a
+commit hash the run was recorded at (`git rev-parse --short HEAD`), enough to correlate a
 regression with a specific harness change.
 
 ## Cost & token tracking
@@ -150,7 +150,7 @@ regression detectors) can read them without re-parsing the report.
 
 Token buckets: `promptTokens` (input), `completionTokens` (output), `totalTokens`, `cacheReadTokens`
 (provider prompt-cache hit), `cacheWriteTokens` (cache miss / new entry), `uncachedTokens` (full-
-price input). `cost` is USD from the provider when it reports one — `n/a` otherwise (not every
+price input). `cost` is USD from the provider when it reports one, `n/a` otherwise (not every
 provider returns it).
 
 ## Regression detection: `--save-baseline` / `--baseline`
@@ -165,10 +165,10 @@ The regression flag is driven by a **two-proportion z-test** (one-sided: "curren
 baseline"). Reject H0 only when the observed pass-rate drop is unlikely under the assumption that
 the true rates are equal, calibrated by `--significance-alpha` (default 0.05 = 95%). Below ~10
 common cases the test isn't reliable, so the run falls back to the simpler
-`--regression-threshold` percentage-point rule (default 5pp) — the same intuition, scoped to small
+`--regression-threshold` percentage-point rule (default 5pp): the same intuition, scoped to small
 samples where the z-test can't say anything informative.
 
-Baselines live under `evals/baselines/` in two layers — one tier for the "latest" pointer that
+Baselines live under `evals/baselines/` in two layers: one tier for the "latest" pointer that
 `compareToBaseline` actually reads, and a `history/` subdir for the full timeline of every
 `--save-baseline`:
 
@@ -181,7 +181,7 @@ evals/baselines/
 ```
 
 Every `--save-baseline` writes a new dated copy to `history/` *and* refreshes the top-level
-"latest" file in one shot — so the latest pointer is always the most recent snapshot, and
+"latest" file in one shot, so the latest pointer is always the most recent snapshot, and
 `history/` is a complete audit log of what the benchmark looked like at every commit. Both tiers
 are tracked in git so baselines move with the codebase they correspond to (the `commit` recorded
 inside each baseline lets `--history` correlate snapshots to commits).
@@ -232,17 +232,17 @@ The "significance block" tells you *why* the run did or didn't trip the regressi
 
 - `p < α` (e.g. p=0.0031 < 0.05) → `*` marker, IS a statistically significant regression.
 - `p ≥ α` but sample is too small for the z-test to be reliable (n < 10) →
-  "LOW N — see threshold fallback" — and the flag follows `--regression-threshold` percentage points.
+  "LOW N — see threshold fallback", and the flag follows `--regression-threshold` percentage points.
 - Effect size is Cohen's h, computed as `|2·asin(√p1) − 2·asin(√p2)|`; convention 0.2 small, 0.5 medium,
   0.8 large. Reported alongside p so you can tell "significant but trivial" from "significant and
   meaningful".
-- CIs are Wilson-score 95% intervals per run — the wider the overlap of the two, the less likely
+- CIs are Wilson-score 95% intervals per run. The wider the overlap of the two, the less likely
   the current drop is real rather than sampling noise.
 
 Per-case regression / improvement detection is structural (case-id matching): cases passing in
 baseline but failing now go in `Regressions`, the symmetric move in `Improvements`. These are
-always computed on the *common* case subset — cases added since the baseline are silently ignored
-(no comparison possible — not a regression). The significance test uses the same subset, so a new
+always computed on the *common* case subset. Cases added since the baseline are silently ignored
+(no comparison possible, so not a regression). The significance test uses the same subset, so a new
 or removed case can't tilt the z-test by inflating the denominator.
 
 When cases don't match 1:1 (e.g. baseline had 20 cases, current run covers 33 after new cases were
@@ -252,11 +252,11 @@ broader coverage.
 
 ## Troubleshooting a failure: `--trace`
 
-The pass/fail table (and even a failed-checks message) tells you *that* a case failed, not *why* —
+The pass/fail table (and even a failed-checks message) tells you *that* a case failed, not *why*,
 and "why" is the only thing that turns a benchmark number into a harness fix or a real model-gap
 finding. Every recorded case carries a full turn-by-turn `trace`: for each turn, the model's
-reasoning (`thinking`), any user-visible commentary it produced, and — for every tool call it
-made — the exact args passed and what the tool actually returned. Not just "it called `edit`," but
+reasoning (`thinking`), any user-visible commentary it produced, and, for every tool call it
+made, the exact args passed and what the tool actually returned. Not just "it called `edit`", but
 what the `read` right before it actually showed the model, and whether the tool's own result
 confirms what the model claimed happened.
 
@@ -273,7 +273,7 @@ node --import tsx evals/run.ts --trace latest --case plan-done-signal -m gpt-5.6
 
 `<file>` can be `latest`, a path, or a bare filename under `evals/results/runs/`; `--case` selects
 which case to expand (omit it to just list what's in the file). For a `--repeat` file, every
-attempt is printed as its own block, in order — reading them side by side is often the fastest way
+attempt is printed as its own block, in order. Reading them side by side is often the fastest way
 to see *what specifically* differed between an attempt that passed and one that didn't, rather than
 just knowing they disagreed.
 
@@ -282,14 +282,14 @@ this project's own eval work told apart, on separate occasions: a genuinely wron
 (`maxTurns: 1` on a plan-mode case whose own system prompt mandates a preliminary `ls`+`read`), a
 wrong argument name in a `verify` function (`args.path` vs. `edit`'s actual `args.filePath`), a real
 product bug two layers down (the `grep` fallback silently returning zero matches when `path` named
-a single file, not a directory) — and a genuine, reproducible model weakness (hedging a plan with
+a single file, not a directory), and a genuine, reproducible model weakness (hedging a plan with
 both options instead of converging, then calling `plan_done` anyway). Four different failure
 classes that would otherwise look identical from the pass/fail table alone: a red row saying the
 same thing regardless of which of those it actually was.
 
 Implementation: `evals/lib/runner.ts`'s `runCase` builds `trace` from the same `AgentEvent` stream
 the TUI and web UI render live (`assistant_message` for thinking/commentary/requested tool calls,
-`turn_end.toolResults` for what each tool actually returned) — nothing synthetic, no re-derivation,
+`turn_end.toolResults` for what each tool actually returned): nothing synthetic, no re-derivation,
 same events the shipping UI is built on. `evals/lib/trace-view.ts` reads it back out of a recorded
 JSON file and pretty-prints it (truncating only the terminal display, never the stored JSON).
 
@@ -297,7 +297,7 @@ JSON file and pretty-prints it (truncating only the terminal display, never the 
 
 Harness-level guardrails (doom-loop detection, dangerous-command confirmation, the automatic
 background-task completion reminder) are deliberately covered by `test/` unit tests, not behavior
-cases here — they're enforced by code regardless of what the model does, so a behavior case would
+cases here. They're enforced by code regardless of what the model does, so a behavior case would
 just be re-testing the guardrail rather than the model. See `docs/eval-behavior.md`'s "What belongs
 where" for the split.
 

@@ -1,4 +1,4 @@
-# ACP — Agent Communication Protocol
+# ACP: Agent Communication Protocol
 
 `cast acp` exposes cast as a JSON-RPC 2.0 agent over stdio, using
 `@agentclientprotocol/sdk` for transport and schema. Any editor that
@@ -57,7 +57,7 @@ Advertised in `initialize`:
 - `fork` and `resume` are deliberately absent: cast has no fork semantics, and
   `session/resume` is a synonym of `session/load`, so advertising it separately
   would make an editor show a distinct affordance for the same thing.
-- `mcpCapabilities.{http,sse}` are `true` — an editor may pass HTTP/SSE MCP
+- `mcpCapabilities.{http,sse}` are `true`: an editor may pass HTTP/SSE MCP
   servers in `session/new`, and their tools are merged with cast's own for the
   life of that session. `stdio` and the experimental `acp` transport are
   refused: spawning local processes on behalf of a remote editor is not
@@ -68,7 +68,7 @@ Advertised in `initialize`:
 
 | Method                | Payload                                                       |
 | --------------------- | ------------------------------------------------------------- |
-| `session/update`      | One per `AgentEvent` — `agent_message_chunk`, `tool_call`,     |
+| `session/update`      | One per `AgentEvent`: `agent_message_chunk`, `tool_call`,      |
 |                       | `tool_call_update`, `agent_thought_chunk`, `usage_update`,     |
 |                       | `session_end`, `session_error`, plus `info` for internal      |
 |                       | signals (compaction, todos, doom-loop, retry).                 |
@@ -87,7 +87,7 @@ Advertised in `initialize`:
 
 ## Dependencies
 
-`cast acp` requires `@agentclientprotocol/sdk` at runtime — it's declared
+`cast acp` requires `@agentclientprotocol/sdk` at runtime. It's declared
 as a direct dependency in `package.json`.
 
 ## Behavior parity with the TUI
@@ -97,8 +97,8 @@ machinery the TUI uses. The bridge replaces:
 
 - `confirmBash` → `requestPermissionViaBridge` (or `undefined` in bypass mode).
 
-Everything else — tool gating, plan state, subagent tools, hooks, skills,
-compaction — is shared. Mid-turn prompts behave identically: enqueued on
+Everything else (tool gating, plan state, subagent tools, hooks, skills,
+compaction) is shared. Mid-turn prompts behave identically: enqueued on
 `runner.followUpQueue`, consumed at the next inner-loop iteration.
 
 ## Limitations
@@ -107,10 +107,10 @@ compaction — is shared. Mid-turn prompts behave identically: enqueued on
 - ACP filesystem `resources` (read/write API) is not implemented.
 - ACP terminal mode (`terminal/*`) is not implemented.
 - `forkSession` / `setSessionConfigOption` / `setSessionModel` are not implemented.
-- `authenticate` returns `{}` — no auth flow.
+- `authenticate` returns `{}`: no auth flow.
 - `providers/list`, `logout`, `nes/*` not implemented.
 - Slash commands are advertised via `available_commands_update`, but invoking
-  them requires sending text through `session/prompt` — there is no
+  them requires sending text through `session/prompt`. There is no
   command-specific protocol method.
 
 ## Smoke test

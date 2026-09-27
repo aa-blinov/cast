@@ -1,19 +1,19 @@
 # cast
 
-A role-based terminal agent harness. Seven built-in personas — senior developer, analyst, reviewer, planner, researcher, assistant, and a coding agent with sub-agents — shared core tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
+A role-based terminal agent harness. Seven built-in personas (senior developer, analyst, reviewer, planner, researcher, assistant, and a coding agent with sub-agents): shared core tools, different judgment. Runs on any OpenAI-compatible model, including the one on your own hardware.
 
 <p align="center"><img src="assets/cast-banner.svg" alt="cast" width="440"></p>
 
 ## Why cast?
 
-**A cast, not a coder.** Seven built-in personas change the agent's role while keeping the normal tool surface familiar. Senior developer for root-cause fixes, reviewer for functional checks, analyst for product and project decisions, planner for execution plans, and researcher for source-backed investigations — same core tools, different judgment. `coder-with-subagents` additionally enables delegation; custom personas can narrow capabilities. Add your own with a markdown file or build one through chat.
+**A cast, not a coder.** Seven built-in personas change the agent's role while keeping the normal tool surface familiar. Senior developer for root-cause fixes, reviewer for functional checks, analyst for product and project decisions, planner for execution plans, and researcher for source-backed investigations. Same core tools, different judgment. `coder-with-subagents` additionally enables delegation; custom personas can narrow capabilities. Add your own with a markdown file or build one through chat.
 
-**Real tools, real work.** It reads files, writes code, runs shell commands, searches your codebase — and does it all in parallel. Delegates sub-tasks to isolated sub-agents. Rules, skills, and MCP servers extend capabilities without touching the codebase.
+**Real tools, real work.** It reads files, writes code, runs shell commands, searches your codebase, and does it all in parallel. Delegates sub-tasks to isolated sub-agents. Rules, skills, and MCP servers extend capabilities without touching the codebase.
 
 **Runs where your code runs.** vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency.
 
 **Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
-**Web UI.** `cast web` (also available as `cast server`) launches a browser-based control room — background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
+**Web UI.** `cast web` (also available as `cast server`) launches a browser-based control room: background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
 
 ## Why personas, not just prompts
 
@@ -21,7 +21,7 @@ Point a generic coding agent and a role-specific one at the same file, and they 
 
 Personas are role prompts first: they steer what the agent investigates, prioritizes, and treats as done. Each persona is defined by markdown frontmatter (`~/.cast/personas/*.md` or `.cast/personas/*.md`) that can also constrain available built-in tools (`tools`), skills (`skills`), MCP servers (`mcp`), and sub-agent delegation (`subagents`, `subagentTypes`). Those capability limits are enforced at runtime, not merely described in the prompt.
 
-Capability scoping is opt-in. The shipped personas deliberately retain the common tool, skill, and MCP surface so changing a role does not unexpectedly remove a workflow; only `coder-with-subagents` exposes delegation. Define allowlists on a custom persona when least privilege or a smaller prompt surface matters — for example, a documentation-only role that cannot call shell or database tools. This reduces instruction clutter and prevents accidental or misrouted invocations; it is not an automatic property of every role.
+Capability scoping is opt-in. The shipped personas deliberately retain the common tool, skill, and MCP surface so changing a role does not unexpectedly remove a workflow; only `coder-with-subagents` exposes delegation. Define allowlists on a custom persona when least privilege or a smaller prompt surface matters, for example a documentation-only role that cannot call shell or database tools. This reduces instruction clutter and prevents accidental or misrouted invocations; it is not an automatic property of every role.
 
 For empirical research on role prompting and tool-agent behavior, see [docs/persona-research.md](docs/persona-research.md).
 
@@ -39,7 +39,7 @@ Windows (PowerShell):
 irm https://aa-blinov.github.io/cast/install.ps1 | iex
 ```
 
-Requires Node.js 22+. Self-contained bundle — no npm packages needed at runtime.
+Requires Node.js 22+. Self-contained bundle: no npm packages needed at runtime.
 
 Pin a version: `CAST_VERSION=0.1.0 curl ... | bash`
 Upgrade later: `cast upgrade`
@@ -64,15 +64,15 @@ cast -c
 
 ### Built-in tools
 
-`bash` `read` `write` `edit` `glob` `grep` `ls` `task` `ssh` `web_search` `web_fetch` — the agent has full filesystem, shell, SSH remote, and web access. Multiple tools run in parallel. The `task` tool delegates work to isolated sub-agents (with their own persona and context) and returns only the final result. Image files (jpg/png/gif/webp) are sent directly to vision-capable models. Web tools are off by default — toggle with `/web` (persists to settings).
+`bash` `read` `write` `edit` `glob` `grep` `ls` `task` `ssh` `web_search` `web_fetch`. The agent has full filesystem, shell, SSH remote, and web access. Multiple tools run in parallel. The `task` tool delegates work to isolated sub-agents (with their own persona and context) and returns only the final result. Image files (jpg/png/gif/webp) are sent directly to vision-capable models. Web tools are off by default; toggle with `/web` (persists to settings).
 
 ### Rules
 
-Project-specific instructions in `.cast/rules/*.md` — Cursor-compatible format with four modes: always (injected every turn), auto (attached when matching files enter context), lazy (model reads on demand), and manual (via `@mention` or `/rule:name`). Nested `.cast/rules/` directories in subdirectories scope rules to that subtree.
+Project-specific instructions in `.cast/rules/*.md`, in a Cursor-compatible format with four modes: always (injected every turn), auto (attached when matching files enter context), lazy (model reads on demand), and manual (via `@mention` or `/rule:name`). Nested `.cast/rules/` directories in subdirectories scope rules to that subtree.
 
 ### Project Context Files
 
-Drop an `AGENTS.md` or `CLAUDE.md` in your repo root — cast picks it up automatically and injects it into the system prompt. Walks every ancestor directory up to `/`, so org-wide guidelines in a parent folder apply to all projects beneath it. The file in `cwd` itself is trust-gated; files above load without prompting. No special syntax, no config — just the file.
+Drop an `AGENTS.md` or `CLAUDE.md` in your repo root; cast picks it up automatically and injects it into the system prompt. Walks every ancestor directory up to `/`, so org-wide guidelines in a parent folder apply to all projects beneath it. The file in `cwd` itself is trust-gated; files above load without prompting. No special syntax, no config: just the file.
 
 ### Skills
 
@@ -80,19 +80,19 @@ Self-contained instruction packages loaded on demand from `~/.cast/skills/` / `.
 
 ### MCP Servers
 
-Connect any [Model Context Protocol](https://modelcontextprotocol.io) server — local (stdio) or remote (streamable HTTP). Uses the common `mcpServers` JSON config shape. Their tools appear alongside the built-in ones.
+Connect any [Model Context Protocol](https://modelcontextprotocol.io) server, local (stdio) or remote (streamable HTTP). Uses the common `mcpServers` JSON config shape. Their tools appear alongside the built-in ones.
 
 ### Personas
 
-Swap the agent's role — and optionally which built-in tools that role may use:
+Swap the agent's role, and optionally which built-in tools that role may use:
 
 | Persona | What it does |
 |---------|-------------|
-| `senior` (default) | Lazy senior dev — root-cause fixes, deletion over addition |
+| `senior` (default) | Lazy senior dev: root-cause fixes, deletion over addition |
 | `coder-with-subagents` | Delegates work to sub-agents via the `task` tool for parallel exploration |
-| `analyst` | Product, analytical, and project work — hypotheses, decisions, requirements, priorities, and plans |
+| `analyst` | Product, analytical, and project work: hypotheses, decisions, requirements, priorities, and plans |
 | `pm` | Turns settled decisions into clear project plans, milestones, dependencies, and actionable tasks |
-| `qa` | Functional review — requirements, regressions, scenarios, and actionable findings |
+| `qa` | Functional review: requirements, regressions, scenarios, and actionable findings |
 | `researcher` | Source-backed investigations with searches, cross-checks, and citations |
 | `assistant` | Everyday help, planning, writing, and quick lookups; uses tools when needed |
 
@@ -100,11 +100,11 @@ Add your own in `~/.cast/personas/` (global) or `.cast/personas/` (project), or 
 
 ### Plan mode
 
-Plan mode is user-owned: `/plan` switches the agent to read-only exploration, and `/build` returns to implementation. The agent writes execution-spec plans with `- [ ]` checklists to `<project>/.cast/plans/<session-id>/`. Once it calls `plan_done`, choose to keep refining, implement in the current context, or implement in a clean model context while retaining the visible thread. An approved plan is re-read into build-mode context across compaction and restarts; its checklist is projected into the task list. Each phase can run its own model — see `/plan-model`.
+Plan mode is user-owned: `/plan` switches the agent to read-only exploration, and `/build` returns to implementation. The agent writes execution-spec plans with `- [ ]` checklists to `<project>/.cast/plans/<session-id>/`. Once it calls `plan_done`, choose to keep refining, implement in the current context, or implement in a clean model context while retaining the visible thread. An approved plan is re-read into build-mode context across compaction and restarts; its checklist is projected into the task list. Each phase can run its own model (see `/plan-model`).
 
 ### Context compaction
 
-When the conversation gets too long, the agent automatically summarizes older messages — keeps the context window useful without losing important details.
+When the conversation gets too long, the agent automatically summarizes older messages. This keeps the context window useful without losing important details.
 
 ### Reasoning levels
 
@@ -116,7 +116,7 @@ Every conversation auto-saves. Resume with `--continue`, pick from a list with `
 
 ### Web UI
 
-`cast web` launches a browser-based control room — same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The file reader previews text and code with wrapped lines and source-line numbers; Markdown, tables, images, and PDFs keep their document-specific previews. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone. `cast server` is an equivalent command for daemon-oriented scripts and integrations.
+`cast web` launches a browser-based control room: the same sessions as the TUI, with a diff viewer, background agents, and token-by-token streaming. The file reader previews text and code with wrapped lines and source-line numbers; Markdown, tables, images, and PDFs keep their document-specific previews. The TUI is still the default for local interactive use; the Web UI is the answer when you want to share a session, keep one running in the background, or drive cast from a browser/phone. `cast server` is an equivalent command for daemon-oriented scripts and integrations.
 
 ```bash
 # Start (default 127.0.0.1:1337)
