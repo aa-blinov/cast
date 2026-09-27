@@ -21,9 +21,12 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `providers` | Provider[] | Saved providers (`name`, `url`, `apiKey`, optional `reasoningFormat`); use `/provider` to manage |
 | `cwd` | string | Last working directory |
 | `permissionMode` | `"default"` \| `"bypass"` | Bash confirmation mode |
+| `permissions` | `{ allow?, ask?, deny? }` | Per-tool permission rules (see [Permission Rules](#permission-rules)) |
 | `projectTrust` | Record<string, boolean> | Per-project trust decisions |
 | `theme` | string | Active color theme id |
 | `webTools` | boolean | Whether web tools are enabled (default: `false`; use `/web` to enable) |
+| `autoFormat` | boolean | Run the project's configured formatter after each `write`/`edit` (default: `true`; see [Auto-format](tools.md#auto-format)) |
+| `notifications` | boolean | TUI: a terminal notification and bell when a turn ends or waits for approval while the terminal is unfocused (default: `true`) |
 | `memoryEnabled` | boolean | Whether durable project memory, retrieval, and the Web UI Memory tab are enabled (default: `true`) |
 | `memoryWriteEnabled` | boolean | Whether checkpoint writing, dream, and distill may update memory (default: `true`; reading remains available when this is `false`) |
 | `memoryPromptBudget` | integer | Maximum estimated tokens reserved for memory context inserted during checkpoint rebuild (256–16384, default: `4096`) |
@@ -181,6 +184,37 @@ Change with:
 - `/permissions default` or `/permissions bypass` (direct set)
 
 See [Tools](tools.md#dangerous-command-gating) for the list of dangerous patterns.
+
+## Permission Rules
+
+`permissions` in `~/.cast/settings.json` decides per tool call whether to run it, ask first, or refuse:
+
+```json
+{
+  "permissions": {
+    "allow": ["bash(npm test*)", "bash(git status)", "write(docs/**)"],
+    "ask": ["bash(git push*)", "write(package.json)", "mcp_github_*"],
+    "deny": ["bash(git push --force*)", "write(.env*)", "edit(/etc/**)"],
+    "approved": ["bash(rm -rf build)"]
+  }
+}
+```
+
+A rule is a tool name, or a tool name with a pattern in parentheses. The pattern is matched against the call's subject:
+
+| Tool | Subject |
+|------|---------|
+| `bash`, `ssh` | the command |
+| `read`, `write`, `edit`, `ls`, `glob`, `grep` | the path, relative to the project when it is inside it, absolute otherwise |
+| `web_fetch` | the URL |
+
+In a command pattern `*` matches anything, spaces included. In a path pattern `*` stays within one directory and `**` crosses them. Tool names take `*` too, so `mcp_github_*` covers every tool of that MCP server. A rule with a pattern never matches a tool without a subject.
+
+- **deny** beats **approved**, which beats **ask**, which beats **allow**, regardless of order, so a broad allow can't cancel a deny. A denied call is not run, and the model is told to ask you instead of working around it. Deny applies in `bypass` mode too.
+- **ask** shows the same prompt as a dangerous command: in the TUI, in the web UI, or in an ACP editor. With nobody to ask (`bypass` mode) the call runs. `cast run` without a terminal refuses it.
+- **allow** answers the dangerous-command prompt ahead of time: `bash(rm -rf build)` runs without asking.
+
+**Always allow** in the prompt appends an exact rule for that call to `approved`, for example `bash(rm -rf build)` or `write(src/a.ts)`. `approved` outranks `ask`, so the rule that asked doesn't ask about that call again, and a `deny` still wins over it. Wildcard characters in the saved subject match only one character, so the saved rule never grows beyond the call you approved. Delete an entry from `approved` to be asked again. Rules are per tool: `deny: ["write(.env*)"]` doesn't stop `bash` from writing the same file, so pair it with a `bash` rule when that matters. Rules are read on every call and apply at once. Subagents follow the same rules. In an ACP editor, "Allow for this session" is kept for the session only and isn't saved.
 
 ## Provider Configuration
 

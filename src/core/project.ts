@@ -15,6 +15,7 @@ import {
 	type ResolvedHookEntry,
 } from "./hooks.ts";
 import { connectMcpServers, loadMcpConfig, type McpServerConfig, type McpSetupResult, saveMcpConfig } from "./mcp.ts";
+import { addAllowRule, exactRule } from "./permissions.ts";
 import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
 import { findProjectRoot } from "./project-root.ts";
 import {
@@ -28,6 +29,7 @@ import {
 import { loadSettings, type PermissionMode, type Settings } from "./settings.ts";
 import { builtinSkillsDir, formatSkillsForPrompt, loadSkills, type Skill } from "./skills.ts";
 import { loadSshConfig, projectSshPath } from "./ssh.ts";
+import type { ConfirmBash } from "./tools/shared.ts";
 
 export interface ProjectResolverDeps {
 	noSkills: boolean;
@@ -516,27 +518,27 @@ export function buildSystemPrompt(
  * Recreated by callers whenever permissionMode changes so the closure never
  * goes stale.
  */
-export function makeConfirmBash(
-	pickers: Pickers,
-	permissionMode: PermissionMode,
-): (command: string, reason: string) => Promise<boolean> {
-	return async (command, reason) => {
+export function makeConfirmBash(pickers: Pickers, permissionMode: PermissionMode): ConfirmBash {
+	return async (command, reason, rule) => {
 		if (permissionMode === "bypass") return true;
 		if (!process.stdin.isTTY) {
 			console.log(
-				`\n\x1b[31m[Blocked: command looks dangerous (${reason}) and can't be confirmed non-interactively.]\x1b[0m`,
+				`\n\x1b[31m[Blocked: ${command} needs confirmation (${reason}), and there is no one to ask.]\x1b[0m`,
 			);
-			console.log("Run interactively to confirm it, or use /permissions bypass beforehand.");
+			console.log("Run interactively to confirm it, add an allow rule, or use /permissions bypass beforehand.");
 			return false;
 		}
-		pickers.log(`Dangerous command: ${reason}\n  ${command}`);
+		const saves = rule ?? exactRule("bash", { command }, "");
+		pickers.log(`Needs confirmation: ${reason}\n  ${command}`);
 		const picked = await pickers.pickOption(
 			[
-				{ value: true, label: "Allow once" },
-				{ value: false, label: "Block" },
+				{ value: "once", label: "Allow once" },
+				{ value: "always", label: `Always allow: saves ${saves}` },
+				{ value: "block", label: "Block" },
 			],
-			{ title: "Allow this command?" },
+			{ title: "Allow this?" },
 		);
-		return picked === true;
+		if (picked === "always") addAllowRule(saves);
+		return picked === "once" || picked === "always";
 	};
 }

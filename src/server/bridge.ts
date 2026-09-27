@@ -28,6 +28,7 @@ import {
 	loadMcpConfig,
 	type McpSetupResult,
 } from "../core/mcp.ts";
+import { addAllowRule, exactRule } from "../core/permissions.ts";
 
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
 import {
@@ -223,7 +224,7 @@ export type WebEvent =
 	/** The turn hit a command the dangerous-command gate wants confirmed. The
 	 * agent is blocked until a client answers via `answerBashConfirm`, or the
 	 * request times out (denied). */
-	| { type: "bash_confirm"; id: string; command: string; reason: string };
+	| { type: "bash_confirm"; id: string; command: string; reason: string; rule?: string };
 
 export interface WebAgentSession {
 	id: string;
@@ -275,7 +276,13 @@ export interface WebAgentSession {
 	sessionSkills?: Skill[];
 	/** A dangerous-command confirmation the turn is blocked on, waiting for a
 	 * client to answer. At most one: the loop runs one bash call at a time. */
-	pendingBashConfirm?: { id: string; command: string; reason: string; settle: (allow: boolean) => void };
+	pendingBashConfirm?: {
+		id: string;
+		command: string;
+		reason: string;
+		rule?: string;
+		settle: (allow: boolean) => void;
+	};
 	/** Files touched (read/write/edit) this session, relative to cwd — grown
 	 * in place by loop.ts across turns AND across separate runAgentLoop
 	 * invocations (passed by reference, same array every call) so a nested
@@ -434,7 +441,7 @@ export interface ServerBridge {
 	): Promise<{ ok: true } | { ok: false; error: string }>;
 	/** Answer a pending dangerous-command confirmation. False when the id names
 	 * no live request (already answered, timed out, or the turn moved on). */
-	answerBashConfirm(sessionId: string, id: string, allow: boolean): boolean;
+	answerBashConfirm(sessionId: string, id: string, allow: boolean, always?: boolean): boolean;
 	/** The confirmation this session is blocked on, if any — so a client that
 	 * connects mid-turn can render it instead of waiting for a replayed event. */
 	getBashConfirm(sessionId: string): { id: string; command: string; reason: string } | undefined;
@@ -1145,7 +1152,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * whose own picker never got a say. With no listener attached there is nobody
 	 * to ask, so the request is denied rather than silently allowed.
 	 */
-	function requestBashConfirm(ws: WebAgentSession, command: string, reason: string): Promise<boolean> {
+	function requestBashConfirm(ws: WebAgentSession, command: string, reason: string, rule?: string): Promise<boolean> {
 		if (ws.listeners.size === 0) return Promise.resolve(false);
 		ws.pendingBashConfirm?.settle(false);
 		const id = randomBytes(8).toString("hex");
@@ -1160,8 +1167,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				ws.pendingBashConfirm = undefined;
 				resolve(allow);
 			};
-			ws.pendingBashConfirm = { id, command, reason, settle };
-			broadcaster.broadcast(ws, { type: "bash_confirm", id, command, reason });
+			ws.pendingBashConfirm = { id, command, reason, rule, settle };
+			broadcaster.broadcast(ws, { type: "bash_confirm", id, command, reason, rule });
 		});
 	}
 
@@ -1172,10 +1179,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	/** Answer a pending confirmation. Returns false when there is none, or when
 	 * the id names an older request that has already been settled. */
-	function answerBashConfirm(sessionId: string, id: string, allow: boolean): boolean {
+	function answerBashConfirm(sessionId: string, id: string, allow: boolean, always = false): boolean {
 		const ws = sessions.get(sessionId);
 		const pending = ws?.pendingBashConfirm;
 		if (!pending || pending.id !== id) return false;
+		if (allow && always) addAllowRule(pending.rule ?? exactRule("bash", { command: pending.command }, ""));
 		pending.settle(allow);
 		return true;
 	}
@@ -1779,7 +1787,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			steeringQueue: ws.runner.steeringQueue,
 			followUpQueue: ws.runner.followUpQueue,
 			confirmBash:
-				effectiveMode === "bypass" ? undefined : (command, reason) => requestBashConfirm(ws, command, reason),
+				effectiveMode === "bypass"
+					? undefined
+					: (command, reason, rule) => requestBashConfirm(ws, command, reason, rule),
 			disabledTools,
 			planState,
 			initialTodos: ws.session.todos,

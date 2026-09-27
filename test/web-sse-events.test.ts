@@ -31,6 +31,35 @@ function createContext() {
 }
 
 describe("web SSE events", () => {
+	it("notifies while the tab is hidden: turn done and approval needed", () => {
+		const shown: [string, { body: string }][] = [];
+		const FakeNotification = Object.assign(
+			function (this: unknown, title: string, opts: { body: string }) {
+				shown.push([title, opts]);
+			},
+			{ permission: "granted" },
+		);
+		vi.stubGlobal("Notification", FakeNotification);
+		vi.stubGlobal("document", { hidden: true });
+		try {
+			const state = createContext();
+			state.wasRunningRef.current = true;
+			handleSseEvent({ type: "bash_confirm", id: "c1", command: "rm -rf build" }, state);
+			handleSseEvent({ type: "end" }, state);
+			expect(shown.map(([title, opts]) => [title, opts.body])).toEqual([
+				["Cast: approval needed", "rm -rf build"],
+				["Cast: turn done", "The agent finished"],
+			]);
+
+			vi.stubGlobal("document", { hidden: false });
+			state.wasRunningRef.current = true;
+			handleSseEvent({ type: "end" }, state);
+			expect(shown).toHaveLength(2);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+
 	it("forwards streaming events without changing their order", () => {
 		const state = createContext();
 		handleSseEvent({ type: "thinking", text: "first" }, state);

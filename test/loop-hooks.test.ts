@@ -93,6 +93,38 @@ describe("runAgentLoop — PostToolUse hook blocking (real bash spawn)", () => {
 		expect(toolMessage(messages).content).toContain("[Hook feedback: formatting failed]");
 	});
 
+	it("hands a non-blocking hook's additionalContext to the model with the result", async () => {
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "echo hi" }) }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		const hooks: HooksFile = {
+			PostToolUse: [
+				{
+					hooks: [{ command: `echo '{"hookSpecificOutput":{"additionalContext":"a.ts(3,1): error TS2304"}}'` }],
+				},
+			],
+		};
+
+		const messages = await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			hooks,
+			onEvent: () => {},
+		});
+
+		const content = toolMessage(messages).content;
+		expect(content).toContain("hi");
+		expect(content).toContain("[Hook context: a.ts(3,1): error TS2304]");
+	});
+
 	it("REGRESSION: still surfaces a block when the hook exits 2 with zero output (no reason)", async () => {
 		vi.mocked(streamAndCollect)
 			.mockImplementationOnce(async () => ({

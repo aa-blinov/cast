@@ -207,9 +207,12 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 | Clear the input | Ctrl+L |
 | Exit (2× to confirm) | Ctrl+C |
 | Attach image | Ctrl+G |
+| Edit the prompt in `$VISUAL` / `$EDITOR` | Ctrl+X |
 | Complete a command, or a file path | Tab |
 
 **Esc** stops the current turn while generating (twice within 2s); `Ctrl+L` clears the input in any state.
+
+**`@`** at the start of a word opens a fuzzy picker of project files (from `git ls-files` in a repository, so `.gitignore` holds; `rg --files` or a directory walk elsewhere). ↑/↓ choose, Tab or Enter insert `@path`, Esc closes it for that word. The model reads the file itself when it needs it. The web composer has the same picker.
 
 **Tab** completes a slash command in the palette, and a path-shaped token anywhere else (one containing `/`, or starting with `~`). Ambiguous ones list what is left to choose from. Tab in ordinary prose does nothing.
 
@@ -218,6 +221,16 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 **A long draft wraps** at the terminal's edge, on word boundaries. The composer draws at most three rows and follows the cursor, with `↑`/`↓` in the prompt column where the draft continues past them. ↑/↓ move between rows, wrapped ones included.
 
 **Ctrl+C**: press twice within 2s to exit. Does not stop a turn. Use Esc for that.
+
+**Ctrl+X** opens the draft in `$VISUAL`, or `$EDITOR` when that is unset, like `git commit` does. The TUI steps aside while the editor runs; save and quit to bring the text back into the composer, still unsent. A GUI editor needs its wait flag (`code --wait`). A non-zero exit, such as `:cq` in vim, leaves the draft as it was.
+
+**Rebinding keys:** `keybindings` in `~/.cast/settings.json` maps an action id to one key or a list, replacing that action's defaults; `[]` unbinds it. `/keys` shows the keys in effect.
+
+```json
+{ "keybindings": { "input.externalEditor": "ctrl+o", "editor.clearBuffer": ["ctrl+l", "alt+l"] } }
+```
+
+Action ids are the ones in [`keybindings.ts`](https://github.com/aa-blinov/cast/blob/master/src/ui/input/keybindings.ts), for example `input.submit`, `input.attachImage`, `editor.deleteWordBackward`.
 
 ## During a Running Agent
 

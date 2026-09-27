@@ -19,6 +19,7 @@ import type { SshHost } from "./ssh.ts";
 import { execBash } from "./tools/bash.ts";
 import { type BashBackgroundDeps, execBashKill, execBashOutput } from "./tools/bash-background.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
+import { formatWrittenFile } from "./tools/format.ts";
 import { execPersonaCreate, PERSONA_CREATE_TOOL_DESCRIPTION, type PersonaToolDeps } from "./tools/persona.ts";
 import { execGlob, execGrep, execLs } from "./tools/search.ts";
 import {
@@ -841,6 +842,13 @@ export function getToolDefinitions(
 // Tool execution — dispatches a tool call to its implementation module.
 // ============================================================================
 
+/** Plan files are exempt: they aren't project code, and the plan branch returns before this. */
+async function withFormatting(result: ToolResult, absolutePath: string, signal?: AbortSignal): Promise<ToolResult> {
+	if (result.isError || loadSettings().autoFormat === false) return result;
+	const note = await formatWrittenFile(absolutePath, signal);
+	return note ? { ...result, content: `${result.content}\n${note}` } : result;
+}
+
 export function createToolExecutor(
 	cwd: string,
 	config: AppConfig,
@@ -901,7 +909,7 @@ export function createToolExecutor(
 							return result;
 						}
 						beforeFileWrite?.(absolutePath);
-						return await execWrite(args, cwd);
+						return withFormatting(await execWrite(args, cwd), absolutePath, signal);
 					}
 					case "edit": {
 						const absolutePath = resolvePath(String(args.filePath ?? ""), cwd);
@@ -928,7 +936,7 @@ export function createToolExecutor(
 							return result;
 						}
 						beforeFileWrite?.(absolutePath);
-						return await execEdit(args, cwd, config);
+						return withFormatting(await execEdit(args, cwd, config), absolutePath, signal);
 					}
 					case "glob":
 					case "find": // legacy alias — same implementation as glob

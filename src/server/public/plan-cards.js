@@ -101,15 +101,18 @@ export function QuestionCard({ question, onChoose }) {
 export function BashConfirmCard({ request, onAnswer }) {
 	if (!request) return null;
 	return html`
-		<section class="plan-decision-card question-card" aria-label="Confirm a dangerous command">
+		<section class="plan-decision-card question-card" aria-label="Confirm a tool call">
 			<div class="plan-decision-header">
-				<span class="plan-decision-name">command</span>
+				<span class="plan-decision-name">approval</span>
 				<span class="plan-decision-kind">${request.reason}</span>
 			</div>
 			<div class="plan-decision-body"><code>${request.command}</code></div>
 			<div class="plan-decision-options">
 				<button class="plan-decision-option" onClick=${() => onAnswer(request.id, true)}>
 					<span class="plan-decision-option-label">Allow once</span>
+				</button>
+				<button class="plan-decision-option" title=${`Saves ${request.rule ?? `bash(${request.command})`} to your permission rules`} onClick=${() => onAnswer(request.id, true, true)}>
+					<span class="plan-decision-option-label">Always allow</span>
 				</button>
 				<button class="plan-decision-option" onClick=${() => onAnswer(request.id, false)}>
 					<span class="plan-decision-option-label">Block</span>

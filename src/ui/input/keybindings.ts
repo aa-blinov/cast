@@ -1,3 +1,4 @@
+import { loadSettings } from "../../core/settings.ts";
 import { type KeyId, matchesKey } from "./keys.ts";
 
 export interface KeybindingDefinition {
@@ -35,6 +36,7 @@ export const TUI_KEYBINDINGS = {
 	"input.abort": { defaultKeys: "ctrl+c" },
 	"input.escape": { defaultKeys: "escape" },
 	"input.attachImage": { defaultKeys: "ctrl+g" },
+	"input.externalEditor": { defaultKeys: "ctrl+x", description: "Edit the prompt in $VISUAL / $EDITOR" },
 	"input.tab": { defaultKeys: "tab" },
 	"history.older": { defaultKeys: "pageUp", description: "Load older session history" },
 } as const satisfies KeybindingDefinitions;
@@ -59,6 +61,10 @@ export class KeybindingsManager {
 		}
 	}
 
+	keysFor(keybinding: Keybinding): KeyId[] {
+		return this.keysById.get(keybinding) ?? [];
+	}
+
 	matches(data: string, keybinding: Keybinding): boolean {
 		const keys = this.keysById.get(keybinding) ?? [];
 		for (const key of keys) {
@@ -70,7 +76,19 @@ export class KeybindingsManager {
 
 let globalKeybindings: KeybindingsManager | null = null;
 
+/** Only string or string-array values: anything else in settings.json is ignored, not fatal. */
+export function sanitizeKeybindings(raw: unknown): KeybindingsConfig {
+	if (!raw || typeof raw !== "object") return {};
+	const out: KeybindingsConfig = {};
+	for (const [id, keys] of Object.entries(raw)) {
+		if (!(id in TUI_KEYBINDINGS)) continue;
+		if (typeof keys === "string") out[id] = keys as KeyId;
+		else if (Array.isArray(keys) && keys.every((k) => typeof k === "string")) out[id] = keys as KeyId[];
+	}
+	return out;
+}
+
 export function getKeybindings(): KeybindingsManager {
-	if (!globalKeybindings) globalKeybindings = new KeybindingsManager();
+	if (!globalKeybindings) globalKeybindings = new KeybindingsManager(sanitizeKeybindings(loadSettings().keybindings));
 	return globalKeybindings;
 }

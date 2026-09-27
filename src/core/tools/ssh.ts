@@ -8,8 +8,8 @@ import {
 	type SshHost,
 	validateKeyPermissions,
 } from "../ssh.ts";
-import { readBashTimeout, stripAnsi } from "./bash.ts";
-import { BoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
+import { formatBashResult, readBashTimeout } from "./bash.ts";
+import { BoundedOutput, type ConfirmBash, type ToolResult } from "./shared.ts";
 
 export async function execSsh(
 	args: Record<string, unknown>,
@@ -112,7 +112,7 @@ export async function execSsh(
 		});
 
 		const maxBytes = config.maxToolOutputBytes;
-		const output = new BoundedOutput(maxBytes);
+		const output = new BoundedOutput(maxBytes, true);
 		let timedOut = false;
 		let aborted = false;
 
@@ -168,27 +168,14 @@ export async function execSsh(
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
 
-			let text = stripAnsi(output.final()).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-			const prefix = aborted
-				? "[ABORTED] Command was interrupted by user.\n\n"
-				: timedOut
-					? `[TIMED OUT] after ${timeoutMs}ms. If this command needs more time, retry with a larger timeout.\n\n`
-					: "";
-			if (exitCode !== 0 && !aborted && !timedOut) {
-				text += `\n\nProcess exited with code ${exitCode}`;
-			}
-			const lines = text.split("\n");
-			if (lines.length > config.maxToolOutputLines) {
-				const kept = lines.slice(-config.maxToolOutputLines);
-				text = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
-			}
-			if (output.truncated) {
-				text += `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`;
-			}
-			const result: ToolResult = {
-				content: prefix + (text || "(no output)"),
-				isError: aborted || timedOut || exitCode !== 0,
-			};
+			const result = formatBashResult(output.final(), config, {
+				exitCode,
+				aborted,
+				timedOut,
+				outputTruncated: output.truncated,
+				fullOutputPath: output.spillPath,
+				timeoutMs,
+			});
 			finalResult = result;
 			resolve(result);
 		});

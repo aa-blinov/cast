@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { BoundedOutput, completedToolCallStatus, normalizeToolResultError } from "../src/core/tools/shared.ts";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	BoundedOutput,
+	completedToolCallStatus,
+	formatSize,
+	normalizeToolResultError,
+	saveToolOutput,
+} from "../src/core/tools/shared.ts";
 
 describe("completedToolCallStatus", () => {
 	it("maps the canonical ToolResult error flag to the only terminal states", () => {
@@ -20,6 +29,14 @@ describe("normalizeToolResultError", () => {
 			code: "INVALID_ARGUMENT",
 			retryable: false,
 			suggestedFix: "Correct the tool name or arguments using the error details, then retry.",
+		});
+	});
+
+	it("classifies conflicts and external failures", () => {
+		expect(normalizeToolResultError({ content: "file already exists", isError: true }).error?.code).toBe("CONFLICT");
+		expect(normalizeToolResultError({ content: "fetch error: 502", isError: true }).error).toMatchObject({
+			code: "EXTERNAL_ERROR",
+			retryable: true,
 		});
 	});
 
@@ -96,5 +113,74 @@ describe("BoundedOutput", () => {
 		expect(live.snapshot()).toBe("x");
 		live.append(emoji.subarray(2));
 		expect(live.snapshot()).toBe("x\u{1F3AF}");
+	});
+});
+
+describe("BoundedOutput spill", () => {
+	let realHome: string | undefined;
+	let home: string;
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		home = mkdtempSync(join(tmpdir(), "cast-spill-"));
+		process.env.HOME = home;
+	});
+	afterEach(() => {
+		process.env.HOME = realHome;
+		rmSync(home, { recursive: true, force: true });
+	});
+
+	// First in this file: pruning runs once per process, on the first save.
+	it("clears saved outputs older than a week", () => {
+		const dir = join(home, ".cast", "tool-output");
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, "old.txt"), "x");
+		writeFileSync(join(dir, "recent.txt"), "x");
+		const eightDaysAgo = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
+		utimesSync(join(dir, "old.txt"), eightDaysAgo, eightDaysAgo);
+		const path = saveToolOutput("full text");
+		expect(readFileSync(path as string, "utf-8")).toBe("full text");
+		expect(readdirSync(dir).sort()).toEqual([path?.split("/").pop(), "recent.txt"].sort());
+	});
+
+	it("writes the whole stream byte-exact, even when the cut splits a character", () => {
+		const out = new BoundedOutput(6, true);
+		const full = Buffer.concat([Buffer.from("abcd"), Buffer.from("\u{1F3AF}", "utf8"), Buffer.from(" tail")]);
+		out.append(full.subarray(0, 3));
+		out.append(full.subarray(3, 9));
+		out.append(full.subarray(9));
+		out.final();
+		expect(out.spillPath?.startsWith(join(home, ".cast", "tool-output"))).toBe(true);
+		expect(readFileSync(out.spillPath as string)).toEqual(full);
+	});
+
+	it("writes nothing while the output fits, or when spill is off", () => {
+		const fits = new BoundedOutput(100, true);
+		fits.append("small");
+		fits.final();
+		expect(fits.spillPath).toBeUndefined();
+		const off = new BoundedOutput(2);
+		off.append("too long");
+		expect(off.truncated).toBe(true);
+		expect(off.spillPath).toBeUndefined();
+	});
+
+	it("keeps working without a file when the home can't be written", () => {
+		mkdirSync(join(home, ".cast"), { recursive: true });
+		writeFileSync(join(home, ".cast", "tool-output"), "a file where the directory should be");
+		expect(saveToolOutput("text")).toBeUndefined();
+		const out = new BoundedOutput(2, true);
+		out.append("too long");
+		expect(out.truncated).toBe(true);
+		expect(out.spillPath).toBeUndefined();
+		expect(out.final()).toBe("to");
+	});
+});
+
+describe("formatSize", () => {
+	it("scales through the units", () => {
+		expect(formatSize(512)).toBe("512B");
+		expect(formatSize(2048)).toBe("2.0KB");
+		expect(formatSize(3 * 1024 * 1024)).toBe("3.0MB");
+		expect(formatSize(5 * 1024 * 1024 * 1024)).toBe("5.0GB");
 	});
 });

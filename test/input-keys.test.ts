@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KeybindingsManager } from "../src/ui/input/keybindings.ts";
+import { KeybindingsManager, sanitizeKeybindings } from "../src/ui/input/keybindings.ts";
 import { decodePrintableKey, Key, matchesKey } from "../src/ui/input/keys.ts";
 
 describe("keys.ts — matchesKey", () => {
@@ -197,5 +197,24 @@ describe("keybindings.ts — KeybindingsManager", () => {
 		const km = new KeybindingsManager();
 		expect(km.matches("\x0c", "editor.clearBuffer")).toBe(true);
 		expect(km.matches("\r", "editor.clearBuffer")).toBe(false);
+	});
+});
+
+describe("keybindings from settings", () => {
+	it("an override replaces the defaults, and [] unbinds", () => {
+		const km = new KeybindingsManager(
+			sanitizeKeybindings({ "input.externalEditor": "ctrl+o", "input.attachImage": [] }),
+		);
+		expect(km.matches("\x0f", "input.externalEditor")).toBe(true);
+		expect(km.matches("\x18", "input.externalEditor")).toBe(false);
+		expect(km.keysFor("input.attachImage")).toEqual([]);
+		expect(km.matches("\x07", "input.attachImage")).toBe(false);
+		expect(km.matches("\x0c", "editor.clearBuffer")).toBe(true);
+	});
+
+	it("ignores unknown actions and malformed values instead of failing", () => {
+		expect(sanitizeKeybindings({ nope: "ctrl+o", "input.submit": 5, "input.tab": ["tab", 1] })).toEqual({});
+		expect(sanitizeKeybindings("ctrl+o")).toEqual({});
+		expect(sanitizeKeybindings(undefined)).toEqual({});
 	});
 });

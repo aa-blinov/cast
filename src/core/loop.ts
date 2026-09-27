@@ -104,6 +104,7 @@ import {
 	isOpenWorkGateActive,
 	type OpenWorkGateConfig,
 } from "./open-work-gate.ts";
+import { evaluatePermission, exactRule, permissionSubject } from "./permissions.ts";
 import type { Persona } from "./personas.ts";
 import { checkReadOnlyCommand, listPlanNames, type PlanState, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
 import { type ProjectResolverDeps, resolveMcpForCwd } from "./project.ts";
@@ -2100,10 +2101,19 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// Read `activeHooks` at call time, not at construction: a skill invoked
 	// mid-run can add PermissionRequest/PermissionDenied hooks, and a run that
 	// started with none would otherwise never see them.
+	// Commands the user just approved through an `ask` rule: the dangerous-
+	// pattern gate inside bash must not ask about the same call again.
+	const approvedCommands = new Set<string>();
 	const confirmBashWithHooks: ConfirmBash | undefined = loopConfig.confirmBash
-		? async (command, reason) => {
+		? async (command, reason, rule) => {
+				if (approvedCommands.delete(command)) return true;
+				// An allow rule is the user's standing answer to this prompt.
+				const rules = loadSettings().permissions;
+				for (const tool of ["bash", "ssh"]) {
+					if (evaluatePermission(rules, tool, { command }, cwd)?.action === "allow") return true;
+				}
 				const hooksForConfirm = activeHooks;
-				if (!hooksForConfirm) return loopConfig.confirmBash!(command, reason);
+				if (!hooksForConfirm) return loopConfig.confirmBash!(command, reason, rule);
 				const pr = await runHooksForEvent(hooksForConfirm, {
 					event: "PermissionRequest",
 					matchTarget: "bash",
@@ -2123,7 +2133,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					});
 					return false;
 				}
-				const allowed = await loopConfig.confirmBash!(command, reason);
+				const allowed = await loopConfig.confirmBash!(command, reason, rule);
 				if (!allowed) {
 					void runHooksForEvent(hooksForConfirm, {
 						event: "PermissionDenied",
@@ -2137,6 +2147,35 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				return allowed;
 			}
 		: loopConfig.confirmBash;
+
+	/**
+	 * `permissions` rules from settings, for every tool (built-in and MCP).
+	 * Read per call, so a rule saved by "always allow" applies at once. An
+	 * `ask` with nobody to ask (bypass mode) runs; a `deny` never does.
+	 */
+	const gatePermissionRules = async (name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> => {
+		const verdict = evaluatePermission(loadSettings().permissions, name, args, cwd);
+		if (verdict?.action === "deny") {
+			return {
+				content: `Denied by the permission rule "${verdict.rule}" in the user's settings. Don't retry it or work around it; ask the user if it is really needed.`,
+				isError: true,
+			};
+		}
+		if (verdict?.action !== "ask") return undefined;
+		const isShell = name === "bash" || name === "ssh";
+		const confirm = isShell ? confirmBashWithHooks : loopConfig.confirmBash;
+		if (!confirm) return undefined;
+		const subject = permissionSubject(name, args, cwd);
+		const label = isShell ? String(args.command) : subject ? `${name} ${subject}` : name;
+		if (!(await confirm(label, `permission rule ${verdict.rule}`, exactRule(name, args, cwd)))) {
+			return {
+				content: `Not run: the user declined ${name} (permission rule "${verdict.rule}"). Ask them before trying another way.`,
+				isError: true,
+			};
+		}
+		if (isShell) approvedCommands.add(String(args.command));
+		return undefined;
+	};
 
 	const builtinExecuteTool = createToolExecutor(
 		cwd,
@@ -2257,6 +2296,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			}
 		}
 		const dispatch = async (finalArgs: Record<string, unknown>): Promise<ToolResult> => {
+			const denial = await gatePermissionRules(name, finalArgs);
+			if (denial) return denial;
 			// Handled here (not in tools.ts's dispatcher) because it needs direct
 			// access to this closure's `todos` — the list must be visible to
 			// syncSystemPrompt on the very next request, not round-tripped through
@@ -3540,6 +3581,9 @@ async function runToolWithHooks(
 		const reason = post.reason || `Blocked by a ${postEvent} hook for "${name}".`;
 		return { ...result, content: `${result.content}\n\n[Hook feedback: ${reason}]` };
 	}
+	// A type check or linter reporting back: the model reads it with the result.
+	if (post.additionalContext)
+		return { ...result, content: `${result.content}\n\n[Hook context: ${post.additionalContext}]` };
 	return result;
 }
 

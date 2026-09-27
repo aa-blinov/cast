@@ -59,6 +59,16 @@ function withTimeout<T>(promise: Promise<T>, ms = 5000): Promise<T> {
 }
 
 describe("bash", () => {
+	// Cut output is saved under ~/.cast/tool-output: keep it out of the real home.
+	let realHome: string | undefined;
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		process.env.HOME = join(TEST_DIR, "fake-home");
+	});
+	afterEach(() => {
+		process.env.HOME = realHome;
+	});
+
 	it("rejects a missing command instead of reporting a no-op as success", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("bash", {});
@@ -79,10 +89,30 @@ describe("bash", () => {
 		expect(result.isError).toBe(true);
 	});
 
-	it("marks byte-limited output so the agent does not mistake it for complete output", async () => {
+	it("saves byte-limited output to a file and points the agent at it", async () => {
 		const exec = createToolExecutor(TEST_DIR, { ...mockConfig, maxToolOutputBytes: 10 });
 		const result = await exec("bash", { command: "printf 123456789012345" });
-		expect(result.content).toContain("Output truncated at 10B");
+		const path = /full output is saved at (\S+):/.exec(result.content)?.[1];
+		expect(path?.startsWith(join(TEST_DIR, "fake-home", ".cast", "tool-output"))).toBe(true);
+		expect(readFileSync(path as string, "utf-8")).toBe("123456789012345");
+	});
+
+	it("saves output cut by line count too", async () => {
+		const exec = createToolExecutor(TEST_DIR, { ...mockConfig, maxToolOutputLines: 5 });
+		const result = await exec("bash", { command: "seq 1 50" });
+		expect(result.content).toContain("[Showing last 5 of");
+		const path = /full output is saved at (\S+):/.exec(result.content)?.[1];
+		expect(
+			readFileSync(path as string, "utf-8")
+				.split("\n")
+				.slice(0, 3),
+		).toEqual(["1", "2", "3"]);
+	});
+
+	it("keeps the old note when the output fits", async () => {
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("bash", { command: "seq 1 5" });
+		expect(result.content).not.toContain("saved at");
 	});
 
 	// Live-echo gating: only a command that looks like it's waiting for input

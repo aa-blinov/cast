@@ -60,6 +60,7 @@ import { resolveSshHosts } from "./ssh.ts";
 import { loadSubagentPrompts, type SubagentPrompt } from "./subagents.ts";
 import { getBashResolution } from "./tools/bash.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
+import type { ConfirmBash } from "./tools/shared.ts";
 import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "./vendors.ts";
 import { createSessionWorktree } from "./worktree.ts";
 
@@ -132,7 +133,7 @@ export interface StartupResult {
 	/** Provider name for the plan model (falls back to active provider if unset). */
 	planModelProvider?: string;
 	reasoningMeta?: ModelReasoningMeta;
-	confirmBash: (command: string, reason: string) => Promise<boolean>;
+	confirmBash: ConfirmBash;
 	projectDeps: ProjectResolverDeps;
 	projectTrusted: boolean;
 	contextFilesSuffix: string;

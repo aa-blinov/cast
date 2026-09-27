@@ -96,7 +96,7 @@ import {
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
-import { TUI_KEYBINDINGS } from "./input/keybindings.ts";
+import { getKeybindings, type Keybinding, TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
@@ -3542,6 +3542,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				"input.abort": "Exit (2× to confirm)",
 				"input.escape": "Stop turn (2×)",
 				"input.attachImage": "Attach image",
+				"input.externalEditor": "Edit in $EDITOR",
 				"input.tab": "Complete a command or path",
 				"editor.insertNewline": "Line break",
 				"editor.clearBuffer": "Clear the input",
@@ -3568,6 +3569,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				"ctrl+a": "Ctrl+A",
 				"ctrl+e": "Ctrl+E",
 				"ctrl+g": "Ctrl+G",
+				"ctrl+x": "Ctrl+X",
 				"alt+b": "Alt+B",
 				"alt+f": "Alt+F",
 				"alt+d": "Alt+D",
@@ -3581,10 +3583,15 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				"ctrl+left": "Ctrl+←",
 				"ctrl+right": "Ctrl+→",
 			};
-			const lines = Object.entries(TUI_KEYBINDINGS).map(([id, def]) => {
+			// The keys in effect, so a `keybindings` override in settings shows here.
+			const bindings = getKeybindings();
+			const lines = (Object.keys(TUI_KEYBINDINGS) as Keybinding[]).map((id) => {
 				const label = ACTION_LABELS[id] ?? id;
-				const rawKeys = Array.isArray(def.defaultKeys) ? def.defaultKeys : [def.defaultKeys];
-				const keys = rawKeys.map((k) => KEY_LABELS[k] ?? k).join(" / ");
+				const keys =
+					bindings
+						.keysFor(id)
+						.map((k) => KEY_LABELS[k] ?? k.replace(/\b[a-z]/g, (c) => c.toUpperCase()))
+						.join(" / ") || "(unbound)";
 				return `  ${label.padEnd(22)} ${keys}`;
 			});
 			const header = "Keybindings";

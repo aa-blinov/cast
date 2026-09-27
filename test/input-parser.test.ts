@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { type InputEvent, InputParser } from "../src/ui/input/input-parser.ts";
+import { BINDING_ORDER, type InputEvent, InputParser } from "../src/ui/input/input-parser.ts";
+import { TUI_KEYBINDINGS } from "../src/ui/input/keybindings.ts";
 import { StdinBuffer } from "../src/ui/input/stdin-buffer.ts";
+import { notifyTerminal } from "../src/ui/terminal-notify.ts";
 
 // Inject completed sequences straight onto the buffer's "data" channel, which
 // is exactly what StdinBuffer emits once a sequence is complete — this exercises
@@ -44,6 +46,12 @@ describe("InputParser — sequence classification", () => {
 		feed("\x1b[I");
 		feed("\x1b[O");
 		expect(events).toEqual([]);
+		// ...but they do tell the notifier where the user is looking.
+		const writes: string[] = [];
+		const out = { write: (s: string) => writes.push(s) } as unknown as NodeJS.WritableStream;
+		expect(notifyTerminal("done", out)).toBe(true);
+		feed("\x1b[I");
+		expect(notifyTerminal("done", out)).toBe(false);
 	});
 
 	it("drops DECXCPR cursor-position responses (CSI row;col R)", () => {
@@ -119,5 +127,11 @@ describe("InputParser — Enter and line breaks", () => {
 		const { events, feed } = makeParser();
 		feed("\n");
 		expect(events).toEqual([{ type: "binding", binding: "input.submit", raw: "\n" }]);
+	});
+});
+
+describe("BINDING_ORDER", () => {
+	it("checks every keybinding, so none is silently dead", () => {
+		expect([...BINDING_ORDER].sort()).toEqual(Object.keys(TUI_KEYBINDINGS).sort());
 	});
 });

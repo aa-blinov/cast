@@ -3383,6 +3383,26 @@ describe("web bridge", () => {
 			await expect(pending).resolves.toBe(false);
 		});
 
+		it("'always' saves the request's rule to the user's permissions", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const events: Array<{ type: string; id?: string; rule?: string }> = [];
+			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			await bridge.submit(ws.id, "publish");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			const confirm = confirmFromLoop() as (command: string, reason: string, rule?: string) => Promise<boolean>;
+			const pending = confirm("write notes.md", "permission rule write(*.md)", "write(notes.md)");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const asked = events.find((e) => e.type === "bash_confirm")!;
+			expect(asked.rule).toBe("write(notes.md)");
+			expect(bridge.answerBashConfirm(ws.id, asked.id!, true, true)).toBe(true);
+			await expect(pending).resolves.toBe(true);
+			const settings = JSON.parse(readFileSync(join(fakeHome, ".cast", "settings.json"), "utf-8"));
+			expect(settings.permissions.approved).toEqual(["write(notes.md)"]);
+		});
+
 		// Nobody attached means nobody to ask, and "nobody said no" is not a yes.
 		it("denies when no client is listening", async () => {
 			const bridge = createServerBridge(makeResult());

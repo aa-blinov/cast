@@ -5,6 +5,7 @@
  * reach a common path/size helper or the ToolResult shape.
  */
 
+import { appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -158,7 +159,8 @@ export type ToolExecutor = (
 ) => Promise<ToolResult>;
 
 /** Asked before running a bash command that matches a known-dangerous pattern. Return false to block it. */
-export type ConfirmBash = (command: string, reason: string) => Promise<boolean>;
+/** `rule` is what an "always allow" answer saves to settings (see permissions.ts). */
+export type ConfirmBash = (command: string, reason: string, rule?: string) => Promise<boolean>;
 
 /** Asked before running a destructive file operation (write/edit/patch, plus MCP
  * tools whose name starts with `mcp_`). Return false to block it. */
@@ -207,23 +209,110 @@ export function formatSize(bytes: number): string {
  * reads. Any non-ASCII text in a large command output — Cyrillic, CJK, emoji,
  * a compiler's box-drawing — was corrupted this way.
  */
+/**
+ * Full output of a command whose result was cut to fit the model's context.
+ * Truncating used to drop the rest, and the note told the model to run the
+ * command again with a redirect: a slow test suite ran twice, and a command
+ * with side effects did them twice. The file lets it read or grep what it
+ * missed instead.
+ */
+const TOOL_OUTPUT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** Past this a runaway command stops filling the disk; the file says so. */
+const TOOL_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
+let prunedToolOutput = false;
+
+export function toolOutputDir(): string {
+	return join(homedir(), ".cast", "tool-output");
+}
+
+/** A new file for one command's full output. Old ones are cleared once per
+ *  process, so the directory can't grow without bound. */
+function newToolOutputPath(): string {
+	const dir = toolOutputDir();
+	mkdirSync(dir, { recursive: true });
+	if (!prunedToolOutput) {
+		prunedToolOutput = true;
+		const cutoff = Date.now() - TOOL_OUTPUT_RETENTION_MS;
+		for (const name of readdirSync(dir)) {
+			try {
+				if (statSync(join(dir, name)).mtimeMs < cutoff) unlinkSync(join(dir, name));
+			} catch {
+				// Gone already, or not ours to remove: either way nothing to do.
+			}
+		}
+	}
+	return join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}.txt`);
+}
+
+/** Saves text already held in memory (a result cut by line count). */
+export function saveToolOutput(text: string): string | undefined {
+	try {
+		const path = newToolOutputPath();
+		writeFileSync(path, text.length > TOOL_OUTPUT_MAX_BYTES ? text.slice(0, TOOL_OUTPUT_MAX_BYTES) : text);
+		return path;
+	} catch {
+		return undefined;
+	}
+}
+
 export class BoundedOutput {
 	private readonly decoder = new StringDecoder("utf-8");
 	private text = "";
 	private bytes = 0;
 	private flushed = false;
+	private spillBytes = 0;
+	/** Raw bytes kept so far, so the file starts byte-exact even when the
+	 *  cut split a character the decoder is still holding. */
+	private head: Buffer[] = [];
 	truncated = false;
+	/** Where the whole stream went once it outgrew maxBytes (spill mode only). */
+	spillPath: string | undefined;
 
-	constructor(private readonly maxBytes: number) {}
+	constructor(
+		private readonly maxBytes: number,
+		/** Keep what doesn't fit in a file instead of dropping it. */
+		private readonly spill = false,
+	) {}
+
+	/** Everything past the budget goes to the spill file, starting with what
+	 *  was already kept, so the file holds the full output. */
+	private spillWrite(buffer: Buffer): void {
+		if (!this.spill || this.spillBytes >= TOOL_OUTPUT_MAX_BYTES) return;
+		try {
+			// Appends rather than a held fd: a pty reports exit before its last
+			// data, so there is no reliable moment to close one.
+			if (this.spillPath === undefined) {
+				const head = Buffer.concat(this.head);
+				this.head = [];
+				this.spillPath = newToolOutputPath();
+				writeFileSync(this.spillPath, head);
+				this.spillBytes += head.byteLength;
+			}
+			const room = TOOL_OUTPUT_MAX_BYTES - this.spillBytes;
+			const part = buffer.byteLength > room ? buffer.subarray(0, room) : buffer;
+			appendFileSync(this.spillPath, part);
+			this.spillBytes += part.byteLength;
+			if (this.spillBytes >= TOOL_OUTPUT_MAX_BYTES) {
+				appendFileSync(this.spillPath, "\n[cast stopped saving here: output passed 64MB]\n");
+			}
+		} catch {
+			// A full disk or a read-only home: the result is still truncated
+			// as before, just without the file.
+			this.spillPath = undefined;
+			this.spillBytes = TOOL_OUTPUT_MAX_BYTES;
+		}
+	}
 
 	append(chunk: Buffer | string): void {
 		const buffer = typeof chunk === "string" ? Buffer.from(chunk, "utf-8") : chunk;
 		const remaining = this.maxBytes - this.bytes;
 		if (remaining <= 0) {
 			this.truncated = true;
+			this.spillWrite(buffer);
 			return;
 		}
 		if (buffer.byteLength <= remaining) {
+			if (this.spill) this.head.push(buffer);
 			this.bytes += buffer.byteLength;
 			this.text += this.decoder.write(buffer);
 			return;
@@ -232,8 +321,10 @@ export class BoundedOutput {
 		// character the cut left: `end()` renders it once, instead of a stray
 		// U+FFFD landing in the middle of the text.
 		this.bytes += remaining;
+		if (this.spill) this.head.push(buffer.subarray(0, remaining));
 		this.text += this.decoder.write(buffer.subarray(0, remaining));
 		this.truncated = true;
+		this.spillWrite(buffer.subarray(remaining));
 	}
 
 	/**

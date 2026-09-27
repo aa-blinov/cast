@@ -133,6 +133,30 @@ A `Stop` block can't loop forever: after 8 continuations in one turn (matching t
 
 Reserved `CAST_*` keys in a hook's own `env` field are silently stripped; the runner always injects the real values.
 
+## Recipe: type check after each edit
+
+A `PostToolUse` hook can feed compiler errors back to the model right after it edits a file. The model sees the hook's `additionalContext` in the tool result and fixes the error in the same turn:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "write|edit", "hooks": [{ "command": ".cast/typecheck.sh", "timeout": 60 }] }
+    ]
+  }
+}
+```
+
+```sh
+#!/bin/sh
+# .cast/typecheck.sh: report tsc errors to the model, stay silent when clean.
+out=$(npx tsc --noEmit --pretty false 2>&1 | head -30)
+[ -z "$out" ] && exit 0
+jq -n --arg e "$out" '{hookSpecificOutput: {additionalContext: ("Type errors after this edit:\n" + $e)}}'
+```
+
+Swap the command for `cargo check --message-format short`, `mypy .` or `go vet ./...` in other languages. A full check on a large project can take a while, so keep the `timeout` generous or check only the edited file where the tool allows it.
+
 ## Managing hooks
 
 `/hooks` lists every merged hook (global/project) with a stable id, its event, matcher, and enabled/disabled state. `/hooks enable <id>` / `/hooks disable <id>` toggles one, `/hooks help` shows a cheat sheet. State is per-user (`~/.cast/settings.json`'s `disabledHooks`), takes effect on the very next message (no restart), and survives edits to unrelated hooks in the same file since the id is derived from the hook's own content. The web UI has the same thing under **Settings → Hooks**.

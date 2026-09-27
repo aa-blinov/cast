@@ -51,6 +51,19 @@ Edit a file by replacing an exact block of literal text (`oldString`) with new t
 
 A successful edit replies with a diff of what actually changed (common prefix/suffix trimmed, `-`/`+` blocks, capped at 80 lines). Check it before issuing the next edit. `oldString: ""` on a path that doesn't exist creates the file with `newString` as its content (prefer `write` for that).
 
+### Auto-format
+
+After a successful `write` or `edit`, cast runs the project's own formatter on that file, the way an editor formats on save. The formatter is found by walking up from the file to the repository root:
+
+| Formatter | Used for | Needs |
+|-----------|----------|-------|
+| biome | `.js` `.ts` `.jsx` `.tsx` `.json` `.css` and their variants | `biome.json`/`biome.jsonc` and `node_modules/.bin/biome` |
+| prettier | the same plus `.md` `.html` `.yaml` `.scss` `.vue` and others | a `.prettierrc*`/`prettier.config.*` or a `prettier` key in `package.json`, and `node_modules/.bin/prettier` |
+| ruff | `.py` `.pyi` | `ruff.toml`, `.ruff.toml` or `[tool.ruff]` in `pyproject.toml`, and `ruff` in `.venv/bin` or on `PATH` |
+| gofmt | `.go` | `gofmt` on `PATH` |
+
+Only an installed formatter runs; cast never downloads one. When the file changes, the tool result says so and asks the model to read the file again before its next edit. A formatter that fails, for example on a syntax error, leaves the file as written. Plan files are not formatted. Set `autoFormat: false` in `~/.cast/settings.json` to turn it off. For a type check after each edit, see the recipe in [Hooks](hooks.md#recipe-type-check-after-each-edit).
+
 ## Search Tools
 
 ### `glob`
@@ -99,7 +112,7 @@ Execute a bash command in the current working directory.
 | `command` | Yes | Bash command to execute |
 | `timeout` | No | Foreground grace/timeout in **milliseconds** (default: 180000, max: 3600000); an explicit background task uses it as its kill timeout. A value under 1000 is read as seconds and converted, with a warning. Nothing legitimately asks for a sub-second deadline |
 
-Output is truncated to the last 2000 lines or 128KB (whichever is hit first).
+Output is truncated to the last 2000 lines or 128KB (whichever is hit first). When it is cut, the whole output is saved under `~/.cast/tool-output/` and the result names the file, so the agent can `read` or `grep` the part it missed instead of running the command again. Saved files are kept for 7 days, and one file stops growing at 64MB. `bash_output` and background tasks point at the same file.
 
 For finite long-running commands (docker build, npm install, large test suites), increase the timeout:
 
@@ -155,7 +168,7 @@ Execute one command on a remote host via SSH. Only available when SSH hosts are 
 | `command` | Yes | Remote command to execute |
 | `timeout` | No | Timeout in **milliseconds** (default: 180000), read the same way as `bash`'s |
 
-Output is combined stdout+stderr, truncated to the last 2000 lines or 128KB.
+Output is combined stdout+stderr, truncated to the last 2000 lines or 128KB. A cut output is saved to a local file the same way as for `bash`.
 
 ### Configuration
 

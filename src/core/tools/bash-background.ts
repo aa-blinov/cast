@@ -16,7 +16,9 @@
  * must not kill a task the user explicitly asked to survive past it.
  */
 
+import { readSync } from "node:fs";
 import { createRequire } from "node:module";
+import { StringDecoder } from "node:string_decoder";
 import type { IPty } from "node-pty";
 
 /**
@@ -91,6 +93,8 @@ export interface BackgroundTask {
 	/** Accumulated stdout+stderr, capped at config.maxToolOutputBytes — mirrors bash.ts's sync path. */
 	rawOutput: string;
 	outputTruncated: boolean;
+	/** The whole output, once it outgrew the byte budget. */
+	fullOutputPath?: string;
 	timedOut: boolean;
 	/** The kill-timer duration, when one was set — only meaningful once `timedOut` is true. */
 	timeoutMs?: number;
@@ -156,6 +160,7 @@ function buildCompletionReminder(task: BackgroundTask, config: AppConfig): strin
 					exitCode: task.exitCode,
 					timedOut: task.timedOut,
 					outputTruncated: task.outputTruncated,
+					fullOutputPath: task.fullOutputPath,
 					timeoutMs: task.timeoutMs,
 				}).content;
 	// The command and its output are data: text that closes this envelope and
@@ -195,21 +200,45 @@ const PTY_DRAIN_MS = 5000;
  * goes straight through: holding that one too made every task wait out
  * node-pty's timer, and a stream that ended before the timer wait the full
  * fallback.
- * ponytail: patches a private field of node-pty 1.1 (unchanged in 1.2 beta);
+ *
+ * The end itself can come early too. On the hangup that follows the child's
+ * exit, libuv takes a short read as the last one and reports EOF without
+ * reading again, while the kernel still holds the rest: `seq 1 3000` arrived
+ * as 8190 of 16893 bytes in most runs. So on end, while the fd is still open,
+ * the rest is read synchronously until the kernel's EIO.
+ * ponytail: patches private fields of node-pty 1.1 (unchanged in 1.2 beta);
  * recheck on upgrade.
  */
 function letPtyDrain(pty: IPty): void {
-	const socket = (
-		pty as unknown as {
-			_socket?: {
-				destroy(): unknown;
-				destroyed?: boolean;
-				readableEnded?: boolean;
-				once(event: "end", listener: () => void): unknown;
-			};
-		}
-	)._socket;
+	const { _socket: socket, _fd: fd } = pty as unknown as {
+		_fd?: number;
+		_socket?: {
+			destroy(): unknown;
+			destroyed?: boolean;
+			readableEnded?: boolean;
+			emit(event: "data", chunk: string): unknown;
+			once(event: "end", listener: () => void): unknown;
+		};
+	};
 	if (!socket) return;
+	if (fd !== undefined) {
+		socket.once("end", () => {
+			const decoder = new StringDecoder("utf-8");
+			const buf = Buffer.alloc(65536);
+			for (;;) {
+				let n = 0;
+				try {
+					n = readSync(fd, buf);
+				} catch {
+					break; // EIO: drained. EAGAIN: nothing more.
+				}
+				if (n <= 0) break;
+				socket.emit("data", decoder.write(buf.subarray(0, n)));
+			}
+			const rest = decoder.end();
+			if (rest) socket.emit("data", rest);
+		});
+	}
 	const destroy = socket.destroy.bind(socket);
 	let held = false;
 	socket.destroy = () => {
@@ -322,13 +351,14 @@ export class BackgroundTaskRegistry {
 			task.pty = pty;
 			letPtyDrain(pty);
 
-			const output = new BoundedOutput(maxBytes);
+			const output = new BoundedOutput(maxBytes, true);
 			pty.onData((data) => {
 				output.append(data);
 				// Snapshot, not final(): this fires per chunk and the task's
 				// output is read live while it runs.
 				task.rawOutput = output.snapshot();
 				task.outputTruncated = output.truncated;
+				task.fullOutputPath = output.spillPath;
 			});
 
 			const timer =
@@ -471,9 +501,11 @@ export async function execBashOutput(
 	const header = `Task ${task.id} (\`${task.command}\`): ${statusLine(task)}`;
 	if (task.status === "running") {
 		const output = truncateOutput(task.rawOutput, config.maxToolOutputLines);
-		const truncationNote = task.outputTruncated
-			? `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`
-			: "";
+		const truncationNote = task.fullOutputPath
+			? `\n\n[Output cut to fit. The full output so far is being saved at ${task.fullOutputPath}.]`
+			: task.outputTruncated
+				? `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`
+				: "";
 		return { content: `${header}\n\n${output || "(no output yet)"}${truncationNote}` };
 	}
 	if (task.status === "error") {
@@ -483,6 +515,7 @@ export async function execBashOutput(
 		exitCode: task.exitCode,
 		timedOut: task.timedOut,
 		outputTruncated: task.outputTruncated,
+		fullOutputPath: task.fullOutputPath,
 		timeoutMs: task.timeoutMs,
 	});
 	return { content: `${header}\n\n${formatted.content}`, isError: formatted.isError };

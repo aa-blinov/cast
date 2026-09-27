@@ -14,7 +14,7 @@ vi.mock(
 );
 vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
 
-import { Composer, canSubmitAttachments } from "../src/server/public/composer.js";
+import { atTokenAt, Composer, canSubmitAttachments } from "../src/server/public/composer.js";
 
 describe("Composer", () => {
 	it("is exported as the isolated composer component", () => {
@@ -25,5 +25,12 @@ describe("Composer", () => {
 		expect(canSubmitAttachments([{ id: "zip", name: "large.zip", uploading: true }])).toBe(false);
 		expect(canSubmitAttachments([{ id: "zip", name: "large.zip", error: "Upload failed" }])).toBe(false);
 		expect(canSubmitAttachments([{ id: "zip", name: "large.zip", path: "/tmp/large.zip" }])).toBe(true);
+	});
+
+	it("opens the @ file picker only on a word-initial @ at the caret, like the TUI", () => {
+		expect(atTokenAt("look at @src/co", 15)).toEqual({ from: 8, to: 15, query: "src/co" });
+		expect(atTokenAt("@", 1)).toEqual({ from: 0, to: 1, query: "" });
+		expect(atTokenAt("mail a@b.com", 12)).toBeNull();
+		expect(atTokenAt("@done next", 10)).toBeNull();
 	});
 });
