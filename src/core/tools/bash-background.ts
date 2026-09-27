@@ -182,6 +182,34 @@ function buildCompletionReminder(task: BackgroundTask, config: AppConfig): strin
  */
 const MAX_RETAINED_FINISHED_TASKS = 100;
 
+/** How long an exited task's tty may keep delivering output it had buffered. */
+const PTY_DRAIN_MS = 5000;
+
+/**
+ * node-pty gives the tty 200ms after the child exits to reach EOF, then
+ * destroys the stream, dropping whatever output is still unread: on a busy
+ * machine a 20-line command came back with 2. On Linux the stream ends on its
+ * own once drained (the read returns EIO), so the first destroy only arms a
+ * longer fallback; the macOS stream that never closes, which the timer exists
+ * for, still ends, just later.
+ * ponytail: patches a private field of node-pty 1.1 (unchanged in 1.2 beta);
+ * recheck on upgrade.
+ */
+function letPtyDrain(pty: IPty): void {
+	const socket = (pty as unknown as { _socket?: { destroy(): unknown; destroyed?: boolean } })._socket;
+	if (!socket) return;
+	const destroy = socket.destroy.bind(socket);
+	let armed = false;
+	socket.destroy = () => {
+		if (armed) return destroy();
+		armed = true;
+		setTimeout(() => {
+			if (!socket.destroyed) destroy();
+		}, PTY_DRAIN_MS).unref();
+		return socket;
+	};
+}
+
 export class BackgroundTaskRegistry {
 	private tasks = new Map<string, BackgroundTask>();
 	private counter = 0;
@@ -277,6 +305,7 @@ export class BackgroundTaskRegistry {
 				env: { ...process.env, PAGER: "cat", GIT_PAGER: "cat", TERM: "xterm-256color" },
 			});
 			task.pty = pty;
+			letPtyDrain(pty);
 
 			const output = new BoundedOutput(maxBytes);
 			pty.onData((data) => {
