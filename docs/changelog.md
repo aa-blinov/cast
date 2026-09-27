@@ -4,6 +4,23 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.45.0
+
+### Added
+
+- **Permission rules.** `permissions` in settings lets you allow, ask about or deny tool calls by tool and pattern: `bash(git push*)`, `write(.env*)`, `mcp_github_*`. Deny wins over everything, in bypass mode too. **Always allow** in the confirmation prompt saves an exact rule, so the same call isn't asked about again. Works in the TUI, the web UI and for subagents.
+- **Cut output is saved to a file.** When a command's output is too long for the tool result, the whole of it goes to `~/.cast/tool-output/` and the agent is told where, so it reads the part it needs instead of running the command again. Covers `bash`, background tasks and `ssh`.
+- **Auto-format after write and edit.** If the project has biome, prettier, ruff or gofmt configured and installed, cast formats each file the agent writes, and tells the agent to re-read it. Turn it off with `autoFormat: false`. The hooks docs have a recipe for a type check after every edit.
+- **`@` file picker.** Type `@` in the composer, TUI or web, to fuzzy-search project files and insert a path. It respects `.gitignore`.
+- **Notifications when you're away.** The TUI sends a terminal notification and a bell when a turn ends or needs approval while the terminal window is out of focus. The web UI also notifies on approval requests, and asks for permission when you first send a message.
+- **Edit the prompt in your editor.** Ctrl+X opens the draft in `$VISUAL` or `$EDITOR`. TUI keys can be remapped with `keybindings` in settings, and `/keys` shows the keys in effect.
+
+### Fixed
+
+- **Background and TUI commands no longer lose the end of a large output.** A command that printed a few KB and exited at once often came back cut short.
+- **A `PostToolUse` hook's `additionalContext` now reaches the agent**, as documented.
+- **The web UI shows the dangerous-command confirmation while the turn waits for it.** The card only appeared when no turn was running, so the command sat blocked until it timed out.
+
 ## 0.44.1
 
 ### Fixed
