@@ -196,6 +196,27 @@ describe("BackgroundTaskRegistry", () => {
 		expect(task.status).toBe("exited");
 	}, 90_000);
 
+	it("keeps output the tty still held when the command exited", async () => {
+		// node-pty destroyed the stream 200ms after the child exited, so output
+		// not yet read by then was lost — what a loaded CI runner hit. Pausing
+		// the reads until well past that window reproduces it every time.
+		const registry = new BackgroundTaskRegistry();
+		const { deps } = makeDeps(true);
+		deps.registry = registry;
+		const task = registry.start(
+			"for i in $(seq 1 20); do echo line-$i; done",
+			process.cwd(),
+			mockConfig,
+			10_000,
+			deps,
+		);
+		task.pty?.pause();
+		setTimeout(() => task.pty?.resume(), 600);
+
+		await task.exitPromise;
+		expect(task.rawOutput.split("\n").filter(Boolean)).toHaveLength(20);
+	});
+
 	it("does not apply the foreground default timeout when background timeout is omitted", async () => {
 		const registry = new BackgroundTaskRegistry();
 		const { deps } = makeDeps(true);
