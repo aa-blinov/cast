@@ -10,39 +10,67 @@ const DOCS = join(ROOT, "docs");
 const SITE = join(ROOT, "site");
 const PACKAGE_VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8")).version;
 
-const NAV_ORDER = [
-	{ file: "getting-started.md", label: "Getting Started" },
-	{ file: "cli-reference.md", label: "CLI Reference" },
-	{ file: "interactive-commands.md", label: "Interactive Commands" },
-	{ file: "tools.md", label: "Tools" },
-	{ file: "personas.md", label: "Personas" },
-	{ file: "persona-research.md", label: "Persona Research" },
-	{ file: "subagents.md", label: "Sub-agents & Delegation" },
-	{ file: "skills.md", label: "Skills" },
-	{ file: "rules.md", label: "Rules" },
-	{ file: "mcp-servers.md", label: "MCP Servers" },
-	{ file: "context-files.md", label: "Context Files" },
-	{ file: "sessions.md", label: "Sessions" },
-	{ file: "memory.md", label: "Memory" },
-	{ file: "dashboard.md", label: "Dashboard" },
-	{ file: "worktrees.md", label: "Git Worktrees" },
-	{ file: "plan-mode.md", label: "Plan Mode" },
-	{ file: "reasoning.md", label: "Reasoning" },
-	{ file: "configuration.md", label: "Configuration" },
-	{ file: "themes.md", label: "Themes" },
-	{ file: "non-interactive-mode.md", label: "Non-Interactive Mode" },
-	{ file: "eval-behavior.md", label: "Behavior Evals" },
-	{ file: "eval-methodology.md", label: "Eval Methodology" },
-	{ file: "architecture.md", label: "Architecture" },
-	{ file: "infrastructure.md", label: "Infrastructure" },
-	{ file: "api.md", label: "API v1" },
-	// Not a real markdown file — rendered from docs/eval-scoreboard.json by the
-	// special case in the build loop below. The ".md" suffix is kept purely so
-	// the existing `.replace(".md", ".html")` calls (sidebar, prev/next, landing
-	// grid) keep working unmodified; nothing here ever reads this as markdown.
-	{ file: "eval-scoreboard.md", label: "Model Scoreboard" },
-	{ file: "changelog.md", label: "Changelog" },
+// One source for the page order, the sidebar and the landing index. Grouped
+// by what a reader comes for; the flat order below (and prev/next) follows it.
+const NAV_GROUPS = [
+	{
+		title: "Start and use",
+		items: [
+			{ file: "getting-started.md", label: "Getting Started" },
+			{ file: "cli-reference.md", label: "CLI Reference" },
+			{ file: "interactive-commands.md", label: "Interactive Commands" },
+			{ file: "configuration.md", label: "Configuration" },
+			{ file: "non-interactive-mode.md", label: "Non-Interactive Mode" },
+			{ file: "themes.md", label: "Themes" },
+		],
+	},
+	{
+		title: "How the agent works",
+		items: [
+			{ file: "tools.md", label: "Tools" },
+			{ file: "personas.md", label: "Personas" },
+			{ file: "persona-research.md", label: "Persona Research" },
+			{ file: "subagents.md", label: "Sub-agents & Delegation" },
+			{ file: "skills.md", label: "Skills" },
+			{ file: "rules.md", label: "Rules" },
+			{ file: "mcp-servers.md", label: "MCP Servers" },
+			{ file: "plan-mode.md", label: "Plan Mode" },
+			{ file: "reasoning.md", label: "Reasoning" },
+		],
+	},
+	{
+		title: "Context and state",
+		items: [
+			{ file: "context-files.md", label: "Context Files" },
+			{ file: "sessions.md", label: "Sessions" },
+			{ file: "memory.md", label: "Memory" },
+			{ file: "worktrees.md", label: "Git Worktrees" },
+		],
+	},
+	{
+		title: "Run and integrate",
+		items: [
+			{ file: "dashboard.md", label: "Dashboard" },
+			{ file: "api.md", label: "API v1" },
+			{ file: "architecture.md", label: "Architecture" },
+			{ file: "infrastructure.md", label: "Infrastructure" },
+		],
+	},
+	{
+		title: "Quality and history",
+		items: [
+			{ file: "eval-behavior.md", label: "Behavior Evals" },
+			{ file: "eval-methodology.md", label: "Eval Methodology" },
+			// Not a real markdown file — rendered from docs/eval-scoreboard.json by the
+			// special case in the build loop below. The ".md" suffix is kept purely so
+			// the existing `.replace(".md", ".html")` calls (sidebar, prev/next, landing
+			// index) keep working unmodified; nothing here ever reads this as markdown.
+			{ file: "eval-scoreboard.md", label: "Model Scoreboard" },
+			{ file: "changelog.md", label: "Changelog" },
+		],
+	},
 ];
+const NAV_ORDER = NAV_GROUPS.flatMap((group) => group.items);
 
 // ── marked config ───────────────────────────────────────────────────────────
 marked.setOptions({
@@ -209,7 +237,9 @@ a:hover { color: #c084fc; text-decoration: none; }
 	height: var(--header-h);
 	background: var(--bg-surface);
 	border-bottom: 1px solid var(--border);
-	display: flex; align-items: center; padding: 0 16px; gap: 12px;
+	display: flex; align-items: center; gap: 12px;
+	/* viewport-fit=cover: keep clear of a landscape phone's notch. */
+	padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
 }
 .header-logo {
 	display: inline-flex; align-items: center; gap: 8px;
@@ -269,11 +299,15 @@ a:hover { color: #c084fc; text-decoration: none; }
 }
 .menu-toggle:hover { color: var(--text); border-color: var(--border-active); }
 @media (max-width: 768px) {
+	/* Closed, the drawer is hidden too, not just moved off-screen: its links
+	   stayed in the Tab order, so keyboard focus vanished past the edge. The
+	   visibility flip waits for the slide to finish. */
 	.sidebar {
-		transform: translateX(-100%); transition: transform .2s ease;
-		z-index: 99; width: 280px;
+		transform: translateX(-100%); visibility: hidden;
+		transition: transform .2s ease, visibility 0s linear .2s;
+		z-index: 99; width: 280px; padding-left: env(safe-area-inset-left);
 	}
-	.sidebar.open { transform: translateX(0); }
+	.sidebar.open { transform: translateX(0); visibility: visible; transition: transform .2s ease; }
 	.sidebar-backdrop {
 		position: fixed; inset: 0; z-index: 98;
 		background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
@@ -281,7 +315,10 @@ a:hover { color: #c084fc; text-decoration: none; }
 	}
 	.sidebar-backdrop.visible { display: block; }
 	.menu-toggle { display: block; }
-	.main { margin-left: 0 !important; padding: 20px 14px 60px !important; }
+	.main {
+		margin-left: 0 !important;
+		padding: 20px max(14px, env(safe-area-inset-right)) 60px max(14px, env(safe-area-inset-left)) !important;
+	}
 	.header { padding: 0 12px; }
 	.header-links { gap: 8px; }
 	.hero { padding: 40px 16px 32px; }
@@ -456,6 +493,8 @@ a:hover { color: #c084fc; text-decoration: none; }
 .badge-fail { background: var(--bg-tertiary); color: var(--text-secondary); }
 .content details { margin: 0 0 8px; }
 .content details summary { cursor: pointer; font-weight: 500; padding: 4px 0; }
+.mermaid-note { margin: 0 0 8px; color: var(--text-muted); font-size: .85rem; }
+.mermaid-error { margin: 12px; color: var(--rose); white-space: pre-wrap; }
 .visually-hidden {
 	position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
 	overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
@@ -713,9 +752,22 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-copy-btn svg { width: 14px; height: 14px; }
 .workspace-copy-btn:hover, .workspace-copy-btn:focus-visible { color: var(--text); border-color: var(--text-muted); }
 .workspace-copy-btn.copied { color: var(--teal); border-color: var(--teal); }
-.workspace-docs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-.workspace-docs a { color: var(--text-dim); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 13px 14px; font-size: .8rem; transition: border-color .15s, color .15s; }
-.workspace-docs a:hover { color: var(--purple); border-color: var(--border-active); }
+/* Every page, grouped: lists under a heading instead of twelve same-size
+   cards, which left fifteen pages (Memory, Plan Mode, API, ...) unreachable
+   from here. Groups sit tight inside, apart from each other. */
+.workspace-docs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 36px 28px; }
+/* Five groups: an auto-fill grid left one orphaned on its own row. */
+@media (max-width: 1100px) { .workspace-docs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.workspace-docs-group h3 {
+	margin: 0 0 10px; color: var(--text-muted);
+	font: 600 .75rem var(--font-mono); text-transform: uppercase; letter-spacing: .08em;
+}
+.workspace-docs-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.workspace-docs-group a {
+	display: block; padding: 6px 0; color: var(--text-dim); font-size: .92rem;
+	transition: color .15s;
+}
+.workspace-docs-group a:hover { color: var(--purple); }
 .workspace-footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 20px; color: var(--text-muted); font: .75rem var(--font-mono); text-align: center; }
 .workspace-footer a { color: var(--text-muted); transition: color .15s ease; }
 .workspace-footer a:hover { color: var(--purple); }
@@ -733,7 +785,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	.workspace-section-heading { display: block; }
 	.workspace-section-heading h2 { margin-bottom: 8px; }
 	.workspace-grid, .workspace-install { grid-template-columns: 1fr; }
-	.workspace-docs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.workspace-docs { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 20px; }
 }
 
 /* The landing preview mirrors the actual Web UI: shared header, sessions
@@ -789,6 +841,29 @@ a:hover { color: #c084fc; text-decoration: none; }
 	.workspace-ui-header { gap: 9px; }
 	.workspace-ui-actions span:nth-child(2) { display: none; }
 }
+
+/* ── Touch ───────────────────────────────────────────────────────── */
+/* Last in the sheet so it wins over the base rules it adjusts. No hover to reveal the copy button, and a finger needs a 44px target. */
+@media (hover: none) {
+	.content pre.code-block .code-copy { opacity: 1; }
+}
+@media (pointer: coarse) {
+	.sidebar a { min-height: 44px; padding: 10px 12px; }
+	.menu-toggle { min-width: 44px; min-height: 44px; }
+	.header-logo { min-width: 44px; min-height: 44px; justify-content: center; }
+	.header-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; }
+	.content pre.code-block .code-copy { min-height: 44px; padding: 0 12px; top: 4px; }
+	/* Room above the first line for the 44px button, so it covers no code. */
+	.content pre.code-block:not(.mermaid):not(.mermaid-code) { padding-top: 54px; }
+	/* The wider button no longer fits beside a long language name
+	   ("POWERSHELL"): the name moves to the left, the button to the edge. */
+	.content pre.code-block::before { top: 20px; left: 20px; right: auto; }
+	.content pre.code-block[data-language] .code-copy { right: 12px; }
+	.doc-nav a { min-height: 44px; }
+	.workspace-copy-btn { width: 44px; height: 44px; top: -13px; }
+	.workspace-ui-persona { min-height: 44px; padding: 0 12px; }
+	.workspace-docs-group a { display: flex; align-items: center; min-height: 44px; padding: 0; }
+}
 `;
 
 // ── Landing page HTML ───────────────────────────────────────────────────────
@@ -796,7 +871,7 @@ const LEGACY_LANDING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>cast — One agent, many roles</title>
 <meta name="description" content="A role-based terminal agent harness. Seven built-in personas, same tools, different judgment. Runs on any OpenAI-compatible model — including the one on your own hardware.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
@@ -933,7 +1008,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>cast — Agent workspace</title>
 <meta name="description" content="cast is a role-based agent workspace for your repository and OpenAI-compatible model.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
@@ -1018,7 +1093,10 @@ ${FONT_LINKS}
 		<section class="workspace-section" aria-labelledby="docs-title">
 			<div class="workspace-section-heading"><h2 id="docs-title">Documentation</h2></div>
 			<nav class="workspace-docs" aria-label="Documentation">
-				${NAV_ORDER.slice(0, 12).map((item) => `<a href="${item.file.replace(".md", ".html")}">${item.label}</a>`).join("\n\t\t\t\t")}
+				${NAV_GROUPS.map(
+					(group, i) =>
+						`<section class="workspace-docs-group" aria-labelledby="docs-group-${i}"><h3 id="docs-group-${i}">${group.title}</h3><ul>${group.items.map((item) => `<li><a href="${item.file.replace(".md", ".html")}">${item.label}</a></li>`).join("")}</ul></section>`,
+				).join("\n\t\t\t\t")}
 			</nav>
 			<div class="workspace-footer"><a href="https://github.com/aa-blinov/cast">GitHub</a><span aria-hidden="true">·</span><a href="https://github.com/aa-blinov/cast/blob/master/LICENSE">MIT License</a></div>
 		</section>
@@ -1064,7 +1142,18 @@ document.querySelectorAll('.workspace-copy-btn').forEach((button) => {
 				button.title = 'Copy command';
 				button.setAttribute('aria-label', label);
 			}, 1200);
-		} catch {}
+		} catch {
+			// Blocked clipboard (permissions, an embedded frame): say so, and
+			// select the command so the user can copy it by hand.
+			button.title = "Couldn't copy: the command is selected, copy it by hand";
+			button.setAttribute('aria-label', "Couldn't copy. The command is selected; copy it by hand");
+			const code = button.closest('.install-block')?.querySelector('code');
+			if (code) window.getSelection()?.selectAllChildren(code);
+			window.setTimeout(() => {
+				button.title = 'Copy command';
+				button.setAttribute('aria-label', label);
+			}, 3000);
+		}
 	});
 });
 </script>
@@ -1073,9 +1162,14 @@ document.querySelectorAll('.workspace-copy-btn').forEach((button) => {
 
 // ── Doc page template ───────────────────────────────────────────────────────
 function docPage(title, bodyHtml, activeFile) {
-	const sidebarLinks = NAV_ORDER.map((item) => {
-		const cls = item.file === activeFile ? ' class="active"' : "";
-		return `\t\t\t<a href="${item.file.replace(".md", ".html")}"${cls}>${item.label}</a>`;
+	const sidebarLinks = NAV_GROUPS.map((group) => {
+		const links = group.items
+			.map((item) => {
+				const current = item.file === activeFile ? ' class="active" aria-current="page"' : "";
+				return `\t\t\t<a href="${item.file.replace(".md", ".html")}"${current}>${item.label}</a>`;
+			})
+			.join("\n");
+		return `\t<div class="sidebar-section">\n\t\t<div class="sidebar-section-title">${group.title}</div>\n${links}\n\t</div>`;
 	}).join("\n");
 
 	// Prev/next sequential navigation (wraps: last → first)
@@ -1088,7 +1182,7 @@ function docPage(title, bodyHtml, activeFile) {
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${title} — cast</title>
 <meta name="description" content="${title} documentation for cast, a role-based terminal agent harness.">
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
@@ -1097,7 +1191,7 @@ ${FONT_LINKS}
 </head>
 <body>
 <header class="header">
-	<button class="menu-toggle" aria-label="Menu">&#9776;</button>
+	<button class="menu-toggle" type="button" aria-label="Documentation menu" aria-expanded="false" aria-controls="doc-sidebar">&#9776;</button>
 	<a href="index.html" class="header-logo" aria-label="cast home"><img src="assets/favicon.svg" alt="cast logo"></a>
 	<span class="header-badge">v${PACKAGE_VERSION}</span>
 	<div class="header-links">
@@ -1107,13 +1201,11 @@ ${FONT_LINKS}
 </header>
 
 <div class="sidebar-backdrop"></div>
-<nav class="sidebar">
-	<div class="sidebar-section">
-		<div class="sidebar-section-title">Documentation</div>
+<nav class="sidebar" id="doc-sidebar" aria-label="Documentation">
 ${sidebarLinks}
-	</div>
 </nav>
 
+<div id="copy-status" class="visually-hidden" role="status" aria-live="polite"></div>
 <main class="main">
 	<article class="content">
 		${bodyHtml}
@@ -1127,26 +1219,60 @@ ${sidebarLinks}
 	const backdrop = document.querySelector('.sidebar-backdrop');
 	const toggle = document.querySelector('.menu-toggle');
 	if (!toggle) return;
-	function close() { sidebar.classList.remove('open'); backdrop.classList.remove('visible'); }
-	function open() { sidebar.classList.add('open'); backdrop.classList.add('visible'); }
+	function close(returnFocus) {
+		if (!sidebar.classList.contains('open')) return;
+		sidebar.classList.remove('open'); backdrop.classList.remove('visible');
+		toggle.setAttribute('aria-expanded', 'false');
+		if (returnFocus) toggle.focus();
+	}
+	function open() {
+		sidebar.classList.add('open'); backdrop.classList.add('visible');
+		toggle.setAttribute('aria-expanded', 'true');
+		// Into the drawer, at the page you're on.
+		(sidebar.querySelector('a.active') || sidebar.querySelector('a'))?.focus();
+	}
 	toggle.addEventListener('click', () => {
-		if (sidebar.classList.contains('open')) close(); else open();
+		if (sidebar.classList.contains('open')) close(true); else open();
 	});
-	backdrop.addEventListener('click', close);
-	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+	backdrop.addEventListener('click', () => close(true));
+	document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(true); });
 })();
 </script>
 ${bodyHtml.includes('<pre class="mermaid"') ? MERMAID_SCRIPT : ""}
 <script>
+// Sources are base64 of UTF-8 bytes; atob alone yields Latin-1, which turned
+// every "—", "→" or box-drawing line into mojibake on the clipboard and in
+// diagram labels.
+function decodeBase64(value) {
+	return new TextDecoder().decode(Uint8Array.from(atob(value || ''), (c) => c.charCodeAt(0)));
+}
+function announce(message) {
+	const status = document.getElementById('copy-status');
+	if (status) status.textContent = message;
+}
 // ── Mermaid viewer with zoom + diagram/code toggle ──
 document.addEventListener('DOMContentLoaded', () => {
 	const blocks = document.querySelectorAll('pre.mermaid');
 	if (!blocks.length) return;
 
+	// Offline, or the CDN is blocked: leave each diagram's source readable
+	// rather than a blank box, and say why.
+	if (typeof mermaid === 'undefined') {
+		blocks.forEach((pre) => {
+			pre.textContent = decodeBase64(pre.dataset.raw) || pre.textContent;
+			pre.className = 'mermaid-code visible';
+			const note = document.createElement('p');
+			note.className = 'mermaid-note';
+			note.textContent = "The diagram viewer couldn't load, so this is the diagram's source.";
+			pre.before(note);
+		});
+		return;
+	}
+
 	mermaid.initialize({ startOnLoad: false, theme: 'dark' });
 
 	blocks.forEach((pre, i) => {
-		const raw = atob(pre.dataset.raw || '') || pre.textContent;
+		const raw = decodeBase64(pre.dataset.raw) || pre.textContent;
 
 		// Build viewer shell
 		const viewer = document.createElement('div');
@@ -1177,7 +1303,10 @@ document.addEventListener('DOMContentLoaded', () => {
 		mermaid.render(id, raw).then(({ svg }) => {
 			diagram.innerHTML = svg;
 		}).catch(err => {
-			diagram.innerHTML = '<pre style="color:#fb7185">' + err.message + '</pre>';
+			const failure = document.createElement('pre');
+			failure.className = 'mermaid-error';
+			failure.textContent = "This diagram couldn't be drawn: " + err.message;
+			diagram.replaceChildren(failure);
 		});
 
 		// Zoom + pan state
@@ -1260,17 +1389,19 @@ document.addEventListener('DOMContentLoaded', () => {
 	document.addEventListener('click', async (e) => {
 		const btn = e.target.closest('.code-copy');
 		if (!btn) return;
-		const raw = atob(btn.dataset.copy || '');
+		const raw = decodeBase64(btn.dataset.copy);
 		try {
 			await navigator.clipboard.writeText(raw);
 			btn.textContent = 'copied';
 			btn.classList.add('copied');
+			announce('Copied to the clipboard');
 			setTimeout(() => {
 				btn.textContent = 'copy';
 				btn.classList.remove('copied');
 			}, 1500);
 		} catch {
 			btn.textContent = 'failed';
+			announce("Couldn't copy: select the code and copy it by hand");
 			setTimeout(() => (btn.textContent = 'copy'), 1500);
 		}
 	});
@@ -1458,5 +1589,16 @@ for (const item of NAV_ORDER) {
 	writeFileSync(join(SITE, outFile), html);
 	console.log(`  ${outFile}`);
 }
+
+// GitHub Pages serves this for any missing path, at any depth, so it pins its
+// base to the site root or every relative asset and link would miss.
+const NOT_FOUND_BODY = `<h1>Page not found</h1>
+<p>There's no page at this address. It may have moved when the docs were reorganised.</p>
+<p>Start from the <a href="index.html">home page</a> or <a href="getting-started.html">Getting Started</a>, or pick a page in the sidebar.</p>`;
+writeFileSync(
+	join(SITE, "404.html"),
+	docPage("Page not found", NOT_FOUND_BODY, "").replace("<head>", '<head>\n<base href="/cast/">'),
+);
+console.log("  404.html");
 
 console.log(`\nSite built: ${SITE} (${NAV_ORDER.length + 1} pages)`);
