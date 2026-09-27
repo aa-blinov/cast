@@ -4,6 +4,12 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.44.1
+
+### Fixed
+
+- **Background commands report done right away again.** Since 0.43.2 every background `bash` task waited an extra fifth of a second after it finished before cast noticed, and longer on a busy machine. It is back to a few milliseconds, and output written just before the exit is still kept.
+
 ## 0.44.0
 
 ### Added
