@@ -105,7 +105,12 @@ renderer.code = function ({ text, lang }) {
 	// The copy button carries the raw source base64-encoded so the exact text
 	// (not the syntax-highlighted HTML) is what lands on the clipboard.
 	const copyData = Buffer.from(text).toString("base64");
-	return `<pre class="code-block"${sourceLanguage ? ` data-language="${escapeHtml(sourceLanguage)}"` : ""}><button class="code-copy" type="button" data-copy="${copyData}" aria-label="Copy code to clipboard">copy</button><code${className}>${highlighted}</code></pre>`;
+	// The language and the copy button sit in a header row above the code, not
+	// on top of it: absolutely placed inside the <pre> they covered the first
+	// line, overlapped each other on long names ("powershell") and scrolled away
+	// with a wide line.
+	const languageLabel = sourceLanguage ? `<span class="code-lang">${escapeHtml(sourceLanguage)}</span>` : "";
+	return `<div class="code-block"${sourceLanguage ? ` data-language="${escapeHtml(sourceLanguage)}"` : ""}><div class="code-head">${languageLabel}<button class="code-copy" type="button" data-copy="${copyData}" aria-label="Copy code to clipboard" title="Copy code">${COPY_ICON_SVG}</button></div><pre><code${className}>${highlighted}</code></pre></div>`;
 };
 const originalTable = renderer.table;
 renderer.table = function (token) {
@@ -394,7 +399,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	border: 1px solid var(--border);
 	color: var(--code-text);
 }
-.content pre.code-block,
+.content .code-block,
 .content pre:not(.mermaid):not(.mermaid-code) {
 	position: relative;
 	background: linear-gradient(180deg, var(--code-bg-raised), var(--code-bg));
@@ -403,26 +408,33 @@ a:hover { color: #c084fc; text-decoration: none; }
 	overflow-x: auto; line-height: 1.6; box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
 	-webkit-overflow-scrolling: touch;
 }
-.content pre.code-block::before {
-	content: attr(data-language);
-	position: absolute; top: 9px; right: 14px;
+/* The frame is the block; its <pre> only scrolls the code. */
+.content .code-block { padding: 0; overflow: hidden; }
+.content .code-block pre:not(.mermaid):not(.mermaid-code) {
+	margin: 0; padding: 4px 20px 18px; border: 0; border-radius: 0;
+	background: none; box-shadow: none; overflow-x: auto;
+}
+.content .code-head {
+	display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+	padding: 8px 12px 0;
+}
+.content .code-lang {
 	font: 600 .75rem/1 var(--font-mono); letter-spacing: .08em;
-	text-transform: uppercase; color: var(--text-muted); opacity: .9;
+	text-transform: uppercase; color: var(--text-muted);
 }
-.content pre.code-block .code-copy {
-	position: absolute; top: 8px; right: 16px;
-	font: 600 .75rem/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase;
+/* Always shown, right after the language: a hover-only button was invisible
+   to touch and to anyone who didn't think to hover. */
+.content .code-block .code-copy {
+	display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0;
 	color: var(--text-muted); background: var(--code-bg-raised);
-	border: 1px solid var(--code-border); border-radius: 6px;
-	padding: 4px 8px; cursor: pointer; opacity: 0;
-	transition: opacity .15s ease, color .15s ease, border-color .15s ease;
+	border: 1px solid var(--code-border); border-radius: 6px; cursor: pointer;
+	transition: color .15s ease, border-color .15s ease;
 }
-.content pre.code-block:hover .code-copy,
-.content pre.code-block .code-copy:focus-visible { opacity: 1; }
-.content pre.code-block .code-copy:hover { color: var(--text); border-color: var(--border-active); }
-.content pre.code-block .code-copy.copied { color: var(--accent-text); border-color: var(--accent); }
-.content pre.code-block[data-language] .code-copy { right: 86px; }
-.content pre.code-block code,
+.content .code-block .code-copy svg { width: 14px; height: 14px; }
+.content .code-block .code-copy.failed { color: var(--rose); border-color: var(--rose); }
+.content .code-block .code-copy:hover { color: var(--text); border-color: var(--border-active); }
+.content .code-block .code-copy.copied { color: var(--accent-text); border-color: var(--accent); }
+.content .code-block code,
 .content pre:not(.mermaid):not(.mermaid-code) code {
 	display: block; min-width: max-content; background: none; border: none;
 	padding: 0; color: var(--code-text); font-size: .875rem; white-space: pre;
@@ -447,9 +459,10 @@ a:hover { color: #c084fc; text-decoration: none; }
 .content .hljs-strong { font-weight: 700; }
 .content .hljs { color: var(--code-text); background: transparent; }
 @media (max-width: 768px) {
-	.content pre.code-block,
 	.content pre:not(.mermaid):not(.mermaid-code) { padding: 16px 14px; border-radius: 8px; }
-	.content pre.code-block code,
+	.content .code-block { padding: 0; }
+	.content .code-block pre:not(.mermaid):not(.mermaid-code) { padding: 4px 14px 16px; border-radius: 0; }
+	.content .code-block code,
 	.content pre:not(.mermaid):not(.mermaid-code) code { font-size: .78rem; }
 }
 
@@ -860,22 +873,14 @@ main:focus { outline: none; }
 }
 
 /* ── Touch ───────────────────────────────────────────────────────── */
-/* Last in the sheet so it wins over the base rules it adjusts. No hover to reveal the copy button, and a finger needs a 44px target. */
-@media (hover: none) {
-	.content pre.code-block .code-copy { opacity: 1; }
-}
+/* Last in the sheet so it wins over the base rules it adjusts: a finger needs a 44px target. */
 @media (pointer: coarse) {
 	.sidebar a { min-height: 44px; padding: 10px 12px; }
 	.menu-toggle { min-width: 44px; min-height: 44px; }
 	.header-logo { min-width: 44px; min-height: 44px; justify-content: center; }
 	.header-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; }
-	.content pre.code-block .code-copy { min-height: 44px; padding: 0 12px; top: 4px; }
-	/* Room above the first line for the 44px button, so it covers no code. */
-	.content pre.code-block:not(.mermaid):not(.mermaid-code) { padding-top: 54px; }
-	/* The wider button no longer fits beside a long language name
-	   ("POWERSHELL"): the name moves to the left, the button to the edge. */
-	.content pre.code-block::before { top: 20px; left: 20px; right: auto; }
-	.content pre.code-block[data-language] .code-copy { right: 12px; }
+	.content .code-block .code-copy { width: 44px; height: 44px; }
+	.content .code-head { padding: 4px 4px 0; }
 	.doc-nav a { min-height: 44px; }
 	.workspace-copy-btn { width: 44px; height: 44px; top: -13px; }
 	.workspace-ui-persona { min-height: 44px; padding: 0 12px; }
@@ -1018,8 +1023,8 @@ ${FONT_LINKS}
 </body>
 </html>`;
 
-const LANDING_COPY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg>';
-const LANDING_CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 12.75 6 6 9-13.5"/></svg>';
+const COPY_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 0 1 1.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 0 0-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 0 1-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 0 0-3.375-3.375h-1.5a1.125 1.125 0 0 1-1.125-1.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H9.75"/></svg>';
+const CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 12.75 6 6 9-13.5"/></svg>';
 
 const LANDING_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -1101,8 +1106,8 @@ ${FONT_LINKS}
 		<section class="workspace-section" aria-labelledby="install-title">
 			<div class="workspace-section-heading"><h2 id="install-title">Install Cast</h2></div>
 			<div class="workspace-install">
-				<div class="install-block"><div class="label">macOS / Linux</div><div class="workspace-code"><code>curl -fsSL https://aa-blinov.github.io/cast/install | bash</code><button class="workspace-copy-btn" type="button" aria-label="Copy macOS and Linux install command" title="Copy command">${LANDING_COPY_ICON_SVG}</button></div></div>
-				<div class="install-block"><div class="label">Windows / PowerShell</div><div class="workspace-code"><code>irm https://aa-blinov.github.io/cast/install.ps1 | iex</code><button class="workspace-copy-btn" type="button" aria-label="Copy Windows install command" title="Copy command">${LANDING_COPY_ICON_SVG}</button></div></div>
+				<div class="install-block"><div class="label">macOS / Linux</div><div class="workspace-code"><code>curl -fsSL https://aa-blinov.github.io/cast/install | bash</code><button class="workspace-copy-btn" type="button" aria-label="Copy macOS and Linux install command" title="Copy command">${COPY_ICON_SVG}</button></div></div>
+				<div class="install-block"><div class="label">Windows / PowerShell</div><div class="workspace-code"><code>irm https://aa-blinov.github.io/cast/install.ps1 | iex</code><button class="workspace-copy-btn" type="button" aria-label="Copy Windows install command" title="Copy command">${COPY_ICON_SVG}</button></div></div>
 			</div>
 		</section>
 
@@ -1153,12 +1158,12 @@ document.querySelectorAll('.workspace-copy-btn').forEach((button) => {
 			if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code).catch(viaCommand);
 			else viaCommand();
 			button.classList.add('copied');
-			button.innerHTML = '${LANDING_CHECK_ICON_SVG}';
+			button.innerHTML = '${CHECK_ICON_SVG}';
 			button.title = 'Copied';
 			button.setAttribute('aria-label', 'Copied');
 			window.setTimeout(() => {
 				button.classList.remove('copied');
-				button.innerHTML = '${LANDING_COPY_ICON_SVG}';
+				button.innerHTML = '${COPY_ICON_SVG}';
 				button.title = 'Copy command';
 				button.setAttribute('aria-label', label);
 			}, 1200);
@@ -1443,6 +1448,8 @@ document.addEventListener('DOMContentLoaded', () => {
 	}
 });
 // ── Copy button for code blocks ──
+const COPY_ICON = ${JSON.stringify(COPY_ICON_SVG)};
+const CHECK_ICON = ${JSON.stringify(CHECK_ICON_SVG)};
 document.addEventListener('DOMContentLoaded', () => {
 	document.addEventListener('click', async (e) => {
 		const btn = e.target.closest('.code-copy');
@@ -1450,17 +1457,23 @@ document.addEventListener('DOMContentLoaded', () => {
 		const raw = decodeBase64(btn.dataset.copy);
 		try {
 			await copyText(raw);
-			btn.textContent = 'copied';
+			btn.innerHTML = CHECK_ICON;
 			btn.classList.add('copied');
+			btn.setAttribute('aria-label', 'Copied');
 			announce('Copied to the clipboard');
 			setTimeout(() => {
-				btn.textContent = 'copy';
+				btn.innerHTML = COPY_ICON;
 				btn.classList.remove('copied');
+				btn.setAttribute('aria-label', 'Copy code to clipboard');
 			}, 1500);
 		} catch {
-			btn.textContent = 'failed';
+			btn.classList.add('failed');
+			btn.setAttribute('aria-label', "Couldn't copy");
 			announce("Couldn't copy: select the code and copy it by hand");
-			setTimeout(() => (btn.textContent = 'copy'), 1500);
+			setTimeout(() => {
+				btn.classList.remove('failed');
+				btn.setAttribute('aria-label', 'Copy code to clipboard');
+			}, 1500);
 		}
 	});
 });
