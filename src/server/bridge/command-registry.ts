@@ -13,7 +13,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
-import { clearGoal, editGoalObjective, readGoal, startGoal } from "../../core/goal.ts";
+import { clearGoal, editGoalObjective, formatGoalStatus, readGoal, startGoal } from "../../core/goal.ts";
 import {
 	buildReviewScope,
 	formatReviewBrief,
@@ -1065,8 +1065,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 	"/goal": ({ ws, arg, submit }) => {
 		const trimmed = arg.trim();
 		if (trimmed === "status") {
-			const current = readGoal(ws.session.id);
-			return { ok: true, result: current ?? { status: "none" } };
+			return { ok: true, result: formatGoalStatus(readGoal(ws.session.id)) };
 		}
 		if (trimmed === "clear") {
 			clearGoal(ws.session.id);

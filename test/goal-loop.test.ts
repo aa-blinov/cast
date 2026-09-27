@@ -44,7 +44,11 @@ let realDb: string | undefined;
 const SESSION = "goal-loop-session";
 
 beforeEach(() => {
-	vi.mocked(streamAndCollect).mockClear();
+	// Reset, not just clear: a test may install a fallback implementation.
+	vi.mocked(streamAndCollect).mockReset();
+	vi.mocked(streamAndCollect).mockImplementation(async () => {
+		throw new Error("test streamAndCollect stub always throws");
+	});
 	realHome = process.env.HOME;
 	fakeHome = mkdtempSync(join(tmpdir(), "cast-goal-loop-home-"));
 	process.env.HOME = fakeHome;
@@ -149,6 +153,8 @@ describe("runAgentLoop — durable goal", () => {
 				challenge = String(messages[messages.length - 1]?.content ?? "");
 				return goalUpdateCall({ status: "complete", note: "checked each requirement, all green" })();
 			})
+			// The independent completion check reads the evidence and agrees.
+			.mockImplementationOnce(async () => ({ content: "COMPLETE", thinking: "", finishReason: "stop" as const }))
 			.mockImplementationOnce(stop);
 
 		await runAgentLoop([{ role: "user", content: "start" }], {
@@ -166,6 +172,65 @@ describe("runAgentLoop — durable goal", () => {
 		expect(readGoal(SESSION)?.status).toBe("complete");
 		// The close is the second call's doing, and nothing continued after it.
 		expect(readGoal(SESSION)?.continuations).toBe(0);
+	});
+
+	it("lets an independent check turn a close down once, citing the gap, then trusts the next", async () => {
+		startGoal(SESSION, "update all three files", 5);
+		let judged = "";
+		let rejection = "";
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(goalUpdateCall({ status: "complete", note: "did a.txt" }))
+			.mockImplementationOnce(goalUpdateCall({ status: "complete", note: "a.txt done" }))
+			.mockImplementationOnce(async (_c: unknown, _m: unknown, messages: Message[]) => {
+				judged = messages.map((m) => String(m.content)).join("\n");
+				return { content: "INCOMPLETE: b.txt and c.txt were never checked", thinking: "", finishReason: "stop" };
+			})
+			.mockImplementationOnce(async (_c: unknown, _m: unknown, messages: Message[]) => {
+				rejection = String(messages[messages.length - 1]?.content ?? "");
+				return goalUpdateCall({ status: "complete", note: "a, b and c all verified" })();
+			})
+			.mockImplementationOnce(stop);
+
+		await runAgentLoop([{ role: "user", content: "start" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: fakeHome,
+			systemPrompt: "base",
+			sessionId: SESSION,
+			onEvent: () => {},
+			onWarning: () => {},
+		});
+
+		expect(judged).toContain("You check whether an agent's goal is actually done");
+		expect(judged).toContain("update all three files");
+		expect(judged).toContain("a.txt done");
+		expect(rejection).toContain("b.txt and c.txt were never checked");
+		// Turned down once; the next close goes through without another check.
+		expect(readGoal(SESSION)).toMatchObject({ status: "complete", judgeRejected: true });
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(5);
+	});
+
+	it("lets the close through when the check itself fails", async () => {
+		startGoal(SESSION, "one thing", 5);
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(goalUpdateCall({ status: "complete", note: "done" }))
+			.mockImplementationOnce(goalUpdateCall({ status: "complete", note: "verified" }))
+			.mockImplementationOnce(async () => {
+				throw new Error("judge provider down");
+			})
+			.mockImplementationOnce(stop);
+
+		await runAgentLoop([{ role: "user", content: "start" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: fakeHome,
+			systemPrompt: "base",
+			sessionId: SESSION,
+			onEvent: () => {},
+			onWarning: () => {},
+		});
+
+		expect(readGoal(SESSION)?.status).toBe("complete");
 	});
 
 	it("keeps the goal active when the agent stops at the challenge", async () => {
@@ -195,6 +260,9 @@ describe("runAgentLoop — durable goal", () => {
 		// exhaustion — what is under test is the status, not the budget.
 		startGoal(SESSION, "one thing", 5);
 		let toolResult = "";
+		// Past the scripted turns the model just stops, so the run ends on the
+		// goal's own idle rule rather than on a provider failure (which pauses it).
+		vi.mocked(streamAndCollect).mockImplementation(async () => stop());
 		vi.mocked(streamAndCollect)
 			.mockImplementationOnce(goalUpdateCall({ note: "still stuck on the build" }))
 			.mockImplementationOnce(async (_c: unknown, _m: unknown, messages: Message[]) => {
@@ -267,6 +335,146 @@ describe("runAgentLoop — durable goal", () => {
 		expect(readGoal(SESSION)?.status).toBe("active");
 	});
 
+	it("ends the run at the iteration cap without spending the goal's continuations", async () => {
+		// The cap used to break out, fall into the goal's stop point, push a
+		// continuation, break on the cap again — until every continuation was
+		// spent without a model call and the goal was marked budget_limited.
+		startGoal(SESSION, "long job", 5);
+		let n = 0;
+		vi.mocked(streamAndCollect).mockImplementation(async () => ({
+			content: "",
+			thinking: "",
+			finishReason: "tool_calls" as const,
+			toolCalls: [{ id: `t${n}`, name: "ls", arguments: JSON.stringify({ path: `/tmp/${n++}` }) }],
+		}));
+
+		const out = await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: fakeHome,
+			systemPrompt: "base",
+			sessionId: SESSION,
+			maxOuterIterations: 2,
+			onEvent: () => {},
+			onWarning: () => {},
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(2);
+		expect(readGoal(SESSION)).toMatchObject({ status: "active", continuations: 0 });
+		expect(out.filter((m) => m.role === "user")).toHaveLength(1);
+	});
+
+	it("stops driving after two passes in a row that change nothing, leaving the goal open", async () => {
+		startGoal(SESSION, "needs the user", 5);
+		vi.mocked(streamAndCollect).mockImplementation(async () => stop());
+		const warnings: string[] = [];
+
+		await runAgentLoop([{ role: "user", content: "start" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: fakeHome,
+			systemPrompt: "base",
+			sessionId: SESSION,
+			onEvent: () => {},
+			onWarning: (w) => warnings.push(w),
+		});
+
+		// Pass one continues, pass two is nudged, pass three stops the drive.
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(3);
+		expect(readGoal(SESSION)).toMatchObject({ status: "active", continuations: 2 });
+		expect(warnings.some((w) => w.includes("two passes in a row changed nothing"))).toBe(true);
+	});
+
+	it("parks the goal when the provider fails mid-goal, like an abort", async () => {
+		startGoal(SESSION, "fragile work", 5);
+
+		await runAgentLoop([{ role: "user", content: "start" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: fakeHome,
+			systemPrompt: "base",
+			sessionId: SESSION,
+			onEvent: () => {},
+			onWarning: () => {},
+		});
+
+		expect(readGoal(SESSION)).toMatchObject({
+			status: "paused",
+			note: "The previous turn failed before it finished.",
+		});
+	});
+
+	it("sees a goal cleared or reworded mid-run on the very next model call", async () => {
+		const { editGoalObjective } = await import("../src/core/goal.ts");
+		const lsCall = (id: string) => ({
+			content: "",
+			thinking: "",
+			finishReason: "tool_calls" as const,
+			toolCalls: [{ id, name: "ls", arguments: JSON.stringify({ path: `/tmp/${id}` }) }],
+		});
+		const seen: Array<{ system: string; tools: string[] }> = [];
+		const capture = (messages: Message[], tools: unknown) =>
+			seen.push({
+				system: String(messages.find((m) => m.role === "system")?.content ?? ""),
+				tools: (tools as Array<{ function: { name: string } }>).map((t) => t.function.name),
+			});
+
+		startGoal(SESSION, "make the old thing", 5);
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async (_c, _m, messages, tools) => {
+				capture(messages, tools);
+				editGoalObjective(SESSION, "make the new thing");
+				return lsCall("a");
+			})
+			.mockImplementationOnce(async (_c, _m, messages, tools) => {
+				capture(messages, tools);
+				clearGoal(SESSION);
+				return lsCall("b");
+			})
+			.mockImplementationOnce(async (_c, _m, messages, tools) => {
+				capture(messages, tools);
+				return stop();
+			});
+
+		await runAgentLoop([{ role: "user", content: "start" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: fakeHome,
+			systemPrompt: "base",
+			sessionId: SESSION,
+			onEvent: () => {},
+			onWarning: () => {},
+		});
+
+		expect(seen[0]!.system).toContain("make the old thing");
+		expect(seen[1]!.system).toContain("make the new thing");
+		expect(seen[2]!.system).not.toContain("make the new thing");
+		expect(seen[2]!.tools).not.toContain("goal_update");
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(3);
+	});
+
+	it("doesn't drive the goal while a plan is being written", async () => {
+		const { createPlanState } = await import("../src/core/plan.ts");
+		startGoal(SESSION, "plan then build", 5);
+		const planState = createPlanState(fakeHome, "goal-plan");
+		planState.enabled = true;
+		vi.mocked(streamAndCollect).mockImplementation(async () => stop());
+
+		await runAgentLoop([{ role: "user", content: "plan it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: fakeHome,
+			systemPrompt: "base",
+			sessionId: SESSION,
+			planState,
+			onEvent: () => {},
+			onWarning: () => {},
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(1);
+		expect(readGoal(SESSION)).toMatchObject({ status: "active", continuations: 0 });
+	});
+
 	it("parks the goal when the turn is aborted, and says so on the way back", async () => {
 		startGoal(SESSION, "slow work", 5);
 		const controller = new AbortController();
@@ -289,6 +497,7 @@ describe("runAgentLoop — durable goal", () => {
 		expect(readGoal(SESSION)?.status).toBe("paused");
 
 		let systemPrompt = "";
+		vi.mocked(streamAndCollect).mockImplementation(async () => stop());
 		vi.mocked(streamAndCollect).mockImplementationOnce(async (_c, _m, messages) => {
 			systemPrompt = String(messages.find((m: Message) => m.role === "system")?.content ?? "");
 			return stop();

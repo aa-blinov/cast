@@ -28,9 +28,14 @@ import {
 	GOAL_BUDGET_PROMPT,
 	GOAL_COMPLETION_CHALLENGE,
 	GOAL_CONTINUATION_PROMPT,
+	GOAL_JUDGE_SYSTEM,
 	GOAL_NUDGE_PROMPT,
 	GOAL_RECOVERY_NOTE,
+	goalJudgePrompt,
+	goalJudgeRejection,
 	goalPromptBlock,
+	markGoalJudgeRejected,
+	parseGoalJudgeVerdict,
 	pauseGoalForAbort,
 	readGoal,
 	recordGoalContinuation,
@@ -454,6 +459,11 @@ const DESTRUCTIVE_WRITE_TOOLS = new Set(["write", "edit", "patch", "apply_patch"
 // group. Unknown/MCP tools, shells, subagents, and stateful plan tools stay
 // ordered so a sibling mutation cannot race another tool in the same model
 // response. Read-only calls remain parallel when they are adjacent.
+/** What the goal's completion check reads of the session: the latest tool
+ *  results, each cut short — enough to see what the checks returned. */
+const GOAL_JUDGE_TOOL_RESULTS = 10;
+const GOAL_JUDGE_RESULT_CHARS = 1500;
+
 export const PARALLEL_SAFE_TOOL_NAMES = new Set([
 	"glob",
 	"grep",
@@ -1913,7 +1923,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// A goal paused by an interrupted turn resumes here, and the run says so in
 	// the prompt — the transcript it inherits may stop mid-tool.
 	const goalResumed = ownsGoal && loopConfig.sessionId ? resumeGoalAfterPause(loopConfig.sessionId) : false;
-	const activeGoal =
+	// Re-read before every model call (refreshGoal below): a `/goal clear` or
+	// `/goal edit` from another surface lands mid-run, not a turn late.
+	let activeGoal =
 		ownsGoal && loopConfig.sessionId && readGoal(loopConfig.sessionId)?.status === "active"
 			? readGoal(loopConfig.sessionId)
 			: undefined;
@@ -1930,7 +1942,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// identical one next time round means the continuation bought nothing —
 	// the budget is spent the same either way, so this is the only thing that
 	// notices churn.
-	let goalLastPassSignature = "";
+	// undefined until a pass has ended, so the first pass is never "unchanged".
+	let goalLastPassSignature: string | undefined;
+	// Unchanged passes in a row: the nudge gets one, a second means the model
+	// is talking rather than working (or waiting on the user), so the drive stops.
+	let goalIdleStreak = 0;
+	// The iteration cap ended the run: a continuation would break on it at once,
+	// spending the goal's whole budget without a single model call.
+	let goalCapHit = false;
 	// A review that ends in prose has had none of its lines checked, which is
 	// the whole point of opening one. Set by the dispatch; the stop point asks
 	// once when it is still false.
@@ -2003,9 +2022,13 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	const skillDisallowedTools = new Set<string>();
 	let tools = baseTools;
 	const applySkillToolRestrictions = (): void => {
-		tools = skillDisallowedTools.size
-			? baseTools.filter((t) => !skillDisallowedTools.has(t.function.name))
-			: baseTools;
+		tools =
+			skillDisallowedTools.size || !activeGoal
+				? baseTools.filter(
+						(t) =>
+							!skillDisallowedTools.has(t.function.name) && (activeGoal || t.function.name !== "goal_update"),
+					)
+				: baseTools;
 		advertisedNames = new Set(tools.map((t) => t.function.name));
 	};
 	// Names registered before allowlist/denylist filters — so a call to a
@@ -2287,6 +2310,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// not a refusal: the model is told what would prove it and can
 				// close on the next call.
 				if (challengeGoalCompletion(loopConfig.sessionId)) return { content: GOAL_COMPLETION_CHALLENGE };
+				const goalNow = readGoal(loopConfig.sessionId);
+				if (goalNow?.status === "active" && !goalNow.judgeRejected) {
+					const gap = await judgeGoalCompletion(goalNow.objective, note);
+					if (gap) {
+						markGoalJudgeRejected(loopConfig.sessionId);
+						return { content: goalJudgeRejection(gap) };
+					}
+				}
 				if (!updateGoal(loopConfig.sessionId, status, note))
 					return { content: "Error: there is no active goal to close.", isError: true };
 				goalClosed = true;
@@ -2431,6 +2462,48 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// mid-turn guard only estimates what came after it.
 	let requestLength = 0;
 	let measuredAt: number | undefined;
+	/** A second reader on a goal's close: the gap it found, or undefined to let
+	 *  the close through. Fails open — a judge that errors or rambles must not
+	 *  hold a goal hostage; the challenge before it already asked for proof. */
+	const judgeGoalCompletion = async (objective: string, note: string): Promise<string | undefined> => {
+		const toolResults = messages
+			.filter((m) => m.role === "tool")
+			.slice(-GOAL_JUDGE_TOOL_RESULTS)
+			.map((m) => {
+				const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+				return text.length > GOAL_JUDGE_RESULT_CHARS ? `${text.slice(0, GOAL_JUDGE_RESULT_CHARS)}…` : text;
+			});
+		try {
+			const verdict = await streamAndCollect(
+				client,
+				currentModel,
+				[
+					{ role: "system", content: GOAL_JUDGE_SYSTEM },
+					{ role: "user", content: goalJudgePrompt(objective, note, toolResults) },
+				],
+				[],
+				2048,
+				signal,
+			);
+			if (verdict.usage) onEvent({ type: "usage", usage: verdict.usage });
+			return parseGoalJudgeVerdict(verdict.content)?.gap;
+		} catch {
+			return undefined;
+		}
+	};
+	// A goal cleared from outside drops out of the prompt and the tool list at
+	// once; an edited one carries its new objective into the next call.
+	const refreshGoal = (): void => {
+		if (!activeGoal || goalClosed || !loopConfig.sessionId) return;
+		const current = readGoal(loopConfig.sessionId);
+		if (current?.status === "active") {
+			activeGoal = current;
+			return;
+		}
+		activeGoal = undefined;
+		goalClosed = true;
+		applySkillToolRestrictions();
+	};
 	const syncSystemPrompt = (turnStart = false): void => {
 		let prompt = systemPrompt;
 		if (loopConfig.rebuildSystemPrompt) {
@@ -2531,6 +2604,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		onEvent({ type: "assistant_message", content, thinking });
 	};
 
+	/** A failed turn leaves the transcript mid-action just like an abort does:
+	 *  park the goal so the next run re-checks the world before building on it. */
+	const pauseGoalOnFailure = () => {
+		if (activeGoal && !goalClosed && loopConfig.sessionId) {
+			pauseGoalForAbort(loopConfig.sessionId, "The previous turn failed before it finished.");
+		}
+	};
+
 	/** Abort end: optional interrupt reminder for the next model turn, then settle. */
 	const endAborted = () => {
 		// An interrupted goal turn is not a finished one: park it so the next
@@ -2611,6 +2692,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				const activeCap = goalCap ?? loopConfig.defaultOuterIterations ?? DEFAULT_OUTER_ITERATION_CAP;
 				outerIteration += 1;
 				if (outerIteration > activeCap) {
+					goalCapHit = true;
 					loopConfig.onWarning?.(
 						goalCap !== undefined
 							? `Autonomous goal hit its iteration budget (${goalCap}) — stopping.`
@@ -2674,6 +2756,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					}
 				}
 
+				refreshGoal();
 				// Re-sync the system prompt against contextFiles that tool calls
 				// from the previous inner iteration may have added — this is what
 				// makes a glob rule attach immediately after its file is read.
@@ -2876,6 +2959,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// Stop and flag it so a cut-off answer isn't mistaken for a clean exit.
 				if (completion.disconnected) {
 					persistPartialAssistant(completion.content, completion.thinking);
+					pauseGoalOnFailure();
 					onEvent({ type: "end", reason: "disconnected" });
 					return;
 				}
@@ -2943,6 +3027,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					if (completion.finishReason === "aborted") {
 						endAborted();
 					} else {
+						pauseGoalOnFailure();
 						onEvent({ type: "end", reason: "error" });
 					}
 					return;
@@ -3264,8 +3349,26 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			// waiting for the user. Bounded twice over — its own continuation
 			// budget, and the outer iteration cap above, which ends the run
 			// whatever the goal wants.
-			if (activeGoal && !goalClosed && !signal?.aborted && loopConfig.sessionId) {
-				if (goalContinuations < activeGoal.maxContinuations) {
+			// Not while planning: a plan ends on the user's approval, and pushing
+			// the turn on would argue with it. The goal drives again in build mode.
+			if (
+				activeGoal &&
+				!goalClosed &&
+				!goalCapHit &&
+				!loopConfig.planState?.enabled &&
+				!signal?.aborted &&
+				loopConfig.sessionId
+			) {
+				const signature = recentToolCalls.map((call) => `${call.name}:${call.argsKey}`).join("|");
+				const unchanged = signature === goalLastPassSignature;
+				goalLastPassSignature = signature;
+				goalIdleStreak = unchanged ? goalIdleStreak + 1 : 0;
+				// After the wrap-up nothing more is driven, so there's nothing to stop.
+				if (!goalWrapUpSent && goalIdleStreak >= 2) {
+					loopConfig.onWarning?.(
+						"Goal paused its drive: two passes in a row changed nothing. It stays active — reply to continue, or /goal clear.",
+					);
+				} else if (goalContinuations < activeGoal.maxContinuations) {
 					// The snapshot is from run start; this write is what notices a
 					// goal cleared or closed from outside the run (another client,
 					// a second process). It returns undefined then, and continuing
@@ -3277,14 +3380,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						break;
 					}
 					goalContinuations = recorded.continuations;
-					const signature = recentToolCalls.map((call) => `${call.name}:${call.argsKey}`).join("|");
-					const churning = signature !== "" && signature === goalLastPassSignature;
-					goalLastPassSignature = signature;
-					messages.push({ role: "user", content: churning ? GOAL_NUDGE_PROMPT : GOAL_CONTINUATION_PROMPT });
+					messages.push({ role: "user", content: unchanged ? GOAL_NUDGE_PROMPT : GOAL_CONTINUATION_PROMPT });
 					onEvent({ type: "followup_injected", messages: [messages[messages.length - 1]!] });
 					continue;
-				}
-				if (!goalWrapUpSent) {
+				} else if (!goalWrapUpSent) {
 					goalWrapUpSent = true;
 					// Terminal, so later turns don't pay the wrap-up round trip
 					// again and `/goal status` stops reporting a healthy active
@@ -3295,7 +3394,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						`Used all ${activeGoal.maxContinuations} continuations without proving completion.`,
 					);
 					loopConfig.onWarning?.(
-						`Goal used its continuation budget (${activeGoal.maxContinuations}) — wrapping up. It stays active; send a message or /goal clear.`,
+						`Goal used its continuation budget (${activeGoal.maxContinuations}) — wrapping up. Start it again with /goal <objective> if there's more to do.`,
 					);
 					messages.push({ role: "user", content: GOAL_BUDGET_PROMPT });
 					onEvent({ type: "followup_injected", messages: [messages[messages.length - 1]!] });
@@ -3330,6 +3429,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				signal,
 			});
 		}
+		pauseGoalOnFailure();
 		onEvent({ type: "error", message });
 		onEvent({ type: "end", reason: "error" });
 	}

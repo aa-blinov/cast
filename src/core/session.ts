@@ -7,6 +7,7 @@ import type { TurnCheckpoint } from "./checkpoint.ts";
 import { type AppConfig, inputTokenBudget } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb } from "./db.ts";
+import { clearGoal } from "./goal.ts";
 import type { Message, Usage } from "./llm.ts";
 import { sessionMemoryDir } from "./memory-files.ts";
 import type { PlanQuestion, PlanTransition } from "./plan.ts";
@@ -1799,6 +1800,9 @@ export function deleteSession(id: string, cwd?: string): boolean {
 	removeSandboxDirFor(id, cwd);
 	removeInputsDirFor(id);
 	removeSessionMemoryDirFor(id);
+	// A goal is session state kept beside the store (~/.cast/goals/<id>.json);
+	// nothing else ever removed it, so deleted threads left their goals behind.
+	clearGoal(id);
 	return result.changes > 0;
 }
 

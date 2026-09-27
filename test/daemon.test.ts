@@ -96,10 +96,13 @@ async function login(): Promise<void> {
 	expect(res.status).toBe(200);
 }
 
-function openSse(path: string, token?: string): { events: unknown[]; close: () => void } {
+function openSse(path: string, token?: string): { events: unknown[]; opened: Promise<void>; close: () => void } {
 	const url = token ? `${origin}${path}?token=${encodeURIComponent(token)}` : `${origin}${path}`;
 	const events: unknown[] = [];
 	const source = new EventSource(url);
+	const opened = new Promise<void>((resolve) => {
+		source.onopen = () => resolve();
+	});
 	source.onmessage = (ev) => {
 		try {
 			events.push(JSON.parse((ev as unknown as { data: string }).data));
@@ -107,7 +110,7 @@ function openSse(path: string, token?: string): { events: unknown[]; close: () =
 			/* ignore */
 		}
 	};
-	return { events, close: () => source.close() };
+	return { events, opened, close: () => source.close() };
 }
 
 beforeEach(async () => {
@@ -333,8 +336,9 @@ describe("daemon single-writer SSE contract", () => {
 		const browser = openSse(`/api/sessions/${session.id}/events`, LOOPBACK_TOKEN);
 		const tui = openSse(`/api/sessions/${session.id}/events`, LOOPBACK_TOKEN);
 
-		// Give both SSE streams a moment to connect.
-		await new Promise((r) => setTimeout(r, 100));
+		// Waited on, not slept on: fixed 100ms/200ms windows were enough on an
+		// idle machine and not under a loaded full-suite run.
+		await Promise.all([browser.opened, tui.opened]);
 
 		const chat = await fetch(`${origin}/api/sessions/${session.id}/chat`, {
 			method: "POST",
@@ -344,7 +348,12 @@ describe("daemon single-writer SSE contract", () => {
 		expect(chat.status).toBe(202);
 
 		// Wait for the daemon to run the (stubbed) turn and settle to idle.
-		await new Promise((r) => setTimeout(r, 200));
+		const settled = (events: unknown[]) => {
+			const list = events as Array<{ type: string; status?: string }>;
+			const answered = list.findIndex((e) => e.type === "assistant_message");
+			return answered >= 0 && list.slice(answered).some((e) => e.type === "status" && e.status !== "running");
+		};
+		await vi.waitFor(() => expect(settled(browser.events) && settled(tui.events)).toBe(true), { timeout: 10_000 });
 
 		tui.close();
 		browser.close();

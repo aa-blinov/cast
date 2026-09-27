@@ -4,7 +4,7 @@ import { filesLostByRestore, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
-import { clearGoal, editGoalObjective, readGoal, startGoal } from "../core/goal.ts";
+import { clearGoal, editGoalObjective, formatGoalStatus, readGoal, startGoal } from "../core/goal.ts";
 import { runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT, runMemoryMaintenanceAgent } from "../core/loop.ts";
@@ -3393,12 +3393,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Goal cleared]");
 				return;
 			}
-			const goal = readGoal(session.id);
-			showNotice(
-				goal
-					? `[Goal (${goal.status}, ${goal.turns} turn${goal.turns === 1 ? "" : "s"}, ${goal.continuations}/${goal.maxContinuations} continuations): ${goal.objective}${goal.note ? ` — ${goal.note}` : ""}]`
-					: "[No goal in this session]",
-			);
+			showNotice(`[${formatGoalStatus(readGoal(session.id))}]`);
 		},
 	},
 	{

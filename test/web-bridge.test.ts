@@ -2095,6 +2095,19 @@ describe("web bridge", () => {
 		expect((loopConfig as { maxOuterIterations?: number }).maxOuterIterations).toBe(50);
 	});
 
+	it("/goal status reads the same as the TUI's, with or without a goal", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		await expect(bridge.executeCommand(ws.id, "/goal status")).resolves.toEqual({
+			ok: true,
+			result: "No goal in this session",
+		});
+		await bridge.executeCommand(ws.id, "/goal ship the report");
+		const status = await bridge.executeCommand(ws.id, "/goal status");
+		expect(status.result).toMatch(/^Goal \(active, \d+ turns?, 0\/5 continuations\): ship the report$/);
+		await bridge.executeCommand(ws.id, "/goal clear");
+	});
+
 	it("/review returns the kick-off message and the loop runs with the review prompt", async () => {
 		runAgentLoop.mockClear();
 		runAgentLoop.mockImplementationOnce(async (messages: unknown) => messages);

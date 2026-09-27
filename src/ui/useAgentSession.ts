@@ -33,7 +33,7 @@ import {
 	saveSession,
 	updateLastCheckpoint,
 } from "../core/session.ts";
-import { loadSettings, type PermissionMode, updateSettings } from "../core/settings.ts";
+import { loadSettings, type PermissionMode, turnIterationCap, updateSettings } from "../core/settings.ts";
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import { extractSystemReminders } from "../core/system-reminder.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
@@ -56,6 +56,7 @@ import {
 	steerServerSession,
 	submitServerChat,
 } from "../server/client.ts";
+import { goalIterationBudget } from "../server/commands.ts";
 import {
 	appendTextBlock,
 	reduceStreamEvent,
@@ -1121,6 +1122,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					subagentModelProvider: resolvedSubagentProvider,
 					cwd,
 					systemPrompt: activeSystemPrompt,
+					// Same budgets as the daemon gives this turn: `/goal N …` caps its
+					// iterations, everything else gets the configured safety cap.
+					maxOuterIterations: goalIterationBudget(goal),
+					defaultOuterIterations: turnIterationCap(),
 					memory: { sessionId: session.id },
 					automaticMemoryMaintenance,
 					automaticMemoryMessages,

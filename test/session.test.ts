@@ -1029,6 +1029,17 @@ describe("session persistence", () => {
 		expect(loadSession(child.id)?.messages).toHaveLength(2);
 	});
 
+	it("removes the session's goal with it", async () => {
+		const { startGoal, readGoal } = await import("../src/core/goal.ts");
+		const session = createSession("gpt-4o", projectA);
+		saveSession(session);
+		startGoal(session.id, "ship it");
+
+		deleteSession(session.id);
+
+		expect(readGoal(session.id)).toBeUndefined();
+	});
+
 	it("cascades checkpoints and subagent sessions when the session is deleted", () => {
 		const session = createSession("gpt-4o", projectA);
 		saveSession(session);

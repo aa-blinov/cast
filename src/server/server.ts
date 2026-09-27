@@ -26,6 +26,7 @@ import { promisify } from "node:util";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { createAgent, deleteAgent, getAgent, listAgents, updateAgent } from "../core/agents.ts";
 import { getDb } from "../core/db.ts";
+import { readGoal, startGoal } from "../core/goal.ts";
 import {
 	listProjectMemory,
 	listProjectMemoryArtifacts,
@@ -75,7 +76,7 @@ import {
 	toDisplayMessages,
 	type WebEvent,
 } from "./bridge.ts";
-import { GOAL_MAX_OUTER_ITERATIONS } from "./commands.ts";
+import { buildGoalPrompt, GOAL_MAX_OUTER_ITERATIONS, goalIterationBudget } from "./commands.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
 
@@ -1630,6 +1631,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				return json(res, { error: "This model does not accept voice messages" }, 400);
 			}
 		}
+		// `goal` makes the message a durable goal, as /goal does. A client that
+		// already set one (the TUI writes it before sending its own wrapped
+		// prompt) is left alone rather than restarted with that prompt as the
+		// objective.
+		if (goal && readGoal(params.id)?.status !== "active") {
+			startGoal(params.id, text.trim());
+			text = buildGoalPrompt(text.trim(), goalIterationBudget(goal) ?? GOAL_MAX_OUTER_ITERATIONS);
+		}
 		try {
 			// Don't await the full submit: the daemon broadcasts status:running
 			// synchronously at turn start, so awaiting the async setup that
@@ -1639,7 +1648,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			// broadcasts status:error + a transcript error), not this response.
 			void bridge
 				.submit(params.id, text, images, clientMessageId, undefined, {
-					...(goal ? { maxOuterIterations: typeof goal === "number" ? goal : GOAL_MAX_OUTER_ITERATIONS } : {}),
+					...(goal ? { maxOuterIterations: goalIterationBudget(goal) } : {}),
 				})
 				.catch((error) => {
 					console.error(`[cast server] chat submit failed:`, error);

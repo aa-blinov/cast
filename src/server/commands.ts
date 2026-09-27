@@ -203,6 +203,14 @@ export const REVIEW_PROMPT = `Review the work done in this session as a careful 
 // ask at most one clarifying question, verify as you go, and report honestly.
 export const GOAL_MAX_OUTER_ITERATIONS = 25;
 
+/** A turn's iteration budget from a submit's `goal` (true or a step count);
+ *  undefined leaves the turn on the safety cap. Shared by the daemon and the
+ *  local TUI so `/goal N …` means the same in both. */
+export function goalIterationBudget(goal: boolean | number | undefined): number | undefined {
+	if (!goal) return undefined;
+	return typeof goal === "number" ? goal : GOAL_MAX_OUTER_ITERATIONS;
+}
+
 const GOAL_STEPS_FLAG_RE = /^(?:--steps|-s)\s+(\d+)\s*(.*)$/s;
 const GOAL_LEADING_NUMBER_RE = /^(\d+)\s+(.*)$/s;
 
