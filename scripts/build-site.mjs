@@ -220,7 +220,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	width: 20px; height: 20px; border-radius: 4px; display: inline-block;
 }
 .header-badge {
-	font-family: var(--font-mono); font-size: .7rem; font-weight: 500;
+	font-family: var(--font-mono); font-size: .75rem; font-weight: 500;
 	color: var(--teal); background: rgba(45, 212, 191, 0.12);
 	border: 1px solid rgba(45, 212, 191, 0.25);
 	padding: 1px 7px; border-radius: 12px;
@@ -242,7 +242,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 }
 .sidebar-section { padding: 0 10px; margin-bottom: 12px; }
 .sidebar-section-title {
-	font-family: var(--font-mono); font-size: .68rem; font-weight: 600;
+	font-family: var(--font-mono); font-size: .75rem; font-weight: 600;
 	text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted);
 	padding: 6px 10px 4px;
 }
@@ -258,7 +258,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 	border: 1px solid var(--accent-muted);
 }
 .sidebar a .badge {
-	font-family: var(--font-mono); font-size: .65rem; color: var(--text-muted);
+	font-family: var(--font-mono); font-size: .75rem; color: var(--text-muted);
 }
 
 /* ── Mobile Menu & Responsiveness ────────────────────────────────── */
@@ -320,8 +320,12 @@ a:hover { color: #c084fc; text-decoration: none; }
 }
 .content h3 { font-size: 1.1rem; font-weight: 600; margin: 24px 0 8px; color: var(--text); }
 .content h4 { font-size: .95rem; font-weight: 600; margin: 18px 0 6px; color: var(--text-dim); }
-.content p { margin: 0 0 14px; color: var(--text-dim); font-size: .92rem; }
-.content ul, .content ol { margin: 0 0 14px; padding-left: 20px; color: var(--text-dim); font-size: .92rem; }
+/* Reading text: 16px, about 75 characters a line. At .92rem (13.8px) across
+   the full 864px column a line ran ~125. In Inter 1ch (the "0") is 10.1px
+   against a 7.4px average letter, so 55ch is ~75 real characters. Tables and
+   code keep the full width. */
+.content p { margin: 0 0 14px; color: var(--text-dim); font-size: 1.0667rem; line-height: 1.65; max-width: 55ch; }
+.content ul, .content ol { margin: 0 0 14px; padding-left: 20px; color: var(--text-dim); font-size: 1.0667rem; line-height: 1.65; max-width: 55ch; }
 .content li { margin: 4px 0; }
 .content strong { color: var(--text); font-weight: 600; }
 .content hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
@@ -349,12 +353,12 @@ a:hover { color: #c084fc; text-decoration: none; }
 .content pre.code-block::before {
 	content: attr(data-language);
 	position: absolute; top: 9px; right: 14px;
-	font: 600 .62rem/1 var(--font-mono); letter-spacing: .08em;
+	font: 600 .75rem/1 var(--font-mono); letter-spacing: .08em;
 	text-transform: uppercase; color: var(--text-muted); opacity: .9;
 }
 .content pre.code-block .code-copy {
 	position: absolute; top: 8px; right: 16px;
-	font: 600 .62rem/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase;
+	font: 600 .75rem/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase;
 	color: var(--text-muted); background: var(--code-bg-raised);
 	border: 1px solid var(--code-border); border-radius: 6px;
 	padding: 4px 8px; cursor: pointer; opacity: 0;
@@ -673,7 +677,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 }
 .workspace-title {
 	max-width: 620px; font-size: clamp(2.7rem, 6vw, 5rem); line-height: 1.02;
-	letter-spacing: -.055em; font-weight: 700; margin-bottom: 22px;
+	letter-spacing: -.04em; font-weight: 700; margin-bottom: 22px;
 }
 .workspace-title .accent { color: #c084fc; }
 .workspace-copy {
@@ -694,8 +698,8 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-card p { margin: 0; color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
 .workspace-card-link { display: block; color: inherit; }
 .workspace-card-link:hover { color: inherit; }
-.workspace-card-tag { display: inline-block; margin-bottom: 16px; color: var(--accent-text); font: 600 .65rem var(--font-mono); text-transform: uppercase; letter-spacing: .1em; }
-.workspace-card-arrow { display: block; margin-top: 16px; color: var(--purple); font: .72rem var(--font-mono); }
+.workspace-card-tag { display: inline-block; margin-bottom: 16px; color: var(--accent-text); font: 600 .75rem var(--font-mono); text-transform: uppercase; letter-spacing: .1em; }
+.workspace-card-arrow { display: block; margin-top: 16px; color: var(--purple); font: .75rem var(--font-mono); }
 .workspace-install { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
 .workspace-install .install-block { max-width: none; min-width: 0; margin: 0; padding: 16px; overflow: hidden; }
 .workspace-code { position: relative; min-width: 0; padding-right: 34px; }
@@ -712,7 +716,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-docs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .workspace-docs a { color: var(--text-dim); background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 13px 14px; font-size: .8rem; transition: border-color .15s, color .15s; }
 .workspace-docs a:hover { color: var(--purple); border-color: var(--border-active); }
-.workspace-footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 20px; color: var(--text-muted); font: .7rem var(--font-mono); text-align: center; }
+.workspace-footer { display: flex; align-items: center; justify-content: center; gap: 10px; padding-top: 20px; color: var(--text-muted); font: .75rem var(--font-mono); text-align: center; }
 .workspace-footer a { color: var(--text-muted); transition: color .15s ease; }
 .workspace-footer a:hover { color: var(--purple); }
 @media (max-width: 900px) {
@@ -743,7 +747,7 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-ui-header {
 	display: flex; align-items: center; gap: 14px; height: 48px; padding: 0 14px;
 	background: var(--bg-surface); border-bottom: 1px solid var(--border); color: var(--text-dim);
-	font: .7rem var(--font-mono);
+	font: .75rem var(--font-mono);
 }
 .workspace-ui-brand { display: flex; align-items: center; color: var(--text); font-weight: 600; }
 .workspace-ui-status {
@@ -753,30 +757,30 @@ a:hover { color: #c084fc; text-decoration: none; }
 .workspace-ui-actions span { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); }
 .workspace-ui-body { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 390px; }
 .workspace-ui-sidebar { display: flex; flex-direction: column; min-width: 0; padding: 12px; background: var(--bg-surface); border-right: 1px solid var(--border); }
-.workspace-ui-new { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-dim); font: .68rem var(--font-mono); }
-.workspace-ui-directory { padding: 16px 3px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font: .6rem var(--font-mono); }
+.workspace-ui-new { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-dim); font: .75rem var(--font-mono); }
+.workspace-ui-directory { padding: 16px 3px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font: .75rem var(--font-mono); }
 .workspace-ui-directory strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-weight: 500; margin-top: 5px; }
-.workspace-ui-sidebar-title { padding: 16px 3px 7px; color: var(--text-muted); font: 600 .6rem var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
-.workspace-ui-session { display: block; width: 100%; padding: 8px 9px; margin-bottom: 3px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font: .65rem var(--font-mono); }
+.workspace-ui-sidebar-title { padding: 16px 3px 7px; color: var(--text-muted); font: 600 .75rem var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
+.workspace-ui-session { display: block; width: 100%; padding: 8px 9px; margin-bottom: 3px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-muted); font: .75rem var(--font-mono); }
 .workspace-ui-session.active { border-color: var(--accent-muted); background: var(--accent-subtle); color: var(--text); }
-.workspace-ui-sidebar-model { margin-top: auto; padding: 12px 3px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--border); color: var(--text-muted); font: .58rem var(--font-mono); }
+.workspace-ui-sidebar-model { margin-top: auto; padding: 12px 3px 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-top: 1px solid var(--border); color: var(--text-muted); font: .75rem var(--font-mono); }
 .workspace-ui-chat { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
 .workspace-ui-chat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 17px; border-bottom: 1px solid var(--border); }
-.workspace-ui-chat-title { color: var(--text); font-size: .76rem; font-weight: 600; }
-.workspace-ui-chat-state { color: var(--text-muted); font: .58rem var(--font-mono); }
+.workspace-ui-chat-title { color: var(--text); font-size: .85rem; font-weight: 600; }
+.workspace-ui-chat-state { color: var(--text-muted); font: .75rem var(--font-mono); }
 .workspace-ui-personas { display: flex; gap: 5px; padding: 12px 17px 0; overflow-x: auto; }
-.workspace-ui-persona { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; font: .61rem var(--font-mono); transition: color .15s, border-color .15s, background .15s; }
+.workspace-ui-persona { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text-muted); cursor: pointer; font: .75rem var(--font-mono); transition: color .15s, border-color .15s, background .15s; }
 .workspace-ui-persona:hover { color: var(--text); border-color: var(--border-active); }
 .workspace-ui-persona.active { color: var(--purple); border-color: color-mix(in srgb, var(--purple) 55%, var(--border)); background: var(--accent-subtle); }
 .workspace-ui-messages { flex: 1; padding: 18px 17px 14px; }
 .workspace-ui-message { display: flex; gap: 9px; margin-bottom: 17px; }
-.workspace-ui-avatar { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 5px; background: var(--teal); color: var(--bg); font: 700 .58rem var(--font-mono); }
+.workspace-ui-avatar { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border-radius: 5px; background: var(--teal); color: var(--bg); font: 700 .75rem var(--font-mono); }
 .workspace-ui-avatar.agent { background: var(--purple); }
 .workspace-ui-message-content { min-width: 0; }
-.workspace-ui-message-label { margin-bottom: 4px; color: var(--text-muted); font: .57rem var(--font-mono); text-transform: uppercase; }
-.workspace-ui-message-text { color: var(--text-dim); font-size: .7rem; line-height: 1.55; }
+.workspace-ui-message-label { margin-bottom: 4px; color: var(--text-muted); font: .75rem var(--font-mono); text-transform: uppercase; }
+.workspace-ui-message-text { color: var(--text-dim); font-size: .8rem; line-height: 1.55; }
 .workspace-ui-message-text strong { color: var(--text); font-weight: 600; }
-.workspace-ui-tool { margin: -2px 0 15px 33px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); font: .58rem var(--font-mono); }
+.workspace-ui-tool { margin: -2px 0 15px 33px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-muted); font: .75rem var(--font-mono); }
 .workspace-ui-tool::before { content: "✓"; margin-right: 6px; color: var(--teal); }
 .workspace-ui-panel[hidden] { display: none; }
 @media (max-width: 640px) {
