@@ -188,24 +188,39 @@ const PTY_DRAIN_MS = 5000;
 /**
  * node-pty gives the tty 200ms after the child exits to reach EOF, then
  * destroys the stream, dropping whatever output is still unread: on a busy
- * machine a 20-line command came back with 2. On Linux the stream ends on its
- * own once drained (the read returns EIO), so the first destroy only arms a
- * longer fallback; the macOS stream that never closes, which the timer exists
- * for, still ends, just later.
+ * machine a 20-line command came back with 2. So only that early destroy is
+ * held back, until the stream ends (it has delivered everything) or
+ * PTY_DRAIN_MS passes (a stream that never ends, the macOS case the timer is
+ * for). A destroy after the end — Node's own autoDestroy, the normal close —
+ * goes straight through: holding that one too made every task wait out
+ * node-pty's timer, and a stream that ended before the timer wait the full
+ * fallback.
  * ponytail: patches a private field of node-pty 1.1 (unchanged in 1.2 beta);
  * recheck on upgrade.
  */
 function letPtyDrain(pty: IPty): void {
-	const socket = (pty as unknown as { _socket?: { destroy(): unknown; destroyed?: boolean } })._socket;
+	const socket = (
+		pty as unknown as {
+			_socket?: {
+				destroy(): unknown;
+				destroyed?: boolean;
+				readableEnded?: boolean;
+				once(event: "end", listener: () => void): unknown;
+			};
+		}
+	)._socket;
 	if (!socket) return;
 	const destroy = socket.destroy.bind(socket);
-	let armed = false;
+	let held = false;
 	socket.destroy = () => {
-		if (armed) return destroy();
-		armed = true;
-		setTimeout(() => {
+		if (held || socket.readableEnded || socket.destroyed) return destroy();
+		held = true;
+		const fallback = setTimeout(() => {
 			if (!socket.destroyed) destroy();
-		}, PTY_DRAIN_MS).unref();
+		}, PTY_DRAIN_MS);
+		fallback.unref();
+		// On end, Node's autoDestroy calls destroy again — through, now.
+		socket.once("end", () => clearTimeout(fallback));
 		return socket;
 	};
 }

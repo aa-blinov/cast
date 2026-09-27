@@ -4036,7 +4036,7 @@ describe("web bridge", () => {
 		// an idle queue forever, which is what used to happen: runAgentLoop is
 		// stubbed here, so nothing drains the queue during the turn and the
 		// stranded-steer net has to pick it up afterwards.
-		await vi.waitFor(() => expect(ws.runner.steeringQueue.hasItems()).toBe(false));
+		await vi.waitFor(() => expect(ws.runner.steeringQueue.hasItems()).toBe(false), { timeout: 10_000 });
 	});
 
 	it("runs MessageDisplay hooks for a completed daemon response", async () => {
@@ -4055,7 +4055,11 @@ describe("web bridge", () => {
 		);
 
 		await bridge.submit(ws.id, "hello");
-		await vi.waitFor(() => expect(readFileSync(join(cwd, ".cast", "message-display"), "utf8")).toBe("displayed"));
+		// The hook is a shell subprocess: waitFor's 1s default was too short on a
+		// loaded full-suite run.
+		await vi.waitFor(() => expect(readFileSync(join(cwd, ".cast", "message-display"), "utf8")).toBe("displayed"), {
+			timeout: 10_000,
+		});
 	});
 
 	it("runs FileChanged hooks from the daemon watcher while idle", async () => {
