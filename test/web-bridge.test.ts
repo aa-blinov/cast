@@ -22,6 +22,12 @@ import { sessionInputsDir } from "../src/server/inputs.ts";
 // resolving with undefined left ws.session.messages undefined, which the real
 // loop can never do, and made unrelated tests throw out of a detached submit.
 const runAgentLoop = vi.fn().mockImplementation(async (messages: unknown) => messages);
+/** This session's turns only: a turn another test left in flight can land in
+ *  the shared mock while this one is waiting, which made a bare call count
+ *  flaky on a loaded CI runner. */
+function loopRunsFor(sessionId: string): unknown[] {
+	return runAgentLoop.mock.calls.filter((call) => (call[1] as { sessionId?: string })?.sessionId === sessionId);
+}
 vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/loop.ts")>();
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
@@ -2866,7 +2872,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		const res = await bridge.executeCommand(ws.id, "/steer hello");
 		expect(res).toEqual({ ok: true, result: "Sent" });
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1), { timeout: 5000 });
+		await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(1), { timeout: 5000 });
 	});
 
 	it("/steer while running enqueues into the steering queue instead of starting a new turn", async () => {
@@ -3984,7 +3990,7 @@ describe("web bridge", () => {
 		expect(ws.status).toBe("running");
 		expect(runAgentLoop).not.toHaveBeenCalled();
 		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1), { timeout: 5000 });
+		await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(1), { timeout: 5000 });
 	});
 
 	it("claims the turn before async provider reconciliation so concurrent sends cannot start two loops", async () => {
@@ -4304,7 +4310,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 
 		bridge.followUp(ws.id, "after the turn");
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1), { timeout: 5000 });
+		await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(1), { timeout: 5000 });
 		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
 	});
 
@@ -4322,7 +4328,7 @@ describe("web bridge", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		await bridge.submit(ws.id, "first");
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalledTimes(1), { timeout: 5000 });
+		await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(1), { timeout: 5000 });
 
 		bridge.followUp(ws.id, "after the turn");
 		resolveFirstRun([...ws.session.messages, { role: "assistant", content: "first" }]);
