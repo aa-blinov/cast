@@ -68,15 +68,19 @@ try {
 	desktop.setDefaultTimeout(15_000);
 	await desktop.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:" + port });
 	await desktop.goto(`http://127.0.0.1:${port}/getting-started.html`, { waitUntil: "networkidle" });
-	const codeCheck = await desktop.locator(".content pre.code-block").first().evaluate((pre) => {
+	const codeCheck = await desktop.locator(".content .code-block").first().evaluate((block) => {
+		const pre = block.querySelector("pre");
 		const code = pre.querySelector("code");
-		const style = getComputedStyle(pre);
+		const style = getComputedStyle(block);
+		const head = block.querySelector(".code-head").getBoundingClientRect();
 		return {
 			background: style.backgroundColor,
 			backgroundImage: style.backgroundImage,
 			borderStyle: style.borderTopStyle,
-			overflowX: style.overflowX,
-			language: pre.getAttribute("data-language"),
+			overflowX: getComputedStyle(pre).overflowX,
+			language: block.getAttribute("data-language"),
+			labelText: block.querySelector(".code-lang")?.textContent ?? "",
+			headAboveCode: head.bottom <= code.getBoundingClientRect().top + 1,
 			codeClass: code?.className ?? "",
 			scrollbarWidth: getComputedStyle(document.documentElement).scrollbarWidth,
 			scrollbarColor: getComputedStyle(document.documentElement).scrollbarColor,
@@ -86,10 +90,12 @@ try {
 	assert.equal(codeCheck.borderStyle, "solid", "code block must have a visible border");
 	assert.equal(codeCheck.overflowX, "auto", "long code must scroll inside its block");
 	assert.equal(codeCheck.language, "bash", "language label must be preserved");
+	assert.equal(codeCheck.labelText, "bash", "the language must be shown beside the copy button");
+	assert(codeCheck.headAboveCode, "the language and copy button must sit above the code, not over it");
 	assert.match(codeCheck.codeClass, /hljs/, "code must use the syntax-highlighting class");
 	assert.equal(codeCheck.scrollbarWidth, "thin", "documentation page must use a themed thin scrollbar");
 	assert.notEqual(codeCheck.scrollbarColor, "auto", "documentation page must define scrollbar colors");
-	assert((await desktop.locator('.content pre.code-block span[class^="hljs-"]').count()) > 0, "highlighted code must contain syntax spans");
+	assert((await desktop.locator('.content .code-block span[class^="hljs-"]').count()) > 0, "highlighted code must contain syntax spans");
 
 	await desktop.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: "networkidle" });
 	await desktop.screenshot({ path: "/tmp/cast-workspace-desktop.png", fullPage: false });
