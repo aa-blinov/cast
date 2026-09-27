@@ -81,10 +81,16 @@ Other:
   local run is not a green CI: the runner is slower and loaded, and races that never show locally
   fail there. Watch every run the push started (CI, and Release / Deploy docs on a tag):
   ```bash
-  gh run list --commit "$(git rev-parse HEAD)"          # all runs for the pushed commit
-  gh run watch <run-id> --exit-status                   # wait for one to finish
+  # wait for every run the pushed commit started, then print each outcome
+  # (a read loop, not `for id in $ids`: zsh doesn't word-split a variable)
+  gh run list --commit "$(git rev-parse HEAD)" --json databaseId -q '.[].databaseId' |
+    while read -r id; do
+      gh run watch "$id" --exit-status >/dev/null
+      gh run view "$id" --json workflowName,conclusion -q '.workflowName + " " + .conclusion'
+    done
   gh run view <run-id> --log-failed                     # on failure
   ```
+  Give the runs ~15s to appear after the push before listing them.
   A red run is a bug to fix, not a rerun button: find why it failed (a flaky test usually means a
   real race in the code or a test that counts something shared), fix it, and push again. Rerun only
   to confirm a fix, and say so.
