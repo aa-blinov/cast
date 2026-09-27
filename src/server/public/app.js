@@ -1325,14 +1325,14 @@ function App() {
 	);
 
 	const answerBashConfirm = useCallback(
-		async (id, allow) => {
+		async (id, allow, always = false) => {
 			if (!activeId) return;
 			// Clear locally first: the turn resumes the moment the daemon has the
 			// answer, and a card left on screen would invite a second click that
 			// the daemon would reject as stale.
 			setSession((prev) => (prev ? { ...prev, bashConfirm: undefined } : prev));
 			try {
-				await api("POST", `/api/sessions/${activeId}/bash-confirm`, { id, allow });
+				await api("POST", `/api/sessions/${activeId}/bash-confirm`, { id, allow, always });
 			} catch (err) {
 				showToast(err.message, "error");
 			}
@@ -2237,9 +2237,9 @@ function App() {
 								html`
 									<${PlanDecisionCard} transition=${session?.planTransition ?? planTransition} onChoose=${handlePlanTransition} />
 									${session?.question && html`<${QuestionCard} question=${session.question} onChoose=${answerQuestion} />`}
-									${session?.bashConfirm && html`<${BashConfirmCard} request=${session.bashConfirm} onAnswer=${answerBashConfirm} />`}
 								`
 							}
+							${session?.bashConfirm && html`<${BashConfirmCard} request=${session.bashConfirm} onAnswer=${answerBashConfirm} />`}
 						`
 					}
 				</div>

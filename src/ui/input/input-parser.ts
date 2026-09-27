@@ -7,6 +7,7 @@
  * module only deals with keypresses and escape sequences ("data" events).
  */
 
+import { setTerminalFocused } from "../terminal-notify.ts";
 import { getKeybindings, type Keybinding } from "./keybindings.ts";
 import { decodePrintableKey, setKittyProtocolActive } from "./keys.ts";
 import { StdinBuffer } from "./stdin-buffer.ts";
@@ -21,7 +22,8 @@ const CURSOR_POS_REMNANT_RE = /^\d+(?:;\d+)+R$/;
 
 export type InputEvent = { type: "binding"; binding: Keybinding; raw: string } | { type: "char"; text: string };
 
-const BINDING_ORDER: Keybinding[] = [
+/** Every action in TUI_KEYBINDINGS: one left out here never fires (a test checks). */
+export const BINDING_ORDER: Keybinding[] = [
 	// Before input.submit: with the Kitty protocol active, Shift+Enter arrives
 	// as bytes plain Enter also accepts ("\n"), so whichever is tested first
 	// wins — and a line break must not be swallowed as a send.
@@ -30,6 +32,7 @@ const BINDING_ORDER: Keybinding[] = [
 	"input.abort",
 	"input.escape",
 	"input.attachImage",
+	"input.externalEditor",
 	"editor.deleteWordBackward",
 	"editor.deleteWordForward",
 	"editor.deleteToLineStart",
@@ -83,6 +86,7 @@ export class InputParser {
 		// below anyway; matched explicitly so the intent is clear and can't
 		// regress.)
 		if (sequence === "\x1b[I" || sequence === "\x1b[O") {
+			setTerminalFocused(sequence === "\x1b[I");
 			return;
 		}
 

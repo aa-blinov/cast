@@ -1,5 +1,8 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkDangerousBash } from "../src/core/permissions.ts";
+import { addAllowRule, checkDangerousBash, evaluatePermission, exactRule } from "../src/core/permissions.ts";
 
 describe("checkDangerousBash", () => {
 	it("flags recursive force delete", () => {
@@ -95,5 +98,79 @@ describe("checkDangerousBash — confirmations that shouldn't be asked for", () 
 		// of confirming without reading.
 		expect(checkDangerousBash("npm publish --dry-run")).toBeUndefined();
 		expect(checkDangerousBash("npm publish")).toBeDefined();
+	});
+});
+
+describe("permission rules", () => {
+	const cwd = "/work/proj";
+
+	it("matches a command glob, and deny beats ask beats allow in any order", () => {
+		const rules = { allow: ["bash(git *)"], ask: ["bash(git push*)"], deny: ["bash(git push --force*)"] };
+		expect(evaluatePermission(rules, "bash", { command: "git status" }, cwd)).toEqual({
+			action: "allow",
+			rule: "bash(git *)",
+		});
+		expect(evaluatePermission(rules, "bash", { command: "git push origin main" }, cwd)?.action).toBe("ask");
+		expect(evaluatePermission(rules, "bash", { command: "git push --force origin" }, cwd)?.action).toBe("deny");
+		expect(evaluatePermission(rules, "bash", { command: "ls" }, cwd)).toBeUndefined();
+	});
+
+	it("matches paths relative to the project, with * inside one directory and ** across", () => {
+		const rules = { deny: ["write(.env*)", "edit(/etc/**)"], ask: ["write(src/*.ts)"], allow: ["write(docs/**)"] };
+		expect(evaluatePermission(rules, "write", { path: "/work/proj/.env.local" }, cwd)?.action).toBe("deny");
+		expect(evaluatePermission(rules, "write", { path: "src/a.ts" }, cwd)?.action).toBe("ask");
+		expect(evaluatePermission(rules, "write", { path: "src/deep/a.ts" }, cwd)).toBeUndefined();
+		expect(evaluatePermission(rules, "write", { path: "docs/a/b.md" }, cwd)?.action).toBe("allow");
+		expect(evaluatePermission(rules, "edit", { filePath: "/etc/hosts" }, cwd)?.action).toBe("deny");
+	});
+
+	it("matches web_fetch by URL", () => {
+		const rules = { deny: ["web_fetch(https://internal.*)"] };
+		expect(evaluatePermission(rules, "web_fetch", { url: "https://internal.corp/x" }, cwd)?.action).toBe("deny");
+		expect(evaluatePermission(rules, "web_fetch", { url: "https://example.com" }, cwd)).toBeUndefined();
+	});
+
+	it("matches whole tools by name glob, and never a patterned rule without a subject", () => {
+		const rules = { deny: ["mcp_github_*", "task(anything)"] };
+		expect(evaluatePermission(rules, "mcp_github_create_issue", {}, cwd)?.action).toBe("deny");
+		expect(evaluatePermission(rules, "mcp_slack_post", {}, cwd)).toBeUndefined();
+		expect(evaluatePermission(rules, "task", { assignment: "anything" }, cwd)).toBeUndefined();
+		expect(evaluatePermission({ deny: [42 as unknown as string] }, "bash", { command: "x" }, cwd)).toBeUndefined();
+	});
+
+	it("an approved answer outranks the ask rule that asked, but never a deny", () => {
+		const rules = { ask: ["write(*.md)"], approved: ["write(a.md)"], deny: ["write(secret.md)"] };
+		expect(evaluatePermission(rules, "write", { path: "a.md" }, cwd)).toEqual({
+			action: "allow",
+			rule: "write(a.md)",
+		});
+		expect(evaluatePermission(rules, "write", { path: "b.md" }, cwd)?.action).toBe("ask");
+		expect(
+			evaluatePermission({ ...rules, approved: ["write(*)"] }, "write", { path: "secret.md" }, cwd)?.action,
+		).toBe("deny");
+	});
+
+	it("saves an exact rule that its own wildcards can't widen", () => {
+		expect(exactRule("bash", { command: "rm -rf build" }, cwd)).toBe("bash(rm -rf build)");
+		expect(exactRule("bash", { command: "rm *.log" }, cwd)).toBe("bash(rm ?.log)");
+		expect(exactRule("write", { path: "/work/proj/src/a.ts" }, cwd)).toBe("write(src/a.ts)");
+		expect(exactRule("mcp_x_y", {}, cwd)).toBe("mcp_x_y");
+		const saved = exactRule("bash", { command: "rm *.log" }, cwd);
+		expect(evaluatePermission({ allow: [saved] }, "bash", { command: "rm important.log" }, cwd)).toBeUndefined();
+	});
+
+	it("appends an always-allow rule to settings once", () => {
+		const realHome = process.env.HOME;
+		const home = mkdtempSync(join(tmpdir(), "cast-perm-"));
+		process.env.HOME = home;
+		try {
+			addAllowRule("bash(npm publish)");
+			addAllowRule("bash(npm publish)");
+			const settings = JSON.parse(readFileSync(join(home, ".cast", "settings.json"), "utf-8"));
+			expect(settings.permissions.approved).toEqual(["bash(npm publish)"]);
+		} finally {
+			process.env.HOME = realHome;
+			rmSync(home, { recursive: true, force: true });
+		}
 	});
 });

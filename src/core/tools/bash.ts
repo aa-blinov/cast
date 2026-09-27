@@ -14,7 +14,7 @@ import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD, MAX_BASH_TIMEOUT_MS } f
 import { checkDangerousBash } from "../permissions.ts";
 import { type BackgroundTask, type BashBackgroundDeps, isPtyAvailable } from "./bash-background.ts";
 import { looksLongRunningCommand } from "./long-running.ts";
-import { BoundedOutput, type ConfirmBash, formatSize, type ToolResult } from "./shared.ts";
+import { BoundedOutput, type ConfirmBash, formatSize, saveToolOutput, type ToolResult } from "./shared.ts";
 
 const INSTALL_PATH_RE = /InstallPath\s+REG_SZ\s+(.+)/;
 const CRLF_RE = /\r\n/g;
@@ -180,6 +180,8 @@ export interface FormatBashResultOptions {
 	aborted?: boolean;
 	timedOut?: boolean;
 	outputTruncated?: boolean;
+	/** The command's whole output, saved when it outgrew the byte budget. */
+	fullOutputPath?: string;
 	timeoutMs?: number;
 	warnPrefix?: string;
 }
@@ -192,6 +194,7 @@ export interface FormatBashResultOptions {
  */
 export function formatBashResult(rawOutput: string, config: AppConfig, opts: FormatBashResultOptions): ToolResult {
 	const { exitCode, aborted = false, timedOut = false, outputTruncated = false, timeoutMs, warnPrefix = "" } = opts;
+	let fullOutputPath = opts.fullOutputPath;
 	let output = stripAnsi(rawOutput).replace(CRLF_RE, "\n").replace(CR_RE, "\n");
 	const prefix = aborted
 		? "[ABORTED] Command was interrupted by user.\n\n"
@@ -203,10 +206,15 @@ export function formatBashResult(rawOutput: string, config: AppConfig, opts: For
 	}
 	const lines = output.split("\n");
 	if (lines.length > config.maxToolOutputLines) {
+		// Every line is still in memory here: keep them all on disk rather than
+		// asking for a re-run to see the start.
+		fullOutputPath ??= outputTruncated ? undefined : saveToolOutput(output);
 		const kept = lines.slice(-config.maxToolOutputLines);
 		output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
 	}
-	if (outputTruncated) {
+	if (fullOutputPath) {
+		output += `\n\n[Output cut to fit. The full output is saved at ${fullOutputPath}: read it in ranges or grep it instead of running the command again.]`;
+	} else if (outputTruncated) {
 		output += `\n\n[Output truncated at ${formatSize(config.maxToolOutputBytes)}. Narrow the command or redirect output to a file and read it in chunks.]`;
 	}
 	return {
@@ -227,6 +235,7 @@ function formatManagedTaskResult(
 	return formatBashResult(task.rawOutput, config, {
 		exitCode: task.exitCode,
 		outputTruncated: task.outputTruncated,
+		fullOutputPath: task.fullOutputPath,
 		timeoutMs,
 		warnPrefix,
 	});
@@ -406,7 +415,7 @@ export async function execBash(
 		});
 
 		const maxBytes = config.maxToolOutputBytes;
-		const output = new BoundedOutput(maxBytes);
+		const output = new BoundedOutput(maxBytes, true);
 		let timedOut = false;
 		let aborted = false;
 
@@ -441,6 +450,7 @@ export async function execBash(
 						exitCode: null,
 						timedOut: true,
 						outputTruncated: output.truncated,
+						fullOutputPath: output.spillPath,
 						timeoutMs,
 						warnPrefix,
 					});
@@ -498,6 +508,7 @@ export async function execBash(
 				aborted,
 				timedOut,
 				outputTruncated: output.truncated,
+				fullOutputPath: output.spillPath,
 				timeoutMs,
 				warnPrefix,
 			});

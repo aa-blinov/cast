@@ -26,6 +26,7 @@ import { promisify } from "node:util";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { createAgent, deleteAgent, getAgent, listAgents, updateAgent } from "../core/agents.ts";
 import { getDb } from "../core/db.ts";
+import { searchProjectFiles } from "../core/file-search.ts";
 import { readGoal, startGoal } from "../core/goal.ts";
 import {
 	listProjectMemory,
@@ -1687,17 +1688,19 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let id: string;
 		let allow: boolean;
+		let always: boolean;
 		try {
-			const parsed = JSON.parse(body) as { id?: unknown; allow?: unknown };
+			const parsed = JSON.parse(body) as { id?: unknown; allow?: unknown; always?: unknown };
 			if (typeof parsed.id !== "string" || typeof parsed.allow !== "boolean") {
-				return json(res, { error: "Expected { id: string, allow: boolean }" }, 400);
+				return json(res, { error: "Expected { id: string, allow: boolean, always?: boolean }" }, 400);
 			}
 			id = parsed.id;
 			allow = parsed.allow;
+			always = parsed.always === true;
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
-		if (!bridge.answerBashConfirm(params.id, id, allow)) {
+		if (!bridge.answerBashConfirm(params.id, id, allow, always)) {
 			return json(res, { error: "No matching confirmation is pending" }, 409);
 		}
 		json(res, { ok: true }, 202);
@@ -2076,6 +2079,15 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// folders) — a synchronous walk, capped on both matches and nodes visited
 	// so a query with zero hits in a huge, gitignore-less tree still returns
 	// promptly instead of walking the entire filesystem underneath cwd.
+	// The composer's `@` picker: fuzzy, and .gitignore-aware in a repository,
+	// unlike the explorer's name search below.
+	route("GET", "/api/sessions/:id/fs/files", (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		json(res, { files: searchProjectFiles(cwd, (url.searchParams.get("q") ?? "").trim(), 30) });
+	});
+
 	route("GET", "/api/sessions/:id/fs/search", (req, res, params) => {
 		const sessionRoot = sessionCwd(params.id);
 		if (!sessionRoot) return json(res, { error: "Not found" }, 404);

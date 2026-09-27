@@ -73,6 +73,16 @@ function settleLeftoverStreaming(takeStreamingNow, setSession) {
 const countTurnMessages = (messages) =>
 	messages.filter((m) => (m.role === "user" || m.role === "assistant") && m.pending !== true).length;
 
+/** A system notification, only while the tab is out of sight: in front, the
+ *  user is already looking at the turn. */
+function notifyIfHidden(title, body) {
+	try {
+		if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
+			new Notification(title, { body, icon: "/favicon.svg", tag: "cast-turn" });
+		}
+	} catch {}
+}
+
 /** Short chime for "the turn finished", on a lazily-created shared context. */
 let chimeContext;
 function playTurnDoneChime() {
@@ -273,12 +283,7 @@ export function handleSseEvent(event, context) {
 				pendingPlanSignalRef.current = null;
 			}
 			if (wasRunning) {
-				try {
-					if (document.hidden && typeof Notification !== "undefined") {
-						if (Notification.permission === "granted") new Notification("Cast — turn done", { body: "Agent finished", icon: "/favicon.svg" });
-						else if (Notification.permission !== "denied") Notification.requestPermission().catch(()=>{});
-					}
-				} catch {}
+				notifyIfHidden("Cast: turn done", event.reason === "aborted" ? "The turn was stopped" : "The agent finished");
 				try {
 					// Only when the tab isn't in front, same as the notification
 					// above — the beep exists to say "look over here", and it fired
@@ -345,7 +350,8 @@ export function handleSseEvent(event, context) {
 		case "bash_confirm":
 			// The daemon is blocked on this until a client answers; render it the
 			// same way a pending question is rendered.
-			setSession((prev) => (prev ? { ...prev, bashConfirm: { id: event.id, command: event.command, reason: event.reason } } : prev));
+			setSession((prev) => (prev ? { ...prev, bashConfirm: { id: event.id, command: event.command, reason: event.reason, rule: event.rule } } : prev));
+			notifyIfHidden("Cast: approval needed", event.command);
 			break;
 		case "agent_actor": {
 			const actor = event.actor;

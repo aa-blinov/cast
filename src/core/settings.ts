@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { PermissionRules } from "./permissions.ts";
 import type { ReasoningFormat } from "./vendors.ts";
 
 // ============================================================================
@@ -86,6 +87,19 @@ export interface Settings {
 	theme?: string;
 	/** When false, web_search and web_fetch tools are not advertised to the model. */
 	webTools?: boolean;
+	/** TUI: notify through the terminal (OSC 9 plus a bell) when a turn ends
+	 * or waits for approval while the terminal is unfocused. Default true. */
+	notifications?: boolean;
+	/** Run the project's configured formatter (biome, prettier, ruff, gofmt)
+	 * on each file write/edit changes. Default true. */
+	autoFormat?: boolean;
+	/** TUI key overrides by action id (see TUI_KEYBINDINGS), e.g.
+	 * `{"input.externalEditor": "ctrl+o"}`. A value replaces that action's
+	 * default keys; `[]` unbinds it. */
+	keybindings?: Record<string, string | string[]>;
+	/** Per-tool permission rules; see PermissionRules in permissions.ts and
+	 * docs/configuration.md. "Always allow" answers are appended to `approved`. */
+	permissions?: PermissionRules;
 	/**
 	 * Search backend for web_search. "ddg" (default when unset) scrapes
 	 * DuckDuckGo's HTML endpoint — free, no key, but rate-limited to ~4

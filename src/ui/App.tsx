@@ -47,6 +47,7 @@ import {
 	type StatusBarSegment,
 } from "./statusbar.tsx";
 import { StatusBarPicker } from "./statusbar-picker.tsx";
+import { notifyTerminal } from "./terminal-notify.ts";
 import { theme } from "./themes/index.ts";
 import { type ChatMessage, type PendingImage, useAgentSession } from "./useAgentSession.ts";
 import { useTerminalResync } from "./useTerminalResync.ts";
@@ -303,7 +304,13 @@ export function App(props: AppProps): JSX.Element {
 			setRepaintKey((k) => k + 1);
 		})();
 	}, [onClearScreen]);
-	const confirmBash = useMemo(() => makeConfirmBash(pickers, permissionMode), [pickers, permissionMode]);
+	const confirmBash = useMemo(() => {
+		const confirm = makeConfirmBash(pickers, permissionMode);
+		return (command: string, reason: string, rule?: string) => {
+			if (permissionMode !== "bypass") notifyTerminal(`cast: approval needed: ${command}`);
+			return confirm(command, reason, rule);
+		};
+	}, [pickers, permissionMode]);
 
 	// Per-turn system prompt rebuild for sticky rules + @-mention.
 	// Called by the loop at the start of each outer iteration.

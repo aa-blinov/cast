@@ -14,6 +14,14 @@ import { MAX_VOICE_SECONDS, startVoiceRecording, voiceUnavailableReason } from "
 
 const PERSONA_CMD_RE = /^\/persona\s+(\S*)$/i;
 
+/** The `@query` token ending at the caret; `@` must start a word, so an e-mail address doesn't count. Same rule as the TUI. */
+export function atTokenAt(value, caret) {
+	let from = caret;
+	while (from > 0 && !/\s/.test(value[from - 1])) from--;
+	if (value[from] !== "@") return null;
+	return { from, to: caret, query: value.slice(from + 1, caret) };
+}
+
 const html = htm.bind(h);
 
 /**
@@ -354,11 +362,51 @@ export function Composer({
 		[onSubmit, ready, sendReady],
 	);
 
+	// `@path` picker: the token under the caret, and the project files matching
+	// it (fetched from the daemon, newest answer wins).
+	const [atTokenState, setAtToken] = useState(null);
+	// Only while the text still holds it: a send or an edit elsewhere drops it.
+	const atToken =
+		atTokenState && value.slice(atTokenState.from, atTokenState.to) === `@${atTokenState.query}` ? atTokenState : null;
+	const [atFiles, setAtFiles] = useState([]);
+	const atRequestRef = useRef(0);
+	useEffect(() => {
+		if (!atToken || !activeId) {
+			setAtFiles([]);
+			return;
+		}
+		const request = ++atRequestRef.current;
+		const timer = setTimeout(() => {
+			api("GET", `/api/sessions/${activeId}/fs/files?q=${encodeURIComponent(atToken.query)}`)
+				.then((data) => {
+					if (request === atRequestRef.current) setAtFiles(Array.isArray(data?.files) ? data.files : []);
+				})
+				.catch(() => {});
+		}, 80);
+		return () => clearTimeout(timer);
+	}, [atToken?.query, atToken?.from, activeId]);
+
+	const handleAtSelect = useCallback(
+		(path) => {
+			if (!atToken) return;
+			const next = `${value.slice(0, atToken.from)}@${path} ${value.slice(atToken.to)}`;
+			const caret = atToken.from + path.length + 2;
+			setValue(next);
+			setAtToken(null);
+			requestAnimationFrame(() => {
+				textareaRef.current?.focus();
+				textareaRef.current?.setSelectionRange(caret, caret);
+			});
+		},
+		[atToken, value],
+	);
+
 	const handleInput = useCallback(
 		(e) => {
 			const val = e.target.value;
 			setValue(val);
 			setCmdVisible(val.startsWith("/") && !val.includes(" "));
+			setAtToken(val.startsWith("/") ? null : atTokenAt(val, e.target.selectionStart ?? val.length));
 			setSelectedIndex(0);
 			resize();
 		},
@@ -379,6 +427,9 @@ export function Composer({
 	} else if (cmdVisible) {
 		pickerItems = (value ? commands.filter((c) => c.name.startsWith(value)) : commands).filter((c) => !c.hidden);
 		pickerSelect = handleCmdSelect;
+	} else if (atToken && atFiles.length > 0) {
+		pickerItems = atFiles.map((path) => ({ value: path, label: "" }));
+		pickerSelect = handleAtSelect;
 	}
 	const clampedIndex = pickerItems.length > 0 ? Math.min(selectedIndex, pickerItems.length - 1) : 0;
 	const pickerOpen = pickerItems.length > 0;
@@ -421,6 +472,12 @@ export function Composer({
 				}
 				if (e.key === "Escape") {
 					setCmdVisible(false);
+					setAtToken(null);
+					return;
+				}
+				if (e.key === "Tab" && atToken) {
+					e.preventDefault();
+					pickerSelect(pickerItems[clampedIndex].value);
 					return;
 				}
 				if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
@@ -439,15 +496,15 @@ export function Composer({
 			}
 		},
 		// biome-ignore lint/correctness/useExhaustiveDependencies: pickerItems/pickerSelect are plain values recomputed every render (not memoized) — already fine since this callback is rebuilt on every keystroke (`value` is a dep) regardless.
-		[pickerItems, clampedIndex, pickerSelect, running, handleSubmit, onAbort],
+		[pickerItems, clampedIndex, pickerSelect, running, handleSubmit, onAbort, atToken],
 	);
 
 	return html`
 		<div class="composer-wrap">
 			<div ref=${pickerRef}>
 				${
-					personaMatch
-						? html`<${ValueSuggest} items=${pickerItems} selectedIndex=${clampedIndex} onHover=${setSelectedIndex} onSelect=${pickerSelect} />`
+					personaMatch || (atToken && !cmdVisible)
+						? html`<${ValueSuggest} items=${pickerItems} selectedIndex=${clampedIndex} label=${personaMatch ? "Personas" : "Files"} onHover=${setSelectedIndex} onSelect=${pickerSelect} />`
 						: html`<${CommandPalette} items=${pickerItems} selectedIndex=${clampedIndex} running=${running} visible=${cmdVisible} onHover=${setSelectedIndex} onSelect=${handleCmdSelect} />`
 				}
 			</div>

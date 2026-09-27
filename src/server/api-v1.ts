@@ -632,6 +632,11 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					properties: {
 						id: { type: "string", description: "The id carried by the bash_confirm event." },
 						allow: { type: "boolean", description: "True runs the command once; false blocks it." },
+						always: {
+							type: "boolean",
+							description:
+								"With allow, also saves the event's rule to the user's permissions.approved, so it isn't asked again.",
+						},
 					},
 				}),
 				responses: {

@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { MessageQueue } from "../src/core/loop.ts";
@@ -195,6 +198,45 @@ describe("BackgroundTaskRegistry", () => {
 		expect(lineCount).toBe(20);
 		expect(task.status).toBe("exited");
 	}, 90_000);
+
+	it("keeps the tail of a large output that ends with the command", async () => {
+		// libuv reported EOF on the hangup after a short read, with the rest
+		// still in the kernel: `seq 1 3000` came back as 8190 of 16893 bytes.
+		const registry = new BackgroundTaskRegistry();
+		const { deps } = makeDeps(true);
+		deps.registry = registry;
+		const tasks = Array.from({ length: 5 }, () =>
+			registry.start("seq 1 3000", process.cwd(), mockConfig, 10_000, deps),
+		);
+		await Promise.all(tasks.map((t) => t.exitPromise));
+		for (const task of tasks) expect(task.rawOutput.trimEnd().endsWith("3000")).toBe(true);
+	}, 30_000);
+
+	it("saves output past the byte budget and names the file", async () => {
+		const realHome = process.env.HOME;
+		const home = mkdtempSync(join(tmpdir(), "cast-bg-spill-"));
+		process.env.HOME = home;
+		try {
+			const registry = new BackgroundTaskRegistry();
+			const { deps } = makeDeps(true);
+			deps.registry = registry;
+			const task = registry.start(
+				"seq 1 3000",
+				process.cwd(),
+				{ ...mockConfig, maxToolOutputBytes: 4096 },
+				10_000,
+				deps,
+			);
+			await task.exitPromise;
+			await vi.waitFor(() => expect(readFileSync(task.fullOutputPath as string, "utf-8")).toMatch(/\b3000\s*$/), {
+				timeout: 10_000,
+			});
+			expect(task.fullOutputPath?.startsWith(join(home, ".cast", "tool-output"))).toBe(true);
+		} finally {
+			process.env.HOME = realHome;
+			rmSync(home, { recursive: true, force: true });
+		}
+	}, 30_000);
 
 	it("keeps output the tty still held when the command exited", async () => {
 		// node-pty destroyed the stream 200ms after the child exited, so output

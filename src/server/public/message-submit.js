@@ -30,6 +30,13 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		setRunning,
 		canSend,
 	} = context;
+	// Browsers only grant this from a user gesture, and sending is the first
+	// one that says the user will wait on a turn.
+	try {
+		if (typeof Notification !== "undefined" && Notification.permission === "default") {
+			Notification.requestPermission().catch(() => {});
+		}
+	} catch {}
 	// Pressing send while the page is reconnecting used to fail on the spot.
 	// It now asks for a reconnect and gives it a few seconds — the usual case
 	// (a phone waking up, a daemon that just restarted) recovers well inside

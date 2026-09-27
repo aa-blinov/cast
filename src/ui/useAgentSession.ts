@@ -65,6 +65,7 @@ import {
 } from "../server/public/stream-blocks.js";
 import { displayWidthCacheFlush } from "./display-width.ts";
 import { isTableLine } from "./markdown-terminal.ts";
+import { notifyTerminal, turnEndNotice } from "./terminal-notify.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
 
@@ -364,7 +365,7 @@ interface UseAgentSessionParams {
 	backgroundTasks: BackgroundTaskRegistry;
 	permissionMode: PermissionMode;
 	mcpResult: McpSetupResult;
-	confirmBash: (command: string, reason: string) => Promise<boolean>;
+	confirmBash: (command: string, reason: string, rule?: string) => Promise<boolean>;
 	/** Per-turn system prompt rebuild for sticky rules + @-mention. */
 	rebuildSystemPrompt?: (context: { userText: string; contextFiles: string[] }) => string;
 	/** The agent saved a persona and asked to switch to it (persona_create with
@@ -1353,6 +1354,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								session.todos = event.todos;
 								break;
 							case "end":
+								if (event.reason !== "aborted") notifyTerminal(turnEndNotice(event.reason));
 								if (event.reason === "aborted") {
 									setLastTurnAborted(true);
 									setMessages((msgs) => [...msgs, { role: "warning", content: "[aborted]" }]);
@@ -1698,7 +1700,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					void (async () => {
 						let allow = false;
 						try {
-							allow = await confirmBashRef.current(event.command, event.reason);
+							allow = await confirmBashRef.current(event.command, event.reason, event.rule);
 						} catch {
 							allow = false;
 						}
@@ -1769,6 +1771,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					setError(null);
 					break;
 				case "end":
+					if (event.reason !== "aborted") notifyTerminal(turnEndNotice(event.reason));
 					if (event.reason === "aborted") {
 						setLastTurnAborted(true);
 						setMessages((msgs) => [...msgs, { role: "warning", content: "[aborted]" }]);

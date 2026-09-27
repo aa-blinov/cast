@@ -1,5 +1,6 @@
 import { Box, Text, useStdin } from "ink";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
+import { searchProjectFiles } from "../core/file-search.ts";
 import type { Skill } from "../core/skills.ts";
 import {
 	registerStdinOwner,
@@ -10,6 +11,8 @@ import {
 } from "../core/stdin-manager.ts";
 import { SLASH_COMMANDS } from "./commands.ts";
 import { displayWidth } from "./display-width.ts";
+import { editInExternalEditor } from "./external-editor.ts";
+import { atTokenAt } from "./input/at-mention.ts";
 import { cellColumn, layoutDraft, offsetAtColumn } from "./input/draft-layout.ts";
 import { type InputEvent, InputParser } from "./input/input-parser.ts";
 import { completePath } from "./input/path-complete.ts";
@@ -18,6 +21,7 @@ import { StdinBuffer } from "./input/stdin-buffer.ts";
 import { graphemeAt, TextBuffer } from "./input/textarea.ts";
 import { chipCharFor, expandPastes, isChipChar, type PendingPaste, pasteLabel } from "./paste.ts";
 import type { ClipboardPasteResult } from "./readClipboardImage.ts";
+import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON } from "./terminal-notify.ts";
 import { theme } from "./themes/index.ts";
 
 // Theme colors read at render time — these are reactive because the Composer
@@ -230,7 +234,21 @@ export function Composer({
 		() => (paletteOpen ? allCommands.filter((c) => c.name.startsWith(val)) : []),
 		[paletteOpen, val, allCommands],
 	);
-	const safeIdx = paletteOpen ? Math.min(paletteIdx, Math.max(0, filteredCmds.length - 1)) : 0;
+	// `@path` picker: files matching the token under the cursor. Esc dismisses
+	// it for that token only; the next `@` opens it again.
+	const atToken = paletteOpen ? undefined : atTokenAt(val, buf.cursorPos);
+	const [atDismissedAt, setAtDismissedAt] = useState<number | null>(null);
+	const atOpen = atToken !== undefined && atDismissedAt !== atToken.from;
+	const atQuery = atOpen ? atToken.query : undefined;
+	const atMatches = useMemo(() => (atQuery === undefined ? [] : searchProjectFiles(cwd, atQuery)), [atQuery, cwd]);
+	useEffect(() => {
+		if (atToken === undefined && atDismissedAt !== null) setAtDismissedAt(null);
+	}, [atToken, atDismissedAt]);
+	const listItems = paletteOpen
+		? filteredCmds.map((c) => ({ name: c.name, description: c.description }))
+		: atMatches.map((path) => ({ name: path, description: "" }));
+	const listOpen = listItems.length > 0 && (paletteOpen || atOpen);
+	const safeIdx = listOpen ? Math.min(paletteIdx, Math.max(0, listItems.length - 1)) : 0;
 
 	// char -> label lookup for the renderer. Built from pendingPastes so it
 	// stays in sync with what's actually in the buffer after chips are
@@ -252,8 +270,8 @@ export function Composer({
 	// `slice(0, paletteRows)` only ever showed the first page, so pressing
 	// Down past the last visible row moved the selection off-screen with no
 	// visual sign of it.
-	if (paletteOpen) {
-		const maxOffset = Math.max(0, filteredCmds.length - paletteRows);
+	if (listOpen) {
+		const maxOffset = Math.max(0, listItems.length - paletteRows);
 		if (safeIdx < paletteScrollRef.current) paletteScrollRef.current = safeIdx;
 		else if (safeIdx >= paletteScrollRef.current + paletteRows) paletteScrollRef.current = safeIdx - paletteRows + 1;
 		paletteScrollRef.current = Math.min(paletteScrollRef.current, maxOffset);
@@ -263,8 +281,8 @@ export function Composer({
 	const paletteScroll = paletteScrollRef.current;
 
 	useEffect(() => {
-		if (paletteIdx > 0 && paletteIdx >= filteredCmds.length) setPaletteIdx(0);
-	}, [paletteIdx, filteredCmds.length]);
+		if (paletteIdx > 0 && paletteIdx >= listItems.length) setPaletteIdx(0);
+	}, [paletteIdx, listItems.length]);
 
 	const doSubmit = () => {
 		const b = bufRef.current;
@@ -445,6 +463,27 @@ export function Composer({
 		// submitted nor escaped. With no matches, keys fall through to normal
 		// editing and Enter submits the text as-is (handleInput already routes
 		// unknown slash input to the agent — it could be a bare file path).
+		if (atOpen && atMatches.length > 0 && event.type === "binding") {
+			const n = atMatches.length;
+			if (event.binding === "editor.cursorUp") {
+				setPaletteIdx((i) => (i - 1 + n) % n);
+				return;
+			}
+			if (event.binding === "editor.cursorDown") {
+				setPaletteIdx((i) => (i + 1) % n);
+				return;
+			}
+			if (event.binding === "input.submit" || event.binding === "input.tab") {
+				b.replaceRange(atToken.from, b.cursorPos, `@${atMatches[safeIdx]} `);
+				setPaletteIdx(0);
+				setVersion((v) => v + 1);
+				return;
+			}
+			if (event.binding === "input.escape") {
+				setAtDismissedAt(atToken.from);
+				return;
+			}
+		}
 		if (paletteOpen && filteredCmds.length > 0) {
 			if (event.type === "binding") {
 				if (event.binding === "editor.cursorUp") {
@@ -490,6 +529,12 @@ export function Composer({
 					break;
 				case "input.attachImage":
 					handleAttachImage();
+					break;
+				case "input.externalEditor":
+					void editInExternalEditor(expandPastes(b.value, pendingPastesRef.current)).then((result) => {
+						if (result.ok) showRecalled(result.text);
+						else showImageNotice(`[${result.error}]`, 5000);
+					});
 					break;
 				case "input.tab": {
 					// Path completion. Only for a path-shaped token (see
@@ -595,6 +640,7 @@ export function Composer({
 		const onCont = () => {
 			esc.write(BRACKETED_PASTE_ON);
 			esc.write(KITTY_PUSH);
+			esc.write(FOCUS_REPORTING_ON);
 		};
 		onCont(); // Enable on initial mount
 		process.on("SIGCONT", onCont);
@@ -685,6 +731,7 @@ export function Composer({
 				setRawModeActive(false);
 				esc.write(KITTY_POP);
 				esc.write(BRACKETED_PASTE_OFF);
+				esc.write(FOCUS_REPORTING_OFF);
 				stdinSource.off("data", stdinDataHandler);
 			},
 			onResume: () => {
@@ -693,6 +740,7 @@ export function Composer({
 				setRawModeActive(true);
 				esc.write(BRACKETED_PASTE_ON);
 				esc.write(KITTY_PUSH);
+				esc.write(FOCUS_REPORTING_ON);
 			},
 		};
 		registerStdinOwner(owner);
@@ -729,6 +777,7 @@ export function Composer({
 			setRawModeActive(false);
 			esc.write(KITTY_POP);
 			esc.write(BRACKETED_PASTE_OFF);
+			esc.write(FOCUS_REPORTING_OFF);
 			process.off("SIGCONT", onCont);
 			stdinSource.off("data", stdinDataHandler);
 			parser.destroy();
@@ -755,27 +804,28 @@ export function Composer({
 	return (
 		<Box flexDirection="column">
 			{imageNotice && <Text color={theme().success}>{imageNotice}</Text>}
-			{paletteOpen && filteredCmds.length > 0 && (
+			{listOpen && (
 				<Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
 					{/* Always paletteRows slots, padded with blank lines, and each row
 					    force-truncated to one line: the box's height must stay constant
 					    as the filter narrows while typing, or the input frame below it
 					    jumps up and down every keystroke. */}
 					{Array.from({ length: paletteRows }, (_, i) => {
-						const c = filteredCmds[paletteScroll + i];
+						const c = listItems[paletteScroll + i];
 						// biome-ignore lint/suspicious/noArrayIndexKey: fixed-size slot grid, not a reorderable list
 						if (!c) return <Text key={`empty-${i}`}> </Text>;
 						const selected = paletteScroll + i === safeIdx;
 						return (
 							<Text key={c.name} color={selected ? theme().success : theme().muted} wrap="truncate">
 								{selected ? "> " : "  "}
-								<Text bold={selected}>{c.name}</Text> <Text color={theme().muted}>{c.description}</Text>
+								<Text bold={selected}>{c.name}</Text>
+								{c.description && <Text color={theme().muted}> {c.description}</Text>}
 							</Text>
 						);
 					})}
 					<Text color={theme().muted}>
 						↑↓ – Tab/Enter – Esc
-						{filteredCmds.length > paletteRows ? ` – ${safeIdx + 1}/${filteredCmds.length}` : ""}
+						{listItems.length > paletteRows ? ` – ${safeIdx + 1}/${listItems.length}` : ""}
 					</Text>
 				</Box>
 			)}
