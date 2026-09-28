@@ -105,7 +105,7 @@ export function getToolDefinitions(
 					"Execute a bash command in the current working directory. Returns stdout and stderr. " +
 					"Each call runs in a fresh shell rooted at that same directory: a `cd` does not carry over to the next " +
 					"call, so repeat it (or use absolute paths) whenever a command must run elsewhere. " +
-					"Output is truncated to last 2000 lines or 128KB (whichever is hit first). " +
+					"Long output shows its first and last lines, about 32000 characters; the full output is saved to a file the result names. " +
 					"Short commands return normally. Long-running commands are automatically promoted to a managed background task " +
 					"instead of blocking indefinitely; use run_in_background:true to start one immediately. " +
 					"Background results arrive automatically, and bash_output/bash_kill can inspect or stop them. " +
@@ -173,7 +173,7 @@ export function getToolDefinitions(
 					"Read the contents of a file. When you already know the path, call this directly — do not search with glob/ls first. " +
 					"Supports text files and images (jpg, jpeg, png, gif, webp, bmp — " +
 					"shown to you as an image in the next message; only works if the model supports vision). " +
-					"Output is truncated to 2000 lines or 128KB. Use offset/limit for large files. " +
+					"Output is truncated to 2000 lines or 50KB, and a line past 2000 characters is cut. Use offset/limit for large files. " +
 					"Large images are automatically downscaled to fit; only rejected if truly huge (25MB+). " +
 					"Each line is prefixed with its line number (`N: content`) — use the exact text (not the number) when calling `edit`. " +
 					"You already have the contents of every file you read earlier in this session — do NOT read the " +

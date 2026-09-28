@@ -63,7 +63,7 @@ A pattern as broad as `bash(*.env*)` also blocks harmless commands that merely m
 | `autoFormat` | `false` stops running the project's formatter (biome, prettier, ruff, gofmt) after `write`/`edit`. Default on |
 | `notifications` | `false` stops the TUI's terminal notification and bell when a turn ends or waits for approval while the terminal is unfocused |
 | `keybindings` | TUI key overrides by action id, e.g. `{"input.externalEditor": "ctrl+o"}`; `[]` unbinds. `/keys` shows the keys in effect. Read at TUI start |
-| `maxToolOutputLines`, `maxToolOutputBytes` | Tool result caps. A cut result's full output is saved under `~/.cast/tool-output/` and the result names the file |
+| `maxToolOutputLines`, `maxToolOutputBytes` | Tool result caps. A cut result's full output is saved under `~/.cast/tool-output/` and the result names the file. `bash` shows at most 32000 characters (start and end) and `read` 50KB, unless `maxToolOutputBytes` is set |
 | `webTools` | Web search/fetch tools; the user toggles them with `/web` |
 | `disabledSkills`, `disabledMcpServers`, `disabledHooks` | Managed by `/skills`, `/mcp`, `/hooks`; prefer the commands |
 

@@ -147,6 +147,27 @@ const SAMPLE_BYTES = 4096;
  * memory cost stays negligible. */
 const MAX_WHOLE_FILE_BYTES = 8 * 1024 * 1024;
 
+/**
+ * Bytes of one `read` result, as in DeepSeek Harness and opencode. At 128KB a
+ * data file read whole (a 118KB access.log in real-task traces) stayed in the
+ * context for every later request; code past this size is read by offset.
+ */
+export const READ_MAX_BYTES = 50 * 1024;
+/** Characters of one line: a minified bundle or a JSON dump is one huge line. */
+export const READ_MAX_LINE_CHARS = 2000;
+
+function readMaxBytes(config: AppConfig): number {
+	return config.maxReadBytes ?? Math.min(READ_MAX_BYTES, config.maxToolOutputBytes);
+}
+
+function renderReadLine(lineNumber: number, line: string): string {
+	const text =
+		line.length > READ_MAX_LINE_CHARS
+			? `${line.slice(0, READ_MAX_LINE_CHARS)}… [line truncated to ${READ_MAX_LINE_CHARS} of ${line.length} chars]`
+			: line;
+	return `${lineNumber}: ${text}`;
+}
+
 function startLineFrom(offset: number | undefined): number {
 	return offset ? Math.max(0, offset - 1) : 0;
 }
@@ -179,7 +200,7 @@ async function readLargeFile(
 	config: AppConfig,
 ): Promise<ToolResult> {
 	const maxLines = Math.min(limit ?? config.maxToolOutputLines, config.maxToolOutputLines);
-	const maxBytes = config.maxToolOutputBytes;
+	const maxBytes = readMaxBytes(config);
 	const kept: string[] = [];
 	let lineNumber = 0;
 	let usedBytes = 0;
@@ -190,7 +211,7 @@ async function readLargeFile(
 		for await (const line of lines) {
 			lineNumber++;
 			if (lineNumber <= startLine) continue;
-			const rendered = `${lineNumber}: ${line}`;
+			const rendered = renderReadLine(lineNumber, line);
 			usedBytes += Buffer.byteLength(rendered, "utf-8") + 1;
 			if (usedBytes > maxBytes && kept.length > 0) {
 				stoppedOnBytes = true;
@@ -371,14 +392,14 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 	}
 
 	// Plain `<line>: <content>` — no hashline gutter (see this file's header).
-	const rendered = selectedLines.map((line, i) => `${startLine + i + 1}: ${line}`);
+	const rendered = selectedLines.map((line, i) => renderReadLine(startLine + i + 1, line));
 
 	// Cap total output bytes too, not just line count: maxToolOutputLines
 	// doesn't help when a handful of lines — or even one, e.g. a minified
 	// bundle — are each many MB long. Without this a single-line file blew
 	// straight past config.maxToolOutputBytes regardless of size, unlike
 	// every other tool (bash/ssh/grep) which enforces this cap.
-	const maxBytes = config.maxToolOutputBytes;
+	const maxBytes = readMaxBytes(config);
 	let usedBytes = 0;
 	let cutIndex = rendered.length;
 	for (let i = 0; i < rendered.length; i++) {

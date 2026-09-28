@@ -194,6 +194,15 @@ export interface FormatBashResultOptions {
 }
 
 /**
+ * Characters of one bash result the model sees. The byte cap (128KB) let a
+ * `cat` of a data file put ~30k tokens into the context, re-sent with every
+ * later request: in real-task traces, cutting results to this size removes
+ * 6.5% of all the tool output the model re-reads. The head keeps the command's banner, the
+ * tail its errors and summary; the whole output is saved to a file.
+ */
+export const BASH_OUTPUT_MAX_CHARS = 32_000;
+
+/**
  * Shared by the synchronous `bash` close handler and the background-task
  * registry (tools/bash-background.ts) — both need the exact same ANSI-strip
  * / prefix / line-truncation treatment on raw process output, just triggered
@@ -218,6 +227,18 @@ export function formatBashResult(rawOutput: string, config: AppConfig, opts: For
 		fullOutputPath ??= outputTruncated ? undefined : saveToolOutput(output);
 		const kept = lines.slice(-config.maxToolOutputLines);
 		output = `[Showing last ${config.maxToolOutputLines} of ${lines.length} lines]\n${kept.join("\n")}`;
+	}
+	const maxChars = config.maxBashOutputChars ?? BASH_OUTPUT_MAX_CHARS;
+	if (output.length > maxChars) {
+		fullOutputPath ??= outputTruncated ? undefined : saveToolOutput(output);
+		// Cut on line breaks so neither side shows the model half a line.
+		const headLimit = Math.floor(maxChars / 4);
+		const headBreak = output.lastIndexOf("\n", headLimit);
+		const headEnd = headBreak > 0 ? headBreak : headLimit;
+		const tailLimit = output.length - (maxChars - headLimit);
+		const tailBreak = output.indexOf("\n", tailLimit);
+		const tailStart = tailBreak >= 0 && tailBreak < output.length - 1 ? tailBreak + 1 : tailLimit;
+		output = `${output.slice(0, headEnd)}\n\n[… ${tailStart - headEnd} characters cut from the middle …]\n\n${output.slice(tailStart)}`;
 	}
 	if (fullOutputPath) {
 		output += `\n\n[Output cut to fit. The full output is saved at ${fullOutputPath}: read it in ranges or grep it instead of running the command again.]`;

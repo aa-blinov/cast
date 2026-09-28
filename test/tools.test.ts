@@ -14,7 +14,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { MessageQueue } from "../src/core/loop.ts";
 import { MAX_PLAN_CHARS, PLAN_TOOL_NAMES, type PlanState } from "../src/core/plan.ts";
+import { BASH_OUTPUT_MAX_CHARS } from "../src/core/tools/bash.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../src/core/tools/bash-background.ts";
+import { READ_MAX_BYTES, READ_MAX_LINE_CHARS } from "../src/core/tools/files.ts";
 import { isPermissionError, withAccessNote } from "../src/core/tools/search.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
 
@@ -121,6 +123,27 @@ describe("bash", () => {
 				.split("\n")
 				.slice(0, 3),
 		).toEqual(["1", "2", "3"]);
+	});
+
+	it("shows the head and tail of a long output and saves all of it", async () => {
+		// 1500 lines of 30 chars: under the line and byte caps, over the char cap.
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("bash", { command: "seq -f 'line %04g xxxxxxxxxxxxxxxxxxxx' 1 1500" });
+		expect(result.content.length).toBeLessThan(BASH_OUTPUT_MAX_CHARS + 500);
+		expect(result.content).toContain("line 0001");
+		expect(result.content).toContain("line 1500");
+		expect(result.content).toContain("characters cut from the middle");
+		// Cut on line breaks: every line either side of the marker is whole.
+		const shown = result.content.split("\n").filter((l) => l && !l.startsWith("["));
+		expect(shown.every((l) => /^line \d{4} x{20}$/.test(l))).toBe(true);
+		const path = /full output is saved at (\S+):/.exec(result.content)?.[1];
+		expect(readFileSync(path as string, "utf-8")).toContain("line 0750");
+	});
+
+	it("lets a user-set limit outrank the bash char cap", async () => {
+		const exec = createToolExecutor(TEST_DIR, { ...mockConfig, maxBashOutputChars: 1_000_000 });
+		const result = await exec("bash", { command: "seq 1 9000" });
+		expect(result.content).not.toContain("cut from the middle");
 	});
 
 	it("keeps the old note when the output fits", async () => {
@@ -656,11 +679,13 @@ describe("read", () => {
 		// output budget — read used to return the whole line regardless of
 		// size, unlike every other tool (bash/ssh/grep) which enforces
 		// config.maxToolOutputBytes.
+		// A limit under READ_MAX_LINE_CHARS, so the line reaches the byte cap
+		// before the per-line cut.
 		writeFileSync(join(TEST_DIR, "huge-line.txt"), "x".repeat(10 * mockConfig.maxToolOutputBytes));
-		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const exec = createToolExecutor(TEST_DIR, { ...mockConfig, maxReadBytes: 1000 });
 		const result = await exec("read", { path: "huge-line.txt" });
-		expect(Buffer.byteLength(result.content, "utf-8")).toBeLessThan(mockConfig.maxToolOutputBytes * 1.1);
-		expect(result.content).toContain("truncated");
+		expect(Buffer.byteLength(result.content, "utf-8")).toBeLessThan(1200);
+		expect(result.content).toContain("the line itself is larger than the output limit");
 	});
 
 	it("caps output by bytes across multiple long lines, stopping on a line boundary", async () => {
@@ -672,6 +697,35 @@ describe("read", () => {
 		expect(Buffer.byteLength(result.content, "utf-8")).toBeLessThanOrEqual(mockConfig.maxToolOutputBytes);
 		expect(result.content).toMatch(new RegExp(`Showing lines 1-\\d+ of ${lineCount + 1}.*stopped at`));
 		expect(result.content).toContain("Use offset=");
+	});
+
+	it("stops a data file at 50KB and hands over the offset to continue", async () => {
+		// A 118KB access.log read whole stayed in the context for every later request.
+		const rows = Array.from({ length: 1200 }, (_, i) => `10.0.0.${i % 250} GET /notes/${i} 200 ${"x".repeat(70)}`);
+		writeFileSync(join(TEST_DIR, "access.log"), `${rows.join("\n")}\n`);
+		const exec = createToolExecutor(TEST_DIR, { ...mockConfig, maxToolOutputBytes: 128 * 1024 });
+		const first = await exec("read", { path: "access.log" });
+		expect(Buffer.byteLength(first.content, "utf-8")).toBeLessThan(READ_MAX_BYTES + 300);
+		const next = Number(/Use offset=(\d+)/.exec(first.content)?.[1]);
+		expect(first.content).toContain(`${next - 1}: `);
+		const second = await exec("read", { path: "access.log", offset: next });
+		expect(second.content.startsWith(`${next}: `)).toBe(true);
+	});
+
+	it("cuts a line past 2000 characters and says how long it was", async () => {
+		writeFileSync(join(TEST_DIR, "bundle.min.js"), `short\n${"a".repeat(5000)}\nafter\n`);
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "bundle.min.js" });
+		expect(result.content).toContain(`2: ${"a".repeat(READ_MAX_LINE_CHARS)}… [line truncated to 2000 of 5000 chars]`);
+		expect(result.content).toContain("3: after");
+	});
+
+	it("lets a user-set limit outrank the 50KB read cap", async () => {
+		writeFileSync(join(TEST_DIR, "big.txt"), `${"z".repeat(100)}\n`.repeat(1000));
+		const exec = createToolExecutor(TEST_DIR, { ...mockConfig, maxReadBytes: 1024 * 1024 });
+		const result = await exec("read", { path: "big.txt" });
+		expect(result.content).not.toContain("stopped at");
+		expect(result.content).toContain("1000: ");
 	});
 
 	it("errors on missing file", async () => {
@@ -2296,6 +2350,10 @@ describe("file tools on large files", () => {
 		expect(result.content).toContain("Large file");
 		// Nowhere near the file's own size.
 		expect(grew).toBeLessThan(2 * 1024 * 1024);
+
+		const capped = await execRead({ path: bigPath }, TEST_DIR, mockConfig);
+		expect(capped.content).toContain("stopped at 50.0KB");
+		expect(Buffer.byteLength(capped.content, "utf-8")).toBeLessThan(READ_MAX_BYTES + 400);
 	});
 
 	it("refuses an image whose pixel count would blow up memory (regression)", async () => {
