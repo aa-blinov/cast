@@ -16,7 +16,7 @@
 | `/plan-model-provider [name]` | Set provider for plan-mode model |
 | `/persona [name]` | Show/change persona |
 | `/provider [name]` | Switch / add / delete providers |
-| `/permissions` | Change bash confirmation mode |
+| `/permissions` | Change permission mode (`default` asks about dangerous commands, `bypass` asks about nothing); per-tool rules live in settings, see `references/settings.md` |
 | `/web` | Toggle web tools (web_search, web_fetch) |
 | `/ssh` | Manage SSH hosts (list, add, remove) |
 | `/theme` | Change color theme |
@@ -29,7 +29,7 @@
 | `/repo` | Show cwd's git status: branch, dirty flag, active worktree |
 | `/plan` | User-initiated task initialization: establish scope and an execution plan before implementation |
 | `/build` | Exit plan mode, approve the plan, and restore the implementation toolset |
-| `/plan-note <text>` | Append a decision note to the active plan |
+| `/plan-note <text>` | Web: append a decision note to the active plan |
 | `/goal [N] <description>` | Work autonomously toward a goal until done — bounded (default 25 model calls; a leading `N` or `--steps N` overrides), never-ask, at most one clarifying question |
 | `/turn-cap [N\|reset]` | Show/set the per-turn iteration safety cap (default 500, applies next call) |
 | `/review` | Ask the agent to verify its own work: git diff, run tests/lint, report honestly what was and wasn't verified |
@@ -40,18 +40,20 @@
 | `/worktree <name>\|list\|remove <name>` | Create/reuse, list, or remove a git worktree for this session |
 | `/evolve` | Let the agent propose/update its own skills based on session experience |
 | `/hooks [enable\|disable <id>]` | List hooks for this project, or enable/disable one by id |
+| `/agents` | This session's subagents: open one's session, or stop a running one |
+| `/context` | List the loaded AGENTS.md / CLAUDE.md context files |
 | `/steer <message>` (`/s`) | Inject a message while the agent is running |
 | `/queue <message>` (`/q`) | Queue a message for after the agent stops |
 | `/queue-reset` (`/qr`) | Clear the message queue |
 | `/reasoning` | Change reasoning level |
 | `/reasoning-format` | Change how reasoning is rendered |
 | `/reasoning-display` (`/rd`) | Show/toggle reasoning display |
-| `/model-selection` | Interactive model picker |
-| `/quick-session-persona [name]` | Set a one-off persona for this session only (doesn't change the default) |
+| `/model-selection` | Web: interactive model picker |
+| `/quick-session-persona [name]` | Web: show or change the persona the sidebar's Quick session button uses |
 | `/web-search-provider [name]` | Show/change the web_search backend |
 | `/web-fetch-provider [name]` | Show/change the web_fetch backend |
-| `/usage` | Show cumulative token/cost usage for this session |
-| `/keys` | Show keyboard shortcuts |
+| `/usage` | Web: cumulative token/cost usage for this session (TUI: `/current`) |
+| `/keys` | Show keyboard shortcuts in effect, including `keybindings` overrides |
 | `/older` | Load an older page of scrollback history |
 | `/copy` | Copy the last assistant message to the clipboard |
 | `/help` | Show help |

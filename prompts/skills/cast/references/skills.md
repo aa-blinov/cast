@@ -35,9 +35,8 @@ Instructions the model reads when this skill is invoked...
 
 **Rules:**
 
-- `name` must be lowercase, alphanumeric + hyphens
-- `name` must match the directory containing `SKILL.md`
-- `description` is required (shown to the model)
+- `name` is optional and defaults to the directory name; when set it must be lowercase letters, digits and hyphens. It may differ from the directory (it is a display name)
+- `description` is recommended; without it the body's first paragraph is used. Keep it specific, since it is what the model sees in the skill list
 - Optional standard fields: `license`, `compatibility` (up to 500 characters), `metadata` (string-to-string map), `allowed-tools` (experimental)
 - `disable-model-invocation: true` — skill is hidden from model, only usable via `/skill:name`
 - `/skills` — multi-select toggle; also `list`, `enable`/`disable <name>`, `uninstall`, `help`

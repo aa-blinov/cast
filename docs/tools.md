@@ -243,8 +243,13 @@ Delegate a task to a sub-agent with an isolated context. The sub-agent runs inde
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `assignment` | Yes | Complete, self-contained task description |
-| `subagent` | No | Sub-agent name (`explore`, `review`, or `worker`; default `worker`) |
+| `description` | No | Short title (3-5 words) shown to the user |
+| `assignment` | Yes | Complete, self-contained task description, including what the report must contain |
+| `subagent` | No | Sub-agent name (`explore`, `review`, `worker`, or a custom one; default `worker`) |
+| `task_id` | No | Continue an earlier sub-agent of this session instead of starting a new one |
+| `background` | No | TUI and web: return at once; the report arrives as a message when it is done |
+
+Several `task` calls in one response run in parallel (up to 4 per session). See [Sub-agents](subagents.md) for child sessions, `/agents`, custom sub-agents and `readOnly`.
 
 The `task` tool is only available when the current persona has `subagents: true` (e.g. the `coder-with-subagents` persona).
 

@@ -1,6 +1,6 @@
 ---
 name: cast
-description: Configures cast itself — creates and manages personas, skills, MCP servers, rules, hooks, and durable project memory. Use when user wants to customize cast, create a persona through chat, install a skill, or ask about memory.
+description: Configures cast itself — creates and manages personas, skills, MCP servers, rules, hooks, permission rules, settings, and durable project memory. Use when user wants to customize cast, create a persona through chat, install a skill, change what the agent may do without asking, or ask about memory.
 ---
 
 # cast configuration
@@ -26,7 +26,8 @@ This skill ships as an **index + reference files**. Read only what the task need
 | Skills — locations, format, discovery order, example | `references/skills.md` |
 | MCP servers — `mcp.json` shape, transports, commands | `references/mcp.md` |
 | Rules — apply modes, glob syntax, nested rules, choosing a mode, `@rule-name` vs `/rule:` | `references/rules.md` |
-| Hooks — `hooks.json` shape, events, matchers, env vars | `references/hooks.md` |
+| Hooks — `hooks.json` shape, events, matchers, env vars, type-check recipe | `references/hooks.md` |
+| Settings and permissions — `settings.json`, allow/ask/deny rules, when the agent may change them, autoFormat, notifications, keybindings | `references/settings.md` |
 | Slash commands — full table, hot-reload vs `/reload` | `references/commands.md` |
 | Providers and model slots — OpenAI-compatible endpoint, reasoning, validation | `references/providers.md` |
 | Web access — local/public server, login, SSH tunnel, security boundary, **and what the browser UI looks like** (routes, sidebar, panels, settings/dashboard tabs) | `references/web.md` |

@@ -33,14 +33,18 @@ A bare `{ "PreToolUse": [...] }` (no wrapping `"hooks"` key) works too. Unrecogn
 | `UserPromptSubmit` | User submits a prompt | Yes |
 | `PreToolUse` | Before tool runs | Yes — can deny or rewrite args |
 | `PostToolUse` | After tool succeeds | No (can rewrite result) |
-| `PermissionRequest` | Bash confirmation dialog | Yes — can approve/deny |
+| `PermissionRequest` | Before a dangerous-command confirmation | Yes — can approve/deny |
 | `Stop` | Agent would end turn | Yes — can keep it going |
 | `SubagentStart`/`SubagentStop` | Subagent lifecycle | No |
 | `PreCompact`/`PostCompact` | Context compaction | No |
 
 **Hook types:** `command` (shell, default), `http` (POST), `mcp_tool` (call MCP tool), `prompt` (one-shot model completion with `{"ok":true/false}` output).
 
-**Response contract:** exit 2 or `{"decision":"block"}` blocks. `{"hookSpecificOutput":{"updatedInput":{...}}}` rewrites tool args. `{"hookSpecificOutput":{"additionalContext":"..."}}` appends context without blocking. `{"continue":false}` force-stops the turn.
+**Response contract:** exit 2 or `{"decision":"block"}` blocks. `{"hookSpecificOutput":{"updatedInput":{...}}}` rewrites tool args. `{"hookSpecificOutput":{"additionalContext":"..."}}` appends context without blocking; on `PostToolUse` the agent reads it with the tool result. `{"continue":false}` force-stops the turn.
+
+**Type check after each edit:** a `PostToolUse` hook on `write|edit` that runs the checker and prints `{"hookSpecificOutput":{"additionalContext":"<errors>"}}` when it finds errors hands them to the agent in the same turn; `docs/hooks.md` has a ready script. Formatting needs no hook: cast runs the project's configured formatter after `write`/`edit` itself (see `references/settings.md`, `autoFormat`).
+
+For "never allow" or "always ask" on a tool, a permission rule (`references/settings.md`) is simpler than a `PreToolUse` hook.
 
 **Matcher:** regex tested against tool name (for tool events), subagent name (for SubagentStart/Stop), or ignored for events with no natural target. Case-insensitive. Supports pipe-separated exact matches (`Write|Edit`).
 

@@ -58,7 +58,14 @@ Textarea (Enter sends, Shift+Enter newline, Esc aborts a running turn),
 paperclip for attachments (images → thumbnails, docs upload to
 `~/.cast/inputs/<session-id>/`, executable/binary files rejected), drag-drop and
 image paste, send/stop button. Typing `/` opens the command palette; `/persona`
-prefix opens the persona picker.
+prefix opens the persona picker; `@` at the start of a word opens a fuzzy picker
+of project files (Tab/Enter insert `@path`).
+
+A dangerous command or an `ask` permission rule shows a confirmation card in the
+thread while the turn waits: **Allow once** / **Always allow** (saves an exact
+rule to `permissions.approved`) / **Block**. With the tab in the background, the
+end of a turn and an approval request raise a browser notification (permission
+is requested on the first send).
 
 ### Right panel tabs
 
