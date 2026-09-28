@@ -30,6 +30,7 @@ import {
 	readLiveServerState,
 	releaseStartLock,
 	type ServerDaemonState,
+	START_LOCK_WAIT_ATTEMPTS,
 } from "./daemon-state.ts";
 
 export interface ServerClient {
@@ -62,7 +63,7 @@ export async function ensureServerClient(): Promise<ServerClient | undefined> {
 		// exclusive lock serializes the spawn so a concurrent TUI launch can't
 		// stack a second daemon while this one's is still recording state.
 		const waitForDaemon = async (attempt: number): Promise<ServerClient | undefined> => {
-			if (attempt >= 100) return undefined;
+			if (attempt >= START_LOCK_WAIT_ATTEMPTS) return undefined;
 			const existing = readLiveServerState();
 			if (existing) {
 				const client = await clientFor(existing);

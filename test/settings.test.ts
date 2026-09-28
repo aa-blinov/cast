@@ -8,6 +8,7 @@ import {
 	checkpointReservedSetting,
 	checkpointThresholdsSetting,
 	getProjectTrust,
+	isBypassPermissionsFlag,
 	isMemoryEnabled,
 	isMemoryWriteEnabled,
 	loadSettings,
@@ -283,5 +284,14 @@ describe("settings", () => {
 
 			expect(loadSettings().disabledHooks?.slice().sort()).toEqual(["hookA", "hookB"]);
 		});
+	});
+});
+
+describe("isBypassPermissionsFlag", () => {
+	it("takes Claude Code's --dangerously-skip-permissions as the same flag", () => {
+		expect(isBypassPermissionsFlag("--bypass-permissions")).toBe(true);
+		expect(isBypassPermissionsFlag("--dangerously-skip-permissions")).toBe(true);
+		expect(isBypassPermissionsFlag("--bypass")).toBe(false);
+		expect(isBypassPermissionsFlag(undefined)).toBe(false);
 	});
 });

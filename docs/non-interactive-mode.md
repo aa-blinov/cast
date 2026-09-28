@@ -77,7 +77,7 @@ fields instead of parsing that text.
 | `--persona <name>` | `-p` | Persona to use |
 | `--format <default\|json>` | | Output format |
 | `--interactive` | | Persistent JSONL session protocol (no positional message) |
-| `--bypass-permissions` | | Skip bash confirmation |
+| `--bypass-permissions` | | Skip confirmations (alias `--dangerously-skip-permissions`) |
 | `--skill <path>` | | Load extra skill |
 | `--no-skills` | | Skip project/agents/global/builtin skill discovery |
 | `--mcp <path>` | | Load extra MCP config |

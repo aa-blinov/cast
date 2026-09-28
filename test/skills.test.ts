@@ -358,13 +358,25 @@ describe("loadSkills discovery", () => {
 });
 
 describe("formatSkillsForPrompt", () => {
-	it("includes name/description/location for visible skills", () => {
+	it("lists name and description, not the install path the model might mistake for the project", () => {
 		writeSkill(GLOBAL_DIR, "my-skill/SKILL.md", { name: "my-skill", description: "Does a thing." });
 		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
 		const prompt = formatSkillsForPrompt(skills);
 		expect(prompt).toContain("<name>my-skill</name>");
 		expect(prompt).toContain("<description>Does a thing.</description>");
-		expect(prompt).toContain(join(GLOBAL_DIR, "my-skill", "SKILL.md"));
+		expect(prompt).not.toContain(GLOBAL_DIR);
+	});
+
+	it("cuts description plus when_to_use at the listing limit", () => {
+		writeSkill(GLOBAL_DIR, "wordy/SKILL.md", {
+			name: "wordy",
+			description: "d".repeat(1000),
+			when_to_use: "w".repeat(1000),
+		});
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		const listed = /<description>([^<]*)<\/description>/.exec(formatSkillsForPrompt(skills))?.[1] ?? "";
+		expect(listed.length).toBe(1536);
+		expect(listed.endsWith("w")).toBe(true);
 	});
 
 	it("excludes skills with disable-model-invocation: true", () => {

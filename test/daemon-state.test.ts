@@ -225,3 +225,10 @@ describe("daemon-state", () => {
 		});
 	});
 });
+
+describe("start lock wait", () => {
+	it("outlasts the lock holder's own startup wait, so concurrent launches reuse its daemon", async () => {
+		const { DAEMON_STARTUP_TIMEOUT_MS, START_LOCK_WAIT_ATTEMPTS } = await import("../src/server/daemon-state.ts");
+		expect(START_LOCK_WAIT_ATTEMPTS * 100).toBeGreaterThan(DAEMON_STARTUP_TIMEOUT_MS);
+	});
+});

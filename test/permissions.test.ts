@@ -1,8 +1,15 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { addAllowRule, checkDangerousBash, evaluatePermission, exactRule } from "../src/core/permissions.ts";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	addAllowRule,
+	checkDangerousBash,
+	EXTERNAL_DIRECTORY,
+	evaluatePermission,
+	exactRule,
+	externalTarget,
+} from "../src/core/permissions.ts";
 
 describe("checkDangerousBash", () => {
 	it("flags recursive force delete", () => {
@@ -172,5 +179,60 @@ describe("permission rules", () => {
 			process.env.HOME = realHome;
 			rmSync(home, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("external directory", () => {
+	let root: string;
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "cast-external-"));
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+		mkdirSync(join(root, "other"));
+		mkdirSync(join(root, "skills"));
+	});
+	afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+	it("leaves paths inside the cwd or the project root alone", () => {
+		const proj = join(root, "proj");
+		expect(externalTarget("read", { path: "a.ts" }, proj, proj)).toBeUndefined();
+		// A session opened in a subdirectory still owns the whole project.
+		expect(externalTarget("edit", { filePath: "../README.md" }, join(proj, "sub"), proj)).toBeUndefined();
+		expect(externalTarget("grep", {}, proj, proj)).toBeUndefined();
+		expect(externalTarget("bash", { command: "cat /etc/hosts" }, proj, proj)).toBeUndefined();
+	});
+
+	it("flags a path outside, naming the directory an approval would cover", () => {
+		const proj = join(root, "proj");
+		expect(externalTarget("read", { path: "../other/x.txt" }, proj, proj)).toEqual({
+			path: join(root, "other", "x.txt"),
+			dir: join(root, "other"),
+		});
+		expect(externalTarget("ls", { path: join(root, "other") }, proj, proj)?.dir).toBe(join(root, "other"));
+	});
+
+	it("follows a symlink that leads out of the project", () => {
+		const proj = join(root, "proj");
+		symlinkSync(join(root, "other"), join(proj, "escape"));
+		expect(externalTarget("write", { path: "escape/x.txt" }, proj, proj)?.path).toBe(join(root, "other", "x.txt"));
+	});
+
+	it("lets reads, not writes, reach the directories cast hands the agent", () => {
+		const proj = join(root, "proj");
+		const readable = [join(root, "skills")];
+		expect(externalTarget("read", { path: join(root, "skills", "SKILL.md") }, proj, proj, readable)).toBeUndefined();
+		expect(externalTarget("write", { path: join(root, "skills", "SKILL.md") }, proj, proj, readable)).toBeDefined();
+		const mem = [join(root, "other")];
+		expect(externalTarget("write", { path: join(root, "other", "notes.md") }, proj, proj, [], mem)).toBeUndefined();
+	});
+
+	it("is matched by external_directory rules on the absolute path", () => {
+		const rules = { allow: [`${EXTERNAL_DIRECTORY}(/data/**)`], deny: [`${EXTERNAL_DIRECTORY}(/etc/**)`] };
+		expect(evaluatePermission(rules, EXTERNAL_DIRECTORY, { path: "/data/a/b.csv" }, "/work")?.action).toBe("allow");
+		expect(evaluatePermission(rules, EXTERNAL_DIRECTORY, { path: "/etc/hosts" }, "/work")?.action).toBe("deny");
+		expect(evaluatePermission(rules, EXTERNAL_DIRECTORY, { path: "/opt/x" }, "/work")).toBeUndefined();
+		const home = { deny: [`${EXTERNAL_DIRECTORY}(~/.ssh/**)`] };
+		expect(
+			evaluatePermission(home, EXTERNAL_DIRECTORY, { path: join(homedir(), ".ssh", "id_rsa") }, "/w")?.action,
+		).toBe("deny");
 	});
 });

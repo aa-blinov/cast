@@ -32,6 +32,7 @@ Never edit settings to get past something that just stopped you: a denied or dec
   - `ask` shows the confirmation prompt. In bypass mode nobody is asked, so an `ask` rule has no effect there; only `deny` still applies. If `permissionMode` is `"bypass"`, tell the user their `ask` rules won't prompt until they switch back with `/permissions default`.
   - `allow` also answers the dangerous-command prompt in advance.
   - `approved` holds the user's "Always allow" answers. It is written by the prompt; add to it only when the user asks.
+- Paths outside the project: `read`/`write`/`edit`/`ls`/`glob`/`grep` there ask first. `external_directory(<glob>)` rules on the absolute path decide instead: `allow: ["external_directory(/data/**)"]` to work in another directory freely, `deny` to wall one off. The agent's own `~/.cast/settings.json` is outside every project, so editing it asks too.
 - Rules are per tool: denying `write(.env*)` does not stop `bash` writing the same file. When the user wants a path protected, suggest the matching `bash` rule too.
 - Subagents follow the same rules.
 

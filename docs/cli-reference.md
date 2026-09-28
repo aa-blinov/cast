@@ -127,7 +127,7 @@ cast -w feature-x                 # Run in an isolated git worktree
 
 | Flag | Description |
 |------|-------------|
-| `--bypass-permissions` | Skip confirmation for dangerous bash commands this run only |
+| `--bypass-permissions` | Skip every confirmation this run only (dangerous commands, `ask` rules, paths outside the project); deny rules still apply. `--dangerously-skip-permissions` is the same flag, spelled as in Claude Code |
 
 See [Tools](tools.md#dangerous-command-gating) for the list of patterns that trigger confirmation.
 
@@ -169,7 +169,7 @@ The `run` subcommand accepts a subset of the main flags:
 | `--persona <name>` | `-p` | Persona to use |
 | `--format <default\|json>` | | Output format |
 | `--interactive` | | Persistent JSONL session protocol; no positional message |
-| `--bypass-permissions` | | Skip bash confirmation prompts |
+| `--bypass-permissions` | | Skip confirmation prompts (alias `--dangerously-skip-permissions`) |
 | `--keep-background` | | Leave background tasks this run started running after it exits |
 | `--skill <directory>` | | Load an extra skill package directory (repeatable). **Not applied under the daemon**, see below |
 | `--no-skills` | | Skip project/agents/global/builtin skill discovery |

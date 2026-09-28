@@ -350,3 +350,14 @@ export class BoundedOutput {
 		return this.text;
 	}
 }
+
+/**
+ * The environment the agent's shell runs with. OLDPWD is the directory the
+ * user was in before, often another project: an agent that ran `env` found
+ * it and committed a "commit my changes" request in that other repository.
+ * PWD follows the session's cwd for the same reason.
+ */
+export function agentShellEnv(cwd: string, extra: Record<string, string>): Record<string, string | undefined> {
+	const { OLDPWD: _previous, ...env } = process.env;
+	return { ...env, PWD: cwd, ...extra };
+}

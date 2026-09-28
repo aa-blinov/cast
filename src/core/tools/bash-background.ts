@@ -51,7 +51,7 @@ import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD } from "../config.ts";
 import type { MessageQueue } from "../loop.ts";
 import { escapeSystemReminderTags } from "../system-reminder.ts";
 import { formatBashResult, getBashResolution, stripAnsi } from "./bash.ts";
-import { BoundedOutput, formatSize, type ToolResult } from "./shared.ts";
+import { agentShellEnv, BoundedOutput, formatSize, type ToolResult } from "./shared.ts";
 
 const PTY_EXECVP_FAILURE_RE = /execvp\(3\) failed/i;
 const NO_SUCH_FILE_RE = /no such file or directory/i;
@@ -346,7 +346,7 @@ export class BackgroundTaskRegistry {
 				cols: 120,
 				rows: 40,
 				cwd,
-				env: { ...process.env, PAGER: "cat", GIT_PAGER: "cat", TERM: "xterm-256color" },
+				env: agentShellEnv(cwd, { PAGER: "cat", GIT_PAGER: "cat", TERM: "xterm-256color" }),
 			});
 			task.pty = pty;
 			letPtyDrain(pty);

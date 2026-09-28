@@ -6,7 +6,9 @@
  * trivially reversible via git; an arbitrary shell command isn't.
  */
 
-import { isAbsolute, relative, sep } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { updateSettings } from "./settings.ts";
 import { resolvePath } from "./tools/shared.ts";
 
@@ -98,6 +100,7 @@ const PATH_ARG: Record<string, string> = {
 
 /** What a rule's pattern is matched against for this call, if anything. */
 export function permissionSubject(tool: string, args: Record<string, unknown>, cwd: string): string | undefined {
+	if (tool === EXTERNAL_DIRECTORY) return typeof args.path === "string" ? args.path : undefined;
 	const value =
 		tool === "bash" || tool === "ssh"
 			? args.command
@@ -134,7 +137,9 @@ function ruleMatches(rule: string, tool: string, subject: string | undefined, pa
 	if (!globToRegex(name, undefined).test(tool)) return false;
 	if (open < 0) return true;
 	if (subject === undefined || !rule.endsWith(")")) return false;
-	return globToRegex(rule.slice(open + 1, -1), pathLike ? "/" : undefined).test(subject);
+	let pattern = rule.slice(open + 1, -1);
+	if (pathLike && (pattern === "~" || pattern.startsWith("~/"))) pattern = homedir() + pattern.slice(1);
+	return globToRegex(pattern, pathLike ? "/" : undefined).test(subject);
 }
 
 export function evaluatePermission(
@@ -145,7 +150,7 @@ export function evaluatePermission(
 ): PermissionVerdict | undefined {
 	if (!rules) return undefined;
 	const subject = permissionSubject(tool, args, cwd);
-	const pathLike = tool in PATH_ARG;
+	const pathLike = tool in PATH_ARG || tool === EXTERNAL_DIRECTORY;
 	for (const list of ["deny", "approved", "ask", "allow"] as const) {
 		const entries = rules[list];
 		if (!Array.isArray(entries)) continue;
@@ -168,4 +173,59 @@ export function addAllowRule(rule: string): void {
 		const approved = current.permissions?.approved ?? [];
 		return approved.includes(rule) ? {} : { permissions: { ...current.permissions, approved: [...approved, rule] } };
 	});
+}
+
+/**
+ * The file tools stay inside the project unless the user says otherwise: a
+ * path outside it is checked against `external_directory(<glob>)` rules, and
+ * asked about when none matches — reading `~/.ssh` or writing `/etc` is not
+ * something to find out about afterwards. Inside means the session's cwd or
+ * its project root (a worktree's own checkout counts). Reads may also reach
+ * what cast itself hands the agent: saved tool output, uploaded inputs, and
+ * the loaded skills' own files. `writableDirs` are cast's own working files
+ * the agent is told to read and update (its memory), open to every tool.
+ */
+export const EXTERNAL_DIRECTORY = "external_directory";
+
+const READ_TOOLS = new Set(["read", "ls", "glob", "grep"]);
+const DIRECTORY_TOOLS = new Set(["ls", "glob", "grep"]);
+
+/** Follows symlinks where the path exists, so a link in the project can't lead out unseen. */
+function realPath(path: string): string {
+	try {
+		if (existsSync(path)) return realpathSync(path);
+		const parent = dirname(path);
+		return parent === path ? path : join(realPath(parent), basename(path));
+	} catch {
+		return path;
+	}
+}
+
+function within(path: string, dir: string): boolean {
+	const rel = relative(dir, path);
+	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+export interface ExternalTarget {
+	/** The resolved path the call reaches. */
+	path: string;
+	/** The directory an "always allow" covers. */
+	dir: string;
+}
+
+export function externalTarget(
+	tool: string,
+	args: Record<string, unknown>,
+	cwd: string,
+	projectRoot: string,
+	readableDirs: string[] = [],
+	writableDirs: string[] = [],
+): ExternalTarget | undefined {
+	const key = PATH_ARG[tool];
+	const value = key ? args[key] : undefined;
+	if (typeof value !== "string" || !value.trim()) return undefined;
+	const path = realPath(resolvePath(value, cwd));
+	if ([cwd, projectRoot, ...writableDirs].some((dir) => within(path, realPath(dir)))) return undefined;
+	if (READ_TOOLS.has(tool) && readableDirs.some((dir) => within(path, realPath(dir)))) return undefined;
+	return { path, dir: DIRECTORY_TOOLS.has(tool) ? path : dirname(path) };
 }

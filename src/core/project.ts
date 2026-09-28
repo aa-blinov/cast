@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { resolveProjectTrust } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { hasContextFileInDir } from "./context-files.ts";
+import { matchesToolsAllowlist } from "./frontmatter.ts";
 import {
 	globalHooksPath,
 	type HookDiagnostic,
@@ -464,7 +465,11 @@ export function formatSystemEnvironmentBlock(cwd: string, options?: SystemEnviro
 		}
 		if (options.persona) {
 			lines.push(`- Persona: ${options.persona.name} (${options.persona.label})`);
-			if (options.persona.filePath) lines.push(`- Persona file: ${options.persona.filePath}`);
+			// A builtin's file sits in cast's install and is read-only: its path
+			// only lures the model into treating that directory as the project.
+			if (options.persona.filePath && options.persona.source !== "builtin") {
+				lines.push(`- Persona file: ${options.persona.filePath}`);
+			}
 			lines.push(`- Persona source: ${options.persona.source}`);
 		}
 	}
@@ -504,7 +509,9 @@ export function buildSystemPrompt(
 		persona.agentsMd ? contextFilesSuffix : "",
 		rulesSuffix,
 		rulesLazySuffix,
-		skillsPromptSuffix,
+		// The listing only says "call the skill tool": without that tool it
+		// names skills this persona can't open.
+		persona.tools === undefined || matchesToolsAllowlist("skill", persona.tools) ? skillsPromptSuffix : "",
 		mcpPromptSuffix,
 		stateBlock,
 	]

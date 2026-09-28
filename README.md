@@ -211,7 +211,7 @@ Options:
   --resume                   Pick which session to resume (numbered list)
   --resume=<id>              Resume specific session by id
   -s, --session <id>         Resume specific session (alias for --resume=<id>)
-  --bypass-permissions       Skip dangerous-command confirmation
+  --bypass-permissions       Skip confirmations (alias --dangerously-skip-permissions)
   --skill <path>             Load extra skill (repeatable)
   --no-skills                Skip project/agents/global/plugin/builtin skill discovery
   --mcp <path>               Load extra MCP config (repeatable)

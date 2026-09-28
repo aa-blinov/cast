@@ -236,6 +236,10 @@ export class StreamStalledError extends Error {}
  * nothing else ever ended it. Generous, so a model that thinks without
  * streaming reasoning isn't cut off. CAST_STREAM_IDLE_TIMEOUT_MS overrides it.
  */
+/** How long a silence runs before the caller hears about it: a long wait with
+ * nothing on screen reads as a hang, well before the attempt is given up. */
+const STREAM_SILENCE_NOTICE_MS = 60_000;
+
 function streamIdleTimeoutMs(): number {
 	const fromEnv = Number(process.env.CAST_STREAM_IDLE_TIMEOUT_MS);
 	return Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 180_000;
@@ -583,6 +587,7 @@ export async function* streamChat(
 	signal?: AbortSignal,
 	reasoningBody: Record<string, unknown> = {},
 	promptCacheBody: Record<string, unknown> = {},
+	onSilence?: (silentMs: number, giveUpMs: number) => void,
 ): AsyncGenerator<StreamChunk> {
 	const params: OpenAI.ChatCompletionCreateParamsStreaming = {
 		model,
@@ -624,9 +629,14 @@ export async function* streamChat(
 			attemptAbort.abort(new StreamStalledError(`Provider sent nothing for ${Math.round(idleMs / 1000)}s`));
 		};
 		let idleTimer = setTimeout(onIdle, idleMs);
+		const noticeMs = Math.min(STREAM_SILENCE_NOTICE_MS, idleMs / 2);
+		const onQuiet = () => onSilence?.(noticeMs, idleMs);
+		let quietTimer = setTimeout(onQuiet, noticeMs);
 		const stillAlive = () => {
 			clearTimeout(idleTimer);
+			clearTimeout(quietTimer);
 			idleTimer = setTimeout(onIdle, idleMs);
+			quietTimer = setTimeout(onQuiet, noticeMs);
 		};
 		try {
 			// biome-ignore lint/performance/noAwaitInLoops: streaming requires sequential read
@@ -853,6 +863,7 @@ export async function* streamChat(
 			await abortableSleep(Math.min(wait, Math.max(0, remaining)), signal);
 		} finally {
 			clearTimeout(idleTimer);
+			clearTimeout(quietTimer);
 			signal?.removeEventListener("abort", forwardAbort);
 		}
 	}
@@ -979,6 +990,7 @@ export async function streamAndCollect(
 	reasoningBody: Record<string, unknown> = {},
 	onRetry?: (attempt: number, reason: string) => void,
 	promptCacheBody: Record<string, unknown> = {},
+	onSilence?: (silentMs: number, giveUpMs: number) => void,
 ): Promise<CompletionResult> {
 	let content = "";
 	let thinking = "";
@@ -1007,6 +1019,7 @@ export async function streamAndCollect(
 		signal,
 		reasoningBody,
 		promptCacheBody,
+		onSilence,
 	)) {
 		if (chunk.retrying) {
 			onRetry?.(chunk.retrying.attempt, chunk.retrying.reason);

@@ -5,6 +5,7 @@ import { parseInteractiveAction, runNonInteractive } from "../src/core/run.ts";
 // so the event stream can be replayed exactly, which is what its stdout/exit
 // contract is made of.
 const mockSubscribe = vi.fn();
+const mockAnswerConfirm = vi.fn(async () => undefined);
 vi.mock("../src/server/client.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/server/client.ts")>();
 	return {
@@ -13,6 +14,7 @@ vi.mock("../src/server/client.ts", async (importOriginal) => {
 		ensureServerSession: async () => ({ id: "sess-1" }),
 		submitServerChat: async () => undefined,
 		subscribeServerEvents: (...args: unknown[]) => mockSubscribe(...args),
+		answerServerBashConfirm: (...args: unknown[]) => mockAnswerConfirm(...(args as [])),
 	};
 });
 
@@ -96,5 +98,20 @@ describe("one-shot run exit contract", () => {
 		});
 		await runNonInteractive({} as never, { message: "hi", format: "text" } as never);
 		expect(written.join("")).toContain("iteration safety cap");
+	});
+
+	it("answers a confirmation no one here can give with a no, at once, and says why", async () => {
+		replay([
+			{ type: "bash_confirm", id: "c1", command: "read /etc/hosts", reason: "outside the project" },
+			{ type: "end", reason: "stop" },
+		]);
+		const written: string[] = [];
+		vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+			written.push(String(chunk));
+			return true;
+		});
+		await runNonInteractive({} as never, { message: "hi", format: "text" } as never);
+		expect(mockAnswerConfirm).toHaveBeenCalledWith(expect.anything(), "sess-1", "c1", false);
+		expect(written.join("")).toContain("read /etc/hosts needs confirmation (outside the project)");
 	});
 });

@@ -33,6 +33,8 @@ vi.mock("../src/core/project.ts", () => ({
 vi.mock("../src/core/settings.ts", () => ({
 	loadSettings: vi.fn(() => ({ serverToken: "test-password", disabledMcpServers: [] })),
 	updateSettings: vi.fn(),
+	isBypassPermissionsFlag: (arg: string | undefined) =>
+		arg === "--bypass-permissions" || arg === "--dangerously-skip-permissions",
 }));
 
 vi.mock("../src/core/startup.ts", () => ({

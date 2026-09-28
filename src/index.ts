@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { runAcpAgent } from "./core/acp/agent.ts";
 import { printHelp } from "./core/help.ts";
 import { runInteractive, runNonInteractive } from "./core/run.ts";
-import { loadSettings } from "./core/settings.ts";
+import { isBypassPermissionsFlag, loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
 import { runUpgrade } from "./core/upgrade.ts";
 import { WorktreeBlockedError } from "./core/worktree.ts";
@@ -21,6 +21,7 @@ import {
 	readLiveServerState,
 	readServerState,
 	releaseStartLock,
+	START_LOCK_WAIT_ATTEMPTS,
 } from "./server/daemon-state.ts";
 import { runTui } from "./ui/tui.tsx";
 
@@ -102,7 +103,7 @@ async function main(): Promise<void> {
 			resumeRequested = true;
 			resumeId = args[i + 1];
 			i++;
-		} else if (args[i] === "--bypass-permissions") {
+		} else if (isBypassPermissionsFlag(args[i])) {
 			cliBypassPermissions = true;
 		} else if (args[i] === "--skill") {
 			const path = args[i + 1];
@@ -197,7 +198,7 @@ async function ensureDaemon(): Promise<string | undefined> {
 		// everyone else waits (bounded) for it to record state and then reuses
 		// the winner instead of spawning a second process.
 		const waitForDaemon = async (attempt: number): Promise<string | undefined> => {
-			if (attempt >= 100) return undefined;
+			if (attempt >= START_LOCK_WAIT_ATTEMPTS) return undefined;
 			const existing = readLiveServerState();
 			if (existing) {
 				const token = await tokenFor(existing);
@@ -271,7 +272,7 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 			interactive = true;
 		} else if (args[i] === "--keep-background") {
 			keepBackground = true;
-		} else if (args[i] === "--bypass-permissions") {
+		} else if (isBypassPermissionsFlag(args[i])) {
 			cliBypassPermissions = true;
 		} else if (args[i] === "--skill") {
 			const path = args[i + 1];
@@ -310,7 +311,8 @@ Options:
   --format <default|json>  Output format
   --interactive          Persistent JSONL session protocol on stdin/stdout
   --keep-background      Leave background tasks this run started running after it exits
-  --bypass-permissions   Skip destructive-action confirmations (bash + write)`);
+  --bypass-permissions   Skip destructive-action confirmations (bash + write);
+                         also --dangerously-skip-permissions`);
 			return;
 		} else {
 			messageParts.push(...args.slice(i));
@@ -379,7 +381,7 @@ async function handleAcpCommand(args: string[], version: string): Promise<void> 
 			i++;
 		} else if (a === "--continue" || a === "-c") {
 			resume = true;
-		} else if (a === "--bypass-permissions") {
+		} else if (isBypassPermissionsFlag(a)) {
 			bypass = true;
 		} else if (a === "--help" || a === "-h") {
 			console.log(`Usage: cast acp [options]
