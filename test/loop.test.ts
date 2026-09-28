@@ -3861,6 +3861,27 @@ describe("compactSessionMessages — extraInstructions", () => {
 		expect(promptText.endsWith("PLAN_MODE_EXTRA_INSTRUCTIONS")).toBe(true);
 	});
 
+	it("logs the summary request under the session it compacts", async () => {
+		let target: unknown;
+		vi.mocked(streamAndCollect).mockImplementationOnce(async (...args: unknown[]) => {
+			target = args[12];
+			return { content: "summary", thinking: "", finishReason: "stop" };
+		});
+		await compactSessionMessages(
+			history(),
+			testConfig,
+			"test-model",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			"session-7",
+		);
+		expect(target).toEqual({ sessionId: "session-7", purpose: "compaction" });
+	});
+
 	it("leaves the prompt untouched without extraInstructions", async () => {
 		let promptText = "";
 		vi.mocked(streamAndCollect).mockImplementationOnce(

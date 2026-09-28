@@ -8,6 +8,7 @@ import OpenAI, {
 import type { ChatCompletionFunctionTool, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { type AppConfig, providerFetch } from "./config.ts";
 import { estimateRequestCost } from "./models-dev.ts";
+import { type LoggedRequest, logRequest, type RequestLogTarget } from "./request-log.ts";
 import { retryMaxWaitSeconds, retryQuotaWaitSeconds } from "./settings.ts";
 import { ThinkBlockParser } from "./vendors.ts";
 
@@ -588,6 +589,8 @@ export async function* streamChat(
 	reasoningBody: Record<string, unknown> = {},
 	promptCacheBody: Record<string, unknown> = {},
 	onSilence?: (silentMs: number, giveUpMs: number) => void,
+	/** Sees the exact body once, before the first attempt (the request log). */
+	onRequest?: (params: Record<string, unknown>) => void,
 ): AsyncGenerator<StreamChunk> {
 	const params: OpenAI.ChatCompletionCreateParamsStreaming = {
 		model,
@@ -608,6 +611,8 @@ export async function* streamChat(
 	if (Object.keys(promptCacheBody).length > 0) {
 		Object.assign(params, promptCacheBody);
 	}
+
+	onRequest?.(params as unknown as Record<string, unknown>);
 
 	let attempt = 0;
 	let yieldedAny = false;
@@ -991,6 +996,7 @@ export async function streamAndCollect(
 	onRetry?: (attempt: number, reason: string) => void,
 	promptCacheBody: Record<string, unknown> = {},
 	onSilence?: (silentMs: number, giveUpMs: number) => void,
+	requestLog?: RequestLogTarget,
 ): Promise<CompletionResult> {
 	let content = "";
 	let thinking = "";
@@ -1009,44 +1015,56 @@ export async function streamAndCollect(
 	// short" from "finished, then the user hit Esc a beat late" so the latter
 	// isn't mislabeled aborted.
 	let sawFinish = false;
+	let logged: LoggedRequest | undefined;
 
-	for await (const chunk of streamChat(
-		client,
-		model,
-		messages,
-		tools,
-		maxTokens,
-		signal,
-		reasoningBody,
-		promptCacheBody,
-		onSilence,
-	)) {
-		if (chunk.retrying) {
-			onRetry?.(chunk.retrying.attempt, chunk.retrying.reason);
-			continue;
-		}
-		firstChunkAt ??= Date.now();
+	try {
+		for await (const chunk of streamChat(
+			client,
+			model,
+			messages,
+			tools,
+			maxTokens,
+			signal,
+			reasoningBody,
+			promptCacheBody,
+			onSilence,
+			requestLog
+				? (params) => {
+						logged = logRequest(requestLog, params);
+					}
+				: undefined,
+		)) {
+			if (chunk.retrying) {
+				logged?.retry(chunk.retrying.reason);
+				onRetry?.(chunk.retrying.attempt, chunk.retrying.reason);
+				continue;
+			}
+			firstChunkAt ??= Date.now();
 
-		if (chunk.usage) usage = chunk.usage;
-		// Thinking before content so a single chunk that closes the <think> tag and
-		// immediately starts the answer (common for Qwen/DeepSeek/MiniMax-M3) creates
-		// the thinking block first and appends content after it — the other order
-		// puts the content block first and the thinking block behind it.
-		if (chunk.thinking) {
-			thinking += chunk.thinking;
-			onThinking?.(chunk.thinking);
+			if (chunk.usage) usage = chunk.usage;
+			// Thinking before content so a single chunk that closes the <think> tag and
+			// immediately starts the answer (common for Qwen/DeepSeek/MiniMax-M3) creates
+			// the thinking block first and appends content after it — the other order
+			// puts the content block first and the thinking block behind it.
+			if (chunk.thinking) {
+				thinking += chunk.thinking;
+				onThinking?.(chunk.thinking);
+			}
+			if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
+			if (chunk.refusal) refusal = (refusal ?? "") + chunk.refusal;
+			if (chunk.content) {
+				content += chunk.content;
+				onToken?.(chunk.content);
+			}
+			if (chunk.toolCalls) toolCalls = chunk.toolCalls;
+			if (chunk.finishReason) {
+				finishReason = chunk.finishReason;
+				sawFinish = true;
+			}
 		}
-		if (chunk.reasoningContent) reasoningContent += chunk.reasoningContent;
-		if (chunk.refusal) refusal = (refusal ?? "") + chunk.refusal;
-		if (chunk.content) {
-			content += chunk.content;
-			onToken?.(chunk.content);
-		}
-		if (chunk.toolCalls) toolCalls = chunk.toolCalls;
-		if (chunk.finishReason) {
-			finishReason = chunk.finishReason;
-			sawFinish = true;
-		}
+	} catch (error) {
+		logged?.fail(error);
+		throw error;
 	}
 	// Capture wall-clock end after the stream is fully consumed (tsLastByte
 	// on done) rather than on the last chunk.
@@ -1064,6 +1082,15 @@ export async function streamAndCollect(
 	// avoids false-flagging providers that omit finish_reason but still send a
 	// terminal usage chunk (include_usage) on a genuinely complete turn.
 	const disconnected = Boolean(!sawFinish && !signal?.aborted && firstChunkAt !== undefined && usage === undefined);
+	// What the provider sent, before the Hermes recovery below rewrites it.
+	logged?.end({
+		finishReason: disconnected ? "disconnected" : finishReason,
+		usage,
+		content,
+		reasoning: thinking,
+		toolCalls,
+		interrupted,
+	});
 
 	// Hermes-XML tool-call recovery. When the structured tool_calls are missing
 	// or carry malformed JSON (truncated `arguments`), but the content holds an

@@ -5,7 +5,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcpAgent } from "./core/acp/agent.ts";
 import { printHelp } from "./core/help.ts";
+import { listLoggedRequests, loadLoggedRequest } from "./core/request-log.ts";
 import { runInteractive, runNonInteractive } from "./core/run.ts";
+import { loadSessionMeta } from "./core/session.ts";
 import { isBypassPermissionsFlag, loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
 import { runUpgrade } from "./core/upgrade.ts";
@@ -65,6 +67,11 @@ async function main(): Promise<void> {
 		return;
 	}
 
+	if (args[0] === "requests") {
+		handleRequestsCommand(args.slice(1));
+		return;
+	}
+
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
 
 	let cliModel: string | undefined;
@@ -95,7 +102,15 @@ async function main(): Promise<void> {
 			resumeRequested = true;
 		} else if (args[i] === "--resume") {
 			resumeRequested = true;
-			resumePicker = true;
+			// `cast --resume <id>`, as in Claude Code: the id used to become the
+			// first prompt, sent to the session picked from the list.
+			const next = args[i + 1];
+			if (next && !next.startsWith("-") && loadSessionMeta(next)) {
+				resumeId = next;
+				i++;
+			} else {
+				resumePicker = true;
+			}
 		} else if (args[i]?.startsWith("--resume=")) {
 			resumeRequested = true;
 			resumeId = args[i]!.slice("--resume=".length);
@@ -442,6 +457,33 @@ Neovim) to wire it as an agent.`);
 
 	const permissionMode = bypass ? "bypass" : (startup.permissionMode as "default");
 	runAcpAgent(startup, { version, permissionMode, sessionId, resume });
+}
+
+/** `cast requests <session> [n] [--response]`: the request log (request-log.ts). */
+function handleRequestsCommand(args: string[]): void {
+	const [sessionId, seqArg] = args.filter((a) => !a.startsWith("--"));
+	if (!sessionId) {
+		console.error("Usage: cast requests <session-id> [n] [--response]");
+		process.exit(1);
+	}
+	if (seqArg !== undefined) {
+		const logged = loadLoggedRequest(sessionId, Number(seqArg));
+		if (!logged) {
+			console.error(`No request ${seqArg} logged for session ${sessionId}`);
+			process.exit(1);
+		}
+		console.log(JSON.stringify(args.includes("--response") ? logged : logged.body, null, 2));
+		return;
+	}
+	const entries = listLoggedRequests(sessionId);
+	if (entries.length === 0) console.log(`No requests logged for session ${sessionId}`);
+	for (const e of entries) {
+		const cached = e.usage?.cacheReadTokens ? ` (${e.usage.cacheReadTokens} cached)` : "";
+		const tokens = e.usage ? ` ${e.usage.promptTokens} in${cached} / ${e.usage.completionTokens} out` : "";
+		const retries = e.retries.length ? ` retries=${e.retries.length}` : "";
+		const how = e.error ? `error: ${e.error}` : (e.finishReason ?? e.outcome ?? "unfinished");
+		console.log(`${e.seq}\t${e.startedAt}\t${e.purpose}\t${e.messageCount} msgs\t${how}${tokens}${retries}`);
+	}
 }
 
 async function handleServerCommand(args: string[]): Promise<void> {

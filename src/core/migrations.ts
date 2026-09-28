@@ -841,6 +841,45 @@ DROP TABLE IF EXISTS messages_fts;
 			}
 		},
 	},
+	{
+		version: 39,
+		name: "model-request-log",
+		up: (db) => {
+			// Every request body sent to a model, rebuildable byte for byte (see
+			// request-log.ts). No foreign key: a request can go out before its
+			// session row is first saved; the trigger cleans up on delete instead.
+			db.exec(`
+CREATE TABLE IF NOT EXISTS model_request_blobs (
+  session_id TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  data BLOB NOT NULL,
+  PRIMARY KEY (session_id, hash)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS model_requests (
+  session_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  purpose TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  params_json TEXT NOT NULL,
+  message_hashes TEXT NOT NULL,
+  tools_hash TEXT,
+  retries_json TEXT,
+  outcome TEXT,
+  finish_reason TEXT,
+  usage_json TEXT,
+  error TEXT,
+  response_hash TEXT,
+  PRIMARY KEY (session_id, seq)
+);
+CREATE TRIGGER IF NOT EXISTS model_requests_session_ad AFTER DELETE ON sessions
+BEGIN
+  DELETE FROM model_requests WHERE session_id = OLD.id;
+  DELETE FROM model_request_blobs WHERE session_id = OLD.id;
+END;
+`);
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

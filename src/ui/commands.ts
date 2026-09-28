@@ -1693,6 +1693,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					(usage) => addUsage(session, usage, { compaction: true }),
 					deps.planMode ? PLAN_COMPACTION_PROMPT : undefined,
 					reminderStateFromPlan(planState),
+					undefined,
+					session.id,
 				);
 				if (result.compacted) {
 					recordCompaction(session, session.messages, result.messages);
