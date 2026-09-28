@@ -69,6 +69,19 @@ describe("context-files", () => {
 			expect(file!.content.startsWith("xxxx")).toBe(true);
 		});
 
+		it("loads the same text once, however many levels carry it", () => {
+			// ~/.cast/AGENTS.md copied to ~/AGENTS.md, or a package that copied the
+			// root file: the model got it twice, on every request.
+			mkdirSync(join(fakeHome, ".cast"), { recursive: true });
+			writeFileSync(join(fakeHome, ".cast", "AGENTS.md"), "Use tabs.\n", "utf-8");
+			writeFileSync(join(fakeHome, "AGENTS.md"), "Use tabs.", "utf-8");
+			writeFileSync(join(level1, "CLAUDE.md"), "Use tabs.\n", "utf-8");
+			writeFileSync(join(level2, "AGENTS.md"), "Run the tests.", "utf-8");
+			const loaded = loadProjectContextFiles(level2, true);
+			expect(loaded.map((f) => f.content.trim())).toEqual(["Use tabs.", "Run the tests."]);
+			expect(loaded[0]!.path).toBe(join(fakeHome, ".cast", "AGENTS.md"));
+		});
+
 		it("leaves an ordinary context file byte-for-byte alone", () => {
 			writeFileSync(join(level2, "AGENTS.md"), "Use tabs.\nRun the tests.\n", "utf-8");
 			const loaded = loadProjectContextFiles(level2, true);
@@ -168,6 +181,12 @@ describe("context-files", () => {
 		it("does NOT include the cwd-level AGENTS.md (that's the static base)", () => {
 			const files = resolveNestedContextFiles(repo, ["apps/web/AGENTS.md"]);
 			expect(files.map((f) => f.content)).not.toContain("ROOT");
+		});
+
+		it("attaches a nested copy of another nested file once", () => {
+			writeFileSync(join(repo, "apps", "web", "components", "AGENTS.md"), "WEB");
+			const files = resolveNestedContextFiles(repo, ["apps/web/components/Button.tsx"]);
+			expect(files.map((f) => f.content)).toEqual(["WEB"]);
 		});
 
 		it("scopes to the touched subtree — an api file does not pull web instructions", () => {
