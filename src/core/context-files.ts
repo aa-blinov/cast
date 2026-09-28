@@ -77,13 +77,21 @@ export function loadProjectContextFiles(cwd: string, projectTrusted: boolean, di
 	const resolvedCwd = resolve(cwd);
 	const result: ContextFile[] = [];
 	const seen = new Set<string>();
+	// The same text reaches the prompt twice through a symlink, a copy in
+	// ~/.cast/ and ~/, or a monorepo package that copied the root file, and is
+	// then paid for on every request.
+	const seenContent = new Set<string>();
+	const isNew = (file: ContextFile): boolean => {
+		const key = file.content.trim();
+		if (seen.has(file.path) || seenContent.has(key)) return false;
+		seen.add(file.path);
+		seenContent.add(key);
+		return true;
+	};
 
 	const globalDir = join(homedir(), ".cast");
 	const globalFile = loadContextFileFromDir(globalDir, diagnostics);
-	if (globalFile) {
-		result.push(globalFile);
-		seen.add(globalFile.path);
-	}
+	if (globalFile && isNew(globalFile)) result.push(globalFile);
 
 	// Walk ancestors from cwd to root. cwd itself is project-local (trust-gated);
 	// everything above is the user's own filesystem hierarchy.
@@ -93,12 +101,7 @@ export function loadProjectContextFiles(cwd: string, projectTrusted: boolean, di
 
 	while (true) {
 		const file = loadContextFileFromDir(current, diagnostics);
-		if (file && !seen.has(file.path)) {
-			if (current !== resolvedCwd || projectTrusted) {
-				ancestorFiles.unshift(file);
-				seen.add(file.path);
-			}
-		}
+		if (file && (current !== resolvedCwd || projectTrusted) && isNew(file)) ancestorFiles.unshift(file);
 		if (current === root) break;
 		const parent = resolve(current, "..");
 		if (parent === current) break;
@@ -127,6 +130,7 @@ export function resolveNestedContextFiles(cwd: string, contextFiles: string[]): 
 	const prefix = resolvedCwd + sep;
 	const out: ContextFile[] = [];
 	const seenFiles = new Set<string>();
+	const seenContent = new Set<string>();
 	const seenDirs = new Set<string>();
 
 	for (const rel of contextFiles) {
@@ -137,8 +141,9 @@ export function resolveNestedContextFiles(cwd: string, contextFiles: string[]): 
 			if (!seenDirs.has(dir)) {
 				seenDirs.add(dir);
 				const file = loadContextFileFromDir(dir);
-				if (file && !seenFiles.has(file.path)) {
+				if (file && !seenFiles.has(file.path) && !seenContent.has(file.content.trim())) {
 					seenFiles.add(file.path);
+					seenContent.add(file.content.trim());
 					out.push(file);
 				}
 			}
