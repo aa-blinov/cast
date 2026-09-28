@@ -14,7 +14,7 @@ Read file contents. Supports text files and images (jpg, jpeg, png, gif, webp, b
 | `offset` | No | Line number to start from (1-indexed) |
 | `limit` | No | Maximum lines to read |
 
-Output is truncated to 2000 lines or 128KB. Images are automatically downscaled to fit within model vision limits; only rejected if truly huge (25MB+). Each line is prefixed with its line number (`N: content`). Copy the exact text (not the number) when calling `edit`.
+Output is truncated to 2000 lines or 50KB, and the result says which `offset` to continue from. A line longer than 2000 characters (a minified bundle, a JSON dump) is cut, with its full length noted. Images are automatically downscaled to fit within model vision limits; only rejected if truly huge (25MB+). Each line is prefixed with its line number (`N: content`). Copy the exact text (not the number) when calling `edit`.
 
 ### `write`
 
@@ -112,7 +112,7 @@ Execute a bash command in the current working directory.
 | `command` | Yes | Bash command to execute |
 | `timeout` | No | Foreground grace/timeout in **milliseconds** (default: 180000, max: 3600000); an explicit background task uses it as its kill timeout. A value under 1000 is read as seconds and converted, with a warning. Nothing legitimately asks for a sub-second deadline |
 
-Output is truncated to the last 2000 lines or 128KB (whichever is hit first). When it is cut, the whole output is saved under `~/.cast/tool-output/` and the result names the file, so the agent can `read` or `grep` the part it missed instead of running the command again. Saved files are kept for 7 days, and one file stops growing at 64MB. `bash_output` and background tasks point at the same file.
+Long output shows the model its start and end, 32000 characters at most, with the cut marked in the middle. When it is cut, the whole output is saved under `~/.cast/tool-output/` and the result names the file, so the agent can `read` or `grep` the part it missed instead of running the command again. Saved files are kept for 7 days, and one file stops growing at 64MB. `bash_output` and background tasks point at the same file.
 
 For finite long-running commands (docker build, npm install, large test suites), increase the timeout:
 
@@ -168,7 +168,7 @@ Execute one command on a remote host via SSH. Only available when SSH hosts are 
 | `command` | Yes | Remote command to execute |
 | `timeout` | No | Timeout in **milliseconds** (default: 180000), read the same way as `bash`'s |
 
-Output is combined stdout+stderr, truncated to the last 2000 lines or 128KB. A cut output is saved to a local file the same way as for `bash`.
+Output is combined stdout+stderr, cut the same way as `bash`: start and end, 32000 characters at most. A cut output is saved to a local file the same way as for `bash`.
 
 ### Configuration
 

@@ -29,6 +29,10 @@ export interface AppConfig {
 	compactionThreshold: number;
 	maxToolOutputLines: number;
 	maxToolOutputBytes: number;
+	/** What a bash result shows the model; unset means BASH_OUTPUT_MAX_CHARS. */
+	maxBashOutputChars?: number;
+	/** Bytes of one `read` result; unset means READ_MAX_BYTES. */
+	maxReadBytes?: number;
 	/** Milliseconds. See DEFAULT_BASH_TIMEOUT_MS. */
 	defaultBashTimeoutMs: number;
 	reasoningLevel: string;
@@ -138,6 +142,9 @@ export function loadConfig(connection: { baseURL: string; apiKey: string }): App
 		compactionThreshold: compactionThresholdSetting(settings),
 		maxToolOutputLines: maxToolOutputLinesSetting(settings),
 		maxToolOutputBytes: maxToolOutputBytesSetting(settings),
+		// A limit the user chose themselves outranks the tighter bash and read defaults.
+		maxBashOutputChars: settings.maxToolOutputBytes === undefined ? undefined : maxToolOutputBytesSetting(settings),
+		maxReadBytes: settings.maxToolOutputBytes === undefined ? undefined : maxToolOutputBytesSetting(settings),
 		defaultBashTimeoutMs: DEFAULT_BASH_TIMEOUT_MS,
 		reasoningLevel: "off",
 		reasoningParams: { body: {}, enabled: false },
