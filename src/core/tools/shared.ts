@@ -160,7 +160,7 @@ export type ToolExecutor = (
 
 /** Asked before running a bash command that matches a known-dangerous pattern. Return false to block it. */
 /** `rule` is what an "always allow" answer saves to settings (see permissions.ts). */
-export type ConfirmBash = (command: string, reason: string, rule?: string) => Promise<boolean>;
+export type ConfirmBash = (command: string, reason: string, rule?: string, signal?: AbortSignal) => Promise<boolean>;
 
 /** Asked before running a destructive file operation (write/edit/patch, plus MCP
  * tools whose name starts with `mcp_`). Return false to block it. */

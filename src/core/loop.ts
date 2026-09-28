@@ -104,6 +104,7 @@ import {
 	isOpenWorkGateActive,
 	type OpenWorkGateConfig,
 } from "./open-work-gate.ts";
+import { approvalOwner, setPendingApproval } from "./pending-approval.ts";
 import { evaluatePermission, exactRule, permissionSubject } from "./permissions.ts";
 import type { Persona } from "./personas.ts";
 import { checkReadOnlyCommand, listPlanNames, type PlanState, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
@@ -870,6 +871,10 @@ export interface LoopConfig {
 	steeringQueue?: MessageQueue;
 	followUpQueue?: MessageQueue;
 	confirmBash?: ConfirmBash;
+	/** A prompt the user already answered yes to in an earlier process (see
+	 * pending-approval.ts): the first confirmation showing exactly this text
+	 * passes without asking. */
+	preApproved?: string;
 	/** Hard cap on outer-loop iterations (each iteration is one LLM call plus
 	 * its tool batch). Goal mode sets this so an autonomous run can't loop
 	 * forever on different-but-unproductive tool calls; the model is nudged
@@ -2104,7 +2109,28 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// Commands the user just approved through an `ask` rule: the dangerous-
 	// pattern gate inside bash must not ask about the same call again.
 	const approvedCommands = new Set<string>();
-	const confirmBashWithHooks: ConfirmBash | undefined = loopConfig.confirmBash
+	// Every prompt goes through here. While it waits it is also kept in the
+	// session (of the conversation, for a subagent's), so a client that opens
+	// the session after this process died can still answer it. `preApproved`
+	// is such an answer: the one call it names passes without asking again.
+	let preApproved = loopConfig.preApproved;
+	const approvalSessionId = loopConfig.sessionId ? approvalOwner(loopConfig.sessionId) : undefined;
+	const askUser: ConfirmBash | undefined = loopConfig.confirmBash
+		? async (command, reason, rule, confirmSignal) => {
+				if (preApproved !== undefined && preApproved === command) {
+					preApproved = undefined;
+					return true;
+				}
+				if (approvalSessionId)
+					setPendingApproval(approvalSessionId, { command, reason, rule, askedAt: Date.now() });
+				try {
+					return await loopConfig.confirmBash!(command, reason, rule, confirmSignal);
+				} finally {
+					if (approvalSessionId) setPendingApproval(approvalSessionId, undefined);
+				}
+			}
+		: undefined;
+	const confirmBashWithHooks: ConfirmBash | undefined = askUser
 		? async (command, reason, rule) => {
 				if (approvedCommands.delete(command)) return true;
 				// An allow rule is the user's standing answer to this prompt.
@@ -2113,7 +2139,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					if (evaluatePermission(rules, tool, { command }, cwd)?.action === "allow") return true;
 				}
 				const hooksForConfirm = activeHooks;
-				if (!hooksForConfirm) return loopConfig.confirmBash!(command, reason, rule);
+				if (!hooksForConfirm) return askUser!(command, reason, rule);
 				const pr = await runHooksForEvent(hooksForConfirm, {
 					event: "PermissionRequest",
 					matchTarget: "bash",
@@ -2133,7 +2159,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					});
 					return false;
 				}
-				const allowed = await loopConfig.confirmBash!(command, reason, rule);
+				const allowed = await askUser!(command, reason, rule);
 				if (!allowed) {
 					void runHooksForEvent(hooksForConfirm, {
 						event: "PermissionDenied",
@@ -2146,7 +2172,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 				return allowed;
 			}
-		: loopConfig.confirmBash;
+		: askUser;
 
 	/**
 	 * `permissions` rules from settings, for every tool (built-in and MCP).
@@ -2163,7 +2189,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		}
 		if (verdict?.action !== "ask") return undefined;
 		const isShell = name === "bash" || name === "ssh";
-		const confirm = isShell ? confirmBashWithHooks : loopConfig.confirmBash;
+		const confirm = isShell ? confirmBashWithHooks : askUser;
 		if (!confirm) return undefined;
 		const subject = permissionSubject(name, args, cwd);
 		const label = isShell ? String(args.command) : subject ? `${name} ${subject}` : name;

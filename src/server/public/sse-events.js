@@ -353,6 +353,10 @@ export function handleSseEvent(event, context) {
 			setSession((prev) => (prev ? { ...prev, bashConfirm: { id: event.id, command: event.command, reason: event.reason, rule: event.rule } } : prev));
 			notifyIfHidden("Cast: approval needed", event.command);
 			break;
+		case "bash_confirm_resolved":
+			// Answered in another tab or the TUI, or timed out: the card is stale.
+			setSession((prev) => (prev?.bashConfirm?.id === event.id ? { ...prev, bashConfirm: undefined } : prev));
+			break;
 		case "agent_actor": {
 			const actor = event.actor;
 			const status = actor.status === "success" ? "completed" : actor.status;

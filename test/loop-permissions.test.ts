@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
+import { getPendingApproval } from "../src/core/pending-approval.ts";
+import { createSession, saveSession } from "../src/core/session.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/llm.ts")>();
@@ -68,7 +70,10 @@ function oneCall(name: string, args: object) {
 		.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
 }
 
-async function run(confirmBash?: (command: string, reason: string, rule?: string) => Promise<boolean>) {
+async function run(
+	confirmBash?: (command: string, reason: string, rule?: string) => Promise<boolean>,
+	extra: { sessionId?: string; preApproved?: string } = {},
+) {
 	const messages: Message[] = await runAgentLoop([{ role: "user", content: "go" }], {
 		config: testConfig,
 		model: "test-model",
@@ -76,6 +81,7 @@ async function run(confirmBash?: (command: string, reason: string, rule?: string
 		systemPrompt: "test",
 		confirmBash,
 		onEvent: () => {},
+		...extra,
 	});
 	const tool = messages.find((m) => m.role === "tool") as { content: string } | undefined;
 	return tool?.content ?? "";
@@ -94,7 +100,12 @@ describe("permission rules in the loop", () => {
 		oneCall("write", { path: "notes.md", content: "x" });
 		const confirm = vi.fn(async () => false);
 		expect(await run(confirm)).toContain("the user declined write");
-		expect(confirm).toHaveBeenCalledWith("write notes.md", "permission rule write(*.md)", "write(notes.md)");
+		expect(confirm).toHaveBeenCalledWith(
+			"write notes.md",
+			"permission rule write(*.md)",
+			"write(notes.md)",
+			undefined,
+		);
 		expect(() => readFileSync(join(dir, "proj", "notes.md"))).toThrow();
 	});
 
@@ -112,5 +123,31 @@ describe("permission rules in the loop", () => {
 		const confirm = vi.fn(async () => false);
 		expect(await run(confirm)).not.toContain("Blocked");
 		expect(confirm).not.toHaveBeenCalled();
+	});
+
+	it("keeps the request in the session while it waits, so another process can answer it", async () => {
+		const session = createSession("test-model", join(dir, "proj"));
+		saveSession(session);
+		rules({ ask: ["write(*.md)"] });
+		oneCall("write", { path: "notes.md", content: "x" });
+		let seen: unknown;
+		await run(
+			async () => {
+				seen = getPendingApproval(session.id);
+				return false;
+			},
+			{ sessionId: session.id },
+		);
+		expect(seen).toMatchObject({ command: "write notes.md", rule: "write(notes.md)" });
+		expect(getPendingApproval(session.id)).toBeUndefined();
+	});
+
+	it("lets the one call an earlier approval names through, once", async () => {
+		rules({ ask: ["write(*.md)"] });
+		oneCall("write", { path: "notes.md", content: "x" });
+		const confirm = vi.fn(async () => false);
+		expect(await run(confirm, { preApproved: "write notes.md" })).not.toContain("declined");
+		expect(confirm).not.toHaveBeenCalled();
+		expect(readFileSync(join(dir, "proj", "notes.md"), "utf-8")).toBe("x");
 	});
 });

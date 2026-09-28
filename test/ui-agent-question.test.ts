@@ -71,6 +71,21 @@ describe("parseDaemonPendingState", () => {
 		});
 	});
 
+	it("restores a confirmation the daemon is still waiting on, and ignores a malformed one", () => {
+		expect(
+			parseDaemonPendingState({
+				bashConfirm: {
+					id: "c1",
+					command: "write a.md",
+					reason: "permission rule write(*.md)",
+					rule: "write(a.md)",
+				},
+			}).bashConfirm,
+		).toEqual({ id: "c1", command: "write a.md", reason: "permission rule write(*.md)", rule: "write(a.md)" });
+		expect(parseDaemonPendingState({ bashConfirm: null }).bashConfirm).toBeUndefined();
+		expect(parseDaemonPendingState({ bashConfirm: { id: 1 } }).bashConfirm).toBeUndefined();
+	});
+
 	it("surfaces the backend turnStartedAt so the elapsed timer resumes across reconnect", () => {
 		expect(
 			parseDaemonPendingState({

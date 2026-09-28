@@ -794,6 +794,11 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					turnStartedAt: { type: ["integer", "null"], description: "Epoch ms the in-flight turn began." },
 					question: { type: ["object", "null"], description: "Pending question awaiting an answer." },
 					planTransition: { type: ["object", "null"] },
+					bashConfirm: {
+						type: ["object", "null"],
+						description:
+							"The confirmation the turn is waiting on (same shape as the bash_confirm event), or null.",
+					},
 					usage: { type: "object", description: "Token and cost totals for the session." },
 					backgroundTasks: {
 						type: "array",

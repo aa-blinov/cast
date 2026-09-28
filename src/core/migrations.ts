@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   share_token TEXT,
   plan_question_json TEXT,
   plan_transition_json TEXT,
-  checkpoint_watermark_seq INTEGER
+  checkpoint_watermark_seq INTEGER,
+  pending_approval_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -827,6 +828,17 @@ DROP TABLE IF EXISTS messages_fts;
 			db.exec(
 				"UPDATE messages SET reasoning = NULL, turn_meta = NULL WHERE role != 'assistant' AND (reasoning IS NOT NULL OR turn_meta IS NOT NULL)",
 			);
+		},
+	},
+	{
+		version: 38,
+		name: "session-pending-approval",
+		up: (db) => {
+			// A confirmation the turn was waiting on when cast stopped: kept so
+			// the next client to open the session can still answer it.
+			if (!columnExists(db, "sessions", "pending_approval_json")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN pending_approval_json TEXT");
+			}
 		},
 	},
 ];

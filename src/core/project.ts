@@ -519,7 +519,7 @@ export function buildSystemPrompt(
  * goes stale.
  */
 export function makeConfirmBash(pickers: Pickers, permissionMode: PermissionMode): ConfirmBash {
-	return async (command, reason, rule) => {
+	return async (command, reason, rule, signal) => {
 		if (permissionMode === "bypass") return true;
 		if (!process.stdin.isTTY) {
 			console.log(
@@ -536,7 +536,7 @@ export function makeConfirmBash(pickers: Pickers, permissionMode: PermissionMode
 				{ value: "always", label: `Always allow: saves ${saves}` },
 				{ value: "block", label: "Block" },
 			],
-			{ title: "Allow this?" },
+			{ title: "Allow this?", signal },
 		);
 		if (picked === "always") addAllowRule(saves);
 		return picked === "once" || picked === "always";

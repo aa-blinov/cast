@@ -31,6 +31,17 @@ function createContext() {
 }
 
 describe("web SSE events", () => {
+	it("drops a confirmation card once it is settled elsewhere, and only that one", () => {
+		const state = createContext();
+		handleSseEvent({ type: "bash_confirm_resolved", id: "old" }, state);
+		const update = state.setSession.mock.calls[0]![0] as (prev: unknown) => unknown;
+		const card = { id: "s1", bashConfirm: { id: "c1", command: "x", reason: "y" } };
+		expect(update(card)).toBe(card);
+		handleSseEvent({ type: "bash_confirm_resolved", id: "c1" }, state);
+		const clear = state.setSession.mock.calls[1]![0] as (prev: unknown) => { bashConfirm?: unknown };
+		expect(clear(card).bashConfirm).toBeUndefined();
+	});
+
 	it("notifies while the tab is hidden: turn done and approval needed", () => {
 		const shown: [string, { body: string }][] = [];
 		const FakeNotification = Object.assign(
