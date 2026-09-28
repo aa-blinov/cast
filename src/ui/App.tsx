@@ -306,9 +306,9 @@ export function App(props: AppProps): JSX.Element {
 	}, [onClearScreen]);
 	const confirmBash = useMemo(() => {
 		const confirm = makeConfirmBash(pickers, permissionMode);
-		return (command: string, reason: string, rule?: string) => {
+		return (command: string, reason: string, rule?: string, signal?: AbortSignal) => {
 			if (permissionMode !== "bypass") notifyTerminal(`cast: approval needed: ${command}`);
-			return confirm(command, reason, rule);
+			return confirm(command, reason, rule, signal);
 		};
 	}, [pickers, permissionMode]);
 
@@ -506,7 +506,9 @@ export function App(props: AppProps): JSX.Element {
 			planSignalRef.current ??
 			agent.pendingPlanTransition?.kind ??
 			readPlanTransition(planState)?.kind ??
-			(readPlanQuestion(planState) ? "question" : null);
+			// A reattaching thin client learns of a waiting question from the
+			// daemon's state, with no signal event and no local planState.
+			(agent.pendingQuestion || readPlanQuestion(planState) ? "question" : null);
 		if (!kind) return;
 		planSignalRef.current = null;
 		if (kind === "done" && planMode) {

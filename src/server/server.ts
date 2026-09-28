@@ -1365,6 +1365,9 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			mode: ws.session.mode ?? "build",
 			question: bridge.getQuestion(ws.id),
 			planTransition: bridge.getPlanTransition(ws.id),
+			// Held in memory while the turn waits: a client that reloads or
+			// reattaches mid-wait gets the prompt back from here.
+			bashConfirm: bridge.getBashConfirm(ws.id) ?? null,
 			title: ws.session.title,
 			pinned: ws.session.pinned,
 			shareToken: ws.session.shareToken ?? null,

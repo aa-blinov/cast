@@ -28,6 +28,13 @@ import {
 	loadMcpConfig,
 	type McpSetupResult,
 } from "../core/mcp.ts";
+import {
+	approvedResumeText,
+	getPendingApproval,
+	type PendingApproval,
+	restoredReason,
+	setPendingApproval,
+} from "../core/pending-approval.ts";
 import { addAllowRule, exactRule } from "../core/permissions.ts";
 
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
@@ -224,7 +231,17 @@ export type WebEvent =
 	/** The turn hit a command the dangerous-command gate wants confirmed. The
 	 * agent is blocked until a client answers via `answerBashConfirm`, or the
 	 * request times out (denied). */
-	| { type: "bash_confirm"; id: string; command: string; reason: string; rule?: string };
+	| { type: "bash_confirm"; id: string; command: string; reason: string; rule?: string }
+	/** That confirmation is settled (answered anywhere, timed out, or replaced),
+	 * so every client drops its prompt for it. */
+	| { type: "bash_confirm_resolved"; id: string };
+
+export interface PendingBashConfirm {
+	id: string;
+	command: string;
+	reason: string;
+	rule?: string;
+}
 
 export interface WebAgentSession {
 	id: string;
@@ -444,7 +461,7 @@ export interface ServerBridge {
 	answerBashConfirm(sessionId: string, id: string, allow: boolean, always?: boolean): boolean;
 	/** The confirmation this session is blocked on, if any — so a client that
 	 * connects mid-turn can render it instead of waiting for a replayed event. */
-	getBashConfirm(sessionId: string): { id: string; command: string; reason: string } | undefined;
+	getBashConfirm(sessionId: string): PendingBashConfirm | undefined;
 	getPlanTransition(sessionId: string): { kind: "done" } | undefined;
 	resolvePlanTransition(sessionId: string, kind: "done"): { ok: true } | { ok: false; error: string };
 	/** Flip a session between plan/build mode. The TUI in daemon mode owns its
@@ -1165,6 +1182,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (ws.pendingBashConfirm?.id !== id) return;
 				clearTimeout(timer);
 				ws.pendingBashConfirm = undefined;
+				broadcaster.broadcast(ws, { type: "bash_confirm_resolved", id });
 				resolve(allow);
 			};
 			ws.pendingBashConfirm = { id, command, reason, rule, settle };
@@ -1172,9 +1190,37 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 	}
 
-	function getBashConfirm(sessionId: string): { id: string; command: string; reason: string } | undefined {
-		const pending = sessions.get(sessionId)?.pendingBashConfirm;
-		return pending ? { id: pending.id, command: pending.command, reason: pending.reason } : undefined;
+	/** A confirmation its turn was waiting on when cast stopped: the turn is
+	 * gone, the request is still in the session. Its id is derived from it,
+	 * so every client names the same one. */
+	function restoredConfirm(ws: WebAgentSession): (PendingBashConfirm & { approval: PendingApproval }) | undefined {
+		if (ws.status === "running" || ws.runner.isRunning) return undefined;
+		const approval = getPendingApproval(ws.id);
+		if (!approval) return undefined;
+		return {
+			id: `restored-${approval.askedAt}`,
+			command: approval.command,
+			reason: restoredReason(approval),
+			rule: approval.rule,
+			approval,
+		};
+	}
+
+	function dropRestoredConfirm(ws: WebAgentSession): void {
+		const restored = getPendingApproval(ws.id);
+		if (!restored) return;
+		setPendingApproval(ws.id, undefined);
+		broadcaster.broadcast(ws, { type: "bash_confirm_resolved", id: `restored-${restored.askedAt}` });
+	}
+
+	function getBashConfirm(sessionId: string): PendingBashConfirm | undefined {
+		const ws = sessions.get(sessionId);
+		const pending = ws?.pendingBashConfirm;
+		if (pending) return { id: pending.id, command: pending.command, reason: pending.reason, rule: pending.rule };
+		const restored = ws ? restoredConfirm(ws) : undefined;
+		return restored
+			? { id: restored.id, command: restored.command, reason: restored.reason, rule: restored.rule }
+			: undefined;
 	}
 
 	/** Answer a pending confirmation. Returns false when there is none, or when
@@ -1182,7 +1228,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function answerBashConfirm(sessionId: string, id: string, allow: boolean, always = false): boolean {
 		const ws = sessions.get(sessionId);
 		const pending = ws?.pendingBashConfirm;
-		if (!pending || pending.id !== id) return false;
+		if (!pending || pending.id !== id) {
+			const restored = ws ? restoredConfirm(ws) : undefined;
+			if (!ws || !restored || restored.id !== id) return false;
+			dropRestoredConfirm(ws);
+			if (!allow) return true;
+			if (always) addAllowRule(restored.rule ?? exactRule("bash", { command: restored.command }, ""));
+			// The call that asked died with its process: a new turn tells the
+			// model it was approved, and lets that one call through unasked.
+			void submit(sessionId, approvedResumeText(restored.approval), undefined, undefined, undefined, {
+				preApproved: restored.command,
+			}).catch(() => {});
+			return true;
+		}
 		if (allow && always) addAllowRule(pending.rule ?? exactRule("bash", { command: pending.command }, ""));
 		pending.settle(allow);
 		return true;
@@ -1360,7 +1418,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		images?: string[],
 		clientMessageId?: string,
 		queuedMessages?: Message[],
-		opts?: { maxOuterIterations?: number },
+		opts?: { maxOuterIterations?: number; preApproved?: string },
 	): Promise<void> {
 		const ws = sessions.get(sessionId);
 		if (!ws) throw new Error("Session not found");
@@ -1415,6 +1473,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// second loop after the first async setup step completes.
 		const ac = new AbortController();
 		const lease = ws.runner.startRun(ac);
+		// A new message moves on from a confirmation left over from before
+		// cast stopped: it counts as declined.
+		if (opts?.preApproved === undefined) dropRestoredConfirm(ws);
 		const automaticMemoryMaintenance = ws.session.messages.length === 0;
 		const automaticMemoryMessages = ws.session.messages.slice();
 		ws.currentTurnId = clientMessageId ?? randomUUID();
@@ -1799,6 +1860,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			sessionId: ws.session.id,
 			permissionMode: effectiveMode,
 			...(opts?.maxOuterIterations ? { maxOuterIterations: opts.maxOuterIterations } : {}),
+			...(opts?.preApproved !== undefined ? { preApproved: opts.preApproved } : {}),
 			// Read fresh each submit so an edited maxTurnIterations applies on
 			// the next agent call.
 			defaultOuterIterations: turnIterationCap(),
@@ -2323,6 +2385,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function abort(sessionId: string): void {
 		const ws = sessions.get(sessionId);
 		if (!ws) return;
+		// A turn stopped while waiting on a confirmation must not keep waiting
+		// on it until the timeout.
+		ws.pendingBashConfirm?.settle(false);
 		ws.runner.abort();
 	}
 

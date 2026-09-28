@@ -14,6 +14,12 @@ import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts"
 import { describeTurnError, isRetryableStreamError, type Message, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
+import {
+	approvedResumeText,
+	getPendingApproval,
+	restoredReason,
+	setPendingApproval,
+} from "../core/pending-approval.ts";
 import type { Persona } from "../core/personas.ts";
 import { type PlanQuestion, type PlanTransition, readActivePlan } from "../core/plan.ts";
 import { resolveHooksForCwd } from "../core/project.ts";
@@ -38,7 +44,7 @@ import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts
 import { extractSystemReminders } from "../core/system-reminder.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import type { PersonaActivation } from "../core/tools/persona.ts";
-import { completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
+import { type ConfirmBash, completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
 import type { SubagentProgress } from "../core/tools/task.ts";
 import {
 	abortServerSession,
@@ -194,16 +200,34 @@ export function parseQuestionToolResult(content: string): PlanQuestion | undefin
 }
 
 /** Extract persisted decision state from the daemon's session response. */
+export interface DaemonBashConfirm {
+	id: string;
+	command: string;
+	reason: string;
+	rule?: string;
+}
+
 export function parseDaemonPendingState(state: Record<string, unknown>): {
 	question: PlanQuestion | undefined;
 	planTransition: PlanTransition | undefined;
+	bashConfirm: DaemonBashConfirm | undefined;
 	status: AgentStatus | undefined;
 	startedAt: number | undefined;
 } {
 	const question = state.question;
 	const planTransition = state.planTransition;
 	const status = state.status;
+	const confirm = state.bashConfirm as Partial<DaemonBashConfirm> | null | undefined;
 	return {
+		bashConfirm:
+			confirm && typeof confirm.id === "string" && typeof confirm.command === "string"
+				? {
+						id: confirm.id,
+						command: confirm.command,
+						reason: typeof confirm.reason === "string" ? confirm.reason : "",
+						rule: typeof confirm.rule === "string" ? confirm.rule : undefined,
+					}
+				: undefined,
 		question:
 			question && typeof question === "object" && Array.isArray((question as { questions?: unknown }).questions)
 				? (question as PlanQuestion)
@@ -365,7 +389,7 @@ interface UseAgentSessionParams {
 	backgroundTasks: BackgroundTaskRegistry;
 	permissionMode: PermissionMode;
 	mcpResult: McpSetupResult;
-	confirmBash: (command: string, reason: string, rule?: string) => Promise<boolean>;
+	confirmBash: ConfirmBash;
 	/** Per-turn system prompt rebuild for sticky rules + @-mention. */
 	rebuildSystemPrompt?: (context: { userText: string; contextFiles: string[] }) => string;
 	/** The agent saved a persona and asked to switch to it (persona_create with
@@ -891,6 +915,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		isRunning: () => runner.isRunning,
 	};
 
+	// The one confirmation the next local turn may pass unasked (see below).
+	const preApprovedRef = useRef<string | undefined>(undefined);
 	const submit = useCallback(
 		async (text: string, images?: PendingImage[], goal?: boolean | number) => {
 			if (isClient && effectiveDaemonUrl) {
@@ -911,7 +937,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					images: images?.map((img) => img.dataUrl),
 					clientMessageId,
 				});
-				setMessages((msgs) => [...msgs, { role: "user", content: text, clientMessageId }]);
+				setMessages((msgs) => [...msgs, ...userMessageRows(text, clientMessageId)]);
 				// Show the activity spinner immediately — the daemon's
 				// status:running SSE event (which would otherwise be the first
 				// signal) only lands after the POST round-trip. Guarded so an
@@ -964,6 +990,11 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			const ac = new AbortController();
 			acRef.current = ac;
 			const lease = runner.startRun(ac);
+			// Set only for the turn an approved restored confirmation starts; any
+			// other new message moves on from that confirmation (declined).
+			const preApproved = preApprovedRef.current;
+			preApprovedRef.current = undefined;
+			if (preApproved === undefined) setPendingApproval(session.id, undefined);
 			const automaticMemoryMaintenance = session.messages.length === 0;
 			const automaticMemoryMessages = session.messages.slice();
 			let chk: Awaited<ReturnType<typeof createCheckpoint>>;
@@ -1059,7 +1090,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// after it (the new turn's response) would still show up, landing at a
 			// higher index, which is exactly the "my message vanished but the
 			// reply appeared" bug this fixes.
-			setMessages((msgs) => [...msgs, { role: "user", content: messageContentToText(userContent) }]);
+			setMessages((msgs) => [...msgs, ...userMessageRows(messageContentToText(userContent))]);
 			const onSigint = () => {
 				runner.abort();
 			};
@@ -1134,6 +1165,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					steeringQueue: runner.steeringQueue,
 					followUpQueue: runner.followUpQueue,
 					confirmBash: permissionMode === "bypass" ? undefined : confirmBash,
+					preApproved,
+					// Same crash-safe snapshot the daemon keeps: quitting mid-turn
+					// (or a crash) must not lose the prompt and what already ran.
+					onMessagesChanged: (messages) => {
+						session.messages = messages;
+						try {
+							saveSession(session);
+						} catch {
+							// Best-effort; the end-of-turn save still runs.
+						}
+					},
 					mcpTools: mcpResult.toolDefinitions,
 					mcpToolIndex: mcpResult.toolIndex,
 					hooks: turnHooks,
@@ -1483,6 +1525,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				if (disposed) return;
 				setPendingQuestion(pending.question);
 				setPendingPlanTransition(pending.planTransition);
+				if (pending.bashConfirm) askDaemonConfirmRef.current(pending.bashConfirm);
 				if (pending.status) {
 					backendStartRef.current = pending.startedAt ?? null;
 					setStatus(pending.status);
@@ -1505,6 +1548,64 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// whenever permissionMode changes).
 	const confirmBashRef = useRef(confirmBash);
 	confirmBashRef.current = confirmBash;
+
+	// The daemon runs the loop, so its confirmation gate asks the attached
+	// clients; answer with the same prompt a local run shows. One prompt per
+	// request id, whether it arrived as an event or from the state a
+	// (re)attaching client loads, and closed when it is settled elsewhere.
+	const openConfirmsRef = useRef(new Map<string, AbortController>());
+
+	// Local mode: a confirmation the turn was waiting on when this TUI quit is
+	// still in the session. Ask it again on open; yes starts a turn that lets
+	// that one call through (the daemon does the same for its clients).
+	const submitRef = useRef(submit);
+	submitRef.current = submit;
+	useEffect(() => {
+		if (isClient) return;
+		const approval = getPendingApproval(session.id);
+		if (!approval) return;
+		const controller = new AbortController();
+		void (async () => {
+			let allow = false;
+			try {
+				allow = await confirmBashRef.current(
+					approval.command,
+					restoredReason(approval),
+					approval.rule,
+					controller.signal,
+				);
+			} catch {
+				allow = false;
+			}
+			if (controller.signal.aborted) return;
+			setPendingApproval(session.id, undefined);
+			if (!allow) return;
+			preApprovedRef.current = approval.command;
+			void submitRef.current(approvedResumeText(approval));
+		})();
+		return () => controller.abort();
+	}, [isClient, session.id]);
+	const askDaemonConfirmRef = useRef((_request: DaemonBashConfirm) => {});
+	askDaemonConfirmRef.current = (request) => {
+		if (openConfirmsRef.current.has(request.id)) return;
+		const controller = new AbortController();
+		openConfirmsRef.current.set(request.id, controller);
+		void (async () => {
+			let allow = false;
+			try {
+				allow = await confirmBashRef.current(request.command, request.reason, request.rule, controller.signal);
+			} catch {
+				allow = false;
+			}
+			openConfirmsRef.current.delete(request.id);
+			if (controller.signal.aborted || !serverClient) return;
+			try {
+				await answerServerBashConfirm(serverClient, session.id, request.id, allow);
+			} catch {
+				// The daemon times the request out on its own if this never lands.
+			}
+		})();
+	};
 
 	// crash) is surfaced immediately and triggers daemon re-selection; the stream
 	// hydrates persisted session state after it reconnects.
@@ -1544,6 +1645,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						if (disposed) return;
 						setPendingQuestion(pending.question);
 						setPendingPlanTransition(pending.planTransition);
+						if (pending.bashConfirm) askDaemonConfirmRef.current(pending.bashConfirm);
 						if (pending.status) {
 							backendStartRef.current = pending.startedAt ?? null;
 							setStatus(pending.status);
@@ -1693,28 +1795,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					}
 					break;
 				}
-				case "bash_confirm": {
-					// The daemon runs the loop, so its dangerous-command gate has no
-					// picker of its own — it asks the attached clients instead. Answer
-					// with the same prompt a local run would show.
-					void (async () => {
-						let allow = false;
-						try {
-							allow = await confirmBashRef.current(event.command, event.reason, event.rule);
-						} catch {
-							allow = false;
-						}
-						if (serverClient) {
-							try {
-								await answerServerBashConfirm(serverClient, session.id, event.id, allow);
-							} catch {
-								// The daemon times the request out on its own if this
-								// never lands; nothing useful to do from here.
-							}
-						}
-					})();
+				case "bash_confirm":
+					askDaemonConfirmRef.current(event);
 					break;
-				}
+				case "bash_confirm_resolved":
+					openConfirmsRef.current.get(event.id)?.abort();
+					break;
 				case "agent_actor": {
 					const status = event.actor.status === "success" ? "completed" : event.actor.status;
 					setMessages((msgs) => [...msgs, { role: "warning", content: `${event.actor.agent} ${status}` }]);

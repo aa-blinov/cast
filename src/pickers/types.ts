@@ -20,6 +20,9 @@ export interface PickOptions<T = unknown> {
 	defaultIndex?: number;
 	/** A prior-attempt error shown in red above the title (e.g. failed validation). */
 	error?: string;
+	/** Closes the picker as cancelled (null) — for a question someone else
+	 *  answered, like a confirmation settled from another client. */
+	signal?: AbortSignal;
 	/** Enable inline fuzzy filter at the top of the modal. When set, the
 	 *  picker accepts printable input and Esc is the only cancel key. */
 	search?: {

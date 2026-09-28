@@ -52,7 +52,7 @@ interface ModalBridge {
  * `pickOption`/`promptText` here just publish a request; App renders the
  * matching modal inline and resolves it via the `resolve` callback.
  */
-function createModalBridge(onLog: (text: string) => void): ModalBridge {
+export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 	let current: ModalRequest | null = null;
 	const listeners = new Set<() => void>();
 
@@ -63,17 +63,21 @@ function createModalBridge(onLog: (text: string) => void): ModalBridge {
 
 	const pickers: Pickers = {
 		pickOption<T>(options: PickOption<T>[], opts?: PickOptions): Promise<T | null> {
-			if (options.length === 0) return Promise.resolve(null);
+			if (options.length === 0 || opts?.signal?.aborted) return Promise.resolve(null);
 			return new Promise((resolvePromise) => {
-				setRequest({
+				const request: ModalRequest = {
 					kind: "option",
 					options: options as PickOption<unknown>[],
 					opts,
 					resolve: (value) => {
-						setRequest(null);
+						opts?.signal?.removeEventListener("abort", onAbort);
+						if (current === request) setRequest(null);
 						resolvePromise(value as T | null);
 					},
-				});
+				};
+				const onAbort = () => request.resolve(null);
+				opts?.signal?.addEventListener("abort", onAbort, { once: true });
+				setRequest(request);
 			});
 		},
 		promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null> {

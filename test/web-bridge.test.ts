@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { getDb } from "../src/core/db.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
+import { getPendingApproval, setPendingApproval } from "../src/core/pending-approval.ts";
 import type { Persona } from "../src/core/personas.ts";
 import { getModelsCache, setModelsCache } from "../src/core/readline.ts";
 import type { Rule } from "../src/core/rules.ts";
@@ -3401,6 +3402,68 @@ describe("web bridge", () => {
 			await expect(pending).resolves.toBe(true);
 			const settings = JSON.parse(readFileSync(join(fakeHome, ".cast", "settings.json"), "utf-8"));
 			expect(settings.permissions.approved).toEqual(["write(notes.md)"]);
+		});
+
+		it("hands a (re)attaching client the pending request, and tells everyone once it is settled", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const events: Array<{ type: string; id?: string }> = [];
+			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			await bridge.submit(ws.id, "write it");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+
+			const confirm = confirmFromLoop() as (command: string, reason: string, rule?: string) => Promise<boolean>;
+			const pending = confirm("write a.md", "permission rule write(*.md)", "write(a.md)");
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			const asked = bridge.getBashConfirm(ws.id);
+			expect(asked).toMatchObject({ command: "write a.md", rule: "write(a.md)" });
+
+			expect(bridge.answerBashConfirm(ws.id, asked!.id, false)).toBe(true);
+			await expect(pending).resolves.toBe(false);
+			expect(events.filter((e) => e.type === "bash_confirm_resolved")).toEqual([
+				{ type: "bash_confirm_resolved", id: asked!.id },
+			]);
+			expect(bridge.getBashConfirm(ws.id)).toBeUndefined();
+		});
+
+		it("offers a request left over from before cast stopped; yes resumes with that one call pre-approved", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const events: Array<{ type: string; id?: string }> = [];
+			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			saveSession(ws.session);
+			setPendingApproval(ws.id, {
+				command: "write a.md",
+				reason: "permission rule write(*.md)",
+				askedAt: Date.now(),
+			});
+
+			const restored = bridge.getBashConfirm(ws.id);
+			expect(restored?.id).toMatch(/^restored-/);
+			expect(restored?.reason).toContain("before cast stopped");
+			expect(bridge.answerBashConfirm(ws.id, restored!.id, true)).toBe(true);
+			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+			const [messages, opts] = runAgentLoop.mock.calls.at(-1)! as [
+				Array<{ content: unknown }>,
+				{ preApproved?: string },
+			];
+			expect(opts.preApproved).toBe("write a.md");
+			expect(JSON.stringify(messages.at(-1)?.content)).toContain("Approved after cast restarted: write a.md");
+			expect(getPendingApproval(ws.id)).toBeUndefined();
+			expect(events).toContainEqual({ type: "bash_confirm_resolved", id: restored!.id });
+		});
+
+		it("a new message instead of an answer drops the leftover request", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			saveSession(ws.session);
+			setPendingApproval(ws.id, { command: "write a.md", reason: "r", askedAt: Date.now() });
+			await bridge.submit(ws.id, "never mind");
+			expect(getPendingApproval(ws.id)).toBeUndefined();
+			expect(bridge.getBashConfirm(ws.id)).toBeUndefined();
 		});
 
 		// Nobody attached means nobody to ask, and "nobody said no" is not a yes.
