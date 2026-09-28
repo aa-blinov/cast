@@ -4,6 +4,18 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.47.0
+
+### Added
+
+- **Claude Code skills load too.** Skills in `~/.claude/skills` show up everywhere, and a trusted project's `.claude/skills` loads after `.cast/skills` and `.agents/skills`.
+- **Whole skill sources can be switched off.** `/skills sources` (or Settings → Skills → Sources in the web UI) turns builtin, cast, agents or Claude Code skills off and on; the slash palette updates at once. Saved as `disabledSkillSources`.
+
+### Fixed
+
+- **Symlinked skills load.** A skill directory or `SKILL.md` that is a symlink, as `npx skills add` creates, was skipped. Dangling links and link loops are ignored.
+- A persona without the `skill` tool no longer gets a skill listing in its prompt.
+
 ## 0.46.0
 
 ### Added
