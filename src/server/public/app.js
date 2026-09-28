@@ -998,6 +998,13 @@ function App() {
 			setBackendUp,
 			applyTheme,
 		});
+	// Stable across renders: Message skips re-rendering on equal props.
+	const forkBeforeMessage = useCallback(
+		(seq) => {
+			if (activeSessionIdRef.current) forkSession(activeSessionIdRef.current, seq);
+		},
+		[forkSession, activeSessionIdRef],
+	);
 	useEffect(() => {
 		const pending = pendingPersonaSessionRef.current;
 		if (running || !pending) return;
@@ -2219,7 +2226,7 @@ function App() {
 									onRetry: loadOlderMessages,
 								})
 							}
-							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} />`)}
+							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${forkBeforeMessage} />`)}
 							${
 								!running &&
 								(messages[messages.length - 1]?.notice === "error" ||

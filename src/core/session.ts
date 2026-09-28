@@ -12,6 +12,7 @@ import type { Message, Usage } from "./llm.ts";
 import { sessionMemoryDir } from "./memory-files.ts";
 import type { PlanQuestion, PlanTransition } from "./plan.ts";
 import { deriveSessionTitle } from "./session-title.ts";
+import { extractSystemReminders } from "./system-reminder.ts";
 import type { TodoItem } from "./todo.ts";
 
 const READ_FILES_RE = /<read-files>\n([\s\S]*?)\n<\/read-files>/;
@@ -2525,31 +2526,82 @@ export function listBackgroundSessions(parentSessionId?: string): SessionState[]
 	return rows.map(({ id }) => loadSession(id)).filter((session): session is SessionState => session !== null);
 }
 
+/** A user prompt a session can be forked before (see forkSession). */
+export interface ForkPoint {
+	seq: number;
+	text: string;
+}
+
+/** The prompts the user typed, oldest first: the points a fork can start before. */
+export function listForkPoints(sessionId: string): ForkPoint[] {
+	const { messages, seqs } = getFullHistoryWithReasoning(sessionId);
+	const points: ForkPoint[] = [];
+	messages.forEach((m, i) => {
+		if (m.role !== "user") return;
+		const text = extractSystemReminders(messageText(m)).cleaned;
+		if (text && !text.startsWith("<checkpoint-boundary>")) points.push({ seq: seqs[i]!, text });
+	});
+	return points;
+}
+
+/**
+ * The conversation up to the message at `beforeSeq`: the source's current
+ * system prompt, then every original message before that point. Compaction
+ * summaries are left out: where a marker sits says nothing reliable about
+ * which messages it replaced, and the originals are all still stored. A fork
+ * that no longer fits is compacted on its first request, like any session.
+ * Cut before a user prompt, the prefix never splits a tool call from its result.
+ */
+function contextBefore(source: SessionState, beforeSeq: number): Message[] {
+	const { messages, reasoning, turnMeta, seqs } = getFullHistoryWithReasoning(source.id);
+	const out: Message[] = [];
+	const system = source.messages[0];
+	if (system?.role === "system" && !messageText(system).startsWith(COMPACTION_MARKER_PREFIX)) {
+		out.push(JSON.parse(JSON.stringify(system)) as Message);
+	}
+	messages.forEach((m, i) => {
+		if (seqs[i]! >= beforeSeq || m.role === "system") return;
+		if (reasoning[i] !== undefined || turnMeta[i] !== undefined) {
+			messageExtras.set(m, { reasoning: reasoning[i], turnMeta: turnMeta[i] });
+		}
+		out.push(m);
+	});
+	return out;
+}
+
 /**
  * Creates an independent branch from the context currently active in a
  * session. Historical rows omitted by compaction intentionally stay omitted:
  * restoring only part of an old tool turn can produce an invalid provider
  * transcript, while the active context is already the safe continuation.
  */
-export function forkSession(source: SessionState): SessionState {
+export function forkSession(source: SessionState, beforeSeq?: number): SessionState {
 	const fork = createSession(source.model, source.cwd ?? process.cwd());
-	fork.messages = JSON.parse(JSON.stringify(source.messages)) as Message[];
-	source.messages.forEach((message, i) => {
-		const extras = messageExtras.get(message);
-		if (extras) messageExtras.set(fork.messages[i]!, { ...extras });
-	});
+	if (beforeSeq === undefined) {
+		fork.messages = JSON.parse(JSON.stringify(source.messages)) as Message[];
+		source.messages.forEach((message, i) => {
+			const extras = messageExtras.get(message);
+			if (extras) messageExtras.set(fork.messages[i]!, { ...extras });
+		});
+	} else {
+		fork.messages = contextBefore(source, beforeSeq);
+	}
 	fork.persona = source.persona;
 	fork.mode = source.mode;
 	fork.providerUrl = source.providerUrl;
 	fork.providerName = source.providerName;
 	fork.lastAnnouncedLocalDate = source.lastAnnouncedLocalDate;
-	fork.reasoning = source.reasoning
-		? (JSON.parse(JSON.stringify(source.reasoning)) as Record<number, string>)
-		: undefined;
-	fork.turnMeta = source.turnMeta
-		? (JSON.parse(JSON.stringify(source.turnMeta)) as Record<number, TurnMeta>)
-		: undefined;
-	fork.todos = source.todos ? (JSON.parse(JSON.stringify(source.todos)) as TodoItem[]) : undefined;
+	// Index maps and the todo list describe the source as it is now; an
+	// earlier point has its reasoning attached per message, and no list yet.
+	if (beforeSeq === undefined) {
+		fork.reasoning = source.reasoning
+			? (JSON.parse(JSON.stringify(source.reasoning)) as Record<number, string>)
+			: undefined;
+		fork.turnMeta = source.turnMeta
+			? (JSON.parse(JSON.stringify(source.turnMeta)) as Record<number, TurnMeta>)
+			: undefined;
+		fork.todos = source.todos ? (JSON.parse(JSON.stringify(source.todos)) as TodoItem[]) : undefined;
+	}
 	fork.title = source.title ? `${source.title} (fork)` : undefined;
 	saveSession(fork);
 	return fork;

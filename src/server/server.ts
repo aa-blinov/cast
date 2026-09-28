@@ -1287,11 +1287,24 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { ok: true });
 	});
 
-	route("POST", "/api/sessions/:id/fork", (_req, res, params) => {
+	route("POST", "/api/sessions/:id/fork", async (req, res, params) => {
 		const source = bridge.getSession(params.id);
 		if (!source) return json(res, { error: "Not found" }, 404);
 		if (source.status === "running") return json(res, { error: "Agent running — abort before forking" }, 409);
-		const fork = bridge.forkSession(params.id);
+		let beforeSeq: number | undefined;
+		const body = await readBody(req);
+		if (body.trim()) {
+			try {
+				const parsed = JSON.parse(body) as { beforeSeq?: unknown };
+				if (parsed.beforeSeq !== undefined) {
+					if (!Number.isInteger(parsed.beforeSeq)) throw new Error();
+					beforeSeq = parsed.beforeSeq as number;
+				}
+			} catch {
+				return json(res, { error: "beforeSeq must be an integer message seq" }, 400);
+			}
+		}
+		const fork = bridge.forkSession(params.id, beforeSeq);
 		if (!fork) return json(res, { error: "Could not fork session" }, 400);
 		json(res, { id: fork.id, session: fork.session }, 201);
 	});

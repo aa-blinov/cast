@@ -8,7 +8,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 |---------|-------------|
 | `/new` | Start a new session (autosaves current if non-empty) |
 | `/continue` | Resume the most recent session (like `cast -c`, but mid-session) |
-| `/fork` | Create a new session from the current safe context and switch to it |
+| `/fork` | Branch into a new session: the whole current context, or the conversation before one of your messages |
 | `/worktree <name>` | Switch current session into an isolated git worktree (`list`, `remove <name>`) |
 | `/sessions` | Session picker with type-to-filter search (by message text, project path, or id); switch or delete |
 | `/clear` | Clear conversation context (and save the cleared state) |
@@ -24,7 +24,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 
 Removing files created during the turn also removes any *you* created in that window: the restore cannot tell them apart, and they cannot be brought back. When there are such files, `/undo` names them and asks before proceeding; over the web API it refuses and asks you to re-run as `/undo --force`. `--force` skips the question.
 
-`/fork` leaves the original session unchanged and starts an independent new session with the context currently sent to the model. It deliberately does not restore compacted-out history, copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
+`/fork` leaves the original session unchanged and starts an independent new session. It asks where from: the whole session (the context currently sent to the model), or before any message you sent (the original conversation up to there, including what compaction had summarized). It does not copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
 
 ## Model and Provider
 

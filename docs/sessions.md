@@ -87,7 +87,7 @@ When enabled, cast creates (or reuses) a git worktree at `.cast/worktrees/<name>
 ```
 /sessions                  # Opens session picker
 /continue                  # Resume the most recent session
-/fork                      # Branch the current safe context into a new session
+/fork                      # Branch the session, whole or from before one of your messages
 /worktree <name>           # Switch current session to a git worktree
 ```
 
@@ -95,7 +95,9 @@ The `/sessions` picker shows each session's project, first message, last-updated
 
 `/continue` is the quick path: it finds the most recently updated session that isn't the current one and switches to it, autosaving the current session first if it has messages. If there's no other session to resume, it shows a notice. This is the in-session equivalent of `cast -c`.
 
-`/fork` creates a new session and switches to it, preserving only the context that is currently safe to send to the model. The source session is not changed. Compacted-out history, pending questions and plan approvals, undo checkpoints, and usage counters are not copied. A fork shares the same working directory; use `/worktree` afterwards when file isolation is needed.
+`/fork` asks where to branch from: the whole session, or before any message you sent. **Whole session** keeps only the context currently sent to the model. **Before a message** takes the conversation up to that point, with every original message, even ones compaction has since summarized (a fork too large for the model is compacted on its first request); send the message again, or something else. In the web UI, the fork button next to a message you sent does the same.
+
+`/fork` creates a new session and switches to it; the source is not changed. Compacted-out history (in the whole-session form), pending questions and plan approvals, undo checkpoints, and usage counters are not copied. A fork shares the same working directory; use `/worktree` afterwards when file isolation is needed.
 
 ### Web UI Sidebar
 

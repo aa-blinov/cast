@@ -197,10 +197,16 @@ export async function createServerSession(
 	return (data as { id: string }).id;
 }
 
-/** Fork the daemon session's current safe context into a new idle session. */
-export async function forkServerSession(client: ServerClient, sessionId: string): Promise<SessionState> {
+/** Fork the daemon session's current safe context (or its history before
+ *  the message at `beforeSeq`) into a new idle session. */
+export async function forkServerSession(
+	client: ServerClient,
+	sessionId: string,
+	beforeSeq?: number,
+): Promise<SessionState> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/fork`, {
 		method: "POST",
+		...(beforeSeq === undefined ? {} : { body: { beforeSeq } }),
 	});
 	if (status !== 201 || !data || typeof data !== "object" || !("session" in data)) {
 		const message = data && typeof data === "object" && "error" in data ? String(data.error) : "fork failed";

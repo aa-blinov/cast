@@ -11,7 +11,7 @@ import type { Persona } from "../src/core/personas.ts";
 import { getModelsCache, setModelsCache } from "../src/core/readline.ts";
 import type { Rule } from "../src/core/rules.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
-import { createSession, getFullHistory, loadSession, saveSession } from "../src/core/session.ts";
+import { createSession, getFullHistory, listForkPoints, loadSession, saveSession } from "../src/core/session.ts";
 import { setProjectTrust } from "../src/core/settings.ts";
 import type { StartupResult } from "../src/core/startup.ts";
 import { sessionInputsDir } from "../src/server/inputs.ts";
@@ -3251,6 +3251,27 @@ describe("web bridge", () => {
 		expect(bridge.getSession(fork!.id)).toBe(fork);
 		fork!.session.messages[0] = { role: "user", content: "Fork-only request" };
 		expect(source.session.messages[0]).toEqual({ role: "user", content: "Original request" });
+	});
+
+	it("/fork <seq> forks the history before that message", async () => {
+		const bridge = createServerBridge(makeResult());
+		const source = bridge.createSession();
+		source.session.messages = [
+			{ role: "user", content: "first ask" },
+			{ role: "assistant", content: "one" },
+			{ role: "user", content: "second ask" },
+			{ role: "assistant", content: "two" },
+		];
+		saveSession(source.session);
+		const [, second] = listForkPoints(source.id);
+
+		const result = await bridge.executeCommand(source.id, `/fork ${second!.seq}`);
+		const forkId = (result as { result: { sessionId: string } }).result.sessionId;
+		expect(bridge.getSession(forkId)?.session.messages.filter((m) => m.role !== "system")).toEqual([
+			{ role: "user", content: "first ask" },
+			{ role: "assistant", content: "one" },
+		]);
+		expect(await bridge.executeCommand(source.id, "/fork soon")).toMatchObject({ ok: false });
 	});
 
 	it("forking a session with an attachment gives the fork its own independent copy, immune to the source being deleted later", () => {

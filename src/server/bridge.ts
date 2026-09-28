@@ -374,7 +374,7 @@ export interface ServerBridge {
 		toolSources?: { noSkills?: boolean; noMcp?: boolean; reasoningLevel?: string },
 	): WebAgentSession;
 	/** Creates an idle copy of the current safe context and registers it as a new session. */
-	forkSession(sessionId: string): WebAgentSession | undefined;
+	forkSession(sessionId: string, beforeSeq?: number): WebAgentSession | undefined;
 	/** The session's `task` children, newest first, running ones marked. */
 	listAgents(sessionId: string): SubagentSummary[];
 	/** Stops a running child of this session; false when it isn't running. */
@@ -1124,10 +1124,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		saveSession(forked);
 	}
 
-	function forkSessionInstance(sessionId: string): WebAgentSession | undefined {
+	function forkSessionInstance(sessionId: string, beforeSeq?: number): WebAgentSession | undefined {
 		const source = getSession(sessionId);
 		if (!source || source.status === "running") return undefined;
-		const session = forkSession(source.session);
+		const session = forkSession(source.session, beforeSeq);
 		rehomeForkedAttachments(source.session.id, session);
 		const persona = resolvePersona(session.persona ?? "") ?? currentPersona;
 		const runner = createAgentRunner();

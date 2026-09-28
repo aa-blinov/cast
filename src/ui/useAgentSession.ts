@@ -306,7 +306,7 @@ export interface UseAgentSession {
 	abort: () => void;
 	clearContext: () => void;
 	/** Fork the current safe context; daemon mode performs the copy on the daemon. */
-	forkSession: () => Promise<SessionState | undefined>;
+	forkSession: (beforeSeq?: number) => Promise<SessionState | undefined>;
 	resetContext: () => string | undefined;
 	/** Re-reads the on-disk session messages into the in-memory list. */
 	refresh: () => void;
@@ -2024,13 +2024,16 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		[isClient, serverClient, session.id],
 	);
 
-	const forkCurrentSession = useCallback(async (): Promise<SessionState | undefined> => {
-		if (isClient && effectiveDaemonUrl) {
-			if (!serverClient) return undefined;
-			return forkServerSession(serverClient, session.id);
-		}
-		return forkSession(session);
-	}, [isClient, effectiveDaemonUrl, serverClient, session]);
+	const forkCurrentSession = useCallback(
+		async (beforeSeq?: number): Promise<SessionState | undefined> => {
+			if (isClient && effectiveDaemonUrl) {
+				if (!serverClient) return undefined;
+				return forkServerSession(serverClient, session.id, beforeSeq);
+			}
+			return forkSession(session, beforeSeq);
+		},
+		[isClient, effectiveDaemonUrl, serverClient, session],
+	);
 
 	const clearContext = useCallback(() => {
 		clearSessionMessages(session);

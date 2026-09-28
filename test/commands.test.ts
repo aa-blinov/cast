@@ -8,7 +8,14 @@ import type { AppConfig } from "../src/core/config.ts";
 import { streamAndCollect } from "../src/core/llm.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import type { Persona } from "../src/core/personas.ts";
-import { appendCheckpoint, createSession, loadSession, type SessionState, saveSession } from "../src/core/session.ts";
+import {
+	appendCheckpoint,
+	createSession,
+	listForkPoints,
+	loadSession,
+	type SessionState,
+	saveSession,
+} from "../src/core/session.ts";
 import { type PermissionMode, updateSettings } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
@@ -892,6 +899,44 @@ describe("handleInput", () => {
 		expect(deps.session.messages).toEqual(fork.messages);
 		expect(calls["agent.refresh"]).toHaveLength(1);
 		expect(noticeText(calls)).toContain(`Forked session: ${fork.id}`);
+	});
+
+	it("/fork offers the whole session or a point before any of your messages", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.session.messages.push(
+			{ role: "user", content: "first ask" },
+			{ role: "assistant", content: "one" },
+			{ role: "user", content: "second ask" },
+			{ role: "assistant", content: "two" },
+		);
+		saveSession(deps.session);
+		let offered: string[] = [];
+		deps.pickers = {
+			...deps.pickers,
+			pickOption: async (options) => {
+				offered = options.map((o) => String(o.label));
+				return options[2]!.value;
+			},
+		};
+		let repainted = 0;
+		deps.onRepaintHistory = () => {
+			repainted++;
+		};
+		let asked: number | undefined;
+		const fork = createSession("test-model", "/tmp");
+		(deps.agent.forkSession as (beforeSeq?: number) => Promise<SessionState | undefined>) = async (beforeSeq) => {
+			asked = beforeSeq;
+			return fork;
+		};
+
+		const firstAsk = listForkPoints(deps.session.id)[0]!.seq;
+		await handleInput("/fork", undefined, deps);
+
+		// Newest first, after the whole-session option.
+		expect(offered).toEqual(["Whole session", "Before: second ask", "Before: first ask"]);
+		expect(asked).toBe(firstAsk);
+		expect(repainted).toBe(1);
+		expect(noticeText(calls)).toContain('before "first ask"');
 	});
 
 	it("/continue refreshes SSH hosts for the resumed project", async () => {
