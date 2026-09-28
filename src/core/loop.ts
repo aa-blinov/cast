@@ -1,4 +1,5 @@
 import { setMaxListeners } from "node:events";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import {
 	type AgentForkContext as ActorForkContext,
@@ -85,9 +86,11 @@ import {
 	waitForProjectCheckpointWriter,
 } from "./memory.ts";
 import {
+	ccMemoryRoot,
 	checkpointPath,
 	ensureMemoryFiles,
 	globalMemoryPath,
+	memoryRoot,
 	notesPath,
 	projectMemoryPath,
 	readMemoryFile,
@@ -105,7 +108,7 @@ import {
 	type OpenWorkGateConfig,
 } from "./open-work-gate.ts";
 import { approvalOwner, setPendingApproval } from "./pending-approval.ts";
-import { evaluatePermission, exactRule, permissionSubject } from "./permissions.ts";
+import { EXTERNAL_DIRECTORY, evaluatePermission, exactRule, externalTarget, permissionSubject } from "./permissions.ts";
 import type { Persona } from "./personas.ts";
 import { checkReadOnlyCommand, listPlanNames, type PlanState, readActivePlan, TERMINAL_TOOL_NAMES } from "./plan.ts";
 import { type ProjectResolverDeps, resolveMcpForCwd } from "./project.ts";
@@ -144,7 +147,7 @@ import {
 	loadSettings,
 	memoryPromptBudget,
 } from "./settings.ts";
-import type { Skill } from "./skills.ts";
+import { builtinSkillsDir, type Skill } from "./skills.ts";
 import { resolveSshHosts, type SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { recordLlmRequest } from "./telemetry.ts";
@@ -156,6 +159,7 @@ import {
 	completedToolCallStatus,
 	normalizeToolResultError,
 	relativeToCwd,
+	toolOutputDir,
 } from "./tools/shared.ts";
 import type { SubagentProgress } from "./tools/task.ts";
 import {
@@ -414,6 +418,21 @@ const TOOL_RENAMES: Record<string, string> = {
 
 function normalizeToolName(name: string): string {
 	return TOOL_RENAMES[name] ?? name;
+}
+
+/** `write` takes `path` and `edit` takes `filePath`, and models mix them up.
+ *  Mapped here, before hooks and permission rules look at the path, so the
+ *  guard checks the same path the tool then writes. */
+function normalizeToolArgs(name: string, args: Record<string, unknown>): Record<string, unknown> {
+	if (name === "edit" && args.filePath === undefined && typeof args.path === "string") {
+		const { path, ...rest } = args;
+		return { ...rest, filePath: path };
+	}
+	if (name === "write" && args.path === undefined && typeof args.filePath === "string") {
+		const { filePath, ...rest } = args;
+		return { ...rest, path: filePath };
+	}
+	return args;
 }
 
 /** Levenshtein distance, capped small — just enough to catch a typo'd tool name. */
@@ -2048,6 +2067,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// (name + serialized args). When the same call appears that many times in
 	// a row we refuse to execute it and tell the model to try something else.
 	const recentToolCalls: Array<{ name: string; argsKey: string }> = [];
+	// Outputs seen this user turn, for noteRepeatedOutputs.
+	const repeatedOutputs = new Map<string, number>();
 
 	// Hooks in force for this run. Seeded from the caller's set and extended
 	// when a skill with a `hooks:` block is invoked — a skill whose whole point
@@ -2179,6 +2200,43 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	 * Read per call, so a rule saved by "always allow" applies at once. An
 	 * `ask` with nobody to ask (bypass mode) runs; a `deny` never does.
 	 */
+	// What cast itself hands the agent to read, wherever it lives. The memory
+	// tool returns file paths to read, and the checkpoint writer edits the
+	// memory files in place: those are cast's own, open to every tool.
+	const readableDirs = [
+		toolOutputDir(),
+		join(homedir(), ".cast", "inputs"),
+		builtinSkillsDir,
+		ccMemoryRoot(),
+		...(loopConfig.skills ?? []).map((skill) => skill.baseDir),
+	];
+	const writableDirs = [memoryRoot()];
+	/** A file tool reaching outside the project: `external_directory` rules
+	 * decide, and with none matching the user is asked. */
+	const gateExternalDirectory = async (
+		name: string,
+		args: Record<string, unknown>,
+	): Promise<ToolResult | undefined> => {
+		const target = externalTarget(name, args, cwd, findProjectRoot(cwd), readableDirs, writableDirs);
+		if (!target) return undefined;
+		const verdict = evaluatePermission(loadSettings().permissions, EXTERNAL_DIRECTORY, { path: target.path }, cwd);
+		if (verdict?.action === "deny") {
+			return {
+				content: `Denied: ${target.path} is outside the project, and the rule "${verdict.rule}" blocks it. Don't retry it or work around it (another path, a shell command); tell the user and ask what they want.`,
+				isError: true,
+			};
+		}
+		if (verdict?.action === "allow" || !askUser) return undefined;
+		const rule = `${EXTERNAL_DIRECTORY}(${target.dir === "/" ? "" : target.dir}/**)`;
+		if (!(await askUser(`${name} ${target.path}`, "outside the project", rule))) {
+			return {
+				content: `Not run: the user declined ${name} on ${target.path}, which is outside the project. Don't retry it or work around it (another path, a shell command); ask the user what they want instead.`,
+				isError: true,
+			};
+		}
+		return undefined;
+	};
+
 	const gatePermissionRules = async (name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> => {
 		const verdict = evaluatePermission(loadSettings().permissions, name, args, cwd);
 		if (verdict?.action === "deny") {
@@ -2187,7 +2245,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				isError: true,
 			};
 		}
-		if (verdict?.action !== "ask") return undefined;
+		if (verdict?.action === "allow") return undefined;
+		if (verdict?.action !== "ask") return gateExternalDirectory(name, args);
 		const isShell = name === "bash" || name === "ssh";
 		const confirm = isShell ? confirmBashWithHooks : askUser;
 		if (!confirm) return undefined;
@@ -2283,6 +2342,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// Legacy aliases (e.g. find → glob) before the allowlist / unknown check
 		// so old model habits and allowlists keep working against one tool.
 		name = normalizeToolName(name);
+		args = normalizeToolArgs(name, args);
 		if (loopConfig.executionAllowedTools && !loopConfig.executionAllowedTools.has(name)) {
 			return { content: `Tool "${name}" is not available in this fork's execution policy.`, isError: true };
 		}
@@ -2810,6 +2870,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					// again" after three identical calls is an explicit go-ahead, not
 					// the model stuck in a loop.
 					recentToolCalls.length = 0;
+					repeatedOutputs.clear();
 					// …and the open-work gate's budget, which is documented as "per
 					// user prompt". The follow-up path already reset it; steering did
 					// not, so a steer sent after the gate had fired twice left the
@@ -2877,6 +2938,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						config.reasoningParams.body,
 						(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
 						promptCacheBody,
+						(silentMs, giveUpMs) =>
+							loopConfig.onWarning?.(
+								`The provider has sent nothing for ${Math.round(silentMs / 1000)}s; still waiting (cast retries at ${Math.round(giveUpMs / 1000)}s). Esc stops the turn.`,
+							),
 					);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
@@ -3169,6 +3234,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						recentToolCalls,
 						DOOM_LOOP_THRESHOLD,
 					);
+					noteRepeatedOutputs(executedToolBatch, repeatedOutputs);
 					toolResults.push(...executedToolBatch);
 					hasMoreToolCalls = true;
 
@@ -3363,6 +3429,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				toolResultTrimmed = false;
 				// Same as steering: a new user message resets the doom-loop window.
 				recentToolCalls.length = 0;
+				repeatedOutputs.clear();
 				openWorkGateFires = 0;
 				if (skillDisallowedTools.size) {
 					skillDisallowedTools.clear();
@@ -3621,6 +3688,35 @@ interface ToolCallResult {
 	id: string;
 	name: string;
 	result: ToolResult;
+}
+
+/** How many times a tool may return the same output before the model is told
+ *  that repeating it won't change anything. */
+const REPEATED_OUTPUT_THRESHOLD = 4;
+const DIGITS_RE = /\d+/g;
+
+/**
+ * The doom-loop guard above only sees identical calls. A model stuck on a
+ * check it can't fix varies the command cosmetically (another `echo`, a
+ * reordered flag) and gets the same answer each time: measured, a broken
+ * interpreter held one run for 227 calls and 15 minutes. This counts
+ * outputs instead, numbers masked so timings and PIDs don't hide a repeat,
+ * and on every REPEATED_OUTPUT_THRESHOLD-th repeat tells the model so. The call
+ * still runs: rerunning a check after a real change is legitimate.
+ */
+export function noteRepeatedOutputs(batch: ToolCallResult[], seen: Map<string, number>): void {
+	for (const call of batch) {
+		const content = call.result.content;
+		if (typeof content !== "string" || !content.trim()) continue;
+		const key = `${call.name}\0${content.slice(0, 4000).replace(DIGITS_RE, "#")}`;
+		const count = (seen.get(key) ?? 0) + 1;
+		seen.set(key, count);
+		if (count % REPEATED_OUTPUT_THRESHOLD !== 0) continue;
+		call.result = {
+			...call.result,
+			content: `${content}\n\n<system-reminder>This is the ${count}th time ${call.name} has returned this same output. Repeating the check won't change it. Either do something materially different, or stop and tell the user what is blocking you and what you already tried.</system-reminder>`,
+		};
+	}
 }
 
 async function executeToolCalls(

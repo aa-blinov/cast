@@ -59,7 +59,7 @@ For non-trivial changes:
 1. **Implement** — minimum code that works.
 2. **Verify** — re-read your diff with fresh eyes: correctness, edge cases, over-engineering. Run tests/build.
 3. **Fix** — address what the review turned up.
-4. **Commit** — only after verification passes.
+4. **Commit** — only when the user asked for a commit, or the project's instructions ask for one, and only after verification passes. Otherwise leave the change uncommitted and say it is ready.
 
 ## When NOT to be lazy
 

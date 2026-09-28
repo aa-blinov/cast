@@ -48,8 +48,10 @@ Options:
                              remove with "git worktree remove" and
                              "git branch -D cast-<name>" when done.
   --bypass-permissions       Skip confirmation for destructive actions
-                             (dangerous bash commands and write/edit/patch
-                             tool calls) this run only — see /permissions
+                             (dangerous bash commands, ask rules, paths
+                             outside the project) this run only; deny rules
+                             still apply. Also accepted as
+                             --dangerously-skip-permissions — see /permissions
                              to persist it
   --skill <directory>        Load an extra skill package directory
                              (repeatable, works even with --no-skills)

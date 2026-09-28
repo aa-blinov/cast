@@ -1084,6 +1084,17 @@ describe("streamChat — a provider that goes silent", () => {
 		expect(seen).toEqual(["retry:Provider sent nothing for 0s", "hello"]);
 	});
 
+	it("says the provider is quiet well before giving up, so a long wait isn't mistaken for a hang", async () => {
+		const client = stallingClient([[], [{ choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] }]]);
+		const quiet: Array<[number, number]> = [];
+		for await (const _ of streamChat(client, "m", [], [], 100, undefined, {}, {}, (silentMs, giveUpMs) =>
+			quiet.push([silentMs, giveUpMs]),
+		)) {
+			// drain
+		}
+		expect(quiet).toEqual([[25, 50]]);
+	});
+
 	it("ends a turn whose stream went silent partway instead of hanging it", async () => {
 		const client = stallingClient([[{ choices: [{ delta: { content: "partial" } }] }]]);
 		const run = async () => {

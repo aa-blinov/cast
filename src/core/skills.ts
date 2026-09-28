@@ -520,7 +520,10 @@ export function formatSkillsForPrompt(
 		lines.push("  <skill>");
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
 		lines.push(`    <description>${escapeXml(desc)}</description>`);
-		lines.push(`    <location>${escapeXml(skill.filePath)}</location>`);
+		// No <location>: the skill tool loads by name and reports the path
+		// itself. The install paths here outnumbered the one working
+		// directory, and a model asked to "commit my changes" opened with
+		// `cd <cast install> && git status` and committed there.
 		lines.push("  </skill>");
 	}
 	lines.push("</available_skills>");

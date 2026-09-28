@@ -2,6 +2,7 @@ import { EOL } from "node:os";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import {
+	answerServerBashConfirm,
 	answerServerQuestion,
 	ensureServerClient,
 	ensureServerSession,
@@ -166,6 +167,14 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 				break;
 			case "notice":
 				emit("notice", { text: event.message });
+				break;
+			case "bash_confirm":
+				// The protocol has no answer message, so this can only be a no;
+				// giving it at once beats the turn waiting out the timeout.
+				void answerServerBashConfirm(client, sessionId, event.id, false).catch(() => {});
+				emit("notice", {
+					text: `Blocked: ${event.command} needs confirmation (${event.reason}), and cast run has no one to ask. Add a permission rule, or rerun with --bypass-permissions.`,
+				});
 				break;
 			case "retry":
 				// A retry can now be a *long* wait — a quota window measured in
@@ -375,6 +384,15 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 						process.stderr.write(`  ${event.message}${EOL}`);
 					}
 					break;
+				case "bash_confirm": {
+					// Nobody here can answer, and leaving it unanswered held the
+					// turn for the daemon's full timeout before the same refusal.
+					// Say no at once, the way a local non-interactive run does.
+					const message = `Blocked: ${event.command} needs confirmation (${event.reason}), and cast run has no one to ask. Add a permission rule, or rerun with --bypass-permissions.`;
+					void answerServerBashConfirm(client, sessionId, event.id, false).catch(() => {});
+					if (!emit("notice", { text: message })) process.stderr.write(`  ${message}${EOL}`);
+					break;
+				}
 				case "retry":
 					// Same reason as the JSONL path: with a quota wait
 					// configured this is a pause of minutes to hours, and a

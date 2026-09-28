@@ -10,7 +10,7 @@ import { closeMcpConnections } from "../core/mcp.ts";
 import { drainAutomaticMemoryMaintenance, drainProjectCheckpointWriters } from "../core/memory.ts";
 import { resolveMcpForCwd } from "../core/project.ts";
 import { deleteSession, pruneBackgroundSessions, pruneSessionEvents } from "../core/session.ts";
-import { loadSettings, updateSettings } from "../core/settings.ts";
+import { isBypassPermissionsFlag, loadSettings, updateSettings } from "../core/settings.ts";
 import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
@@ -81,7 +81,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		} else if (args[i] === "--reasoning" || args[i] === "-r") {
 			cliReasoning = args[i + 1];
 			i++;
-		} else if (args[i] === "--bypass-permissions") {
+		} else if (isBypassPermissionsFlag(args[i])) {
 			cliBypassPermissions = true;
 		}
 	}

@@ -26,6 +26,12 @@ import type { ReasoningFormat } from "./vendors.ts";
 
 export type PermissionMode = "default" | "bypass";
 
+/** `--bypass-permissions`, or Claude Code's spelling of it, so muscle memory
+ *  from there works here: both skip every confirmation (deny rules still hold). */
+export function isBypassPermissionsFlag(arg: string | undefined): boolean {
+	return arg === "--bypass-permissions" || arg === "--dangerously-skip-permissions";
+}
+
 export interface StatusBarConfig {
 	visible: string[];
 	order: string[];

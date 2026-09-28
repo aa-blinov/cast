@@ -32,6 +32,12 @@ export const DAEMON_PROTOCOL_VERSION = 2;
 /** One startup budget shared by every daemon launcher. */
 export const DAEMON_STARTUP_TIMEOUT_MS = 60_000;
 
+/** Polls (100ms apart) a process waits while another holds the start lock.
+ *  It must outlast the other's own startup wait: capped at 10s, several
+ *  `cast run`s started together gave up on a daemon that took longer to boot
+ *  ("cast run requires the server daemon") while it was coming up. */
+export const START_LOCK_WAIT_ATTEMPTS = DAEMON_STARTUP_TIMEOUT_MS / 100 + 50;
+
 // Resolved at call time (not module load) so tests can point HOME at a
 // per-test tmp dir before the first read; a top-level const would freeze
 // on whatever homedir() returned when the module was first imported.

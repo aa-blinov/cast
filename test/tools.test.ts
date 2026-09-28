@@ -76,6 +76,20 @@ describe("bash", () => {
 		expect(result.content).toContain('"command" is required');
 	});
 
+	it("runs in the session's directory without the user's previous one in the env", async () => {
+		const realOld = process.env.OLDPWD;
+		process.env.OLDPWD = "/some/other/project";
+		try {
+			const exec = createToolExecutor(TEST_DIR, mockConfig);
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: a shell expansion, not a JS template
+			const result = await exec("bash", { command: 'echo "old=${OLDPWD:-none} pwd=$PWD"' });
+			expect(result.content.trim()).toBe(`old=none pwd=${TEST_DIR}`);
+		} finally {
+			if (realOld === undefined) delete process.env.OLDPWD;
+			else process.env.OLDPWD = realOld;
+		}
+	});
+
 	it("executes a command and returns output", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("bash", { command: "echo hello" });

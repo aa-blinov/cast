@@ -150,4 +150,88 @@ describe("permission rules in the loop", () => {
 		expect(confirm).not.toHaveBeenCalled();
 		expect(readFileSync(join(dir, "proj", "notes.md"), "utf-8")).toBe("x");
 	});
+
+	it("an edit sent with write's `path` still edits, and the guard sees that path", async () => {
+		writeFileSync(join(dir, "proj", "a.txt"), "old");
+		oneCall("edit", { path: "a.txt", oldString: "old", newString: "new" });
+		await run(vi.fn(async () => true));
+		expect(readFileSync(join(dir, "proj", "a.txt"), "utf-8")).toBe("new");
+
+		writeFileSync(join(dir, "out.txt"), "old");
+		oneCall("edit", { path: join(dir, "out.txt"), oldString: "old", newString: "new" });
+		const confirm = vi.fn(async () => false);
+		await run(confirm);
+		expect(confirm).toHaveBeenCalled();
+		expect(readFileSync(join(dir, "out.txt"), "utf-8")).toBe("old");
+	});
+
+	describe("outside the project", () => {
+		it("asks before a file tool reaches outside, with the directory as the rule to save", async () => {
+			writeFileSync(join(dir, "secret.txt"), "top secret");
+			oneCall("read", { path: join(dir, "secret.txt") });
+			const confirm = vi.fn(async () => false);
+			const content = await run(confirm);
+			expect(confirm).toHaveBeenCalledWith(
+				`read ${join(dir, "secret.txt")}`,
+				"outside the project",
+				`external_directory(${dir}/**)`,
+				undefined,
+			);
+			expect(content).toContain("outside the project");
+			expect(content).not.toContain("top secret");
+		});
+
+		it("runs it once approved, and an always-allow answer stops the asking", async () => {
+			writeFileSync(join(dir, "notes.txt"), "shared notes");
+			oneCall("read", { path: join(dir, "notes.txt") });
+			expect(await run(vi.fn(async () => true))).toContain("shared notes");
+
+			rules({ approved: [`external_directory(${dir}/**)`] });
+			oneCall("read", { path: join(dir, "notes.txt") });
+			const confirm = vi.fn(async () => false);
+			expect(await run(confirm)).toContain("shared notes");
+			expect(confirm).not.toHaveBeenCalled();
+		});
+
+		it("a deny rule blocks, and a tool's own allow rule counts as the answer", async () => {
+			rules({ deny: [`external_directory(${dir}/**)`] });
+			oneCall("write", { path: join(dir, "x.txt"), content: "x" });
+			expect(await run(vi.fn(async () => true))).toContain("blocks it");
+			expect(() => readFileSync(join(dir, "x.txt"))).toThrow();
+
+			rules({ allow: [`write(${dir}/**)`] });
+			oneCall("write", { path: join(dir, "x.txt"), content: "x" });
+			const confirm = vi.fn(async () => false);
+			await run(confirm);
+			expect(confirm).not.toHaveBeenCalled();
+			expect(readFileSync(join(dir, "x.txt"), "utf-8")).toBe("x");
+		});
+
+		it("never asks about cast's own memory files, which the agent is told to read and update", async () => {
+			const realMem = process.env.CAST_MEMORY_DIR;
+			process.env.CAST_MEMORY_DIR = join(dir, "memory");
+			try {
+				oneCall("write", { path: join(dir, "memory", "sessions", "s1", "notes.md"), content: "note" });
+				const confirm = vi.fn(async () => false);
+				await run(confirm);
+				expect(confirm).not.toHaveBeenCalled();
+				expect(readFileSync(join(dir, "memory", "sessions", "s1", "notes.md"), "utf-8")).toBe("note");
+			} finally {
+				if (realMem === undefined) delete process.env.CAST_MEMORY_DIR;
+				else process.env.CAST_MEMORY_DIR = realMem;
+			}
+		});
+
+		it("with nobody to ask (bypass) it runs; inside the project it never asks", async () => {
+			writeFileSync(join(dir, "free.txt"), "free");
+			oneCall("read", { path: join(dir, "free.txt") });
+			expect(await run(undefined)).toContain("free");
+
+			writeFileSync(join(dir, "proj", "local.txt"), "local");
+			oneCall("read", { path: "local.txt" });
+			const confirm = vi.fn(async () => false);
+			expect(await run(confirm)).toContain("local");
+			expect(confirm).not.toHaveBeenCalled();
+		});
+	});
 });

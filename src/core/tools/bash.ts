@@ -14,7 +14,14 @@ import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD, MAX_BASH_TIMEOUT_MS } f
 import { checkDangerousBash } from "../permissions.ts";
 import { type BackgroundTask, type BashBackgroundDeps, isPtyAvailable } from "./bash-background.ts";
 import { looksLongRunningCommand } from "./long-running.ts";
-import { BoundedOutput, type ConfirmBash, formatSize, saveToolOutput, type ToolResult } from "./shared.ts";
+import {
+	agentShellEnv,
+	BoundedOutput,
+	type ConfirmBash,
+	formatSize,
+	saveToolOutput,
+	type ToolResult,
+} from "./shared.ts";
 
 const INSTALL_PATH_RE = /InstallPath\s+REG_SZ\s+(.+)/;
 const CRLF_RE = /\r\n/g;
@@ -409,7 +416,7 @@ export async function execBash(
 		// immediately. No PTY, no prompt detection.
 		const proc = spawn(bash.path, ["-c", command], {
 			cwd,
-			env: { ...process.env, PAGER: "cat", GIT_PAGER: "cat" },
+			env: agentShellEnv(cwd, { PAGER: "cat", GIT_PAGER: "cat" }),
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: true,
 		});

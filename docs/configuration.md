@@ -179,7 +179,7 @@ Global resources (`~/.cast/`, `~/.agents/skills/`, `~/.config/agents/skills/`) a
 | `bypass` | All bash commands run without confirmation |
 
 Change with:
-- `--bypass-permissions` flag (this run only)
+- `--bypass-permissions` flag, or `--dangerously-skip-permissions` as in Claude Code (this run only)
 - `/permissions` command (persists to settings)
 - `/permissions default` or `/permissions bypass` (direct set)
 
@@ -214,7 +214,15 @@ In a command pattern `*` matches anything, spaces included. In a path pattern `*
 - **ask** shows the same prompt as a dangerous command: in the TUI, in the web UI, or in an ACP editor. With nobody to ask (`bypass` mode) the call runs. `cast run` without a terminal refuses it.
 - **allow** answers the dangerous-command prompt ahead of time: `bash(rm -rf build)` runs without asking.
 
-**Always allow** in the prompt appends an exact rule for that call to `approved`, for example `bash(rm -rf build)` or `write(src/a.ts)`. `approved` outranks `ask`, so the rule that asked doesn't ask about that call again, and a `deny` still wins over it. Wildcard characters in the saved subject match only one character, so the saved rule never grows beyond the call you approved. Delete an entry from `approved` to be asked again. **A prompt outlives the process that asked.** While a confirmation waits, it is also kept in the session. If cast stops before you answer (you quit a local TUI, or the daemon stops), the next TUI or browser that opens the session shows the same prompt, marked with how long ago it was asked. Approving it starts a turn that tells the agent the call was approved and lets exactly that call through without asking again; the agent re-runs the step if it is still needed. Blocking it, or sending a new message instead, drops it. A reloaded page or a reattached TUI gets a prompt that is still live the same way, and a prompt answered in one client closes in the others. Questions and plan approvals are saved in the session and come back the same way.
+**Always allow** in the prompt appends an exact rule for that call to `approved`, for example `bash(rm -rf build)` or `write(src/a.ts)`. `approved` outranks `ask`, so the rule that asked doesn't ask about that call again, and a `deny` still wins over it. Wildcard characters in the saved subject match only one character, so the saved rule never grows beyond the call you approved. Delete an entry from `approved` to be asked again. **Outside the project, file tools ask first.** A `read`, `write`, `edit`, `ls`, `glob` or `grep` that reaches a path outside the session's directory and its project root is asked about, like an `ask` rule; symlinks are followed, so a link inside the project can't lead out unnoticed. Reads may reach what cast itself hands the agent without asking: saved tool output (`~/.cast/tool-output`), uploaded files (`~/.cast/inputs`) and the loaded skills' own files. Control it with `external_directory(<glob>)` rules on the absolute path (a leading `~/` is your home directory, in every path rule):
+
+```json
+{ "permissions": { "allow": ["external_directory(/data/**)"], "deny": ["external_directory(/etc/**)", "external_directory(~/.ssh/**)"] } }
+```
+
+**Always allow** on that prompt saves `external_directory(<that directory>/**)`. A tool's own allow rule that covers the path (`write(/tmp/**)`) counts as the answer too. In bypass mode nothing is asked, and a deny still applies. `bash` is not checked: a shell command's paths can't be known before it runs, so guard those with `bash(...)` rules.
+
+**A prompt outlives the process that asked.** While a confirmation waits, it is also kept in the session. If cast stops before you answer (you quit a local TUI, or the daemon stops), the next TUI or browser that opens the session shows the same prompt, marked with how long ago it was asked. Approving it starts a turn that tells the agent the call was approved and lets exactly that call through without asking again; the agent re-runs the step if it is still needed. Blocking it, or sending a new message instead, drops it. A reloaded page or a reattached TUI gets a prompt that is still live the same way, and a prompt answered in one client closes in the others. Questions and plan approvals are saved in the session and come back the same way.
 
 Rules are per tool: `deny: ["write(.env*)"]` doesn't stop `bash` from writing the same file, so pair it with a `bash` rule when that matters. Rules are read on every call and apply at once. Subagents follow the same rules. In an ACP editor, "Allow for this session" is kept for the session only and isn't saved.
 
