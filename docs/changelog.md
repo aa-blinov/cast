@@ -4,6 +4,18 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.45.1
+
+### Fixed
+
+- **A prompt waiting for your answer is never lost.** A confirmation (a dangerous command, or an `ask` permission rule) now comes back after you reload the page, reopen the TUI, or restart cast. If cast stopped before you answered, the prompt says how long ago it was asked, and approving it lets the agent pick the step up again without asking twice. Answering in one window closes the prompt everywhere else, and sending a new message instead drops it. Questions and plan approvals come back the same way.
+- **Quitting the TUI mid-turn no longer loses the turn.** Without the daemon, cast only saved a turn when it ended, so quitting or crashing midway dropped your message and everything that had run.
+- **Esc no longer leaves the turn waiting on an open confirmation** for five minutes.
+
+### Changed
+
+- **The built-in `cast` skill is up to date** with the current TUI, commands and skill format, and explains permission rules and settings, so you can ask the agent to set them up.
+
 ## 0.45.0
 
 ### Added
