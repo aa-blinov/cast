@@ -65,9 +65,13 @@ import {
 } from "../core/settings.ts";
 import {
 	formatSkillsForPrompt,
+	isSkillSourceFamily,
 	isUninstallableSkill,
+	listSkillSources,
 	renderSkillInvocation,
+	SKILL_SOURCE_FAMILIES,
 	type Skill,
+	type SkillSourceFamily,
 	uninstallUserSkill,
 } from "../core/skills.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
@@ -245,6 +249,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/skills enable", description: "Enable one skill — name", takesArgs: true },
 	{ name: "/skills help", description: "Show skills command cheat sheet" },
 	{ name: "/skills list", description: "List loaded skills" },
+	{ name: "/skills sources", description: "Turn skill sources on/off (cast, Claude Code, skills.sh, built-in)" },
 	{
 		name: "/skills uninstall",
 		description: "Uninstall — picker, or skill name (cast/agents dirs)",
@@ -437,9 +442,11 @@ const SKILLS_HELP = `Skills — pick a row from the /skills palette, or type:
   /skills enable|disable NAME
   /skills uninstall            Pick global/project skill to remove
   /skills uninstall NAME
+  /skills sources              Turn whole sources on/off (multi-select)
+  /skills sources NAME on|off  builtin, cast, agents, claude
 
 Add skills via ~/.cast/skills/, .cast/skills/, .agents/skills/ (npx skills add),
-or --skill.
+~/.claude/skills/ and .claude/skills/ (Claude Code), or --skill.
 Builtin skills: disable them — /skills uninstall does not remove them.`;
 
 const HOOKS_HELP = `Hooks — shell/HTTP commands that fire on lifecycle events:
@@ -615,6 +622,10 @@ async function handleSkillsCommand(input: string, deps: CommandDeps): Promise<vo
 		deps.agent.addDisplayMessage({ role: "warning", content: formatSkillsList(deps) });
 		return;
 	}
+	if (verb === "sources") {
+		await handleSkillSources(deps, rest);
+		return;
+	}
 	if (verb === "enable" || verb === "disable") {
 		if (!name) {
 			showNotice(`[Usage: /skills ${verb} <name>]`);
@@ -653,6 +664,38 @@ async function handleSkillsCommand(input: string, deps: CommandDeps): Promise<vo
 		return;
 	}
 	showNotice(`[Unknown /skills ${verb}. See /skills help]`);
+}
+
+/** `/skills sources [NAME on|off]`: whole skill directories on or off. */
+async function handleSkillSources(deps: CommandDeps, args: string[]): Promise<void> {
+	const current = loadSettings().disabledSkillSources ?? [];
+	let next: SkillSourceFamily[];
+	if (args.length > 0) {
+		const [family, state] = args;
+		if (!family || !isSkillSourceFamily(family) || (state !== "on" && state !== "off")) {
+			deps.showNotice(`[Usage: /skills sources <${SKILL_SOURCE_FAMILIES.join("|")}> on|off]`);
+			return;
+		}
+		next = state === "off" ? [...new Set([...current, family])] : current.filter((f) => f !== family);
+	} else {
+		const sources = listSkillSources(current);
+		const enabled = await deps.pickers.pickMulti(
+			sources.map((s) => ({ value: s.family, label: s.label })),
+			{
+				title: "Skill sources (space to toggle, enter to confirm)",
+				initialSelected: sources.filter((s) => s.enabled).map((s) => s.family),
+			},
+		);
+		if (enabled === null) {
+			deps.showNotice("[Cancelled]");
+			return;
+		}
+		next = SKILL_SOURCE_FAMILIES.filter((f) => !enabled.includes(f));
+	}
+	updateSettings({ disabledSkillSources: next.length > 0 ? next : undefined });
+	await reloadSkillsAfterChange(deps);
+	const off = next.length > 0 ? next.join(", ") : "none";
+	deps.agent.addDisplayMessage({ role: "warning", content: `[Skill sources off: ${off}]` });
 }
 
 async function reloadMcpAfterChange(deps: CommandDeps, disabledServers: string[]): Promise<void> {

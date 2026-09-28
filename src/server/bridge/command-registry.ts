@@ -89,7 +89,14 @@ import {
 	memoryDreamIntervalDays,
 	updateSettings,
 } from "../../core/settings.ts";
-import { isUninstallableSkill, renderSkillInvocation, uninstallUserSkill } from "../../core/skills.ts";
+import {
+	isSkillSourceFamily,
+	isUninstallableSkill,
+	listSkillSources,
+	renderSkillInvocation,
+	SKILL_SOURCE_FAMILIES,
+	uninstallUserSkill,
+} from "../../core/skills.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../../core/skills-sh.ts";
 import type { SshHost, saveSshConfig } from "../../core/ssh.ts";
 import { recordLlmRequest } from "../../core/telemetry.ts";
@@ -1432,8 +1439,21 @@ const commandHandlers: Record<string, CommandHandler> = {
 		if (sub === "help") {
 			return {
 				ok: true,
-				result: "/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name>",
+				result:
+					"/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name> – /skills sources [<name> on|off]",
 			};
+		}
+		if (sub === "sources") {
+			const current = loadSettings().disabledSkillSources ?? [];
+			if (!rest) return { ok: true, result: listSkillSources(current) };
+			const [family, state] = rest.split(WHITESPACE_RE);
+			if (!family || !isSkillSourceFamily(family) || (state !== "on" && state !== "off")) {
+				return { ok: false, error: `Usage: /skills sources <${SKILL_SOURCE_FAMILIES.join("|")}> on|off` };
+			}
+			const next = state === "off" ? [...new Set([...current, family])] : current.filter((f) => f !== family);
+			updateSettings({ disabledSkillSources: next.length > 0 ? next : undefined });
+			await refreshSkillsFromSkills();
+			return { ok: true, result: listSkillSources(next) };
 		}
 		if (sub === "enable" || sub === "disable") {
 			if (!rest) return { ok: false, error: `Usage: /skills ${sub} <name>` };

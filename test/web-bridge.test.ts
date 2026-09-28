@@ -2509,14 +2509,40 @@ describe("web bridge", () => {
 		expect(noArg.result).toEqual(list.result);
 	});
 
-	it("/skills help returns the help-text with the four subcommands", async () => {
+	it("/skills help returns the help-text with every subcommand", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const result = await bridge.executeCommand(ws.id, "/skills help");
 		expect(result).toEqual({
 			ok: true,
-			result: "/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name>",
+			result:
+				"/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name> – /skills sources [<name> on|off]",
 		});
+	});
+
+	it("/skills sources lists the families and switches one", async () => {
+		const bridge = createServerBridge(
+			makeResult({
+				projectDeps: {
+					noSkills: false,
+					noMcp: false,
+					cliSkillPaths: [],
+					cliMcpPaths: [],
+				} as unknown as StartupResult["projectDeps"],
+			}),
+		);
+		const ws = bridge.createSession();
+		const listed = (await bridge.executeCommand(ws.id, "/skills sources")) as {
+			ok: boolean;
+			result: Array<{ family: string; enabled: boolean }>;
+		};
+		expect(listed.result.map((s) => s.family)).toEqual(["builtin", "cast", "agents", "claude"]);
+		const off = (await bridge.executeCommand(ws.id, "/skills sources claude off")) as {
+			result: Array<{ family: string; enabled: boolean }>;
+		};
+		expect(off.result.find((s) => s.family === "claude")?.enabled).toBe(false);
+		expect(await bridge.executeCommand(ws.id, "/skills sources nope off")).toMatchObject({ ok: false });
+		await bridge.executeCommand(ws.id, "/skills sources claude on");
 	});
 
 	it("/skills enable (no name) returns the usage error", async () => {

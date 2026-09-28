@@ -28,7 +28,7 @@ import {
 	type Rule,
 } from "./rules.ts";
 import { loadSettings, type PermissionMode, type Settings } from "./settings.ts";
-import { builtinSkillsDir, formatSkillsForPrompt, loadSkills, type Skill } from "./skills.ts";
+import { builtinSkillsDir, formatSkillsForPrompt, loadSkills, type Skill, type SkillSourceFamily } from "./skills.ts";
 import { loadSshConfig, projectSshPath } from "./ssh.ts";
 import type { ConfirmBash } from "./tools/shared.ts";
 
@@ -96,6 +96,16 @@ function projectSkillsDir(targetCwd: string): string | undefined {
 	return dir !== globalSkillsDir() ? dir : undefined;
 }
 
+/** Claude Code's user skills: the same SKILL.md format, so they load as-is. */
+function claudeGlobalSkillsDir(): string {
+	return join(homedir(), ".claude", "skills");
+}
+
+function projectClaudeSkillsDir(targetCwd: string): string | undefined {
+	const dir = join(targetCwd, ".claude", "skills");
+	return dir !== claudeGlobalSkillsDir() ? dir : undefined;
+}
+
 /** skills.sh / Agent Skills universal project path (`npx skills add` default). */
 function projectAgentsSkillsDir(targetCwd: string): string | undefined {
 	const dir = join(targetCwd, ".agents", "skills");
@@ -138,6 +148,9 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 	const agentsSkillsDir = projectAgentsSkillsDir(cwd);
 	if (!deps.noSkills && agentsSkillsDir && existsSync(agentsSkillsDir))
 		lines.push("  - .agents/skills/ (skills.sh / universal agent skills)");
+	const claudeSkillsDir = projectClaudeSkillsDir(cwd);
+	if (!deps.noSkills && claudeSkillsDir && existsSync(claudeSkillsDir))
+		lines.push("  - .claude/skills/ (Claude Code project skills)");
 	const mcpPath = projectMcpPath(cwd);
 	if (!deps.noMcp && mcpPath && existsSync(mcpPath)) {
 		const names = Object.keys(loadMcpConfig(mcpPath));
@@ -173,14 +186,18 @@ export interface PromptContextSkillOptions {
 
 /** Shared load options for parent session and task subagents. */
 function skillLoadOptionsForCwd(cwd: string, trusted: boolean, opts: { noSkills: boolean; cliSkillPaths: string[] }) {
-	const skillsDir = projectSkillsDir(cwd);
-	const agentsDir = projectAgentsSkillsDir(cwd);
+	const off = new Set(loadSettings().disabledSkillSources ?? []);
+	const use = (family: SkillSourceFamily) => !opts.noSkills && !off.has(family);
+	const inProject = (dir: string | undefined) => (trusted && dir && existsSync(dir) ? dir : undefined);
+	const claudeGlobal = claudeGlobalSkillsDir();
 	return {
-		globalDir: opts.noSkills ? undefined : globalSkillsDir(),
-		builtinDir: opts.noSkills ? undefined : builtinSkillsDir,
-		projectDir: !opts.noSkills && trusted && skillsDir && existsSync(skillsDir) ? skillsDir : undefined,
-		agentsProjectDir: !opts.noSkills && trusted && agentsDir && existsSync(agentsDir) ? agentsDir : undefined,
-		agentsGlobalDirs: opts.noSkills ? undefined : agentsGlobalSkillsDirs().filter((d) => existsSync(d)),
+		globalDir: use("cast") ? globalSkillsDir() : undefined,
+		builtinDir: use("builtin") ? builtinSkillsDir : undefined,
+		projectDir: use("cast") ? inProject(projectSkillsDir(cwd)) : undefined,
+		agentsProjectDir: use("agents") ? inProject(projectAgentsSkillsDir(cwd)) : undefined,
+		agentsGlobalDirs: use("agents") ? agentsGlobalSkillsDirs().filter((d) => existsSync(d)) : undefined,
+		claudeProjectDir: use("claude") ? inProject(projectClaudeSkillsDir(cwd)) : undefined,
+		claudeGlobalDir: use("claude") && existsSync(claudeGlobal) ? claudeGlobal : undefined,
 		extraPaths: opts.cliSkillPaths,
 	};
 }

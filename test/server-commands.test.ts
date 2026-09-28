@@ -44,6 +44,10 @@ describe("web slash commands", () => {
 		}
 	});
 
+	it("lets the skill sources be listed during a turn", () => {
+		expect(isCommandBlocking("/skills sources")).toBe(false);
+	});
+
 	it("blocks resource mutations during a turn", () => {
 		for (const command of [
 			"/mcp enable server",
@@ -53,6 +57,7 @@ describe("web slash commands", () => {
 			"/skills enable skill",
 			"/skills disable skill",
 			"/skills uninstall skill",
+			"/skills sources claude off",
 			"/ssh add host example.com",
 			"/ssh remove host",
 		]) {

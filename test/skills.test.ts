@@ -7,6 +7,7 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,6 +20,7 @@ import {
 	formatSkillInvocation,
 	formatSkillsForPrompt,
 	isUninstallableSkill,
+	listSkillSources,
 	loadSkills,
 	renderSkillInvocation,
 	uninstallUserSkill,
@@ -325,6 +327,57 @@ describe("loadSkills discovery", () => {
 		});
 		expect(castGlobalWins.skills.find((s) => s.name === "shared")?.description).toBe("Cast global.");
 		expect(castGlobalWins.skills.find((s) => s.name === "only-agents")?.source).toBe("agents");
+	});
+
+	it("loads Claude Code skills below cast's and skills.sh's own paths, as source claude", () => {
+		const claudeProject = join(TEST_DIR, "claude-project");
+		const claudeGlobal = join(TEST_DIR, "claude-global");
+		const agentsGlobal = join(TEST_DIR, "agents-global-2");
+		for (const d of [claudeProject, claudeGlobal, agentsGlobal]) mkdirSync(d, { recursive: true });
+		writeSkill(claudeProject, "shared/SKILL.md", { name: "shared", description: "Claude project." });
+		writeSkill(GLOBAL_DIR, "shared/SKILL.md", { name: "shared", description: "Cast global." });
+		writeSkill(agentsGlobal, "dup/SKILL.md", { name: "dup", description: "Agents global." });
+		writeSkill(claudeGlobal, "dup/SKILL.md", { name: "dup", description: "Claude global." });
+		writeSkill(claudeGlobal, "only-claude/SKILL.md", { name: "only-claude", description: "From Claude Code." });
+
+		const { skills } = loadSkills({
+			claudeProjectDir: claudeProject,
+			globalDir: GLOBAL_DIR,
+			agentsGlobalDirs: [agentsGlobal],
+			claudeGlobalDir: claudeGlobal,
+			extraPaths: [],
+		});
+		// A project's .claude/skills outranks the user's global cast skills…
+		expect(skills.find((s) => s.name === "shared")?.description).toBe("Claude project.");
+		// …but ~/.claude/skills yields to every other global path.
+		expect(skills.find((s) => s.name === "dup")?.description).toBe("Agents global.");
+		expect(skills.find((s) => s.name === "only-claude")?.source).toBe("claude");
+		// They belong to Claude Code: cast doesn't delete them.
+		expect(isUninstallableSkill(skills.find((s) => s.name === "only-claude")!)).toBe(false);
+	});
+
+	it("follows symlinked skill directories and files, skips dangling ones, and survives a loop", () => {
+		const real = join(TEST_DIR, "real-skills");
+		writeSkill(real, "linked-dir/SKILL.md", { name: "linked-dir", description: "Via a linked directory." });
+		writeSkill(real, "file-src/SKILL.md", { name: "linked-file", description: "Via a linked SKILL.md." });
+		mkdirSync(join(GLOBAL_DIR, "linked-file"), { recursive: true });
+		symlinkSync(join(real, "linked-dir"), join(GLOBAL_DIR, "linked-dir"));
+		symlinkSync(join(real, "file-src", "SKILL.md"), join(GLOBAL_DIR, "linked-file", "SKILL.md"));
+		symlinkSync(join(TEST_DIR, "missing"), join(GLOBAL_DIR, "dangling"));
+		symlinkSync(GLOBAL_DIR, join(GLOBAL_DIR, "loop"));
+		const names = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] }).skills.map((s) => s.name);
+		expect(names).toContain("linked-dir");
+		expect(names).toContain("linked-file");
+		expect(names.filter((n) => n === "linked-dir")).toHaveLength(1);
+	});
+
+	it("lists every source family and whether it is on", () => {
+		expect(listSkillSources(["claude"]).map((s) => [s.family, s.enabled])).toEqual([
+			["builtin", true],
+			["cast", true],
+			["agents", true],
+			["claude", false],
+		]);
 	});
 
 	it("loads an explicit --skill path even when it's outside global/project dirs", () => {

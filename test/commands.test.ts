@@ -677,6 +677,18 @@ describe("handleInput", () => {
 		expect(loadSettings().disabledSkills ?? []).not.toContain("cast");
 	});
 
+	it("/skills sources turns a whole source off and on", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/skills sources claude off", undefined, deps);
+		expect(loadSettings().disabledSkillSources).toEqual(["claude"]);
+		expect(displayMessageText(calls)).toContain("[Skill sources off: claude]");
+		await handleInput("/skills sources claude on", undefined, deps);
+		expect(loadSettings().disabledSkillSources).toBeUndefined();
+		await handleInput("/skills sources nope off", undefined, deps);
+		expect(loadSettings().disabledSkillSources).toBeUndefined();
+	});
+
 	it("/mcp list and help", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/mcp help", undefined, deps);

@@ -416,7 +416,7 @@ function SettingsMcp({ data, busy, act, confirm }) {
 		</div>
 	`;
 }
-function SettingsSkills({ data, busy, act, confirm }) {
+function SettingsSkills({ data, sources, busy, act, confirm }) {
 	const skills = data || [];
 	const [pending, addPending, removePending] = usePendingIds();
 	const groups = [
@@ -427,7 +427,22 @@ function SettingsSkills({ data, busy, act, confirm }) {
 			label: "Project",
 			items: skills.filter((s) => s.source === "project" || s.source === "agents" || s.source === "path"),
 		},
+		{ key: "claude", label: "Claude Code", items: skills.filter((s) => s.source === "claude") },
 	];
+	const renderSource = (src) => {
+		const key = `source:${src.family}`;
+		return html`
+		<div key=${key} class="settings-item-row">
+			<div class="settings-item-info">
+				<span class="settings-item-status ${src.enabled ? "ok" : "off"}" />
+				<span class="settings-item-name">${src.label}</span>
+			</div>
+			<div class="settings-item-actions">
+				<button class="modal-btn icon-btn" title=${src.enabled ? "Turn off this source" : "Turn on this source"} disabled=${busy || pending.has(key)} onClick=${() => actPending(act, addPending, removePending, key, `/skills sources ${src.family} ${src.enabled ? "off" : "on"}`)}>${pending.has(key) ? "loading" : src.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+			</div>
+		</div>
+	`;
+	};
 	const renderSkill = (s) => {
 		const toggleKey = `${s.name}:toggle`;
 		const uninstallKey = `${s.name}:uninstall`;
@@ -454,6 +469,14 @@ function SettingsSkills({ data, busy, act, confirm }) {
 	return html`
 		<div class="settings-rows">
 			<p class="settings-intro"><span>On-demand instruction sets — expertise packs the agent picks up when a task matches, or you invoke with <code>/skill-name</code>. Click ℹ to preview one.</span></p>
+			${
+				Array.isArray(sources) &&
+				sources.length > 0 &&
+				html`<div class="settings-group">
+					<div class="settings-section-title">Sources</div>
+					${sources.map(renderSource)}
+				</div>`
+			}
 			${groups
 				.filter((g) => g.items.length > 0)
 				.map(
