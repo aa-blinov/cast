@@ -18,6 +18,7 @@ import {
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { PermissionRules } from "./permissions.ts";
+import type { SkillSourceFamily } from "./skills.ts";
 import type { ReasoningFormat } from "./vendors.ts";
 
 // ============================================================================
@@ -181,6 +182,10 @@ export interface Settings {
 	/** Skill names disabled via /skills toggle. Still discovered for the picker;
 	 * omitted from the agent catalog and /skill: invocation until re-enabled. */
 	disabledSkills?: string[];
+	/** Whole skill sources switched off (`/skills sources`): "builtin",
+	 * "cast" (~/.cast/skills + .cast/skills), "agents" (skills.sh paths),
+	 * "claude" (~/.claude/skills + .claude/skills). */
+	disabledSkillSources?: SkillSourceFamily[];
 	/** Hook group ids (see hookGroupId in hooks.ts) disabled via /hooks toggle.
 	 * A group's id is content-derived, so it survives edits to unrelated hooks
 	 * in the same file. */

@@ -11,7 +11,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { type Dirent, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { matchesToolsAllowlist, parseFrontmatter } from "./frontmatter.ts";
@@ -44,7 +44,34 @@ const SKILLS_INSTRUCTIONS = readRequiredPrompt(promptsDir, "skills-instructions.
 
 export const builtinSkillsDir = join(promptsDir, "skills");
 
-export type SkillSource = "builtin" | "global" | "project" | "agents" | "path";
+export type SkillSource = "builtin" | "global" | "project" | "agents" | "claude" | "path";
+
+/** What a user can switch off in settings (`disabledSkillSources`): each
+ *  family covers its global and project directories. `--skill` paths stay. */
+export type SkillSourceFamily = "builtin" | "cast" | "agents" | "claude";
+export const SKILL_SOURCE_FAMILIES: SkillSourceFamily[] = ["builtin", "cast", "agents", "claude"];
+
+export const SKILL_SOURCE_LABELS: Record<SkillSourceFamily, string> = {
+	builtin: "Built-in (shipped with cast)",
+	cast: "cast: ~/.cast/skills, .cast/skills",
+	agents: "skills.sh: ~/.agents/skills, .agents/skills",
+	claude: "Claude Code: ~/.claude/skills, .claude/skills",
+};
+
+export function isSkillSourceFamily(value: string): value is SkillSourceFamily {
+	return (SKILL_SOURCE_FAMILIES as string[]).includes(value);
+}
+
+/** Every family, whether it is on, for `/skills sources` on each surface. */
+export function listSkillSources(
+	disabled: readonly SkillSourceFamily[] = [],
+): Array<{ family: SkillSourceFamily; label: string; enabled: boolean }> {
+	return SKILL_SOURCE_FAMILIES.map((family) => ({
+		family,
+		label: SKILL_SOURCE_LABELS[family],
+		enabled: !disabled.includes(family),
+	}));
+}
 
 export interface Skill {
 	name: string;
@@ -353,13 +380,31 @@ function loadSkillFromFile(
  * recursion stops there. Other directories are containers only: recurse into
  * them to find skill roots, never treating arbitrary Markdown as a package.
  */
+function isDirectoryTarget(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
 function loadSkillsFromDirInternal(
 	dir: string,
 	source: SkillSource,
+	visited: Set<string> = new Set(),
 ): { skills: Skill[]; diagnostics: SkillDiagnostic[] } {
 	const skills: Skill[] = [];
 	const diagnostics: SkillDiagnostic[] = [];
 	if (!existsSync(dir)) return { skills, diagnostics };
+	// Symlinks are followed (below), so a link back up the tree must not loop.
+	let real: string;
+	try {
+		real = realpathSync(dir);
+	} catch {
+		return { skills, diagnostics };
+	}
+	if (visited.has(real)) return { skills, diagnostics };
+	visited.add(real);
 
 	let entries: Dirent[];
 	try {
@@ -369,7 +414,11 @@ function loadSkillsFromDirInternal(
 		return { skills, diagnostics };
 	}
 
-	if (entries.some((e) => e.name === "SKILL.md" && e.isFile())) {
+	if (
+		entries.some(
+			(e) => e.name === "SKILL.md" && (e.isFile() || (e.isSymbolicLink() && existsSync(join(dir, "SKILL.md")))),
+		)
+	) {
 		const result = loadSkillFromFile(join(dir, "SKILL.md"), source);
 		if (result.skill) skills.push(result.skill);
 		diagnostics.push(...result.diagnostics);
@@ -380,8 +429,12 @@ function loadSkillsFromDirInternal(
 		if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
 		const fullPath = join(dir, entry.name);
 
-		if (entry.isDirectory()) {
-			const result = loadSkillsFromDirInternal(fullPath, source);
+		// A skill linked in (a dotfiles checkout, another tool's install) is a
+		// symlink, which readdir doesn't report as a directory: followed, or it
+		// silently never loaded. A dangling link is skipped.
+		const isDir = entry.isDirectory() || (entry.isSymbolicLink() && isDirectoryTarget(fullPath));
+		if (isDir) {
+			const result = loadSkillsFromDirInternal(fullPath, source, visited);
 			skills.push(...result.skills);
 			diagnostics.push(...result.diagnostics);
 		}
@@ -407,6 +460,10 @@ export interface LoadSkillsOptions {
 	 * First listed wins on collision within this tier.
 	 */
 	agentsGlobalDirs?: string[];
+	/** `<cwd>/.claude/skills` — Claude Code's project skills. Trust-gated like `projectDir`. */
+	claudeProjectDir?: string;
+	/** `~/.claude/skills` — Claude Code's user skills, same SKILL.md format. */
+	claudeGlobalDir?: string;
 	/** Explicit `--skill <directory>` packages — load even with `--no-skills`. */
 	extraPaths: string[];
 }
@@ -414,8 +471,8 @@ export interface LoadSkillsOptions {
 /**
  * Load skills from every configured location. On a name collision the
  * first-loaded skill wins:
- * `.cast` project > `.agents` project > `.cast` global > `.agents` global >
- * builtin > `--skill` paths.
+ * `.cast` project > `.agents` project > `.claude` project > `.cast` global >
+ * `.agents` global > `.claude` global > builtin > `--skill` paths.
  */
 export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagnostics: SkillDiagnostic[] } {
 	const skillMap = new Map<string, Skill>();
@@ -438,10 +495,12 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 	// Highest priority first (see JSDoc).
 	if (options.projectDir) addAll(loadSkillsFromDirInternal(options.projectDir, "project"));
 	if (options.agentsProjectDir) addAll(loadSkillsFromDirInternal(options.agentsProjectDir, "agents"));
+	if (options.claudeProjectDir) addAll(loadSkillsFromDirInternal(options.claudeProjectDir, "claude"));
 	if (options.globalDir) addAll(loadSkillsFromDirInternal(options.globalDir, "global"));
 	for (const dir of options.agentsGlobalDirs ?? []) {
 		addAll(loadSkillsFromDirInternal(dir, "agents"));
 	}
+	if (options.claudeGlobalDir) addAll(loadSkillsFromDirInternal(options.claudeGlobalDir, "claude"));
 	if (options.builtinDir) addAll(loadSkillsFromDirInternal(options.builtinDir, "builtin"));
 
 	for (const rawPath of options.extraPaths) {

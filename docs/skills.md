@@ -16,12 +16,27 @@ Skills are discovered from multiple locations. On a name collision, the first-lo
 
 1. **Project (cast)**: `.cast/skills/` (trust-gated)
 2. **Project (agents)**: `.agents/skills/` (trust-gated; skills.sh / `npx skills add` universal path)
-3. **Global (cast)**: `~/.cast/skills/` (always loaded)
-4. **Global (agents)**: `~/.agents/skills/` then the compatible `~/.config/agents/skills/` (skills.sh universal global)
-6. **Builtin**: `prompts/skills/` (ships with cast)
-7. **Extra paths**: `--skill <directory>` flags (loaded even with `--no-skills`)
+3. **Project (Claude Code)**: `.claude/skills/` (trust-gated)
+4. **Global (cast)**: `~/.cast/skills/` (always loaded)
+5. **Global (agents)**: `~/.agents/skills/` then the compatible `~/.config/agents/skills/` (skills.sh universal global)
+6. **Global (Claude Code)**: `~/.claude/skills/`
+7. **Builtin**: `prompts/skills/` (ships with cast)
+8. **Extra paths**: `--skill <directory>` flags (loaded even with `--no-skills`)
 
-Use `--no-skills` to skip auto-discovery (including `.agents/skills`). Extra paths (`--skill`) still load.
+Claude Code skills use the same `SKILL.md` format, so the ones you already have work in cast unchanged. They show up with source `claude`; `/skills uninstall` leaves them alone, since they belong to Claude Code.
+
+Use `--no-skills` to skip auto-discovery (including `.agents/skills` and `.claude/skills`). Extra paths (`--skill`) still load.
+
+### Turning sources off
+
+Each family of locations can be switched off as a whole: `builtin`, `cast` (`~/.cast/skills` and `.cast/skills`), `agents` (the skills.sh paths) and `claude` (`~/.claude/skills` and `.claude/skills`).
+
+```
+/skills sources              Multi-select of the four
+/skills sources claude off   One at a time (on|off)
+```
+
+The web UI has the same switches at the top of **Settings → Skills**. The choice is saved as `disabledSkillSources` in `~/.cast/settings.json` and applies at once.
 
 ### skills.sh / `npx skills add`
 

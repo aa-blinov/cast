@@ -267,6 +267,8 @@ export function isCommandBlocking(input: string): boolean {
 	// the active loop. Keep the palette available and gate the actual mutation.
 	if (name === "/mcp" || name === "/skills" || name === "/ssh") {
 		const readOnly = name === "/ssh" ? [undefined, "list"] : [undefined, "list", "help"];
+		// Bare `/skills sources` only lists them; naming one switches it.
+		if (name === "/skills" && rest[0] === "sources") return rest.length > 1;
 		return !readOnly.includes(rest[0]);
 	}
 	// /rule:NAME is one token (no space before the rule id) — the bridge

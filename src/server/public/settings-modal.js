@@ -209,12 +209,12 @@ export function SettingsModal({
 				}
 				commit((d) => ({ ...d, mcp: res.result }));
 			} else if (t === "skills") {
-				const res = await run("/skills list");
+				const [res, sources] = await Promise.all([run("/skills list"), run("/skills sources")]);
 				if (!res.ok) {
 					setLoadError(res.error);
 					return;
 				}
-				commit((d) => ({ ...d, skills: res.result }));
+				commit((d) => ({ ...d, skills: res.result, skillSources: sources.ok ? sources.result : [] }));
 			} else if (t === "skillssh") {
 				// Reuses the same data as the Skills tab — Skills.sh skills are
 				// already loaded from ~/.config/agents/skills/ as part of the
@@ -381,7 +381,7 @@ export function SettingsModal({
 															: tab === "mcp"
 																? html`<${panels.SettingsMcp} data=${data.mcp} busy=${busy} act=${act} confirm=${confirm} />`
 																: tab === "skills"
-																	? html`<${panels.SettingsSkills} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
+																	? html`<${panels.SettingsSkills} data=${data.skills} sources=${data.skillSources} busy=${busy} act=${act} confirm=${confirm} />`
 																			: tab === "skillssh"
 																				? html`<${panels.SettingsSkillssh} data=${data.skills} busy=${busy} act=${act} confirm=${confirm} />`
 																				: tab === "provider"

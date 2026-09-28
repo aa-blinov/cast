@@ -6,8 +6,11 @@ Skills are reusable instruction files the model can read on demand.
 2. `.agents/skills/` — skills.sh universal project path (trust-gated)
 3. `~/.cast/skills/` — global
 4. `~/.config/agents/skills/` / `~/.agents/skills/` — skills.sh universal global
-5. Shipped with cast — builtin
-6. `--skill <directory>` — explicit skill package directory (still loads with `--no-skills`)
+5. `~/.claude/skills/` — Claude Code's skills, loaded as they are (`.claude/skills/` in a trusted project ranks just below `.agents/skills/`)
+6. Shipped with cast — builtin
+7. `--skill <directory>` — explicit skill package directory (still loads with `--no-skills`)
+
+`/skills sources` (or `disabledSkillSources` in settings: `builtin`, `cast`, `agents`, `claude`) turns a whole family of locations off.
 
 `--no-skills` skips project, agents, global, and builtin discovery.
 
@@ -41,7 +44,7 @@ Instructions the model reads when this skill is invoked...
 - `disable-model-invocation: true` — skill is hidden from model, only usable via `/skill:name`
 - `/skills` — multi-select toggle; also `list`, `enable`/`disable <name>`, `uninstall`, `help`
 - `/skills uninstall` — delete a cast/agents skill from disk (picker or name + confirm); builtin and `--skill` paths are not removable
-- On name collision: `.cast` project > `.agents` project > `.cast` global > `.agents` global > builtin
+- On name collision: `.cast` project > `.agents` project > `.claude` project > `.cast` global > `.agents` global > `.claude` global > builtin
 
 **Example — create a skill:**
 
