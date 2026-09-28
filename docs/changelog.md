@@ -4,6 +4,23 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.46.0
+
+### Added
+
+- **File tools ask before leaving the project.** A `read`, `write`, `edit`, `ls`, `glob` or `grep` outside the session's directory and its project root asks first, following symlinks. Allow or wall off directories with `external_directory(<glob>)` rules; "Always allow" saves the directory. Cast's own memory, saved tool output, uploads and skills stay open.
+- **`--dangerously-skip-permissions`** works as the same flag as `--bypass-permissions`, as in Claude Code. Deny rules still apply.
+- **A silent provider is reported.** After 60 seconds without a byte, cast says it is still waiting and when it will retry.
+
+### Fixed
+
+- **The agent no longer wanders into another repository.** Asked to "commit my changes", it could commit in a different project: its shell inherited the directory you were in before, and the system prompt named cast's install directory a dozen times. Both are gone.
+- **Several `cast run`s started at once all work.** Some failed with "cast run requires the server daemon" while the daemon was still starting. The TUI had the same limit.
+- **`cast run` no longer hangs on a confirmation.** A dangerous command or an `ask` rule is refused at once, with the reason, instead of after five minutes.
+- **A stuck check stops being repeated.** When the same tool output comes back again and again, the agent is told that repeating it won't help, and to try something else or say what is blocking it.
+- **The senior persona commits only when you ask.**
+- `edit` and `write` accept each other's path argument.
+
 ## 0.45.1
 
 ### Fixed
