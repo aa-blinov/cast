@@ -4,6 +4,16 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.47.1
+
+### Changed
+
+- **Long tool output costs less context.** A `bash` result shows the model at most 32000 characters, its start and end, cut on line breaks with the cut marked; before, up to 128KB went in and stayed in every later request. `read` stops at 50KB and says which `offset` continues, and a line past 2000 characters (a minified bundle, a JSON dump) is cut with its length noted. The full `bash` output is still saved to a file the result names. Setting `maxToolOutputBytes` yourself restores your own limit for both.
+
+### Fixed
+
+- **The same instructions load once.** An `AGENTS.md`/`CLAUDE.md` whose text is already loaded from another level (`~/.cast/` and `~/`, a symlink, a package that copied the root file) is skipped instead of being sent twice with every request.
+
 ## 0.47.0
 
 ### Added
