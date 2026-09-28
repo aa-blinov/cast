@@ -61,6 +61,7 @@ A pattern as broad as `bash(*.env*)` also blocks harmless commands that merely m
 | Key | Effect |
 |-----|--------|
 | `autoFormat` | `false` stops running the project's formatter (biome, prettier, ruff, gofmt) after `write`/`edit`. Default on |
+| `lsp`, `lspAutoInstall`, `lspServers` | Language servers: the `lsp` tool and errors added to `write`/`edit` results. `lsp: false` turns them off, `lspAutoInstall: false` stops installing npm servers into `~/.cast/lsp`, `lspServers` adds or overrides one (`command`, `extensions`, `env`, `initialization`, `disabled`). `/lsp` shows what runs |
 | `notifications` | `false` stops the TUI's terminal notification and bell when a turn ends or waits for approval while the terminal is unfocused |
 | `keybindings` | TUI key overrides by action id, e.g. `{"input.externalEditor": "ctrl+o"}`; `[]` unbinds. `/keys` shows the keys in effect. Read at TUI start |
 | `maxToolOutputLines`, `maxToolOutputBytes` | Tool result caps. A cut result's full output is saved under `~/.cast/tool-output/` and the result names the file. `bash` shows at most 32000 characters (start and end) and `read` 50KB, unless `maxToolOutputBytes` is set |

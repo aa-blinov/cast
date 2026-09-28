@@ -11,9 +11,11 @@
  * The seam under test (web-bridge.test.ts) is `bridge.executeCommand(name)`;
  * these handlers are tested through it, not directly.
  */
+
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { clearGoal, editGoalObjective, formatGoalStatus, readGoal, startGoal } from "../../core/goal.ts";
+import { formatLspStatus, lspStatus } from "../../core/lsp/index.ts";
 import {
 	buildReviewScope,
 	formatReviewBrief,
@@ -395,6 +397,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 			},
 		};
 	},
+	"/lsp": () => ({ ok: true, result: formatLspStatus(lspStatus()) }),
 	"/repo": (ctx) => {
 		const { ws, cwd } = ctx;
 		const sessionCwd = ws.session.cwd ?? cwd;

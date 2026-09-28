@@ -174,6 +174,27 @@ describe("parseToolSummary — edit +added/-removed", () => {
 	});
 });
 
+describe("parseToolSummary — lsp", () => {
+	it("shows the operation and where it points", () => {
+		expect(
+			parseToolSummary(
+				"lsp",
+				JSON.stringify({ operation: "findReferences", file_path: "src/a.ts", line: 12, character: 5 }),
+			),
+		).toEqual({ kind: "generic", text: "findReferences src/a.ts:12:5" });
+		expect(parseToolSummary("lsp", JSON.stringify({ operation: "documentSymbol", file_path: "src/a.ts" }))).toEqual({
+			kind: "generic",
+			text: "documentSymbol src/a.ts",
+		});
+		expect(
+			parseToolSummary(
+				"lsp",
+				JSON.stringify({ operation: "workspaceSymbol", file_path: "src/a.ts", query: "parse" }),
+			),
+		).toEqual({ kind: "generic", text: 'workspaceSymbol "parse"' });
+	});
+});
+
 describe("parseToolSummary — todo_write", () => {
 	it("summarizes as N/M done plus the in_progress item, not a raw JSON dump", () => {
 		const args = JSON.stringify({

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { type AppConfig, DEFAULT_BASH_TIMEOUT_MS, MAX_BASH_TIMEOUT_MS } from "./config.ts";
 import type { Tool } from "./llm.ts";
+import { lspEnabled } from "./lsp/index.ts";
 import { execMemorySearch, MEMORY_TOOL_DESCRIPTION } from "./memory.ts";
 import type { PlanState } from "./plan.ts";
 import {
@@ -20,6 +21,14 @@ import { execBash } from "./tools/bash.ts";
 import { type BashBackgroundDeps, execBashKill, execBashOutput } from "./tools/bash-background.ts";
 import { execEdit, execRead, execWrite } from "./tools/files.ts";
 import { formatWrittenFile } from "./tools/format.ts";
+import {
+	type DiagnosticsBefore,
+	diagnosticsAfterChange,
+	diagnosticsBefore,
+	execLsp,
+	LSP_OPERATIONS,
+	warmUpLsp,
+} from "./tools/lsp.ts";
 import { execPersonaCreate, PERSONA_CREATE_TOOL_DESCRIPTION, type PersonaToolDeps } from "./tools/persona.ts";
 import { execGlob, execGrep, execLs } from "./tools/search.ts";
 import {
@@ -307,6 +316,44 @@ export function getToolDefinitions(
 			},
 		},
 		...(memoryEnabled ? [memoryTool] : []),
+		...(lspEnabled()
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "lsp",
+							description:
+								"Ask the project's language server (compiler-grade code intelligence) about code. Operations: " +
+								"goToDefinition, goToTypeDefinition, goToImplementation, findReferences (includes the declaration), hover (type and docs), " +
+								"documentSymbol (outline of file_path), workspaceSymbol (find symbols by name across the project: pass query), " +
+								"prepareCallHierarchy, incomingCalls (who calls the function at the cursor), outgoingCalls (what it calls), " +
+								"diagnostics (the compiler's errors and warnings for file_path, without running a build). " +
+								"line and character are 1-based, as `read` shows them; put the cursor on the symbol's name. " +
+								"Prefer grep/read for ordinary text search; use lsp when the name is ambiguous (overloads, same name in many places), " +
+								"to find every real caller before changing a signature, or to check types without building. " +
+								"edit and write already report the errors the language server finds after a change.",
+							parameters: {
+								type: "object",
+								properties: {
+									operation: { type: "string", enum: [...LSP_OPERATIONS] },
+									file_path: {
+										type: "string",
+										description:
+											"The file to query (relative or absolute). For workspaceSymbol, any file of the language picks the server.",
+									},
+									line: { type: "number", description: "1-based line of the cursor (position operations)" },
+									character: {
+										type: "number",
+										description: "1-based column of the cursor (position operations)",
+									},
+									query: { type: "string", description: "Symbol name to search for (workspaceSymbol)" },
+								},
+								required: ["operation", "file_path"],
+							},
+						},
+					},
+				]
+			: []),
 		{
 			type: "function",
 			function: {
@@ -849,6 +896,17 @@ async function withFormatting(result: ToolResult, absolutePath: string, signal?:
 	return note ? { ...result, content: `${result.content}\n${note}` } : result;
 }
 
+async function withDiagnostics(
+	result: ToolResult,
+	absolutePath: string,
+	cwd: string,
+	before: DiagnosticsBefore,
+): Promise<ToolResult> {
+	if (result.isError) return result;
+	const note = await diagnosticsAfterChange(absolutePath, cwd, before);
+	return note ? { ...result, content: `${result.content}${note}` } : result;
+}
+
 export function createToolExecutor(
 	cwd: string,
 	config: AppConfig,
@@ -878,6 +936,8 @@ export function createToolExecutor(
 						return await execBashKill(args, backgroundBash);
 					case "read": {
 						const result = await execRead(args, cwd, config);
+						if (!result.isError && !result.imageDataUrl)
+							warmUpLsp(resolvePath(String(args.path ?? ""), cwd), cwd);
 						// A read of the active-or-other plan file while plan mode is
 						// active makes it the active plan — same effect plan_read's
 						// `name` argument used to have, without a dedicated tool. Build
@@ -909,7 +969,13 @@ export function createToolExecutor(
 							return result;
 						}
 						beforeFileWrite?.(absolutePath);
-						return withFormatting(await execWrite(args, cwd), absolutePath, signal);
+						const lspBefore = await diagnosticsBefore(absolutePath, cwd);
+						return withDiagnostics(
+							await withFormatting(await execWrite(args, cwd), absolutePath, signal),
+							absolutePath,
+							cwd,
+							lspBefore,
+						);
 					}
 					case "edit": {
 						const absolutePath = resolvePath(String(args.filePath ?? ""), cwd);
@@ -936,8 +1002,16 @@ export function createToolExecutor(
 							return result;
 						}
 						beforeFileWrite?.(absolutePath);
-						return withFormatting(await execEdit(args, cwd, config), absolutePath, signal);
+						const lspBefore = await diagnosticsBefore(absolutePath, cwd);
+						return withDiagnostics(
+							await withFormatting(await execEdit(args, cwd, config), absolutePath, signal),
+							absolutePath,
+							cwd,
+							lspBefore,
+						);
 					}
+					case "lsp":
+						return await execLsp(args, cwd, signal);
 					case "glob":
 					case "find": // legacy alias — same implementation as glob
 						return await execGlob(args, cwd, config, signal);

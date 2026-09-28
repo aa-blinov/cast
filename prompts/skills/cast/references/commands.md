@@ -54,6 +54,7 @@
 | `/web-fetch-provider [name]` | Show/change the web_fetch backend |
 | `/usage` | Web: cumulative token/cost usage for this session (TUI: `/current`) |
 | `/keys` | Show keyboard shortcuts in effect, including `keybindings` overrides |
+| `/lsp` | Show running language servers and why others are off |
 | `/older` | Load an older page of scrollback history |
 | `/copy` | Copy the last assistant message to the clipboard |
 | `/help` | Show help |

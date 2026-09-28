@@ -64,6 +64,61 @@ After a successful `write` or `edit`, cast runs the project's own formatter on t
 
 Only an installed formatter runs; cast never downloads one. When the file changes, the tool result says so and asks the model to read the file again before its next edit. A formatter that fails, for example on a syntax error, leaves the file as written. Plan files are not formatted. Set `autoFormat: false` in `~/.cast/settings.json` to turn it off. For a type check after each edit, see the recipe in [Hooks](hooks.md#recipe-type-check-after-each-edit).
 
+### Language servers
+
+After a `write` or `edit`, cast hands the file to the project's language server and waits for its verdict, at most 5 seconds (usually milliseconds). The errors it finds are added to the tool result, so the model fixes them in the same turn without running a build:
+
+```
+LSP errors introduced by this change, please fix:
+<diagnostics file="src/math.ts">
+ERROR [2:2] Type 'string' is not assignable to type 'number'. (ts 2322)
+</diagnostics>
+
+This change broke other files:
+<diagnostics file="src/main.ts">
+ERROR [3:31] Argument of type 'number' is not assignable to parameter of type 'string'. (ts 2345)
+</diagnostics>
+```
+
+Only errors are reported, 20 per file. Errors that were already in the file before the change are counted, not listed (`(2 errors were already in src/math.ts before this change.)`), so the model fixes what it broke rather than chasing old problems; the first time a file is seen, all of its errors are listed. Other open files are reported when the change gave them new errors, up to 5.
+
+The `lsp` tool asks the same servers directly. Positions are 1-based, as `read` shows them; results are `path:line:col` with the line of code:
+
+| Operation | What it returns |
+|-----------|-----------------|
+| `goToDefinition`, `goToTypeDefinition`, `goToImplementation` | where the symbol at the cursor is defined |
+| `findReferences` | every use, including the declaration, grouped by file (100 at most) |
+| `hover` | its type and documentation |
+| `documentSymbol` | the file's outline with line ranges |
+| `workspaceSymbol` | symbols matching `query` across the project (50 at most) |
+| `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls` | who calls the function at the cursor, and what it calls |
+| `diagnostics` | the compiler's errors and warnings for the file, without a build |
+
+A server starts the first time a file needs it, one per project root, and is shared by every session; one idle for 10 minutes is stopped. Servers run without the credentials in cast's environment (API keys, tokens), and are not handed files over 4MB. Reading a file starts its server in the background. A server that crashes is restarted, twice at most. `/lsp` shows which servers run and why others don't; `cast lsp <operation> <file> [line character | query]` asks one from the shell.
+
+| Language | Server | Found |
+|----------|--------|-------|
+| TypeScript, JavaScript | TypeScript 7's own (`tsc --lsp`), or typescript-language-server with the project's TypeScript 5 | project, or installed |
+| Python | basedpyright or pyright, with the project's `.venv`/`venv`/`$VIRTUAL_ENV` | `PATH`, or installed |
+| Vue, Svelte, Astro, Bash, YAML, JSON, CSS, HTML, PHP (intelephense), Dockerfile, Prisma | their npm language servers | project, `PATH`, or installed |
+| Go | gopls | `PATH`, `~/go/bin`, or `go install` |
+| C/C++, Rust, Lua, Zig, LaTeX, Typst | clangd, rust-analyzer, lua-language-server, zls, texlab, tinymist | `PATH`, or downloaded |
+| ESLint, oxlint, Biome | the project's own linter as a server (its config and plugins apply) | when the project has it |
+| Deno, Ruby, C#, F#, Java, Kotlin, Swift, Elixir, Dart, OCaml, Haskell, Gleam, Clojure, Nix, Julia, Terraform | deno, ruby-lsp/rubocop, roslyn/csharp-ls, fsautocomplete, jdtls, kotlin-lsp, sourcekit-lsp, elixir-ls, dart, ocamllsp, haskell-language-server, gleam, clojure-lsp, nixd, julia, terraform-ls | `PATH` |
+
+"Installed" means cast installs the npm package into `~/.cast/lsp` on first use (`npm install --ignore-scripts`, no install hooks run); "downloaded" means the server's latest GitHub release for your OS and CPU, into `~/.cast/lsp/bin`. Turn that off with `lspAutoInstall: false`, and language servers altogether with `lsp: false`. Add a server, or change a built-in one, in `lspServers`:
+
+```json
+{
+  "lspServers": {
+    "pyright": { "disabled": true },
+    "my-dsl": { "command": ["my-dsl-lsp", "--stdio"], "extensions": [".dsl"], "initialization": { "strict": true } }
+  }
+}
+```
+
+A built-in override may set `command`, `extensions`, `env` or `initialization` (sent as `initializationOptions` and answered to `workspace/configuration`) and keeps the rest. The tool is read-only: it is allowed in plan mode and to the explore and review subagents, and a path outside the project asks first like any file tool.
+
 ## Search Tools
 
 ### `glob`

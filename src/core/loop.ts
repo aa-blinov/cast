@@ -488,6 +488,7 @@ const GOAL_JUDGE_RESULT_CHARS = 1500;
 export const PARALLEL_SAFE_TOOL_NAMES = new Set([
 	"glob",
 	"grep",
+	"lsp",
 	"ls",
 	"memory",
 	"session_history",

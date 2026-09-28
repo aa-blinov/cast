@@ -191,8 +191,8 @@ describe("loadSubagentPrompts", () => {
 		expect(review).toBeDefined();
 		expect(explore!.label).toBe("Explore");
 		expect(review!.label).toBe("Review");
-		expect(explore!.tools).toEqual(["read", "grep", "glob", "ls", "bash"]);
-		expect(review!.tools).toEqual(["read", "grep", "glob", "ls", "bash"]);
+		expect(explore!.tools).toEqual(["read", "grep", "glob", "ls", "lsp", "bash"]);
+		expect(review!.tools).toEqual(["read", "grep", "glob", "ls", "lsp", "bash"]);
 		expect(explore!.tools).not.toContain("write");
 		expect(explore!.tools).not.toContain("edit");
 		expect(review!.tools).not.toContain("write");

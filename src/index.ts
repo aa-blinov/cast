@@ -5,11 +5,13 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAcpAgent } from "./core/acp/agent.ts";
 import { printHelp } from "./core/help.ts";
+import { formatLspStatus, lspStatus, shutdownAllLspServers } from "./core/lsp/index.ts";
 import { listLoggedRequests, loadLoggedRequest } from "./core/request-log.ts";
 import { runInteractive, runNonInteractive } from "./core/run.ts";
 import { loadSessionMeta } from "./core/session.ts";
 import { isBypassPermissionsFlag, loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
+import { execLsp, LSP_OPERATIONS } from "./core/tools/lsp.ts";
 import { runUpgrade } from "./core/upgrade.ts";
 import { WorktreeBlockedError } from "./core/worktree.ts";
 import {
@@ -69,6 +71,11 @@ async function main(): Promise<void> {
 
 	if (args[0] === "requests") {
 		handleRequestsCommand(args.slice(1));
+		return;
+	}
+
+	if (args[0] === "lsp") {
+		await handleLspCommand(args.slice(1));
 		return;
 	}
 
@@ -457,6 +464,29 @@ Neovim) to wire it as an agent.`);
 
 	const permissionMode = bypass ? "bypass" : (startup.permissionMode as "default");
 	runAcpAgent(startup, { version, permissionMode, sessionId, resume });
+}
+
+/**
+ * `cast lsp <operation> <file> [line character | query]`: asks the language
+ * server what the `lsp` tool would, from the shell. `cast lsp status` lists
+ * the servers once a query has started them.
+ */
+async function handleLspCommand(args: string[]): Promise<void> {
+	const [operation, file, a, b] = args;
+	if (!operation || (!file && operation !== "status")) {
+		console.error(`Usage: cast lsp <${LSP_OPERATIONS.join("|")}> <file> [line character | query]`);
+		process.exit(1);
+	}
+	if (operation === "status") {
+		console.log(formatLspStatus(lspStatus()));
+		return;
+	}
+	const position = a !== undefined && b !== undefined ? { line: Number(a), character: Number(b) } : {};
+	const result = await execLsp({ operation, file_path: file, ...position, query: a }, process.cwd());
+	console.log(result.content);
+	console.log(`\n${formatLspStatus(lspStatus())}`);
+	await shutdownAllLspServers();
+	process.exit(result.isError ? 1 : 0);
 }
 
 /** `cast requests <session> [n] [--response]`: the request log (request-log.ts). */
