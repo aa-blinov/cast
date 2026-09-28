@@ -172,8 +172,9 @@ export interface CommandContext {
 	) => Promise<void>;
 	/** Abort the running turn on the given session. */
 	abort: (sessionId: string) => void;
-	/** Create a new idle copy of the given session (used by /fork). */
-	forkSessionInstance: (sessionId: string) => WebAgentSession | undefined;
+	/** Create a new idle copy of the given session (used by /fork), optionally
+	 *  of its history before the message at `beforeSeq`. */
+	forkSessionInstance: (sessionId: string, beforeSeq?: number) => WebAgentSession | undefined;
 	/** List every session summary the daemon knows about (used by /sessions). */
 	listSessions: () => SessionSummary[];
 	/** Whether the user has trusted the cwd's project to load its hooks file
@@ -447,8 +448,11 @@ const commandHandlers: Record<string, CommandHandler> = {
 			result: { cwd: sessionCwd, isGit: true, branch, dirty, worktree },
 		};
 	},
-	"/fork": ({ ws, forkSessionInstance }) => {
-		const fork = forkSessionInstance(ws.id);
+	"/fork": ({ ws, arg, forkSessionInstance }) => {
+		const beforeSeq = arg ? Number(arg) : undefined;
+		if (beforeSeq !== undefined && !Number.isInteger(beforeSeq))
+			return { ok: false, error: "Usage: /fork [message seq]" };
+		const fork = forkSessionInstance(ws.id, beforeSeq);
 		if (!fork) return { ok: false, error: "Could not fork session" };
 		return { ok: true, result: { sessionId: fork.id } };
 	},

@@ -33,6 +33,7 @@ import {
 	getSessionEvents,
 	hasRecentClientMessageId,
 	lastPersistedSeq,
+	listForkPoints,
 	listSessionSummaries,
 	listSessions,
 	listSubagentSessions,
@@ -1965,6 +1966,47 @@ describe("session persistence", () => {
 
 		const fork = forkSession(loadSession(s.id)!);
 		expect(getFullHistoryWithReasoning(fork.id).reasoning[1]).toBe("thinking about X...");
+	});
+
+	it("forks before any prompt, with the context the model had then", () => {
+		const s = createSession("gpt-4o", projectA);
+		const sys: Message = { role: "system", content: "SYS" };
+		const u1: Message = { role: "user", content: "first" };
+		const a1: Message = { role: "assistant", content: "one" };
+		const u2: Message = { role: "user", content: "second" };
+		const a2: Message = { role: "assistant", content: "two" };
+		const u3: Message = { role: "user", content: "third" };
+		const a3: Message = { role: "assistant", content: "three" };
+		s.messages = [sys, u1, a1, u2, a2];
+		attachReasoning(a1, "why one");
+		saveSession(s);
+		// u1/a1 folded into a summary; u2 onward kept, then the session went on.
+		const marker: Message = { role: "system", content: "[Compacted context — 2 messages summarized]\nsummary of 1" };
+		recordCompaction(s, s.messages, [sys, marker, u2, a2]);
+		s.messages = [sys, marker, u2, a2];
+		s.messages.push({ role: "user", content: "<system-reminder>internal</system-reminder>" }, u3, a3);
+		saveSession(s);
+
+		const points = listForkPoints(s.id);
+		expect(points.map((p) => p.text)).toEqual(["first", "second", "third"]);
+
+		// Before the compaction.
+		const early = forkSession(loadSession(s.id)!, points[1]!.seq);
+		expect(loadSession(early.id)!.messages).toEqual([sys, u1, a1]);
+		expect(getFullHistoryWithReasoning(early.id).reasoning[2]).toBe("why one");
+
+		// After it: every original up to the point, the summary left out.
+		const late = forkSession(loadSession(s.id)!, points[2]!.seq);
+		expect(loadSession(late.id)!.messages).toEqual([
+			sys,
+			u1,
+			a1,
+			u2,
+			a2,
+			{ role: "user", content: "<system-reminder>internal</system-reminder>" },
+		]);
+		// The source is untouched.
+		expect(loadSession(s.id)!.messages).toHaveLength(7);
 	});
 
 	it("keeps reasoning on its own message when the array shifts between saves", () => {

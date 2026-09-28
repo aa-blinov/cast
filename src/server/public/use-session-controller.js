@@ -439,10 +439,11 @@ export function useSessionController({
 		],
 	);
 
+	// beforeSeq: fork the history before that user message instead of all of it.
 	const forkSession = useCallback(
-		async (id) => {
+		async (id, beforeSeq) => {
 			try {
-				const data = await api("POST", `/api/sessions/${id}/fork`);
+				const data = await api("POST", `/api/sessions/${id}/fork`, beforeSeq === undefined ? undefined : { beforeSeq });
 				if (!data?.id) throw new Error("Could not fork session");
 				await loadSessions();
 				await selectSession(data.id);

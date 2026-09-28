@@ -492,8 +492,10 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 			post: {
 				summary: "Fork an idle session",
 				parameters: [idParameter],
+				requestBody: requestBody({ $ref: "#/components/schemas/ForkRequest" }),
 				responses: {
 					"201": jsonResponse("Forked session", { $ref: "#/components/schemas/CreateSessionResponse" }),
+					"400": errorResponse,
 					"401": errorResponse,
 					"404": errorResponse,
 					"409": errorResponse,
@@ -835,6 +837,16 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 				type: "object",
 				required: ["id", "session"],
 				properties: { id: { type: "string" }, session: { type: "object" } },
+			},
+			ForkRequest: {
+				type: "object",
+				properties: {
+					beforeSeq: {
+						type: "integer",
+						description:
+							"Fork the history before the message with this `seq` (a user message, from history) instead of the whole current context.",
+					},
+				},
 			},
 			ChatRequest: {
 				type: "object",

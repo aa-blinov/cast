@@ -46,6 +46,7 @@ import {
 	countTurnMessages,
 	createSession,
 	dropLastCheckpoint,
+	listForkPoints,
 	listSessionSummaries,
 	listSubagentSessions,
 	loadCheckpoints,
@@ -191,7 +192,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/dream", description: "Consolidate durable project memory" },
 	{ name: "/evolve", description: "Propose reusable skills for this project from the session" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
-	{ name: "/fork", description: "Fork the current conversation into a new session" },
+	{ name: "/fork", description: "Fork the conversation, whole or from before one of your messages" },
 	{ name: "/goal", description: "Work toward a goal autonomously until done — goal text", takesArgs: true },
 	{ name: "/help", description: "Show this command list" },
 	{ name: "/hooks", description: "List configured hooks" },
@@ -1506,9 +1507,30 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	{
 		match: (input) => input === "/fork",
 		run: async ({ deps, agent, session, showNotice }) => {
+			// Newest first: going back a step or two is the common case.
+			const points = listForkPoints(session.id).reverse();
+			let beforeSeq: number | undefined;
+			if (points.length > 0) {
+				const picked = await deps.pickers.pickOption<string>(
+					[
+						{ value: "all", label: "Whole session", description: "Everything up to now" },
+						...points.map((p) => ({
+							value: String(p.seq),
+							label: `Before: ${p.text.split(WHITESPACE_RE).join(" ").slice(0, 70)}`,
+							description: "The conversation up to this message, which you can then send again or change",
+						})),
+					],
+					{ title: "Fork from where?" },
+				);
+				if (!picked) {
+					showNotice("[Cancelled]");
+					return;
+				}
+				beforeSeq = picked === "all" ? undefined : Number(picked);
+			}
 			let forked: SessionState | undefined;
 			try {
-				forked = await agent.forkSession();
+				forked = await agent.forkSession(beforeSeq);
 			} catch (err) {
 				showNotice(`[Could not fork this session: ${err instanceof Error ? err.message : String(err)}]`);
 				return;
@@ -1520,7 +1542,15 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			restoreSessionState(session, forked);
 			agent.refresh();
 			deps.setPlanMode(forked.mode === "plan");
-			showNotice(`[Forked session: ${forked.id}]`);
+			// A fork from a point is shorter than what's drawn: the later turns
+			// would stay on screen, looking like part of the new session.
+			if (beforeSeq !== undefined) await deps.onRepaintHistory?.();
+			const point = points.find((p) => p.seq === beforeSeq);
+			showNotice(
+				point
+					? `[Forked session: ${forked.id}, before "${point.text.slice(0, 70)}". Send it again, or something else.]`
+					: `[Forked session: ${forked.id}]`,
+			);
 			return;
 		},
 	},

@@ -268,6 +268,15 @@ describe("daemon single-writer SSE contract", () => {
 		const fork = await request(`/sessions/${id}/fork`, { method: "POST" });
 		expect(fork.status).toBe(201);
 		const { id: forkId } = (await fork.json()) as { id: string };
+		await expect(
+			request(`/sessions/${id}/fork`, { method: "POST", body: JSON.stringify({ beforeSeq: "x" }) }),
+		).resolves.toMatchObject({ status: 400 });
+		const earlyFork = await request(`/sessions/${id}/fork`, {
+			method: "POST",
+			body: JSON.stringify({ beforeSeq: 0 }),
+		});
+		expect(earlyFork.status).toBe(201);
+		const { id: earlyForkId } = (await earlyFork.json()) as { id: string };
 
 		await expect(
 			request(`/sessions/${id}/mode`, { method: "POST", body: JSON.stringify({ mode: "plan" }) }),
@@ -307,6 +316,7 @@ describe("daemon single-writer SSE contract", () => {
 			status: 202,
 		});
 		await expect(request(`/sessions/${forkId}`, { method: "DELETE" })).resolves.toMatchObject({ status: 200 });
+		await expect(request(`/sessions/${earlyForkId}`, { method: "DELETE" })).resolves.toMatchObject({ status: 200 });
 	});
 
 	it("returns documented client errors for malformed v1 JSON requests", async () => {

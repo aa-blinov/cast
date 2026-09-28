@@ -24,7 +24,7 @@ export function parseSkillInvocation(content) {
 	return { name: unescape(match[1]), location: unescape(match[2]), args: match[3]?.trim() ?? "" };
 }
 
-function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false }) {
+function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, onFork }) {
 	const role = msg.role || "assistant";
 	// Only used by the legacy floating image-result branch below (pre
 	// castToolCallId sessions) — declared unconditionally so hook order stays
@@ -169,7 +169,12 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false })
 
 	return html`
 	<div class="message message-${role}">
-		<div class="message-label">${labelMap[role] ?? role}</div>
+		<div class="message-label">${labelMap[role] ?? role}${
+			role === "user" &&
+			onFork &&
+			typeof msg.seq === "number" &&
+			html`<button type="button" class="message-fork" title="Fork: a new session with the conversation before this message" aria-label="Fork from before this message" onClick=${() => onFork(msg.seq)}><${icons.fork} /></button>`
+		}</div>
 		<div class="message-content ${role === "user" ? "" : "md-body"}" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
 		${
 			msg.attachments?.length > 0 &&

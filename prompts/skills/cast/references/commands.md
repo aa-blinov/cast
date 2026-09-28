@@ -25,7 +25,7 @@
 | `/sessions` | List/switch sessions |
 | `/continue` | Switch to the most recently updated other session |
 | `/new` | Start a fresh session |
-| `/fork` | Fork the current session into a new one |
+| `/fork` | Fork the session into a new one: whole, or from before one of the user's messages |
 | `/repo` | Show cwd's git status: branch, dirty flag, active worktree |
 | `/plan` | User-initiated task initialization: establish scope and an execution plan before implementation |
 | `/build` | Exit plan mode, approve the plan, and restore the implementation toolset |
