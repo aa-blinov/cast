@@ -96,6 +96,7 @@ const PATH_ARG: Record<string, string> = {
 	ls: "path",
 	glob: "path",
 	grep: "path",
+	lsp: "file_path",
 };
 
 /** What a rule's pattern is matched against for this call, if anything. */
@@ -187,7 +188,7 @@ export function addAllowRule(rule: string): void {
  */
 export const EXTERNAL_DIRECTORY = "external_directory";
 
-const READ_TOOLS = new Set(["read", "ls", "glob", "grep"]);
+const READ_TOOLS = new Set(["read", "ls", "glob", "grep", "lsp"]);
 const DIRECTORY_TOOLS = new Set(["ls", "glob", "grep"]);
 
 /** Follows symlinks where the path exists, so a link in the project can't lead out unseen. */

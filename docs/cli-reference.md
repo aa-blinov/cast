@@ -10,6 +10,7 @@ cast web [start|stop|status]          Browser-based control room
 cast server [start|stop|status]       Alias for cast web
 cast upgrade [version] [--force]      Self-update
 cast requests <session> [n]           What the model was sent
+cast lsp <operation> <file> [...]     Ask a language server, as the lsp tool does
 ```
 
 TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported. Use `cast run` for scripting.
@@ -59,6 +60,16 @@ Print the request log of a session: every request cast sent to the model, exactl
 cast requests <session-id>             # One line per request: purpose, messages, finish reason, tokens
 cast requests <session-id> 3           # Request 3's body as JSON, byte for byte
 cast requests <session-id> 3 --response  # ... and what the model answered
+```
+
+### `cast lsp`
+
+Run one [`lsp` tool](tools.md#language-servers) query from the shell, in the current directory:
+
+```bash
+cast lsp findReferences src/math.ts 1 17     # line and character, 1-based
+cast lsp workspaceSymbol src/math.ts total   # the file picks the server; the last word is the query
+cast lsp diagnostics src/main.ts
 ```
 
 ### `cast web`

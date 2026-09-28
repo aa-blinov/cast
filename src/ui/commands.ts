@@ -8,6 +8,7 @@ import { clearGoal, editGoalObjective, formatGoalStatus, readGoal, startGoal } f
 import { runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT, runMemoryMaintenanceAgent } from "../core/loop.ts";
+import { formatLspStatus, lspStatus } from "../core/lsp/index.ts";
 import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult, mcpServerToolBlurbs } from "../core/mcp.ts";
 import {
 	cancelAutomaticMemoryRun,
@@ -200,6 +201,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/hooks enable", description: "Enable a hook — id", takesArgs: true },
 	{ name: "/hooks help", description: "Show hooks command cheat sheet" },
 	{ name: "/keys", description: "List all keybindings" },
+	{ name: "/lsp", description: "Show the language servers cast is running" },
 	{ name: "/mcp", description: "Toggle MCP servers on/off" },
 	{ name: "/mcp disable", description: "Disable one server — name", takesArgs: true },
 	{ name: "/mcp enable", description: "Enable one server — name", takesArgs: true },
@@ -3325,6 +3327,21 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				role: "warning",
 				content: `${chosen.subagent} · ${chosen.title ?? chosen.id}${chosen.running ? " (running)" : ""}\n${formatSubagentTranscript(child.messages)}`,
 			});
+		},
+	},
+	{
+		match: (input) => input === "/lsp",
+		run: async ({ deps, showNotice }) => {
+			// A thin client's servers run in the daemon, not here.
+			if (deps.agent.daemonMode) {
+				try {
+					showNotice(String(await deps.agent.runCommand("/lsp")));
+				} catch (err) {
+					showNotice(`[Could not ask the daemon: ${err instanceof Error ? err.message : String(err)}]`);
+				}
+				return;
+			}
+			showNotice(formatLspStatus(lspStatus()));
 		},
 	},
 	{

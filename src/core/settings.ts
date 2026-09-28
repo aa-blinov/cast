@@ -47,6 +47,17 @@ export interface Provider {
 	reasoningFormat?: ReasoningFormat;
 }
 
+export interface LspServerSetting {
+	/** Command and arguments; required for a server cast doesn't know. */
+	command?: string[];
+	/** Extensions with the dot (`.ts`), or whole basenames; required for a new server. */
+	extensions?: string[];
+	env?: Record<string, string>;
+	/** Sent as initializationOptions, and answers workspace/configuration. */
+	initialization?: Record<string, unknown>;
+	disabled?: boolean;
+}
+
 export interface Settings {
 	/** Last used model */
 	model?: string;
@@ -100,6 +111,12 @@ export interface Settings {
 	/** Run the project's configured formatter (biome, prettier, ruff, gofmt)
 	 * on each file write/edit changes. Default true. */
 	autoFormat?: boolean;
+	/** Language servers: the `lsp` tool and diagnostics after edits (default: on). */
+	lsp?: boolean;
+	/** Install npm-distributed language servers into ~/.cast/lsp on first use (default: on). */
+	lspAutoInstall?: boolean;
+	/** Custom language servers, or overrides of built-in ones by id. */
+	lspServers?: Record<string, LspServerSetting>;
 	/** TUI key overrides by action id (see TUI_KEYBINDINGS), e.g.
 	 * `{"input.externalEditor": "ctrl+o"}`. A value replaces that action's
 	 * default keys; `[]` unbinds it. */

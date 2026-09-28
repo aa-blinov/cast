@@ -89,6 +89,19 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 		return { kind: "write", path: parsed.path, lines };
 	}
 
+	// `findReferences src/a.ts:12:5`, `workspaceSymbol "parseArgs"`.
+	if (parsed && name === "lsp" && typeof parsed.operation === "string") {
+		const at =
+			typeof parsed.line === "number"
+				? `:${parsed.line}${typeof parsed.character === "number" ? `:${parsed.character}` : ""}`
+				: "";
+		const target =
+			parsed.operation === "workspaceSymbol" && typeof parsed.query === "string"
+				? JSON.stringify(parsed.query)
+				: `${typeof parsed.file_path === "string" ? parsed.file_path : ""}${at}`;
+		return { kind: "generic", text: `${parsed.operation} ${target}` };
+	}
+
 	if (name === "task") {
 		const taskText = formatTaskToolSummary(args);
 		if (taskText) return { kind: "task", text: taskText };

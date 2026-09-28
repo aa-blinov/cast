@@ -26,6 +26,9 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `theme` | string | Active color theme id |
 | `webTools` | boolean | Whether web tools are enabled (default: `false`; use `/web` to enable) |
 | `autoFormat` | boolean | Run the project's configured formatter after each `write`/`edit` (default: `true`; see [Auto-format](tools.md#auto-format)) |
+| `lsp` | boolean | Language servers: the `lsp` tool and errors reported after each `write`/`edit` (default: `true`; see [Language servers](tools.md#language-servers)) |
+| `lspAutoInstall` | boolean | Install npm-distributed language servers into `~/.cast/lsp` on first use (default: `true`) |
+| `lspServers` | object | Custom language servers, or overrides of built-in ones by id: `command`, `extensions`, `env`, `initialization`, `disabled` |
 | `notifications` | boolean | TUI: a terminal notification and bell when a turn ends or waits for approval while the terminal is unfocused (default: `true`) |
 | `memoryEnabled` | boolean | Whether durable project memory, retrieval, and the Web UI Memory tab are enabled (default: `true`) |
 | `memoryWriteEnabled` | boolean | Whether checkpoint writing, dream, and distill may update memory (default: `true`; reading remains available when this is `false`) |

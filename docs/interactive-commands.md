@@ -186,6 +186,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 |---------|-------------|
 | `/repo` | Show cwd, git branch, dirty state, remote, and HEAD |
 | `/keys` | List all keybindings |
+| `/lsp` | Show the language servers cast is running, and why others aren't |
 | `/help` | Show the command list |
 | `/ssh` | Manage SSH hosts: list, add, remove (persists to `~/.cast/ssh.json`) |
 
