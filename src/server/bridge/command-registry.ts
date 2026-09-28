@@ -867,23 +867,34 @@ const commandHandlers: Record<string, CommandHandler> = {
 		ws.status = "running";
 		syncFsWatcher(ws);
 		broadcaster.broadcast(ws, { type: "status", status: "running" });
-		compactSessionMessages(ws.session.messages, config, ws.session.model, undefined, undefined, (usage) => {
-			addUsage(ws.session, usage, { compaction: true });
-			// Billed like any request; without a row the dashboard's spend fell
-			// short of the session's own total by every manual compaction.
-			recordLlmRequest({
-				sessionId: ws.id,
-				provider: ws.session.providerName ?? loadSettings().modelProvider ?? "default",
-				model: ws.session.model,
-				kind: "compaction",
-				promptTokens: usage.promptTokens,
-				completionTokens: usage.completionTokens,
-				cacheReadTokens: usage.cacheReadTokens,
-				cacheWriteTokens: usage.cacheWriteTokens,
-				cost: usage.cost,
-				contextWindow: config.contextWindow,
-			});
-		})
+		compactSessionMessages(
+			ws.session.messages,
+			config,
+			ws.session.model,
+			undefined,
+			undefined,
+			(usage) => {
+				addUsage(ws.session, usage, { compaction: true });
+				// Billed like any request; without a row the dashboard's spend fell
+				// short of the session's own total by every manual compaction.
+				recordLlmRequest({
+					sessionId: ws.id,
+					provider: ws.session.providerName ?? loadSettings().modelProvider ?? "default",
+					model: ws.session.model,
+					kind: "compaction",
+					promptTokens: usage.promptTokens,
+					completionTokens: usage.completionTokens,
+					cacheReadTokens: usage.cacheReadTokens,
+					cacheWriteTokens: usage.cacheWriteTokens,
+					cost: usage.cost,
+					contextWindow: config.contextWindow,
+				});
+			},
+			undefined,
+			undefined,
+			undefined,
+			ws.id,
+		)
 			.then((result) => {
 				ws.status = "idle";
 				syncFsWatcher(ws);

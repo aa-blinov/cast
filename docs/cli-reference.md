@@ -9,6 +9,7 @@ cast run --interactive [options]      Persistent JSONL session
 cast web [start|stop|status]          Browser-based control room
 cast server [start|stop|status]       Alias for cast web
 cast upgrade [version] [--force]      Self-update
+cast requests <session> [n]           What the model was sent
 ```
 
 TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported. Use `cast run` for scripting.
@@ -48,6 +49,16 @@ Re-run the installer to update cast. Only works for release installs (not `npm l
 cast upgrade              # Upgrade to latest
 cast upgrade 0.3.0        # Upgrade to specific version
 cast upgrade --force      # Reinstall even if same version
+```
+
+### `cast requests`
+
+Print the request log of a session: every request cast sent to the model, exactly as it went out (see [Sessions](sessions.md#request-log)).
+
+```bash
+cast requests <session-id>             # One line per request: purpose, messages, finish reason, tokens
+cast requests <session-id> 3           # Request 3's body as JSON, byte for byte
+cast requests <session-id> 3 --response  # ... and what the model answered
 ```
 
 ### `cast web`
@@ -111,14 +122,14 @@ cast -p senior "review this PR"
 |------|-------|-------------|
 | `--continue` | `-c` | Resume the most recently updated session |
 | `--resume` | | Pick which session to resume (numbered list) |
-| `--resume=<id>` | | Resume a specific session by id |
+| `--resume <id>`, `--resume=<id>` | | Resume a specific session by id |
 | `--session <id>` | `-s` | Resume a specific session (alias for `--resume=<id>`) |
 | `--worktree <name>` | `-w` | Run in an isolated git worktree created at `.cast/worktrees/<name>` |
 
 ```bash
 cast -c                           # Resume last session
 cast --resume                     # Pick from a list
-cast --resume=nd4k8f2x            # Resume by id
+cast --resume nd4k8f2x            # Resume by id (or --resume=nd4k8f2x)
 cast -s nd4k8f2x "keep working"   # Resume + initial prompt
 cast -w feature-x                 # Run in an isolated git worktree
 ```

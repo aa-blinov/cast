@@ -8,6 +8,12 @@ Sessions are stored in a single SQLite database at `~/.cast/sessions/sessions.db
 
 Sessions saved by older versions of cast (individual `.json`/`.jsonl` files under `~/.cast/sessions/<encoded-cwd>/`) are imported into the database automatically on first run after upgrading. The original files are left on disk untouched.
 
+## Request Log
+
+Messages say what was said; the request log says what the model was actually sent. Every request cast makes for a session (turns, compaction, the goal check, memory upkeep) is stored with its full body: the system prompt of that moment, reminders added to that request only, the history after compaction, the tool set, the model parameters, plus its retries, how it ended, its token usage and the raw answer. A body rebuilt from the log serializes to exactly the bytes that went out, so a bad turn or an eval can be replayed as it happened.
+
+Each message and tool set is stored once per session, compressed, so a session costs about as much again as its messages (on real runs, less: 80KB of log for 1.2MB sent). The log is deleted with its session. Read it with [`cast requests`](cli-reference.md#cast-requests). A request that isn't part of a session (the provider check at startup, prompt hooks, `/evolve` skill drafts) is not logged.
+
 ## Project Memory
 
 > See [Memory](memory.md) for a complete, beginner-friendly guide: what memory

@@ -1809,6 +1809,10 @@ async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<Mem
 		undefined,
 		undefined,
 		{},
+		undefined,
+		{},
+		undefined,
+		input.sessionId ? { sessionId: input.sessionId, purpose: "memory-dream" } : undefined,
 	);
 	if (response.usage) input.onUsage?.(response.usage);
 	const parsed = parseMemoryDreamOutput(response.content);
@@ -2111,6 +2115,10 @@ async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<M
 		undefined,
 		undefined,
 		{},
+		undefined,
+		{},
+		undefined,
+		input.sessionId ? { sessionId: input.sessionId, purpose: "memory-distill" } : undefined,
 	);
 	if (response.usage) input.onUsage?.(response.usage);
 	const candidates = parseMemoryDistillOutput(response.content);

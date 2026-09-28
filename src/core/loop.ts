@@ -603,6 +603,8 @@ export async function compactSessionMessages(
 	reminderState?: PostCompactReminderState,
 	/** Provider credentials override (for per-slot provider selection). */
 	providerOverride?: { baseURL: string; apiKey: string },
+	/** The session the summary request is logged under (request-log.ts). */
+	sessionId?: string,
 ): Promise<CompactSessionResult> {
 	const client = createClient(config, providerOverride);
 	try {
@@ -629,6 +631,9 @@ export async function compactSessionMessages(
 					undefined,
 					{},
 					onRetry,
+					{},
+					undefined,
+					sessionId ? { sessionId, purpose: "compaction" } : undefined,
 				);
 				// The summarization call itself is a real request against the
 				// model — it costs real tokens/money and was previously just
@@ -743,6 +748,7 @@ async function performCompaction(
 		loopConfig.planState?.enabled ? PLAN_COMPACTION_PROMPT : undefined,
 		reminderStateFromPlan(loopConfig.planState),
 		loopConfig.modelProvider,
+		loopConfig.sessionId,
 	);
 	if (result.compacted) {
 		const fullHistoryBeforeCompaction = [...messages];
@@ -1883,6 +1889,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		loopConfig.sessionId,
 	);
 	const promptCacheBody = promptCacheRequestBody(promptCacheStrategy);
+	const turnLog = loopConfig.sessionId ? { sessionId: loopConfig.sessionId, purpose: "turn" } : undefined;
 	const memoryBudgetTokens = memoryPromptBudgetTokens(config);
 	let checkpointBoundary = loopConfig.checkpointBoundary ?? findCheckpointBoundary(messages);
 	if (checkpointBoundary < 0 && loopConfig.sessionId) {
@@ -2611,6 +2618,13 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				[],
 				2048,
 				signal,
+				undefined,
+				undefined,
+				{},
+				undefined,
+				{},
+				undefined,
+				loopConfig.sessionId ? { sessionId: loopConfig.sessionId, purpose: "goal-judge" } : undefined,
 			);
 			if (verdict.usage) onEvent({ type: "usage", usage: verdict.usage });
 			return parseGoalJudgeVerdict(verdict.content)?.gap;
@@ -2942,6 +2956,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							loopConfig.onWarning?.(
 								`The provider has sent nothing for ${Math.round(silentMs / 1000)}s; still waiting (cast retries at ${Math.round(giveUpMs / 1000)}s). Esc stops the turn.`,
 							),
+						turnLog,
 					);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
@@ -3004,6 +3019,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							config.reasoningParams.body,
 							(attempt, reason) => onEvent({ type: "retry", attempt, reason }),
 							promptCacheBody,
+							undefined,
+							turnLog,
 						);
 						recovered = true;
 					} else if (isContextOverflow(err) && !toolResultTrimmed) {
