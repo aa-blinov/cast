@@ -9,17 +9,17 @@
  * (broadcaster / fs-watcher / idle). fs-watcher consumes `broadcast` from
  * the broadcaster factory as a dep, and `idle` (planned next) will
  * consume `stopFsWatcher` from this factory as a dep. The watcher state
- * itself (the maps of chokidar instances and debounce timers, the
+ * itself (the maps of directory watchers and debounce timers, the
  * 500ms debounce window) lives inside this module — bridge.ts only
  * needs to invoke the three exported methods.
  */
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import chokidar from "chokidar";
-import { invalidateProjectFiles, listIgnoredPaths } from "../../core/file-search.ts";
+import { invalidateProjectFiles, listIgnoredPaths, listProjectFiles } from "../../core/file-search.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
 import { resolveHooksForCwd } from "../../core/project.ts";
 import type { WebAgentSession, WebEvent } from "../bridge.ts";
+import { type DirWatcher, watchDirectories } from "./dir-watcher.ts";
 
 export interface FsWatcherDeps {
 	sessions: Map<string, WebAgentSession>;
@@ -27,7 +27,7 @@ export interface FsWatcherDeps {
 	trustForSessionCwd: (sessionCwd: string) => boolean;
 	broadcast: (ws: WebAgentSession, event: WebEvent) => void;
 	/** Called at the end of syncFsWatcher so the same call site that toggles
-	 * the chokidar watcher also re-triggers the idle eviction timer. The
+	 * the directory watcher also re-triggers the idle eviction timer. The
 	 * bridge wires this to idleEvictor.syncIdleSessionEviction — kept as a
 	 * callback rather than a direct import so the two factories stay
 	 * decoupled (the original behaviour of "every session-state transition
@@ -50,7 +50,7 @@ export interface FsWatcher {
 const TRAILING_SLASH_RE = /\/+$/;
 
 export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
-	const fsWatchers = new Map<string, { close: () => unknown; on: (...args: unknown[]) => unknown }[]>();
+	const fsWatchers = new Map<string, DirWatcher>();
 	const fsDebounceTimers = new Map<string, NodeJS.Timeout>();
 	/** Sessions whose watcher is waiting for git's ignore list; stop cancels the start. */
 	const starting = new Set<string>();
@@ -100,26 +100,22 @@ export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
 		const sessionCwd = ws.session.cwd;
 		if (!sessionCwd || !existsSync(sessionCwd)) return;
 		starting.add(ws.id);
-		// Git's ignore list first: chokidar walks (and puts an inotify watch on)
-		// everything it isn't told to skip, and the name list below misses nested
-		// build folders. The walk runs on the one thread every session shares.
-		void listIgnoredPaths(sessionCwd).then((ignoredByGit) => {
-			if (!starting.delete(ws.id) || fsWatchers.has(ws.id)) return;
-			watchProject(ws, sessionCwd, ignoredByGit);
-		});
+		// Git's file and ignore lists first: they replace a walk of the tree, which
+		// ran (stat by stat) on the one thread every session shares.
+		void Promise.all([listIgnoredPaths(sessionCwd), listProjectFiles(sessionCwd)])
+			.then(([ignoredByGit, index]) => {
+				if (!starting.delete(ws.id) || fsWatchers.has(ws.id)) return;
+				watchProject(ws, sessionCwd, ignoredByGit, index.dirs);
+			})
+			.catch(() => {
+				starting.delete(ws.id);
+			});
 	}
 
-	function watchProject(ws: WebAgentSession, sessionCwd: string, ignoredByGit: string[]): void {
+	function watchProject(ws: WebAgentSession, sessionCwd: string, ignoredByGit: string[], dirs: string[]): void {
 		try {
-			// chokidar wraps native fs.watch with cross-platform polling and
-			// a sane ignore matcher — no more inotify max_user_watches limit
-			// on real cwds, no more top-level-only coverage. We exclude the
-			// usual noise (.git, node_modules, build outputs) so an `npm i`
-			// or git gc doesn't fire 100k events.
-			//
-			// chokidar v5's `string` matcher is a literal-equality check (it
-			// does not expand globs), so we use a function predicate against
-			// the absolute path of every event.
+			// We exclude the usual noise (.git, node_modules, build outputs) so an
+			// `npm i` or git gc doesn't fire 100k events, plus whatever git ignores.
 			const ignoreSegments = new Set([
 				"node_modules",
 				".git",
@@ -134,19 +130,18 @@ export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
 				".mypy_cache",
 			]);
 			const ignoredRoots = ignoredByGit.map((entry) => join(sessionCwd, entry.replace(TRAILING_SLASH_RE, "")));
-			const watcher = chokidar.watch(sessionCwd, {
-				ignored: (path) =>
-					path.split("/").some((p) => ignoreSegments.has(p)) ||
-					ignoredRoots.some((root) => path === root || path.startsWith(`${root}/`)),
-				ignoreInitial: true,
-				persistent: true,
-				awaitWriteFinish: false,
-			});
-			watcher.on("all", makeFsCallback(ws.id));
-			watcher.on("error", () => {
-				stopFsWatcher(ws.id);
-			});
-			fsWatchers.set(ws.id, [watcher as unknown as { close: () => unknown; on: (...args: unknown[]) => unknown }]);
+			const isIgnored = (path: string): boolean =>
+				path.split("/").some((p) => ignoreSegments.has(p)) ||
+				ignoredRoots.some((root) => path === root || path.startsWith(`${root}/`));
+			const onChange = makeFsCallback(ws.id);
+			const watcher = watchDirectories(
+				sessionCwd,
+				dirs.map((dir) => join(sessionCwd, dir)),
+				isIgnored,
+				onChange,
+				() => stopFsWatcher(ws.id),
+			);
+			fsWatchers.set(ws.id, watcher);
 		} catch {
 			// cwd may not exist (e.g. sandbox removed); ignore silently.
 		}
@@ -154,22 +149,8 @@ export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
 
 	function stopFsWatcher(sessionId: string): void {
 		starting.delete(sessionId);
-		const list = fsWatchers.get(sessionId);
-		if (list) {
-			for (const w of list) {
-				try {
-					// chokidar's close() returns a Promise — fire-and-forget is
-					// fine here, the inotify wd releases on process exit anyway.
-					const result = (w as unknown as { close: () => unknown }).close();
-					if (result && typeof (result as Promise<unknown>).catch === "function") {
-						(result as Promise<unknown>).catch(() => {});
-					}
-				} catch {
-					// already closed by error handler
-				}
-			}
-			fsWatchers.delete(sessionId);
-		}
+		fsWatchers.get(sessionId)?.close();
+		fsWatchers.delete(sessionId);
 		const t = fsDebounceTimers.get(sessionId);
 		if (t) {
 			clearTimeout(t);
