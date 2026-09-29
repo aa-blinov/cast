@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	invalidateProjectFiles,
+	listIgnoredPaths,
 	listProjectFiles,
 	searchProjectFiles,
 	searchProjectNames,
@@ -24,6 +25,21 @@ describe("project file search", () => {
 			touch(p);
 	});
 	afterEach(() => rmSync(TEST_DIR, { recursive: true, force: true }));
+
+	it("lists ignored folders once, nested ones included, and nothing outside a repository", async () => {
+		expect(await listIgnoredPaths(TEST_DIR)).toEqual([]);
+		execFileSync("git", ["init", "-q"], { cwd: TEST_DIR });
+		writeFileSync(join(TEST_DIR, ".gitignore"), "node_modules/\nwork/\n*.log\n");
+		touch("evals/work/a.txt");
+		touch("evals/work/deep/b.txt");
+		touch("keep/c.log");
+		const ignored = await listIgnoredPaths(TEST_DIR);
+		expect(ignored).toContain("node_modules/");
+		expect(ignored).toContain("evals/work/");
+		expect(ignored).toContain("keep/c.log");
+		expect(ignored.some((path) => path.startsWith("evals/work/") && path !== "evals/work/")).toBe(false);
+		expect(ignored).not.toContain("src/");
+	});
 
 	it("honours .gitignore in a repository and still lists untracked files", async () => {
 		execFileSync("git", ["init", "-q"], { cwd: TEST_DIR });

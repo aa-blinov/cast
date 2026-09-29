@@ -177,6 +177,24 @@ export function listProjectFiles(cwd: string, options: { includeIgnored?: boolea
 	return pending;
 }
 
+/**
+ * What git ignores under `cwd`, as paths relative to it (a directory ends in
+ * `/`, and is listed once instead of file by file). Empty outside a repository.
+ * For the idle file watcher, which otherwise walks ignored trees: one nested
+ * build folder of 11 000 files kept a daemon busy for two seconds after every
+ * turn.
+ */
+export async function listIgnoredPaths(cwd: string): Promise<string[]> {
+	return (
+		(await lines(
+			"git",
+			["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"],
+			cwd,
+			"\0",
+		)) ?? []
+	);
+}
+
 /** Forget the cached listings of a project: files were created, moved or deleted. */
 export function invalidateProjectFiles(cwd: string): void {
 	cache.delete(`${cwd}\u0000tracked`);
