@@ -14,9 +14,9 @@
  * needs to invoke the three exported methods.
  */
 import { existsSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import chokidar from "chokidar";
-import { invalidateProjectFiles } from "../../core/file-search.ts";
+import { invalidateProjectFiles, listIgnoredPaths } from "../../core/file-search.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
 import { resolveHooksForCwd } from "../../core/project.ts";
 import type { WebAgentSession, WebEvent } from "../bridge.ts";
@@ -47,9 +47,13 @@ export interface FsWatcher {
 	setOnIdle: (callback: (ws: WebAgentSession) => void) => void;
 }
 
+const TRAILING_SLASH_RE = /\/+$/;
+
 export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
 	const fsWatchers = new Map<string, { close: () => unknown; on: (...args: unknown[]) => unknown }[]>();
 	const fsDebounceTimers = new Map<string, NodeJS.Timeout>();
+	/** Sessions whose watcher is waiting for git's ignore list; stop cancels the start. */
+	const starting = new Set<string>();
 	const FS_DEBOUNCE_MS = 500;
 	// Mutable holder — bridge.ts patches this in via setOnIdle once the
 	// idleEvictor factory exists. Defaults to a no-op so construction order
@@ -92,9 +96,20 @@ export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
 	}
 
 	function startFsWatcher(ws: WebAgentSession): void {
-		if (fsWatchers.has(ws.id)) return;
+		if (fsWatchers.has(ws.id) || starting.has(ws.id)) return;
 		const sessionCwd = ws.session.cwd;
 		if (!sessionCwd || !existsSync(sessionCwd)) return;
+		starting.add(ws.id);
+		// Git's ignore list first: chokidar walks (and puts an inotify watch on)
+		// everything it isn't told to skip, and the name list below misses nested
+		// build folders. The walk runs on the one thread every session shares.
+		void listIgnoredPaths(sessionCwd).then((ignoredByGit) => {
+			if (!starting.delete(ws.id) || fsWatchers.has(ws.id)) return;
+			watchProject(ws, sessionCwd, ignoredByGit);
+		});
+	}
+
+	function watchProject(ws: WebAgentSession, sessionCwd: string, ignoredByGit: string[]): void {
 		try {
 			// chokidar wraps native fs.watch with cross-platform polling and
 			// a sane ignore matcher — no more inotify max_user_watches limit
@@ -118,8 +133,11 @@ export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
 				".tox",
 				".mypy_cache",
 			]);
+			const ignoredRoots = ignoredByGit.map((entry) => join(sessionCwd, entry.replace(TRAILING_SLASH_RE, "")));
 			const watcher = chokidar.watch(sessionCwd, {
-				ignored: (path) => path.split("/").some((p) => ignoreSegments.has(p)),
+				ignored: (path) =>
+					path.split("/").some((p) => ignoreSegments.has(p)) ||
+					ignoredRoots.some((root) => path === root || path.startsWith(`${root}/`)),
 				ignoreInitial: true,
 				persistent: true,
 				awaitWriteFinish: false,
@@ -135,6 +153,7 @@ export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
 	}
 
 	function stopFsWatcher(sessionId: string): void {
+		starting.delete(sessionId);
 		const list = fsWatchers.get(sessionId);
 		if (list) {
 			for (const w of list) {
