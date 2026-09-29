@@ -1681,15 +1681,24 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			setError("Daemon connection lost — reconnecting…");
 			if (recoveryStarted) return;
 			recoveryStarted = true;
+			// A failed attempt (daemon still starting, spawn lost a race) re-arms
+			// the flag: EventSource keeps firing onerror while it retries, and with
+			// the flag stuck the TUI sat on "reconnecting" forever.
 			void ensureServerClient()
 				.then((live) => {
-					if (disposed || !live) return;
+					if (disposed) return;
+					if (!live) {
+						recoveryStarted = false;
+						return;
+					}
 					// Replace the EventSource even when the daemon came back on the
 					// same URL. A CLOSED source is not guaranteed to retry after a
 					// restart; the new open is also the commit point for pending sends.
 					setDaemonOverride({ url: live.baseUrl, token: live.token });
 				})
-				.catch(() => {});
+				.catch(() => {
+					recoveryStarted = false;
+				});
 		};
 		source.onmessage = (ev) => {
 			let event: import("../server/bridge.ts").WebEvent;
