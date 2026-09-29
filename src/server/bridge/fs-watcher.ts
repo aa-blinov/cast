@@ -16,6 +16,7 @@
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import chokidar from "chokidar";
+import { invalidateProjectFiles } from "../../core/file-search.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
 import { resolveHooksForCwd } from "../../core/project.ts";
 import type { WebAgentSession, WebEvent } from "../bridge.ts";
@@ -70,6 +71,8 @@ export function createFsWatcher(deps: FsWatcherDeps): FsWatcher {
 					fsDebounceTimers.delete(sessionId);
 					const ws = deps.sessions.get(sessionId);
 					if (!ws || ws.status !== "idle") return;
+					// Files appeared, moved or went: the cached search index is stale.
+					invalidateProjectFiles(ws.session.cwd ?? deps.cwd);
 					deps.broadcast(ws, { type: "fs_change" });
 					const hookEvent = eventName === "addDir" ? "DirectoryAdded" : "FileChanged";
 					const hooks = resolveHooksForCwd(

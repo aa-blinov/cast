@@ -203,6 +203,11 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	border-top: 1px solid var(--border);
 }
 .diff-group-header:first-child { border-top: none; }
+.diff-group-more {
+	padding: 4px 12px 8px;
+	font-size: var(--fs-micro);
+	color: var(--text-muted);
+}
 .diff-group-count {
 	background: var(--bg-raised);
 	border-radius: 8px;
@@ -633,3 +638,43 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	font-size: var(--fs-ui);
 	color: var(--text-muted);
 }
+
+/* File explorer: actions row, selection, drag targets, dimmed ignored entries */
+.fs-toolbar-actions { flex-wrap: wrap; align-items: center; padding-top: 4px; }
+.fs-tool-btn {
+	display: inline-flex; align-items: center; gap: 4px;
+	background: none;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-muted);
+	font-family: var(--font);
+	font-size: var(--fs-ui);
+	padding: 3px 8px;
+	cursor: pointer;
+}
+.fs-tool-btn:hover { color: var(--cyan); border-color: var(--border-active); }
+.fs-tool-btn svg { width: 14px; height: 14px; }
+.fs-tool-toggle { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-muted); font-size: var(--fs-ui); cursor: pointer; }
+.fs-selection {
+	display: flex; align-items: center; gap: 8px;
+	padding: 6px 8px;
+	border-bottom: 1px solid var(--border);
+	background: var(--accent-subtle);
+	color: var(--text);
+	font-size: var(--fs-ui);
+}
+.fs-selection span { flex: 1; }
+.fs-upload { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: var(--fs-ui); color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.fs-upload-name { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-upload progress { flex: 1; min-width: 0; height: 6px; }
+.fs-row.picked { background: var(--accent-subtle); }
+.fs-row.drop, .fs-tree.drop { outline: 1px dashed var(--cyan); outline-offset: -2px; }
+.fs-row.current .fs-name { color: var(--cyan); }
+.fs-row-main.ignored { opacity: .5; }
+.fs-tag { flex-shrink: 0; margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); font-size: 11px; }
+.fs-empty-dir { color: var(--text-muted); font-size: var(--fs-ui); padding: 3px 0; }
+.fs-more, .fs-more-note { color: var(--text-muted); font-size: var(--fs-ui); }
+.fs-more { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 8px; margin: 4px 0; cursor: pointer; font-family: var(--font); }
+.fs-more:hover:not(:disabled) { color: var(--cyan); border-color: var(--border-active); }
+.fs-more-note { padding: 8px; }
+.fs-create-row { align-items: center; gap: 6px; padding: 2px 8px; }

@@ -107,6 +107,7 @@ Features:
 - Status popover (info icon): persona, model, mode, token usage, and git branch for the active session
 - Keyboard shortcuts: `Ctrl+B` (`⌘B` on Mac) toggles the sidebar, `Ctrl+Shift+D` / `N` / `L` toggle the diff panel / start a new session / clear context, `Ctrl+/` shows the full reference
 - Chat slash commands are available in the composer; provider, MCP, skills, hooks, and SSH are managed through Settings. Non-blocking commands work while an agent runs.
+- Files tab: browse, search (`ignored` includes git-ignored paths), create files and folders, upload (button or drag and drop), move by dragging onto a folder, download (a folder as `.tar.gz`), rename and delete; Ctrl/Cmd-click selects several items
 - Mobile/tablet/desktop responsive: sidebar and diff panel become touch-friendly slide-over drawers on narrow screens
 - Themed sign-in screen with an HttpOnly, SameSite session cookie; repeated failed sign-ins are rate-limited
 

@@ -240,7 +240,27 @@ export function Composer({
 	const [atDismissedAt, setAtDismissedAt] = useState<number | null>(null);
 	const atOpen = atToken !== undefined && atDismissedAt !== atToken.from;
 	const atQuery = atOpen ? atToken.query : undefined;
-	const atMatches = useMemo(() => (atQuery === undefined ? [] : searchProjectFiles(cwd, atQuery)), [atQuery, cwd]);
+	// Searched off the input's path: listing a large repository takes tens of
+	// milliseconds to seconds, and doing it inline froze typing for that long.
+	// An answer for a query the user has already typed past is dropped.
+	const [atMatches, setAtMatches] = useState<string[]>([]);
+	useEffect(() => {
+		if (atQuery === undefined) {
+			setAtMatches([]);
+			return;
+		}
+		let stale = false;
+		void searchProjectFiles(cwd, atQuery)
+			.then((paths) => {
+				if (!stale) setAtMatches(paths);
+			})
+			.catch(() => {
+				if (!stale) setAtMatches([]);
+			});
+		return () => {
+			stale = true;
+		};
+	}, [atQuery, cwd]);
 	useEffect(() => {
 		if (atToken === undefined && atDismissedAt !== null) setAtDismissedAt(null);
 	}, [atToken, atDismissedAt]);
