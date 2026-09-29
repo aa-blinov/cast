@@ -15,6 +15,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/compact` | Force context compaction now (auto-triggers near the limit) |
 | `/dream` | Verify the recent project trajectory and consolidate durable project memory |
 | `/distill` | Verify repeated work and package high-confidence workflows as a skill or persona |
+| `/rewind` | Rewind to before a chosen message: the files, the conversation, or both (any turn, not only the last) |
 | `/undo [--force]` | Undo the last turn: put the files back as they were before it and remove your last message and everything after it, from the conversation and from the saved history |
 | `/copy` | Copy last assistant response to clipboard |
 | `/current` | Show all status bar data (even disabled segments) |
@@ -32,7 +33,21 @@ What is restored depends on the folder:
 
 Removing files created during the turn also removes any *you* created in that window: the restore cannot tell them apart, and they cannot be brought back. When there are such files, `/undo` names them and asks before proceeding. In the web UI a dialog lists them; over the API `/undo` refuses and asks you to re-run as `/undo --force`, which skips the question.
 
-In the web UI the last message you sent has an undo button (hover it; it is always visible on touch screens). It opens a dialog that says which message goes, how the files are restored, and what will be deleted, then asks before doing anything. Typing `/undo` opens the same dialog. `GET /api/v1/sessions/{id}/undo` returns the same preview for your own client.
+In the web UI a typed `/undo` opens a dialog that says which message goes, how the files are restored, and what will be deleted, then asks before doing anything. `GET /api/v1/sessions/{id}/undo` returns the same preview for your own client. To go back further than the last turn, use `/rewind`.
+
+### Rewind
+
+`/rewind` takes any turn back, not only the last. Every turn records a snapshot of the folder when it starts and the message it started with, so you pick a message and what goes back:
+
+| Choice | What happens |
+|--------|--------------|
+| **Files and conversation** | The files go back as they were before that message, and the message and everything after it (every later turn) is removed from the conversation and the saved history. Later turns' snapshots are dropped with them. |
+| **Files only** | The files go back; the conversation and every snapshot stay, so you can rewind the files forward to a later turn again. |
+| **Conversation only** | The message and everything after it is removed; the files stay as they are. |
+
+The files part restores the same way `/undo` does (see the table above), including its warning about files created since: they are named and you are asked first (`--force` skips the question). A message that compaction has taken out of the conversation the model sees can only be rewound for the files. Sessions from before this feature recorded no snapshots per message; they have `/undo` only.
+
+In the TUI, `/rewind` shows a picker of your messages (newest first) and then of what goes back. In the web UI every such message has a **Rewind** button under its label (hover it; always visible on touch screens) that opens the same choice in a dialog. The command takes `/rewind <message seq> [both|conversation|code] [--force]`, and over the API `GET /api/v1/sessions/{id}/rewind-points` lists the messages, `GET .../rewind?userSeq=` previews, and `POST .../rewind` does it.
 
 `/fork` leaves the original session unchanged and starts an independent new session. It asks where from: the whole session (the context currently sent to the model), or before any message you sent (the original conversation up to there, including what compaction had summarized). In the web UI you can also fork through an answer that ends a turn (**Fork from here** under it), which keeps that answer; the TUI picker has a row for it too. Forking from an earlier point asks whether the fork gets its own copy of the files as they were then (a worktree or a snapshot copy); see [Sessions](sessions.md). It does not copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
 

@@ -171,7 +171,8 @@ export {
 	toDisplayMessages,
 } from "./bridge/display.ts";
 
-import { previewUndo, type UndoPreview } from "./bridge/undo.ts";
+import type { RewindPreview } from "../core/rewind.ts";
+import { previewRewindFor, previewUndo, type UndoPreview } from "./bridge/undo.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
 
 export { type EvolveSkillSuggestion, parseEvolveJson, parseSuggestionJson } from "./bridge/parsers.ts";
@@ -406,6 +407,10 @@ export interface ServerBridge {
 	listSessionsAsync(): Promise<SessionSummary[]>;
 	/** What /undo would do in this session, for a confirmation dialog; undefined for an unknown session. */
 	previewUndo(sessionId: string): Promise<UndoPreview | undefined>;
+	/** What rewinding to before the message `userSeq` would do; undefined for an unknown session. */
+	previewRewind(sessionId: string, userSeq: number): Promise<RewindPreview | undefined>;
+	/** The user messages that can be rewound to (their turn's snapshot knows them), oldest first. */
+	rewindPoints(sessionId: string): number[] | undefined;
 	/** True when a turn is in progress in a live session. Cold sessions can't be
 	 *  running, so this never touches the database. */
 	hasRunningSession(): boolean;
@@ -2915,8 +2920,19 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return withColdSessions(await listSessionSummariesAsync());
 	}
 
+	async function previewRewindForSession(sessionId: string, userSeq: number): Promise<RewindPreview | undefined> {
+		const ws = getSession(sessionId);
+		return ws ? previewRewindFor(ws, userSeq) : undefined;
+	}
+
+	function rewindPointsFor(sessionId: string): number[] | undefined {
+		const ws = getSession(sessionId);
+		if (!ws) return undefined;
+		return (ws.session.checkpoints ?? []).map((c) => c.userSeq).filter((s): s is number => s !== undefined);
+	}
+
 	async function previewUndoFor(sessionId: string): Promise<UndoPreview | undefined> {
-		const ws = sessions.get(sessionId);
+		const ws = getSession(sessionId);
 		return ws ? previewUndo(ws) : undefined;
 	}
 
@@ -3616,6 +3632,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		listSessions,
 		listSessionsAsync,
 		previewUndo: previewUndoFor,
+		previewRewind: previewRewindForSession,
+		rewindPoints: rewindPointsFor,
 		hasRunningSession,
 		searchSessions,
 		searchSessionsAsync,

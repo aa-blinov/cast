@@ -891,6 +891,85 @@ describe("web bridge", () => {
 		expect(result).toEqual({ ok: false, error: "No checkpoint available to undo" });
 	});
 
+	it("/rewind goes back to before a chosen message, in the mode asked for", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const dir = ws.session.cwd ?? "";
+		mkdirSync(dir, { recursive: true });
+		const file = join(dir, "a.txt");
+		writeFileSync(file, "v2");
+		ws.session.messages = [
+			{ role: "user", content: "first" },
+			{ role: "assistant", content: "one" },
+			{ role: "user", content: "second" },
+			{ role: "assistant", content: "two" },
+		] as never;
+		saveSession(ws.session);
+		const seqs = getFullHistoryWithReasoning(ws.id).seqs;
+		// File-only checkpoints (a folder too big to snapshot): before turn 1 there was no a.txt; before turn 2 it read v1.
+		ws.session.checkpoints = [
+			{
+				id: "chk-1",
+				timestamp: "",
+				cwd: dir,
+				userSeq: seqs[0],
+				backups: [{ relPath: "a.txt", existedBefore: false }],
+			},
+			{
+				id: "chk-2",
+				timestamp: "",
+				cwd: dir,
+				userSeq: seqs[2],
+				backups: [
+					{
+						relPath: "a.txt",
+						existedBefore: true,
+						content: Buffer.from("v1").toString("base64"),
+						encoding: "base64",
+					},
+				],
+			},
+		];
+		expect(bridge.rewindPoints(ws.id)).toEqual([seqs[0], seqs[2]]);
+		expect(bridge.rewindPoints("nope")).toBeUndefined();
+		expect(await bridge.previewRewind("nope", 1)).toBeUndefined();
+		expect(await bridge.previewRewind(ws.id, seqs[2]!)).toMatchObject({
+			available: true,
+			kind: "files",
+			shellChangesCovered: false,
+			message: "second",
+			turns: 1,
+		});
+
+		const filesOnly = await bridge.executeCommand(ws.id, `/rewind ${seqs[2]} code`);
+		expect(filesOnly.ok).toBe(true);
+		expect(readFileSync(file, "utf8")).toBe("v1");
+		expect(ws.session.messages).toHaveLength(4);
+		expect(ws.session.checkpoints).toHaveLength(2);
+
+		writeFileSync(file, "v2");
+		const both = await bridge.executeCommand(ws.id, `/rewind ${seqs[2]}`);
+		expect(both.ok).toBe(true);
+		expect(readFileSync(file, "utf8")).toBe("v1");
+		expect(loadSession(ws.id)?.messages.map((m) => m.content)).toEqual(["first", "one"]);
+		expect(ws.session.checkpoints).toHaveLength(1);
+
+		expect((await bridge.executeCommand(ws.id, "/rewind")).error).toMatch(/Usage/);
+		expect((await bridge.executeCommand(ws.id, `/rewind ${seqs[0]} sideways`)).error).toMatch(/Usage/);
+		expect((await bridge.executeCommand(ws.id, "/rewind 9999")).ok).toBe(false);
+	});
+
+	it("/rewind waits for the agent, and a rewind blocks a message meanwhile", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.status = "running";
+		expect((await bridge.executeCommand(ws.id, "/rewind 1")).error).toMatch(/Agent running/);
+		expect(await bridge.previewRewind(ws.id, 1)).toMatchObject({
+			available: false,
+			reason: expect.stringMatching(/still working/),
+		});
+	});
+
 	it("a turn's checkpoint names the user message that started it", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

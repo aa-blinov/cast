@@ -25,6 +25,7 @@ import {
 	listProjectMemoryCheckpoints,
 	searchProjectMemory,
 } from "../core/memory.ts";
+import { REWIND_MODES, type RewindMode } from "../core/rewind.ts";
 import {
 	forkCutAfterReply,
 	getHistoryPage,
@@ -1830,6 +1831,52 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!message.trim()) return json(res, { error: "Empty message" }, 400);
 		bridge.followUp(params.id, message);
 		json(res, { ok: true }, 202);
+	});
+
+	// Which user messages have a snapshot to rewind to: the client shows its Rewind button on those.
+	route("GET", "/api/sessions/:id/rewind-points", (_req, res, params) => {
+		const userSeqs = bridge.rewindPoints(params.id);
+		if (!userSeqs) return json(res, { error: "Not found" }, 404);
+		json(res, { userSeqs });
+	});
+
+	// What rewinding to before a message would do, for the dialog before it does it.
+	route("GET", "/api/sessions/:id/rewind", async (req, res, params) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const userSeq = Number(url.searchParams.get("userSeq"));
+		if (!url.searchParams.get("userSeq") || !Number.isInteger(userSeq)) {
+			return json(res, { error: "userSeq must be an integer message seq" }, 400);
+		}
+		const preview = await bridge.previewRewind(params.id, userSeq);
+		if (!preview) return json(res, { error: "Not found" }, 404);
+		json(res, preview);
+	});
+
+	route("POST", "/api/sessions/:id/rewind", async (req, res, params) => {
+		let userSeq: number;
+		let mode: string;
+		let force: boolean;
+		try {
+			const parsed = JSON.parse(await readBody(req)) as { userSeq?: unknown; mode?: unknown; force?: unknown };
+			if (!Number.isInteger(parsed.userSeq)) throw new Error();
+			if (parsed.mode !== undefined && !REWIND_MODES.includes(parsed.mode as RewindMode)) throw new Error();
+			if (parsed.force !== undefined && typeof parsed.force !== "boolean") throw new Error();
+			userSeq = parsed.userSeq as number;
+			mode = (parsed.mode as string | undefined) ?? "both";
+			force = parsed.force === true;
+		} catch {
+			return json(
+				res,
+				{ error: "Expected { userSeq: integer, mode?: both|conversation|code, force?: boolean }" },
+				400,
+			);
+		}
+		const result = await bridge.executeCommand(params.id, `/rewind ${userSeq} ${mode}${force ? " --force" : ""}`);
+		if (!result.ok) {
+			const status = result.error?.includes("Agent running") || result.error?.includes("--force") ? 409 : 400;
+			return json(res, { error: result.error }, status);
+		}
+		json(res, { ok: true, result: result.result });
 	});
 
 	// What /undo would do, for the confirmation dialog before it does it.

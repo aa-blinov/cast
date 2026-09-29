@@ -29,13 +29,13 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "GET",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|diff\/file|undo|fork-preview|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
+			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|diff\/file|undo|fork-preview|rewind|rewind-points|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
 	},
 	{ method: "DELETE", legacyPath: /^\/api\/sessions\/[^/]+(\/(permanent|share|fs|inputs))?$/ },
 	{
 		method: "POST",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|fs\/create|fs\/move|fs\/delete|inputs\/upload)$/,
+			/^\/api\/sessions\/[^/]+\/(fork|rewind|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|fs\/create|fs\/move|fs\/delete|inputs\/upload)$/,
 	},
 	{ method: "PUT", legacyPath: /^\/api\/sessions\/[^/]+\/(fs\/upload|inputs\/upload)$/ },
 	{ method: "GET", legacyPath: /^\/api\/browse$/ },
@@ -325,6 +325,44 @@ const additionalApiV1Paths: OpenApiObject = {
 				"400": errorResponse,
 				"404": errorResponse,
 			},
+		},
+	},
+	"/api/v1/sessions/{id}/rewind-points": {
+		get: {
+			summary: "The messages a session can be rewound to",
+			description:
+				"userSeqs are the seqs of the user messages whose turn recorded a snapshot of the files, oldest first. Older sessions have none.",
+			parameters: [idParameter],
+			responses: { "200": jsonResponse("Rewind points", { type: "object" }), "404": errorResponse },
+		},
+	},
+	"/api/v1/sessions/{id}/rewind": {
+		get: {
+			summary: "Preview a rewind to before a message",
+			description:
+				"Nothing is changed. available says whether the rewind can run now (reason says why not). message and turns say what the conversation loses; conversationAvailable is false when the message was compacted out of the model's context (files only). lost lists (at most 20 of lostTotal) the files created since that restoring the files deletes.",
+			parameters: [idParameter, { name: "userSeq", in: "query", required: true, schema: { type: "integer" } }],
+			responses: {
+				"200": jsonResponse("Rewind preview", { type: "object" }),
+				"400": errorResponse,
+				"404": errorResponse,
+			},
+		},
+		post: {
+			summary: "Rewind to before a message",
+			description:
+				"mode both restores the files and removes that turn and every later one from the conversation and the saved history; conversation only removes them; code only restores the files and keeps the conversation and every snapshot. 409 when restoring would delete files created since and force is not set, or while a turn runs.",
+			parameters: [idParameter],
+			requestBody: requestBody({
+				type: "object",
+				required: ["userSeq"],
+				properties: {
+					userSeq: { type: "integer" },
+					mode: { type: "string", enum: ["both", "conversation", "code"], default: "both" },
+					force: { type: "boolean" },
+				},
+			}),
+			responses: { "200": jsonResponse("Rewound", { type: "object" }), "400": errorResponse, "409": errorResponse },
 		},
 	},
 	"/api/v1/sessions/{id}/undo": {

@@ -58,6 +58,7 @@ export const BLOCKING_COMMANDS = new Set([
 	"/reload",
 	"/subagent-model",
 	"/undo",
+	"/rewind",
 ]);
 
 export const SLASH_COMMANDS: Array<{
@@ -167,6 +168,12 @@ export const SLASH_COMMANDS: Array<{
 	},
 	{ name: "/usage", description: "Show token and cost usage", blocking: false, hidden: true },
 	{ name: "/undo", description: "Undo the last turn and restore its files", blocking: true },
+	{
+		name: "/rewind",
+		description:
+			"Rewind to before a message: files, conversation or both — /rewind <seq> [both|conversation|code] [--force]",
+		blocking: true,
+	},
 	{
 		name: "/web",
 		description: "Toggle web tools (web_search, web_fetch)",

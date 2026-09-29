@@ -166,6 +166,7 @@ Env vars: `CAST_SERVER_PORT` (default `1337`), `CAST_SERVER_HOST` (default `127.
 | `/sessions` | List/switch/delete saved sessions |
 | `/fork` | Branch into a new session: the whole context, or from before one of your messages (web UI: also through an agent's answer) |
 | `/undo` | Undo the last turn: put the files back and remove the turn from the conversation |
+| `/rewind` | Rewind to before a chosen message: the files, the conversation, or both |
 | `/skills` | List loaded skills |
 | `/skill:name [args]` | Force-load and run a skill |
 | `/mcp` | Toggle MCP servers on/off |

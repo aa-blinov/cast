@@ -1072,6 +1072,9 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	max-height: 88vh;
 }
 .modal-confirm { max-width: 360px; }
+/* A choice of three or four actions needs the room, and wraps rather than spilling out of the dialog. */
+.modal-confirm-wide { max-width: 560px; }
+.modal-confirm .modal-footer { flex-wrap: wrap; }
 .modal-share { max-width: 440px; }
 .modal-preview {
 	max-width: min(1100px, 92vw);
