@@ -1133,12 +1133,12 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { isGit: true, hasCommits: !!head, branch: branch ?? "—", cwd });
 	});
 
-	route("GET", "/api/sessions", (req, res) => {
+	route("GET", "/api/sessions", async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const q = url.searchParams.get("q");
 		const limitParam = url.searchParams.get("limit");
 		const offsetParam = url.searchParams.get("offset");
-		const all = q ? bridge.searchSessions(q) : bridge.listSessions();
+		const all = q ? await bridge.searchSessionsAsync(q) : await bridge.listSessionsAsync();
 		if (limitParam !== null || offsetParam !== null) {
 			const limit = Math.min(200, Math.max(1, parseInt(limitParam ?? "50", 10) || 50));
 			const offset = Math.max(0, parseInt(offsetParam ?? "0", 10) || 0);
@@ -2887,7 +2887,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// checkpoint's cost on the single event loop.
 	const walHygieneTimer = setInterval(
 		() => {
-			if (bridge.listSessions().some((s) => s.status === "running")) return;
+			if (bridge.hasRunningSession()) return;
 			try {
 				getDb().exec("PRAGMA wal_checkpoint(TRUNCATE)");
 			} catch {
