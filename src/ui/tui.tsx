@@ -142,8 +142,10 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// and the id is nowhere on screen — the exit clears it along with the rest
 	// of the frame. Print the exact command instead of the bare id. Skipped
 	// for a session with no turns: there is nothing to resume.
+	let resumeHintPrinted = false;
 	const printResumeHint = () => {
-		if (!sessionHasMessages(result.session.id)) return;
+		if (resumeHintPrinted || !sessionHasMessages(result.session.id)) return;
+		resumeHintPrinted = true;
 		process.stdout.write(`\x1b[2mResume this session:\x1b[22m cast --resume=${result.session.id}\n`);
 	};
 
@@ -167,6 +169,9 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		void drainProjectCheckpointWriters(2_500)
 			.finally(() => closeMcpConnections(result.mcpResult.connections))
 			.then(async () => {
+				// Unmount first: Ink redraws its last frame on exit and erases the
+				// lines above the cursor, which wiped the resume hint printed below.
+				ink.unmount();
 				process.stdout.write("\x1b[2J\x1b[H");
 				printResumeHint();
 				await new Promise((resolve) => setTimeout(resolve, 60));
@@ -189,7 +194,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		});
 	};
 
-	const { waitUntilExit } = render(
+	const ink = render(
 		<App
 			result={result}
 			version={args.version}
@@ -234,7 +239,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// instances.js at runtime, which always failed in the release bundle
 	// (ink is inlined by esbuild; there's no node_modules/ink to resolve).
 
-	await waitUntilExit();
+	await ink.waitUntilExit();
 	saveSession(result.session);
 	printResumeHint();
 	if (result.hooks) {
