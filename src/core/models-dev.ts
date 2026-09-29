@@ -66,7 +66,7 @@ export async function fetchModelsDevCatalog(): Promise<ModelsDevCatalog | undefi
 	try {
 		const stat = statSync(path);
 		if (Date.now() - stat.mtimeMs < CACHE_TTL_MS) {
-			const cached = readCache(path);
+			const cached = cachedCatalog();
 			if (cached) return cached;
 		}
 	} catch {
@@ -81,7 +81,7 @@ export async function fetchModelsDevCatalog(): Promise<ModelsDevCatalog | undefi
 		writeFileSync(path, text, "utf-8");
 		return catalog;
 	} catch {
-		return readCache(path);
+		return cachedCatalog();
 	}
 }
 
@@ -202,13 +202,43 @@ export function lookupCostFromCatalog(
 }
 
 /** USD for one request, from cached catalog prices. Undefined when unpriced. */
+/**
+ * The cached catalog, parsed once per version of the file. Every request
+ * without a provider-reported cost asks for a price, and the file is ~5MB:
+ * parsing it per request was 55% of the agent's CPU through a run of tool
+ * calls, the event loop blocked for each.
+ */
+let parsedCatalog: { path: string; mtimeMs: number; size: number; catalog: ModelsDevCatalog | undefined } | undefined;
+const priceMemo = new Map<string, ReturnType<typeof lookupCostFromCatalog>>();
+
+function cachedCatalog(): ModelsDevCatalog | undefined {
+	const path = cachePath();
+	let stat: { mtimeMs: number; size: number };
+	try {
+		stat = statSync(path);
+	} catch {
+		return undefined;
+	}
+	if (
+		!parsedCatalog ||
+		parsedCatalog.path !== path ||
+		parsedCatalog.mtimeMs !== stat.mtimeMs ||
+		parsedCatalog.size !== stat.size
+	) {
+		parsedCatalog = { path, mtimeMs: stat.mtimeMs, size: stat.size, catalog: readCache(path) };
+		priceMemo.clear();
+	}
+	return parsedCatalog.catalog;
+}
+
 export function estimateRequestCost(
 	modelId: string,
 	usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number },
 ): number | undefined {
-	const catalog = readCache(cachePath());
+	const catalog = cachedCatalog();
 	if (!catalog) return undefined;
-	const price = lookupCostFromCatalog(modelId, catalog);
+	if (!priceMemo.has(modelId)) priceMemo.set(modelId, lookupCostFromCatalog(modelId, catalog));
+	const price = priceMemo.get(modelId);
 	if (!price) return undefined;
 	const cacheRead = Math.min(usage.cacheReadTokens ?? 0, usage.promptTokens);
 	const uncached = Math.max(0, usage.promptTokens - cacheRead);

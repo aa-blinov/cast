@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, utimesSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,9 +13,8 @@ afterEach(() => {
 	globalThis.fetch = realFetch;
 });
 
-const { fetchModelsDevCatalog, lookupContextWindowFromCatalog, lookupModelMetadataFromCatalog } = await import(
-	"../src/core/models-dev.ts"
-);
+const { estimateRequestCost, fetchModelsDevCatalog, lookupContextWindowFromCatalog, lookupModelMetadataFromCatalog } =
+	await import("../src/core/models-dev.ts");
 
 const CATALOG_FIXTURE = {
 	fireworks: { models: { "minimax-m3": { limit: { context: 512_000 } } } },
@@ -164,5 +163,36 @@ describe("lookupModelMetadataFromCatalog — audio input", () => {
 	it("leaves audio input unknown when no entry lists modalities", () => {
 		const catalog = { openai: { models: { "gpt-4o": { limit: { context: 128_000 } } } } };
 		expect(lookupModelMetadataFromCatalog("gpt-4o", catalog)?.audioInput).toBeUndefined();
+	});
+});
+
+describe("estimateRequestCost", () => {
+	let home = "";
+	let realHome: string | undefined;
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		home = mkdtempSync(join(tmpdir(), "cast-cost-"));
+		process.env.HOME = home;
+	});
+	afterEach(() => {
+		process.env.HOME = realHome;
+		rmSync(home, { recursive: true, force: true });
+	});
+
+	const writeCatalog = (input: number, pad = "") => {
+		mkdirSync(join(home, ".cast", "cache"), { recursive: true });
+		writeFileSync(
+			join(home, ".cast", "cache", "models-dev.json"),
+			JSON.stringify({ p: { models: { "m-1": { cost: { input, output: 2 } } }, note: pad } }),
+		);
+	};
+
+	it("prices from the cached catalog, and sees a newer catalog on disk", async () => {
+		writeCatalog(1);
+		expect(estimateRequestCost("m-1", { promptTokens: 1_000_000, completionTokens: 0 })).toBe(1);
+		// Kept in memory between requests, and replaced when the file changes.
+		writeCatalog(3, "x");
+		expect(estimateRequestCost("m-1", { promptTokens: 1_000_000, completionTokens: 0 })).toBe(3);
+		expect(estimateRequestCost("unknown", { promptTokens: 10, completionTokens: 0 })).toBeUndefined();
 	});
 });
