@@ -76,7 +76,6 @@ export function watchDirectories(
 			if (isIgnored(dir)) continue;
 			add(dir);
 			try {
-				// biome-ignore lint/performance/noAwaitInLoops: one folder at a time keeps the walk's load bounded
 				for (const entry of await readdir(dir, { withFileTypes: true })) {
 					if (entry.isDirectory()) stack.push(join(dir, entry.name));
 				}
@@ -90,10 +89,16 @@ export function watchDirectories(
 
 	function handle(dir: string, event: string, filename: string | Buffer | null): void {
 		if (closed) return;
-		if (!filename) return onChange("change", dir);
+		if (!filename) {
+			onChange("change", dir);
+			return;
+		}
 		const path = join(dir, filename.toString());
 		if (isIgnored(path)) return;
-		if (event !== "rename") return onChange("change", path);
+		if (event !== "rename") {
+			onChange("change", path);
+			return;
+		}
 		// A rename is a create or a delete; only a stat says which, and whether
 		// what appeared is a folder that needs watching too.
 		stat(path).then(
