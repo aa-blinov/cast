@@ -4,6 +4,7 @@ import { Box, Text, useApp, useWindowSize } from "ink";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AppConfig, inputTokenBudget } from "../core/config.ts";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
+import { lspStatus } from "../core/lsp/index.ts";
 import { formatMcpForPrompt } from "../core/mcp.ts";
 import { findPersona, listPersonas, type Persona } from "../core/personas.ts";
 import {
@@ -31,6 +32,7 @@ import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
 import { ModalPicker, MultiSelectPicker, TextInputModal } from "../pickers/ink.tsx";
+import { useAnimationTick } from "./animation-clock.ts";
 import { ChatLog } from "./ChatLog.tsx";
 import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
@@ -42,6 +44,7 @@ import type { ClipboardPasteResult } from "./readClipboardImage.ts";
 import { Spinner } from "./Spinner.tsx";
 import {
 	defaultStatusBarConfig,
+	fitSegments,
 	getStatusBarSegments,
 	type SegmentContext,
 	type StatusBarSegment,
@@ -457,6 +460,36 @@ export function App(props: AppProps): JSX.Element {
 		daemonUrl,
 		daemonToken,
 	});
+	// Running language servers for the status bar: this process's own, or the
+	// daemon's when attached to one (the servers run where the agent does).
+	const [lspServers, setLspServers] = useState<string[]>([]);
+	const { daemonMode, runCommand } = agent;
+	const showLsp = statusBar.visible.includes("lsp");
+	useEffect(() => {
+		// Off by default: only asked while the segment is on.
+		if (!showLsp) return;
+		let stopped = false;
+		const poll = async () => {
+			let ids: string[];
+			try {
+				ids = daemonMode
+					? (((await runCommand("/lsp")) as { running?: Array<{ id: string }> } | undefined)?.running ?? []).map(
+							(s) => s.id,
+						)
+					: lspStatus().running.map((s) => s.id);
+			} catch {
+				return;
+			}
+			const unique = [...new Set(ids)].sort();
+			if (!stopped) setLspServers((prev) => (prev.join() === unique.join() ? prev : unique));
+		};
+		void poll();
+		const timer = setInterval(() => void poll(), 5_000);
+		return () => {
+			stopped = true;
+			clearInterval(timer);
+		};
+	}, [daemonMode, runCommand, showLsp]);
 	addDisplayMessageRef.current = agent.addDisplayMessage;
 	// Mode flips in daemon mode go over HTTP (setSessionMode on the daemon) —
 	// populate the ref setPlanMode reads after the agent hook exists.
@@ -928,6 +961,7 @@ export function App(props: AppProps): JSX.Element {
 				messages={session.messages}
 				sessionId={session.id}
 				worktree={cwd.includes("/.cast/worktrees/") ? cwd.split("/.cast/worktrees/")[1]?.split("/")[0] : undefined}
+				lspServers={lspServers}
 				repaintKey={repaintKey}
 			/>
 		</Box>
@@ -991,16 +1025,11 @@ function StatusBar(
 	},
 ): JSX.Element {
 	const { statusBar, turnStartedAt, getElapsedMs, repaintKey, ...ctxRest } = props;
-	const [, forceTick] = useState(0);
-	useEffect(() => {
-		if (turnStartedAt === null) return;
-		// 100ms — a 0.1s-quantum counter reads as continuous instead of a
-		// 200ms jump between tenths.
-		const id = setInterval(() => forceTick((n) => n + 1), 100);
-		return () => clearInterval(id);
-	}, [turnStartedAt]);
+	// On the spinners' clock: its own 100ms timer made a frame of its own.
+	useAnimationTick(turnStartedAt !== null);
 
 	const ctx: SegmentContext = { ...ctxRest, elapsedMs: getElapsedMs() };
+	const { columns } = useWindowSize();
 	const segments = getStatusBarSegments();
 	const visibleSet = new Set(statusBar.visible);
 
@@ -1012,15 +1041,17 @@ function StatusBar(
 		if (!ordered.some((s) => s.id === seg.id)) ordered.push(seg);
 	}
 
+	const shown = ordered.flatMap((seg) => {
+		if (!visibleSet.has(seg.id)) return [];
+		const node = seg.render(ctx);
+		if (!node) return [];
+		const side: "left" | "right" = statusBar.sides[seg.id] ?? seg.side;
+		return [{ id: seg.id, side, node, text: seg.formatValue(ctx) ?? "" }];
+	});
 	const leftElems: JSX.Element[] = [];
 	const rightElems: JSX.Element[] = [];
-	for (const seg of ordered) {
-		if (!visibleSet.has(seg.id)) continue;
-		const side = statusBar.sides[seg.id] ?? seg.side;
-		const node = seg.render(ctx);
-		if (!node) continue;
-		if (side === "left") leftElems.push(node);
-		else rightElems.push(node);
+	for (const item of fitSegments(shown, columns, displayWidth)) {
+		(item.side === "left" ? leftElems : rightElems).push(item.node);
 	}
 
 	const sep = <Text color={theme().muted}> │ </Text>;

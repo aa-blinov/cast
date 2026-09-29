@@ -3068,6 +3068,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				maxResponseTokens: config.maxResponseTokens,
 				messages: session.messages,
 				sessionId: session.id,
+				lspServers: deps.agent.daemonMode ? undefined : [...new Set(lspStatus().running.map((l) => l.id))],
 			};
 			// Build ordered list from statusBar.order, then append any new segments
 			const ordered: StatusBarSegment[] = cfg.order
@@ -3335,7 +3336,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			// A thin client's servers run in the daemon, not here.
 			if (deps.agent.daemonMode) {
 				try {
-					showNotice(String(await deps.agent.runCommand("/lsp")));
+					const result = (await deps.agent.runCommand("/lsp")) as { text?: string } | string;
+					showNotice(typeof result === "string" ? result : (result?.text ?? ""));
 				} catch (err) {
 					showNotice(`[Could not ask the daemon: ${err instanceof Error ? err.message : String(err)}]`);
 				}

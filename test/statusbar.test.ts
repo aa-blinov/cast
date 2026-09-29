@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "../src/core/llm.ts";
 import {
 	defaultStatusBarConfig,
+	fitSegments,
 	getStatusBarSegments,
+	SEGMENT_DROP_ORDER,
 	SEGMENT_MAX_WIDTH,
 	type SegmentContext,
 } from "../src/ui/statusbar.tsx";
@@ -57,7 +59,44 @@ describe("SEGMENT_MAX_WIDTH", () => {
 	});
 });
 
+describe("fitSegments", () => {
+	const items = [
+		{ id: "persona", side: "left" as const, text: "Senior Developer" },
+		{ id: "mode", side: "left" as const, text: "BUILD" },
+		{ id: "model", side: "left" as const, text: "test-model" },
+		{ id: "session", side: "left" as const, text: "mum4ax6itgys0i" },
+		{ id: "context", side: "right" as const, text: "ctx 6.1k/96k (6%)" },
+		{ id: "cost", side: "right" as const, text: "$0.01" },
+		{ id: "elapsed", side: "right" as const, text: "2.9s" },
+	];
+	const ids = (columns: number) => fitSegments(items, columns, (t) => t.length).map((i) => i.id);
+
+	it("keeps everything that fits", () => {
+		expect(ids(200)).toEqual(items.map((i) => i.id));
+	});
+
+	it("drops whole segments, least useful first, keeping mode, model and time", () => {
+		// 31 + 2 separators left, 26 + 2 right, 1 between: exactly 70.
+		expect(ids(70)).toEqual(["persona", "mode", "model", "context", "cost", "elapsed"]);
+		expect(ids(62)).toEqual(["persona", "mode", "model", "context", "elapsed"]);
+		expect(ids(45)).toEqual(["persona", "mode", "model", "elapsed"]);
+		expect(ids(30)).toEqual(["mode", "model", "elapsed"]);
+		expect(ids(5)).toEqual(["elapsed"]);
+	});
+
+	it("ranks every built-in segment", () => {
+		for (const seg of getStatusBarSegments()) expect(SEGMENT_DROP_ORDER).toContain(seg.id);
+	});
+});
+
 describe("segment renderers", () => {
+	it("lsp lists the running servers, and shows nothing without any", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "lsp")!;
+		expect(seg.render(emptyCtx())).toBeNull();
+		expect(seg.formatValue(emptyCtx({ lspServers: ["pyright", "typescript"] }))).toBe("pyright, typescript");
+		expect(seg.render(emptyCtx({ lspServers: ["typescript"] }))).not.toBeNull();
+	});
+
 	it("usage returns null when there's no usage", () => {
 		const seg = getStatusBarSegments().find((s) => s.id === "usage")!;
 		expect(seg.render(emptyCtx())).toBeNull();

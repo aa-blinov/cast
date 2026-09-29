@@ -8,6 +8,16 @@ import { shortPath } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
+/** "typescript, pyright" / "off" / "none yet", plus what failed to start. */
+export function lspSummary(lsp) {
+	if (lsp.enabled === false) return "off";
+	const running = [...new Set((lsp.running ?? []).map((s) => s.id))];
+	const failed = [...new Set((lsp.unavailable ?? []).map((s) => s.id))].filter((id) => !running.includes(id));
+	const parts = [running.length ? running.join(", ") : "none running yet"];
+	if (failed.length) parts.push(`unavailable: ${failed.join(", ")}`);
+	return parts.join(" · ");
+}
+
 function SettingsStatus({ data }) {
 	if (!data) return null;
 	const current = data.current || {};
@@ -29,6 +39,7 @@ function SettingsStatus({ data }) {
 		${repo.isGit && html`<div class="settings-row"><span>Git branch</span><span>${repo.branch}${repo.dirty ? " (dirty)" : ""}</span></div>`}
 		<div class="settings-row"><span>Worktree</span><span title=${repo.worktree ?? ""}>${repo.worktree ? shortPath(repo.worktree) : "—"}</span></div>
 		${repo.isGit === false && html`<div class="settings-row"><span>Git</span><span>not a repository</span></div>`}
+		${data.lsp && html`<div class="settings-row"><span>LSP</span><span title=${data.lsp.text ?? ""}>${lspSummary(data.lsp)}</span></div>`}
 	</div>`;
 }
 
@@ -39,12 +50,13 @@ export function StatusPopover({ activeId, running }) {
 	const load = useCallback(async () => {
 		setError(null);
 		try {
-			const [current, repo, providers] = await Promise.all([
+			const [current, repo, providers, lsp] = await Promise.all([
 				api("POST", `/api/sessions/${activeId}/command`, { command: "/current" }),
 				api("POST", `/api/sessions/${activeId}/command`, { command: "/repo" }),
 				api("POST", `/api/sessions/${activeId}/command`, { command: "/provider list" }),
+				api("POST", `/api/sessions/${activeId}/command`, { command: "/lsp" }).catch(() => null),
 			]);
-			setData({ current: current?.result, repo: repo?.result, providers: providers?.result });
+			setData({ current: current?.result, repo: repo?.result, providers: providers?.result, lsp: lsp?.result });
 		} catch (err) {
 			setError(err.message);
 		}

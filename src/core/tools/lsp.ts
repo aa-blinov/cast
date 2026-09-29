@@ -39,6 +39,21 @@ export const LSP_OPERATIONS = [
 ] as const;
 type Operation = (typeof LSP_OPERATIONS)[number];
 
+/** The server capability, and the method a dynamic registration would name, per operation. */
+const CAPABILITY: Record<Operation, [string | undefined, string]> = {
+	goToDefinition: ["definitionProvider", "textDocument/definition"],
+	goToTypeDefinition: ["typeDefinitionProvider", "textDocument/typeDefinition"],
+	goToImplementation: ["implementationProvider", "textDocument/implementation"],
+	findReferences: ["referencesProvider", "textDocument/references"],
+	hover: ["hoverProvider", "textDocument/hover"],
+	documentSymbol: ["documentSymbolProvider", "textDocument/documentSymbol"],
+	workspaceSymbol: ["workspaceSymbolProvider", "workspace/symbol"],
+	prepareCallHierarchy: ["callHierarchyProvider", "textDocument/prepareCallHierarchy"],
+	incomingCalls: ["callHierarchyProvider", "textDocument/prepareCallHierarchy"],
+	outgoingCalls: ["callHierarchyProvider", "textDocument/prepareCallHierarchy"],
+	diagnostics: [undefined, ""],
+};
+
 const MAX_LOCATIONS = 100;
 const MAX_RESULT_CHARS = 16_000;
 const MAX_SYMBOLS = 50;
@@ -262,10 +277,18 @@ async function queryLsp(
 	const clients = await touchFile(path, cwd, firstLook || operation === "diagnostics");
 	if (clients.length === 0) return { content: noServerMessage(path), isError: true };
 	used.push(...clients);
+	const [capability, registration] = CAPABILITY[operation];
+	const able = capability ? clients.filter((c) => c.supports(capability, registration)) : clients;
+	if (able.length === 0) {
+		return {
+			content: `The language server for this file (${clients.map((c) => c.serverId).join(", ")}) does not support ${operation}.`,
+			isError: true,
+		};
+	}
 	const uri = fileUri(path);
 
 	if (operation === "diagnostics") {
-		const found = diagnosticsFor(path, clients);
+		const found = diagnosticsFor(path, able);
 		if (found.length === 0) return { content: `No diagnostics in ${displayPath(uri, cwd)}.` };
 		const sorted = [...found].sort(
 			(a, b) => (a.severity ?? 1) - (b.severity ?? 1) || a.range.start.line - b.range.start.line,
@@ -276,7 +299,7 @@ async function queryLsp(
 	if (operation === "workspaceSymbol") {
 		const query = typeof args.query === "string" ? args.query : "";
 		const results = await firstNonEmpty(
-			clients,
+			able,
 			(c) =>
 				c.request<Array<{ name: string; kind: number; location: Location; containerName?: string }>>(
 					"workspace/symbol",
@@ -302,7 +325,7 @@ async function queryLsp(
 
 	if (operation === "documentSymbol") {
 		const results = await firstNonEmpty(
-			clients,
+			able,
 			(c) => c.request<DocumentSymbol[]>("textDocument/documentSymbol", { textDocument: { uri } }, undefined, sig),
 			(r) => !r?.length,
 		);
@@ -321,7 +344,7 @@ async function queryLsp(
 
 	if (operation === "hover") {
 		const results = await firstNonEmpty(
-			clients,
+			able,
 			(c) => c.request("textDocument/hover", at, undefined, sig),
 			(r) => !renderHover(r),
 		);
@@ -338,14 +361,14 @@ async function queryLsp(
 	const method = locationMethods[operation];
 	if (method) {
 		const results = await Promise.all(
-			clients.map((c) => c.request(method[0], method[1], undefined, sig).catch(() => null)),
+			able.map((c) => c.request(method[0], method[1], undefined, sig).catch(() => null)),
 		);
 		return { content: cap(renderLocations(results.flatMap(toLocations), cwd)) };
 	}
 
 	// Call hierarchy: the item at the cursor, then who calls it / what it calls.
 	type Item = { name: string; kind: number; uri: string; range: Range; selectionRange: Range; detail?: string };
-	for (const client of clients) {
+	for (const client of able) {
 		// biome-ignore lint/performance/noAwaitInLoops: the first server with an item answers; the rest aren't asked
 		const items = await client
 			.request<Item[] | null>("textDocument/prepareCallHierarchy", at, undefined, sig)

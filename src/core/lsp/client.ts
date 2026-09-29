@@ -119,6 +119,7 @@ export class LspClient {
 	/** Pull-diagnostic registrations (`client/registerCapability`), by identifier. */
 	private readonly pullIdentifiers = new Set<string | undefined>();
 	private readonly registrationWaiters: Array<() => void> = [];
+	private readonly registeredMethods = new Set<string>();
 	private stderrTail = "";
 	private exited = false;
 	/** Last time the server was asked anything, for idle shutdown. */
@@ -134,6 +135,9 @@ export class LspClient {
 			cwd: opts.root,
 			env: { ...scrubbedEnv(), ...opts.env },
 			stdio: ["pipe", "pipe", "pipe"],
+			// Its own process group, so killing it takes the helpers it starts
+			// (typescript-language-server's tsserver) along.
+			detached: process.platform !== "win32",
 		});
 		this.proc.stdout?.on("data", (chunk: Buffer) => this.onData(chunk));
 		// A server's stderr is its log; draining it keeps the pipe from filling.
@@ -263,6 +267,7 @@ export class LspClient {
 				for (const reg of (
 					params as { registrations?: Array<{ method: string; registerOptions?: { identifier?: string } }> }
 				)?.registrations ?? []) {
+					this.registeredMethods.add(reg.method);
 					if (reg.method === "textDocument/diagnostic") this.pullIdentifiers.add(reg.registerOptions?.identifier);
 				}
 				for (const wake of this.registrationWaiters.splice(0)) wake();
@@ -355,6 +360,12 @@ export class LspClient {
 			INITIALIZE_TIMEOUT_MS,
 		);
 		this.capabilities = result?.capabilities ?? {};
+		// Positions are UTF-16 code units on both sides; a server that insists on
+		// another encoding would put every line:col slightly off.
+		const encoding = this.capabilities.positionEncoding;
+		if (typeof encoding === "string" && encoding !== "utf-16") {
+			throw new Error(`uses ${encoding} positions; cast speaks utf-16`);
+		}
 		this.notify("initialized", {});
 		if (this.settings) this.notify("workspace/didChangeConfiguration", { settings: this.settings });
 	}
@@ -408,6 +419,11 @@ export class LspClient {
 		const sync = this.capabilities.textDocumentSync;
 		if (typeof sync === "number") return sync;
 		return (sync as { change?: number } | undefined)?.change ?? 1;
+	}
+
+	/** Whether the server offers a feature: declared at initialize, or registered since. */
+	supports(capability: string, method: string): boolean {
+		return Boolean(this.capabilities[capability]) || this.registeredMethods.has(method);
 	}
 
 	/** Whether the server answers `textDocument/diagnostic` (pull) rather than only publishing. */
@@ -499,7 +515,13 @@ export class LspClient {
 
 	/** Immediate, for process exit, when there is no time to ask nicely. */
 	kill(): void {
-		if (!this.exited) this.proc.kill("SIGKILL");
+		if (this.exited) return;
+		try {
+			if (this.proc.pid && process.platform !== "win32") process.kill(-this.proc.pid, "SIGKILL");
+			else this.proc.kill("SIGKILL");
+		} catch {
+			this.proc.kill("SIGKILL");
+		}
 	}
 
 	/** Diagnostics published since `since` for the file, if any arrived. */
@@ -515,9 +537,7 @@ export class LspClient {
 		} catch {
 			// Unresponsive: killed below.
 		}
-		setTimeout(() => {
-			if (!this.exited) this.proc.kill("SIGKILL");
-		}, 1_000).unref();
+		setTimeout(() => this.kill(), 1_000).unref();
 	}
 }
 

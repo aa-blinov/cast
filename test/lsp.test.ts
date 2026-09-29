@@ -46,6 +46,7 @@ function settings(extra: Record<string, unknown> = {}, pull = false): void {
 }
 
 beforeEach(() => {
+	delete process.env.CAST_LSP;
 	realHome = process.env.HOME;
 	home = mkdtempSync(join(tmpdir(), "cast-lsp-home-"));
 	project = mkdtempSync(join(tmpdir(), "cast-lsp-project-"));
@@ -55,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	resetLspForTests();
+	process.env.CAST_LSP = "off";
 	process.env.HOME = realHome;
 	rmSync(home, { recursive: true, force: true });
 	rmSync(project, { recursive: true, force: true });
@@ -154,6 +156,14 @@ describe("lsp tool", () => {
 		expect(bad.isError).toBe(true);
 	});
 
+	it("says a server doesn't support an operation instead of finding nothing", async () => {
+		const r = await exec("lsp", { operation: "goToImplementation", file_path: "lib.fake", line: 1, character: 5 });
+		expect(r).toMatchObject({
+			isError: true,
+			content: "The language server for this file (fake) does not support goToImplementation.",
+		});
+	});
+
 	it("says when no server handles a file", async () => {
 		writeFileSync(join(project, "notes.txt"), "hello");
 		const r = await exec("lsp", { operation: "hover", file_path: "notes.txt", line: 1, character: 1 });
@@ -180,6 +190,13 @@ describe("lsp tool", () => {
 		const r = await exec("lsp", { operation: "hover", file_path: "lib.fake", line: 1, character: 6 });
 		expect(r.isError).toBe(true);
 		expect(lspStatus().unavailable.map((u) => u.id)).toContain("fake");
+	});
+
+	it("is turned off for one run by CAST_LSP=off", async () => {
+		process.env.CAST_LSP = "off";
+		expect(getToolDefinitions().some((t) => t.type === "function" && t.function.name === "lsp")).toBe(false);
+		delete process.env.CAST_LSP;
+		expect(getToolDefinitions().some((t) => t.type === "function" && t.function.name === "lsp")).toBe(true);
 	});
 
 	it("is not offered, and edits say nothing, when turned off", async () => {
