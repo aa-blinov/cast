@@ -238,6 +238,8 @@
 .message-user:hover .message-fork, .message-fork:focus-visible { opacity: 1; }
 .message-fork:hover { color: var(--text); background: var(--bg-hover, rgba(127,127,127,.12)); }
 @media (hover: none) { .message-fork { opacity: .7; } }
+/* The last turn's undo is the one you reach for right after a bad answer: always visible there. */
+.message-undo { opacity: .55; }
 .message-attachments {
 	display: flex; flex-wrap: wrap; gap: 4px;
 	margin-top: 6px;

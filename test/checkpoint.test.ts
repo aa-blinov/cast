@@ -52,7 +52,7 @@ describe("checkpoint module", () => {
 		expect(readFileSync(targetFile, "utf8")).toBe("mutated content");
 		expect(existsSync(createdFile)).toBe(true);
 
-		const res = restoreCheckpoint(chk);
+		const res = await restoreCheckpoint(chk);
 		expect(res.ok).toBe(true);
 		expect(readFileSync(targetFile, "utf8")).toBe("initial content");
 		expect(existsSync(createdFile)).toBe(false);
@@ -92,7 +92,7 @@ describe("checkpoint module", () => {
 		expect(readFileSync(initialFile, "utf8")).toBe("console.log('v2 broken');");
 		expect(existsSync(newFile)).toBe(true);
 
-		const res = restoreCheckpoint(chk);
+		const res = await restoreCheckpoint(chk);
 		expect(res.ok).toBe(true);
 		expect(readFileSync(initialFile, "utf8")).toBe("console.log('v1');");
 		expect(existsSync(newFile)).toBe(false);
@@ -114,7 +114,7 @@ describe("checkpoint module", () => {
 			const chk = await createCheckpoint(TEST_DIR);
 			expect(chk.gitCommitSha).toBeDefined();
 			writeFileSync(join(TEST_DIR, "a.ts"), "v2", "utf8");
-			expect(restoreCheckpoint(chk).ok).toBe(true);
+			expect((await restoreCheckpoint(chk)).ok).toBe(true);
 			expect(readFileSync(join(TEST_DIR, "a.ts"), "utf8")).toBe("v1");
 		} finally {
 			if (saved.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
@@ -135,7 +135,7 @@ describe("checkpoint module", () => {
 		const chk = await createCheckpoint(TEST_DIR, true);
 		backupFileForCheckpoint(chk, file);
 		writeFileSync(file, "the agent overwrote it", "utf8");
-		const res = restoreCheckpoint(chk);
+		const res = await restoreCheckpoint(chk);
 
 		expect(res.ok).toBe(true);
 		expect(readFileSync(file).equals(original)).toBe(true);
@@ -161,10 +161,10 @@ describe("checkpoint module", () => {
 			writeFileSync(join(TEST_DIR, "tracked.ts"), "v2", "utf8");
 			writeFileSync(join(TEST_DIR, "written-during-the-turn.txt"), "the user's own note", "utf8");
 
-			expect(filesLostByRestore(chk)).toEqual(["written-during-the-turn.txt"]);
+			expect(await filesLostByRestore(chk)).toEqual(["written-during-the-turn.txt"]);
 
 			// And the claim holds: restoring keeps the first, loses the second.
-			restoreCheckpoint(chk);
+			await restoreCheckpoint(chk);
 			expect(existsSync(join(TEST_DIR, "untracked-before.txt"))).toBe(true);
 			expect(existsSync(join(TEST_DIR, "written-during-the-turn.txt"))).toBe(false);
 		});
@@ -189,16 +189,16 @@ describe("checkpoint module", () => {
 			expect(chk.gitCommitSha).toBeDefined();
 			writeFileSync(join(sub, "written-during-the-turn.txt"), "the user's own note", "utf8");
 
-			expect(filesLostByRestore(chk)).toEqual(["written-during-the-turn.txt"]);
+			expect(await filesLostByRestore(chk)).toEqual(["written-during-the-turn.txt"]);
 
-			restoreCheckpoint(chk);
+			await restoreCheckpoint(chk);
 			expect(existsSync(join(sub, "untracked-before.txt"))).toBe(true);
 			expect(existsSync(join(sub, "written-during-the-turn.txt"))).toBe(false);
 		});
 
 		it("reports nothing for a shadow checkpoint, which never cleans", async () => {
 			const chk = await createCheckpoint(TEST_DIR, true);
-			expect(filesLostByRestore(chk)).toEqual([]);
+			expect(await filesLostByRestore(chk)).toEqual([]);
 		});
 	});
 });
@@ -230,7 +230,7 @@ describe("checkpoints in a git repository", () => {
 		backupFileForCheckpoint(chk, join(TEST_DIR, "build", "out.js"));
 		writeFileSync(join(TEST_DIR, "build", "out.js"), "made\n");
 
-		const res = restoreCheckpoint(chk);
+		const res = await restoreCheckpoint(chk);
 		expect(res.ok).toBe(true);
 		expect(res.message).toContain("2 ignored or outside-folder file(s)");
 		expect(readFileSync(join(TEST_DIR, "ignored.txt"), "utf8")).toBe("I0\n");
@@ -250,7 +250,7 @@ describe("checkpoints in a git repository", () => {
 		writeFileSync(join(TEST_DIR, "a.txt"), "A-outside\n");
 		writeFileSync(join(sub, "b.txt"), "B1\n");
 
-		expect(restoreCheckpoint(chk).ok).toBe(true);
+		expect((await restoreCheckpoint(chk)).ok).toBe(true);
 		expect(readFileSync(join(TEST_DIR, "a.txt"), "utf8")).toBe("A0\n");
 		expect(readFileSync(join(sub, "b.txt"), "utf8")).toBe("B0\n");
 	});
@@ -261,7 +261,7 @@ describe("checkpoints in a git repository", () => {
 		writeFileSync(join(TEST_DIR, "a.txt"), "A1\n");
 		git("reflog", "expire", "--expire=now", "--all");
 		git("gc", "-q", "--prune=now");
-		expect(restoreCheckpoint(chk).ok).toBe(true);
+		expect((await restoreCheckpoint(chk)).ok).toBe(true);
 		expect(readFileSync(join(TEST_DIR, "a.txt"), "utf8")).toBe("A0\n");
 		// A successful restore lets go of the commit.
 		expect(git("for-each-ref", "refs/cast/checkpoints/")).toBe("");
@@ -275,7 +275,7 @@ describe("checkpoints in a git repository", () => {
 	it("a failed restore leaves the ref, so undo can be tried again", async () => {
 		const chk = await createCheckpoint(TEST_DIR);
 		const bad = { ...chk, gitCommitSha: "0".repeat(40) };
-		expect(restoreCheckpoint(bad).ok).toBe(false);
+		expect((await restoreCheckpoint(bad)).ok).toBe(false);
 		expect(git("for-each-ref", "refs/cast/checkpoints/")).toContain(chk.id);
 	});
 });
@@ -295,7 +295,7 @@ describe("checkpoints outside a git repository", () => {
 		writeFileSync(join(TEST_DIR, "edited.txt"), "E1\n");
 		writeFileSync(join(TEST_DIR, "shell.txt"), "S1\n");
 
-		const res = restoreCheckpoint(chk);
+		const res = await restoreCheckpoint(chk);
 		expect(res.ok).toBe(true);
 		expect(res.message).toContain("changes made by shell commands are not undone");
 		expect(readFileSync(join(TEST_DIR, "edited.txt"), "utf8")).toBe("E0\n");

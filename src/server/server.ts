@@ -1781,6 +1781,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { ok: true }, 202);
 	});
 
+	// What /undo would do, for the confirmation dialog before it does it.
+	route("GET", "/api/sessions/:id/undo", async (_req, res, params) => {
+		const preview = await bridge.previewUndo(params.id);
+		if (!preview) return json(res, { error: "Not found" }, 404);
+		json(res, preview);
+	});
+
 	route("POST", "/api/sessions/:id/command", async (req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);

@@ -19,6 +19,7 @@ import { icons } from "./icons.js";
 import { lazy, prefetchWhenIdle } from "./lazy.js";
 import { Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
+import { undoLastTurn } from "./undo-flow.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { BashConfirmCard, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { Sidebar as SidebarModule } from "./sidebar.js";
@@ -744,7 +745,7 @@ function App() {
 		return () => window.removeEventListener("popstate", onPop);
 	}, [applyView]);
 	const requestConfirm = useCallback(
-		(message) => new Promise((resolve) => setConfirmState({ message, resolve })),
+		(message, options = {}) => new Promise((resolve) => setConfirmState({ message, resolve, confirmLabel: options.confirmLabel })),
 		[setConfirmState],
 	);
 	const cwd = selectedCwd ?? defaultCwd ?? "";
@@ -1214,6 +1215,22 @@ function App() {
 		setSidebarWidth,
 	});
 
+	// Undo the last turn: ask the daemon what it would do, confirm, then do it.
+	// Shared by the button on the last message and a typed /undo.
+	const undoTurn = useCallback(
+		() =>
+			activeId
+				? undoLastTurn({
+						id: activeId,
+						confirm: requestConfirm,
+						addNotice,
+						showToast,
+						refresh: () => selectSession(activeId, { push: false }),
+					})
+				: Promise.resolve(false),
+		[activeId, requestConfirm, addNotice, showToast, selectSession],
+	);
+
 	// Diff panel drag-to-resize — pointer events so mouse and touch both work.
 	// Submit message
 	const submitMessage = useCallback(
@@ -1242,6 +1259,7 @@ function App() {
 				setRunning,
 				canSend: () => Boolean(session && connectionUsable()),
 				awaitConnection,
+				undoTurn,
 		}),
 		[
 			planRefineArmedRef,
@@ -1265,6 +1283,7 @@ function App() {
 			setRunning,
 			connected,
 			backendUp,
+			undoTurn,
 		],
 	);
 
@@ -1883,6 +1902,8 @@ function App() {
 	const [fullyMountedId, setFullyMountedId] = useState(null);
 	const firstPaintOnly = !!session?.id && fullyMountedId !== session.id && messages.length > FIRST_PAINT_MESSAGES;
 	const shownMessages = firstPaintOnly ? messages.slice(-FIRST_PAINT_MESSAGES) : messages;
+	// The one turn /undo can take back is the last: its user message carries the button.
+	const lastUserMessage = [...shownMessages].reverse().find((m) => m.role === "user");
 	firstPaintOnlyRef.current = firstPaintOnly;
 	useEffect(() => {
 		if (!session?.id || fullyMountedId === session.id) return;
@@ -1987,7 +2008,7 @@ function App() {
 				<div class="modal-confirm-body" id="confirm-message">${confirmState.message}</div>
 				<div class="modal-footer">
 					<button class="modal-btn" data-dismiss onClick=${() => closeConfirm(false)}>Cancel</button>
-					<button class="modal-btn modal-btn-danger" onClick=${() => closeConfirm(true)}>Confirm</button>
+					<button class="modal-btn modal-btn-danger" onClick=${() => closeConfirm(true)}>${confirmState.confirmLabel ?? "Confirm"}</button>
 				</div>
 			</div>
 		</div>
@@ -2227,7 +2248,7 @@ function App() {
 									onRetry: loadOlderMessages,
 								})
 							}
-							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${forkBeforeMessage} />`)}
+							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${forkBeforeMessage} onUndo=${!running && activeId && msg === lastUserMessage ? undoTurn : undefined} />`)}
 							${
 								!running &&
 								(messages[messages.length - 1]?.notice === "error" ||

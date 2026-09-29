@@ -1,9 +1,9 @@
-import { execFile, execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { CHECKPOINT_REF_PREFIX, createShadowSnapshot, releaseShadowRefs } from "./shadow-snapshot.ts";
-import { findCanonicalGitRoot } from "./worktree.ts";
 
 export interface CheckpointFileBackup {
 	relPath: string;
@@ -38,32 +38,35 @@ const LEADING_DOT_SLASH_RE = /^\.\//;
 const MAX_SHADOW_BACKUP_BYTES = 10 * 1024 * 1024;
 const TRAILING_SLASH_RE = /\/$/;
 const EMPTY_SOURCE_RE = /did not match any file\(s\) known to git/;
-function runGit(cwd: string, args: string[], env?: NodeJS.ProcessEnv): string | null {
-	try {
-		const out = execFileSync("git", args, {
-			cwd,
-			env: { ...process.env, ...GIT_NO_PROMPT_ENV, ...env },
-			encoding: "utf8",
-			stdio: ["ignore", "pipe", "pipe"],
-		});
-		return out.trim();
-	} catch {
-		return null;
-	}
+interface GitResult {
+	ok: boolean;
+	stdout: string;
+	stderr: string;
 }
 
-/** Async twin of runGit: a checkpoint runs at the start of every turn, and
- * run synchronously its git calls held the daemon's event loop — every
- * session, SSE stream and HTTP request waited on them. */
-function runGitAsync(cwd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string | null> {
+/**
+ * git without holding the event loop: a checkpoint runs at the start of every
+ * turn and a restore on /undo, and run synchronously their git calls stopped
+ * every session, SSE stream and HTTP request in the daemon until they ended.
+ */
+function gitRun(cwd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<GitResult> {
 	return new Promise((resolvePromise) => {
 		execFile(
 			"git",
 			args,
-			{ cwd, env: { ...process.env, ...GIT_NO_PROMPT_ENV, ...env }, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
-			(error, stdout) => resolvePromise(error ? null : stdout.trim()),
+			{ cwd, env: { ...process.env, ...GIT_NO_PROMPT_ENV, ...env }, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+			(error, stdout, stderr) => resolvePromise({ ok: !error, stdout: stdout.trim(), stderr: String(stderr) }),
 		);
 	});
+}
+
+async function runGitAsync(cwd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string | null> {
+	const result = await gitRun(cwd, args, env);
+	return result.ok ? result.stdout : null;
+}
+
+async function insideGitRepo(cwd: string): Promise<boolean> {
+	return (await runGitAsync(cwd, ["rev-parse", "--git-dir"])) !== null;
 }
 
 /** Checkpoint commits are internal objects nobody reads the author of; without
@@ -193,9 +196,6 @@ export function backupFileForCheckpoint(checkpoint: TurnCheckpoint, filePath: st
 }
 
 /**
- * Restore a workspace to the state captured by checkpoint.
- */
-/**
  * Files a restore would delete without being able to bring them back.
  *
  * Restoring a git checkpoint runs `git clean -fd` first, which removes every
@@ -205,21 +205,21 @@ export function backupFileForCheckpoint(checkpoint: TurnCheckpoint, filePath: st
  * gone for good, and that includes whatever the user wrote themselves while
  * the agent worked. Callers ask first.
  */
-export function filesLostByRestore(checkpoint: TurnCheckpoint): string[] {
+export async function filesLostByRestore(checkpoint: TurnCheckpoint): Promise<string[]> {
 	if (!checkpoint.gitCommitSha) return [];
 	if (!checkpoint.shadowDir) {
-		if (!findCanonicalGitRoot(checkpoint.cwd)) return [];
+		if (!(await insideGitRepo(checkpoint.cwd))) return [];
 		return lostFiles(checkpoint);
 	}
 	// The hidden repository's own index describes some other checkpoint, so ask
 	// against a throwaway copy that holds this one's tree.
-	const indexDir = mkdtempSync(join(tmpdir(), "cast-lost-"));
+	const indexDir = await mkdtemp(join(tmpdir(), "cast-lost-"));
 	try {
 		const env = { ...shadowEnv(checkpoint), GIT_INDEX_FILE: join(indexDir, "index") };
-		if (runGit(checkpoint.cwd, ["read-tree", checkpoint.gitCommitSha], env) === null) return [];
-		return lostFiles(checkpoint, env);
+		if ((await runGitAsync(checkpoint.cwd, ["read-tree", checkpoint.gitCommitSha], env)) === null) return [];
+		return await lostFiles(checkpoint, env);
 	} finally {
-		rmSync(indexDir, { recursive: true, force: true });
+		await rm(indexDir, { recursive: true, force: true });
 	}
 }
 
@@ -228,8 +228,8 @@ function shadowEnv(checkpoint: TurnCheckpoint): NodeJS.ProcessEnv | undefined {
 	return checkpoint.shadowDir ? { GIT_DIR: checkpoint.shadowDir, GIT_WORK_TREE: checkpoint.cwd } : undefined;
 }
 
-function lostFiles(checkpoint: TurnCheckpoint, env?: NodeJS.ProcessEnv): string[] {
-	const wouldRemove = runGit(checkpoint.cwd, ["clean", "-nd"], env);
+async function lostFiles(checkpoint: TurnCheckpoint, env?: NodeJS.ProcessEnv): Promise<string[]> {
+	const wouldRemove = await runGitAsync(checkpoint.cwd, ["clean", "-nd"], env);
 	if (!wouldRemove) return [];
 	const commit = checkpoint.gitCommitSha as string;
 	const inCheckpoint = new Set(
@@ -237,7 +237,13 @@ function lostFiles(checkpoint: TurnCheckpoint, env?: NodeJS.ProcessEnv): string[
 		// prints paths relative to it, so in a subdirectory the comparison below
 		// was between two different namespaces (and, before that, between
 		// "notes.txt" and git clean's "./notes.txt").
-		(runGit(checkpoint.cwd, ["ls-tree", "-r", "--full-tree", "--full-name", "--name-only", commit], env) ?? "")
+		(
+			(await runGitAsync(
+				checkpoint.cwd,
+				["ls-tree", "-r", "--full-tree", "--full-name", "--name-only", commit],
+				env,
+			)) ?? ""
+		)
 			.split("\n")
 			.filter(Boolean),
 	);
@@ -246,7 +252,7 @@ function lostFiles(checkpoint: TurnCheckpoint, env?: NodeJS.ProcessEnv): string[
 	// repository root. Comparing the two directly meant that in a subdirectory
 	// nothing ever matched, so /undo warned that it would delete files its own
 	// restore puts straight back — including files the *user* had written.
-	const prefix = runGit(checkpoint.cwd, ["rev-parse", "--show-prefix"], env) ?? "";
+	const prefix = (await runGitAsync(checkpoint.cwd, ["rev-parse", "--show-prefix"], env)) ?? "";
 	const removed: string[] = [];
 	for (const rawLine of wouldRemove.split("\n")) {
 		const line = rawLine.trim();
@@ -269,7 +275,7 @@ function lostFiles(checkpoint: TurnCheckpoint, env?: NodeJS.ProcessEnv): string[
 }
 
 /** Puts back the files saved by backupFileForCheckpoint. */
-function applyBackups(checkpoint: TurnCheckpoint): { restored: number; skipped: string[] } {
+async function applyBackups(checkpoint: TurnCheckpoint): Promise<{ restored: number; skipped: string[] }> {
 	let restored = 0;
 	const skipped: string[] = [];
 	for (const backup of checkpoint.backups ?? []) {
@@ -279,9 +285,10 @@ function applyBackups(checkpoint: TurnCheckpoint): { restored: number; skipped: 
 			continue;
 		}
 		if (backup.existedBefore && backup.content !== undefined) {
-			mkdirSync(dirname(absPath), { recursive: true });
+			// biome-ignore lint/performance/noAwaitInLoops: a few files, restored in order
+			await mkdir(dirname(absPath), { recursive: true });
 			// Older checkpoints stored text; anything written since is base64.
-			writeFileSync(
+			await writeFile(
 				absPath,
 				backup.encoding === "base64" ? Buffer.from(backup.content, "base64") : Buffer.from(backup.content, "utf8"),
 			);
@@ -289,7 +296,7 @@ function applyBackups(checkpoint: TurnCheckpoint): { restored: number; skipped: 
 		} else if (!backup.existedBefore) {
 			if (existsSync(absPath)) {
 				try {
-					rmSync(absPath, { recursive: true, force: true });
+					await rm(absPath, { recursive: true, force: true });
 				} catch {
 					// Best effort
 				}
@@ -303,63 +310,47 @@ function applyBackups(checkpoint: TurnCheckpoint): { restored: number; skipped: 
 const tooLargeNote = (skipped: string[]): string =>
 	skipped.length > 0 ? ` — left untouched (too large to snapshot): ${skipped.join(", ")}` : "";
 
-export function restoreCheckpoint(checkpoint: TurnCheckpoint): { ok: boolean; message: string } {
-	const repoRoot = findCanonicalGitRoot(checkpoint.cwd);
-	const env = { ...process.env, ...GIT_NO_PROMPT_ENV, ...shadowEnv(checkpoint) };
+/**
+ * Restore a workspace to the state captured by checkpoint.
+ */
+export async function restoreCheckpoint(checkpoint: TurnCheckpoint): Promise<{ ok: boolean; message: string }> {
+	const env = shadowEnv(checkpoint);
+	const failed = (result: GitResult): { ok: false; message: string } => ({
+		ok: false,
+		message: `Failed to restore Git checkpoint: ${result.stderr.trim() || "git failed"}`,
+	});
 
-	if (checkpoint.gitCommitSha && (checkpoint.shadowDir || repoRoot)) {
-		try {
-			// The hidden repository's index describes the last snapshot, not this one;
-			// point it at this one's tree so `clean` below judges "created since".
-			if (checkpoint.shadowDir) {
-				execFileSync("git", ["read-tree", checkpoint.gitCommitSha], {
-					cwd: checkpoint.cwd,
-					env,
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-			}
-			// Remove post-checkpoint untracked files before restoring the tree.
-			// The restore then recreates files that were untracked at the checkpoint.
-			execFileSync("git", ["clean", "-fd"], { cwd: checkpoint.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
-			try {
-				execFileSync("git", ["restore", `--source=${checkpoint.gitCommitSha}`, "--worktree", "--", "."], {
-					cwd: checkpoint.cwd,
-					env,
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-			} catch (err) {
-				// An empty checkpoint (a fresh sandbox at the first turn) has nothing
-				// under `.` to restore, and git treats that as an error; the clean
-				// above already removed everything created since.
-				const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "");
-				if (!EMPTY_SOURCE_RE.test(stderr)) throw err;
-			}
-			// The ignored and out-of-scope files git doesn't cover.
-			const { restored, skipped } = applyBackups(checkpoint);
-			// Its job is done: let git collect the commit now.
-			spawnSync("git", ["update-ref", "-d", `${CHECKPOINT_REF_PREFIX}${checkpoint.id}`], {
-				cwd: checkpoint.cwd,
-				env,
-				stdio: "ignore",
-			});
-			const extra =
-				restored > 0 && !checkpoint.shadowDir ? ` and ${restored} ignored or outside-folder file(s)` : "";
-			const kind = checkpoint.shadowDir ? "snapshot" : "Git checkpoint";
-			return {
-				ok: true,
-				message: `Restored workspace to ${kind} ${checkpoint.gitCommitSha.slice(0, 7)}${extra}${tooLargeNote(skipped)}`,
-			};
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return { ok: false, message: `Failed to restore Git checkpoint: ${msg}` };
+	if (checkpoint.gitCommitSha && (checkpoint.shadowDir || (await insideGitRepo(checkpoint.cwd)))) {
+		const sha = checkpoint.gitCommitSha;
+		// The hidden repository's index describes the last snapshot, not this one;
+		// point it at this one's tree so `clean` below judges "created since".
+		if (checkpoint.shadowDir) {
+			const readTree = await gitRun(checkpoint.cwd, ["read-tree", sha], env);
+			if (!readTree.ok) return failed(readTree);
 		}
+		// Remove post-checkpoint untracked files before restoring the tree.
+		// The restore then recreates files that were untracked at the checkpoint.
+		const clean = await gitRun(checkpoint.cwd, ["clean", "-fd"], env);
+		if (!clean.ok) return failed(clean);
+		const restore = await gitRun(checkpoint.cwd, ["restore", `--source=${sha}`, "--worktree", "--", "."], env);
+		// An empty checkpoint (a fresh sandbox at the first turn) has nothing under
+		// `.` to restore, and git treats that as an error; the clean above already
+		// removed everything created since.
+		if (!restore.ok && !EMPTY_SOURCE_RE.test(restore.stderr)) return failed(restore);
+		// The ignored and out-of-scope files git doesn't cover.
+		const { restored, skipped } = await applyBackups(checkpoint);
+		// Its job is done: let git collect the commit now.
+		await gitRun(checkpoint.cwd, ["update-ref", "-d", `${CHECKPOINT_REF_PREFIX}${checkpoint.id}`], env);
+		const extra = restored > 0 && !checkpoint.shadowDir ? ` and ${restored} ignored or outside-folder file(s)` : "";
+		const kind = checkpoint.shadowDir ? "snapshot" : "Git checkpoint";
+		return { ok: true, message: `Restored workspace to ${kind} ${sha.slice(0, 7)}${extra}${tooLargeNote(skipped)}` };
 	}
 
 	if (checkpoint.backups) {
-		const { restored, skipped } = applyBackups(checkpoint);
-		// Without git there is no snapshot of the folder, only a copy of each file
-		// the edit and write tools touched: what a shell command changed or
-		// created is not known, so say so instead of reporting a full restore.
+		const { restored, skipped } = await applyBackups(checkpoint);
+		// Without a snapshot there is only a copy of each file the edit and write
+		// tools touched: what a shell command changed or created is not known, so
+		// say so instead of reporting a full restore.
 		const scope =
 			" (only files changed with edit/write are restored; this folder is too big to snapshot, so changes made by shell commands are not undone)";
 		return {

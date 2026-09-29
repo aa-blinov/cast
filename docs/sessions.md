@@ -153,7 +153,7 @@ During plan mode, compaction preserves exploration findings that aren't yet writ
 |---------|-------------|
 | `/compact` | Force compaction now |
 | `/clear` | Clear all context (and save the cleared state) |
-| `/undo` | Restore the latest checkpoint and remove the last turn |
+| `/undo` | Put the files back as before the last turn and remove that turn from the conversation (see [Interactive commands](interactive-commands.md)) |
 
 ## Usage Tracking
 

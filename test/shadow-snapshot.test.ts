@@ -59,7 +59,7 @@ describe("snapshots of a folder that is not a git repository", () => {
 		mkdirSync(join(project, "newdir"));
 		writeFileSync(join(project, "newdir", "x.txt"), "x");
 
-		const res = restoreCheckpoint(chk);
+		const res = await restoreCheckpoint(chk);
 		expect(res.ok).toBe(true);
 		expect(res.message).toContain("snapshot");
 		expect(readFileSync(join(project, "b.txt"), "utf8")).toBe("B0\n");
@@ -72,7 +72,7 @@ describe("snapshots of a folder that is not a git repository", () => {
 		const chk = await createCheckpoint(project);
 		writeFileSync(join(project, "node_modules", "dep.js"), "dep-changed\n");
 		writeFileSync(join(project, "node_modules", "added.js"), "x");
-		restoreCheckpoint(chk);
+		await restoreCheckpoint(chk);
 		expect(readFileSync(join(project, "node_modules", "dep.js"), "utf8")).toBe("dep-changed\n");
 		expect(existsSync(join(project, "node_modules", "added.js"))).toBe(true);
 	});
@@ -83,26 +83,26 @@ describe("snapshots of a folder that is not a git repository", () => {
 		const second = await createCheckpoint(project);
 		writeFileSync(join(project, "a.txt"), "A2\n");
 
-		expect(restoreCheckpoint(second).ok).toBe(true);
+		expect((await restoreCheckpoint(second)).ok).toBe(true);
 		expect(readFileSync(join(project, "a.txt"), "utf8")).toBe("A1\n");
-		expect(restoreCheckpoint(first).ok).toBe(true);
+		expect((await restoreCheckpoint(first)).ok).toBe(true);
 		expect(readFileSync(join(project, "a.txt"), "utf8")).toBe("A0\n");
 	});
 
 	it("names the files created since the checkpoint, and only those", async () => {
 		const chk = await createCheckpoint(project);
-		expect(filesLostByRestore(chk)).toEqual([]);
+		expect(await filesLostByRestore(chk)).toEqual([]);
 		writeFileSync(join(project, "a.txt"), "A1\n");
-		expect(filesLostByRestore(chk)).toEqual([]);
+		expect(await filesLostByRestore(chk)).toEqual([]);
 		writeFileSync(join(project, "made.txt"), "new\n");
-		expect(filesLostByRestore(chk)).toEqual(["made.txt"]);
+		expect(await filesLostByRestore(chk)).toEqual(["made.txt"]);
 	});
 
 	it("also restores what the edit tools backed up", async () => {
 		const chk = await createCheckpoint(project);
 		backupFileForCheckpoint(chk, join(project, "a.txt"));
 		writeFileSync(join(project, "a.txt"), "A1\n");
-		expect(restoreCheckpoint(chk).ok).toBe(true);
+		expect((await restoreCheckpoint(chk)).ok).toBe(true);
 		expect(readFileSync(join(project, "a.txt"), "utf8")).toBe("A0\n");
 	});
 
@@ -127,7 +127,7 @@ describe("snapshots of a folder that is not a git repository", () => {
 		mkdirSync(join(fresh, "d"));
 		writeFileSync(join(fresh, "d", "y.txt"), "y");
 
-		const res = restoreCheckpoint(chk);
+		const res = await restoreCheckpoint(chk);
 		expect(res.ok).toBe(true);
 		expect(readdirSync(fresh)).toEqual([]);
 	});
@@ -142,7 +142,7 @@ describe("snapshots of a folder that is not a git repository", () => {
 		expect(chk.gitCommitSha).toBeUndefined();
 
 		writeFileSync(join(project, "b.txt"), "B-by-shell\n");
-		const res = restoreCheckpoint(chk);
+		const res = await restoreCheckpoint(chk);
 		expect(res.message).toContain("too big to snapshot");
 		expect(readFileSync(join(project, "b.txt"), "utf8")).toBe("B-by-shell\n");
 	});

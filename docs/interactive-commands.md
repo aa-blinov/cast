@@ -15,14 +15,24 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/compact` | Force context compaction now (auto-triggers near the limit) |
 | `/dream` | Verify the recent project trajectory and consolidate durable project memory |
 | `/distill` | Verify repeated work and package high-confidence workflows as a skill or persona |
-| `/undo` | Undo the last turn: restore files from the most recent checkpoint and drop the last user message (and everything after it) |
+| `/undo [--force]` | Undo the last turn: put the files back as they were before it and remove your last message and everything after it, from the conversation and from the saved history |
 | `/copy` | Copy last assistant response to clipboard |
 | `/current` | Show all status bar data (even disabled segments) |
 | `/quit`, `/exit` | Save and exit |
 
-`/undo` requires a checkpoint from the previous turn. In a Git workspace, every file is restored to its pre-turn tree without changing the user's Git index; files created during the turn are removed, while files that were untracked before the turn are restored. Outside Git, Cast restores files changed through its `write` and `edit` tools from shadow backups. Arbitrary changes made through `bash` or an MCP tool in a non-Git workspace cannot be reversed. `/undo` is refused while the agent is running (use `/abort` first) and is a no-op if there is nothing to undo.
+`/undo` takes back the last turn: the files and the conversation together. Cast takes a checkpoint of the working directory when each turn starts, and `/undo` restores the newest one, then removes your message that started the turn and everything after it. It stays gone after a page reload or a restart. Run it again to step back another turn. It is refused while the agent is running (use `/abort` first) and does nothing if there is no checkpoint.
 
-Removing files created during the turn also removes any *you* created in that window: the restore cannot tell them apart, and they cannot be brought back. When there are such files, `/undo` names them and asks before proceeding; over the web API it refuses and asks you to re-run as `/undo --force`. `--force` skips the question.
+What is restored depends on the folder:
+
+| Folder | What comes back |
+|--------|-----------------|
+| A Git repository | Every tracked and untracked file, as of the start of the turn, without touching your Git index. Files git ignores (`.env`, build output) that the agent changed with `edit` or `write`, and files it wrote outside the session's folder, are restored too. Each checkpoint is pinned by a ref under `refs/cast/checkpoints/`, so `git gc` cannot collect it, and the ref is released when the checkpoint is restored or the session is deleted. |
+| Not a repository, and small (up to 3000 files and 50MB; dependency and build folders like `node_modules` and `dist` are not counted) | Everything, including what shell commands changed, created or deleted. Cast commits the folder each turn to a hidden repository under `~/.cast/shadow/`, which is deleted with the session. `node_modules`, `dist` and similar folders are left alone. Sandbox sessions are this case. |
+| Not a repository, and bigger, the home directory, or `/` | Only the files the agent changed with `edit` and `write`. `/undo` says that changes made by shell commands are not undone. |
+
+Removing files created during the turn also removes any *you* created in that window: the restore cannot tell them apart, and they cannot be brought back. When there are such files, `/undo` names them and asks before proceeding. In the web UI a dialog lists them; over the API `/undo` refuses and asks you to re-run as `/undo --force`, which skips the question.
+
+In the web UI the last message you sent has an undo button (hover it; it is always visible on touch screens). It opens a dialog that says which message goes, how the files are restored, and what will be deleted, then asks before doing anything. Typing `/undo` opens the same dialog. `GET /api/v1/sessions/{id}/undo` returns the same preview for your own client.
 
 `/fork` leaves the original session unchanged and starts an independent new session. It asks where from: the whole session (the context currently sent to the model), or before any message you sent (the original conversation up to there, including what compaction had summarized). It does not copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
 

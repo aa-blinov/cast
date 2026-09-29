@@ -3,9 +3,11 @@ import { api } from "./api.js";
 const SYSTEM_REMINDER_STRIP_RE = /\n\n<system-reminder>[\s\S]*<\/system-reminder>/;
 const STEER_CMD_RE = /^\/(steer|s)\s*/;
 const QUEUE_CMD_RE = /^\/(queue|q)\s*/;
+const UNDO_FORCE_RE = /\s(--force|-f)(\s|$)/;
 
 export async function submitMessage(text, images, pendingDocs, context) {
 	const {
+		undoTurn,
 		planRefineArmedRef,
 		session,
 		draftVersionRef,
@@ -234,6 +236,12 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		// and "/web-artifacts-builder" or "/queue-reset" used to land in the
 		// /web or /queue branch (the first then threw on its string result).
 		const commandName = text.trim().split(/\s+/)[0];
+		// A typed /undo gets the same preview and confirmation as the button; only
+		// an explicit --force skips it.
+		if (commandName === "/undo" && !UNDO_FORCE_RE.test(text)) {
+			await undoTurn();
+			return;
+		}
 		try {
 			const result = await api("POST", `/api/sessions/${id}/command`, { command: text });
 			if (text === "/sessions") await loadSessions();

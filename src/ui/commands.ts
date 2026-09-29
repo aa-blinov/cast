@@ -46,6 +46,7 @@ import {
 	addUsage,
 	countTurnMessages,
 	createSession,
+	deleteMessagesFrom,
 	dropLastCheckpoint,
 	listForkPoints,
 	listSessionSummaries,
@@ -2299,7 +2300,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			// created after the checkpoint — including whatever the user wrote
 			// themselves while the agent worked. Those cannot be brought back, so
 			// name them and ask, unless --force says not to.
-			const lost = filesLostByRestore(lastCheckpoint);
+			const lost = await filesLostByRestore(lastCheckpoint);
 			const forced = input.includes("--force") || input.includes("-f");
 			if (lost.length > 0 && !forced) {
 				const shown = lost.slice(0, 10);
@@ -2316,7 +2317,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					return;
 				}
 			}
-			const res = restoreCheckpoint(lastCheckpoint);
+			const res = await restoreCheckpoint(lastCheckpoint);
 			if (!res.ok) {
 				showNotice(`[Undo failed: ${res.message}]`);
 				return;
@@ -2334,6 +2335,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				}
 			}
 			if (lastUserIdx !== -1) {
+				// Deleted from the store as well: saveSession only appends.
+				deleteMessagesFrom(session, msgs[lastUserIdx] as Message);
 				session.messages = msgs.slice(0, lastUserIdx);
 			}
 			session.checkpoints = checkpoints;
