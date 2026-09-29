@@ -884,6 +884,17 @@ describe("web bridge", () => {
 		expect(result).toEqual({ ok: false, error: "No checkpoint available to undo" });
 	});
 
+	it("/undo keeps the checkpoint when the restore fails, so it can be retried", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.checkpoints = [
+			{ id: "chk-x", timestamp: "", cwd: ws.session.cwd ?? "", gitCommitSha: "0".repeat(40) },
+		];
+		const result = await bridge.executeCommand(ws.id, "/undo --force");
+		expect(result.ok).toBe(false);
+		expect(ws.session.checkpoints).toHaveLength(1);
+	});
+
 	it("/undo while the agent is running fails with the idle-required error", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

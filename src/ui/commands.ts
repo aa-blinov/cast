@@ -2316,12 +2316,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					return;
 				}
 			}
-			checkpoints.pop();
 			const res = restoreCheckpoint(lastCheckpoint);
 			if (!res.ok) {
 				showNotice(`[Undo failed: ${res.message}]`);
 				return;
 			}
+			checkpoints.pop();
 			// Drop the matching row so the persisted checkpoint list stays in sync.
 			dropLastCheckpoint(session.id);
 

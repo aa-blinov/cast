@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import type { TurnCheckpoint } from "./checkpoint.ts";
+import { releaseCheckpointRefs, type TurnCheckpoint } from "./checkpoint.ts";
 import { type AppConfig, inputTokenBudget } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb, sessionsDbPath } from "./db.ts";
@@ -1776,6 +1776,7 @@ export function deleteSession(id: string, cwd?: string): boolean {
 			id: string;
 		}>
 	).map((row) => row.id);
+	const checkpointsToRelease = loadCheckpoints(id);
 	const remove = () =>
 		withMessageFtsClearedFor(db, [id, ...children], () => {
 			for (const child of children) db.prepare("DELETE FROM sessions WHERE id = ?").run(child);
@@ -1799,6 +1800,8 @@ export function deleteSession(id: string, cwd?: string): boolean {
 	// don't pile up as orphans. Matched exactly (never by prefix), so a
 	// project that merely lives under ~/.cast/sandbox is never touched.
 	// The caller passes the cwd it captured before the row was deleted.
+	// Their commits are only kept alive by a ref each; let git collect them.
+	void releaseCheckpointRefs(checkpointsToRelease).catch(() => {});
 	removeSandboxDirFor(id, cwd);
 	removeInputsDirFor(id);
 	removeSessionMemoryDirFor(id);
