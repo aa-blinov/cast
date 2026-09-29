@@ -31,6 +31,16 @@
 /* 87.5% is 14px at the browser default, but follows a user who raised their
  * browser's font size instead of pinning everyone to 14px. */
 html { font-size: calc(87.5% * var(--font-scale, 1)); }
+/* A phone reads at arm's length. Apple sets body text at 17pt with 11pt the
+ * floor, Material at 14sp with 11sp for the smallest label, and the web
+ * guidance is 12px at the very least; at 87.5% the chat text was 12.6px, the
+ * secondary text 11.2px and the small labels 10px. 100% is the size the
+ * user's browser (or Android's font-size setting) asked for: chat text 14.4px,
+ * secondary 12.8px, labels 11.5px. Still a percentage, so the browser's text
+ * size and the Scale in Settings keep working. */
+@media (pointer: coarse) and (max-width: 768px) {
+	html { font-size: calc(100% * var(--font-scale, 1)); }
+}
 body {
 	font-family: var(--font);
 	background: var(--bg);

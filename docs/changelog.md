@@ -6,6 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Changed
 
+- **Readable text on a phone.** The web UI's root size was 87.5% of the browser's (14px), so on a phone the chat text was 12.6px, secondary text 11.2px and small labels 10px: under Apple's 11pt floor and Material's 14sp body. On touch screens up to 768px wide it now follows the browser's own size: chat text 14.4px, secondary 12.8px, labels 11.5px. It is still a percentage, so the browser's or Android's text size setting and the Scale in Settings keep working.
 - **A smaller message box on a phone.** The web composer took ~100px of the screen: three 44px buttons left the field 176px wide, and its font was forced to 16px everywhere. The buttons keep a 44px touch target but look 36px, the padding is tighter (the box is 50px, the field 238px wide), and the 16px floor now applies only on iOS, where a smaller font makes the page zoom on focus. On Android the field uses the chat's own text size.
 
 ## 0.48.0
