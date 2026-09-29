@@ -228,8 +228,10 @@
 .message-user .message-label { color: var(--teal); display: flex; align-items: center; gap: 6px; }
 /* Shown on hover (and always on touch screens, which have none). */
 .message-fork {
-	display: inline-flex; align-items: center; justify-content: center;
-	width: 20px; height: 20px; padding: 0;
+	display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+	position: relative; z-index: 1;
+	height: 20px; padding: 0 6px;
+	font: inherit; font-size: var(--fs-micro, 11px);
 	border: 0; border-radius: var(--radius-sm);
 	background: transparent; color: var(--text-dim);
 	cursor: pointer; opacity: 0;
@@ -239,8 +241,15 @@
 .message-fork:hover { color: var(--text); background: var(--bg-hover, rgba(127,127,127,.12)); }
 @media (hover: none) { .message-fork { opacity: .7; } }
 /* Under an answer: the action row appears with the answer and reads as a labelled button. */
-.message-actions { display: flex; gap: 6px; margin-top: 2px; }
-.message-actions .message-fork { width: auto; padding: 0 6px; gap: 4px; font: inherit; font-size: var(--fs-micro, 11px); }
+.message-actions { display: flex; gap: 6px; margin: 2px 0 14px; }
+/* A finger needs 44px: keep the small look, widen the hit area (the labelled buttons have no hover state to guide it). */
+@media (hover: none) {
+	.message-fork::after { content: ""; position: absolute; inset: -12px -4px; }
+	/* .message is content-visibility: auto, which clips whatever sticks out of it (the hit area above
+	   included), so in the label row the buttons get their height for real. */
+	.message-user .message-label { gap: 10px; }
+	.message-user .message-fork { height: 32px; }
+}
 .message-group:hover .message-actions .message-fork { opacity: 1; }
 /* The last turn's undo is the one you reach for right after a bad answer: always visible there. */
 .message-undo { opacity: .55; }

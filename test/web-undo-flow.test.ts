@@ -5,7 +5,7 @@ vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }), { virtual: true
 const { describeUndo } = await import("../src/server/public/undo-flow.js");
 
 describe("describeUndo", () => {
-	it("names the message that goes and how many messages go with it", () => {
+	it("names the message that goes and says the agent's work after it goes too", () => {
 		const text = describeUndo({
 			available: true,
 			kind: "snapshot",
@@ -15,16 +15,13 @@ describe("describeUndo", () => {
 			lostTotal: 0,
 			lost: [],
 		});
-		expect(text).toContain('Your message "fix the bug" and the 4 messages from it on are removed.');
+		expect(text).toContain('Your message "fix the bug" and everything the agent did after it are removed.');
 		expect(text).toContain("Every file in the folder goes back");
 		expect(text).not.toContain("shell commands");
 		expect(text).not.toContain("also deletes");
 	});
 
-	it("says 'message' for one, and copes with no user message at all", () => {
-		expect(describeUndo({ kind: "git", removedMessage: "x", removedMessages: 1, lostTotal: 0, lost: [] })).toContain(
-			"and the message from it on",
-		);
+	it("copes with no user message at all", () => {
 		expect(describeUndo({ kind: "git", lostTotal: 0, lost: [] }).startsWith("Undo the last turn?\n\n")).toBe(true);
 	});
 
