@@ -2076,7 +2076,7 @@ function App() {
 			<${NewSessionModal}
 				open=${newSessionOpen}
 				personas=${personas}
-				defaultPersona=${defaultP}
+				defaultPersona=${defaultP?.name}
 				cwd=${cwd}
 				defaultCwd=${defaultCwd}
 				defaultModel=${defaultModel}
