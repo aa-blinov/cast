@@ -1,9 +1,10 @@
 import { execFile, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { CHECKPOINT_REF_PREFIX, createShadowSnapshot, releaseShadowRefs } from "./shadow-snapshot.ts";
+import { ensureSessionWorktree } from "./worktree.ts";
 
 export interface CheckpointFileBackup {
 	relPath: string;
@@ -386,4 +387,84 @@ export async function releaseCheckpointRefs(checkpoints: TurnCheckpoint[]): Prom
 			});
 		}),
 	);
+}
+
+/**
+ * The snapshot that holds the files as they were at a cut in the conversation:
+ * the start of the first turn at or after it. A cut before one of your messages
+ * is that message's own checkpoint; a cut after an answer is the next turn's.
+ * Only checkpoints that know their turn (userSeq) qualify.
+ */
+export function checkpointAtCut(checkpoints: TurnCheckpoint[], beforeSeq: number): TurnCheckpoint | undefined {
+	let best: TurnCheckpoint | undefined;
+	for (const c of checkpoints) {
+		if (c.userSeq === undefined || c.userSeq < beforeSeq) continue;
+		if (!best || c.userSeq < (best.userSeq as number)) best = c;
+	}
+	return best;
+}
+
+/** Why a fork can't have the files of a point: nothing was saved for it. */
+export const NO_SNAPSHOT_ERROR =
+	"There is no snapshot of the files at that point (an older session, or a folder too big to snapshot)";
+
+export type ForkFiles = { ok: true; cwd: string; kind: "worktree" | "snapshot" } | { ok: false; error: string };
+
+/** How a checkpoint's files can be given to a fork, or why they can't. */
+export async function forkFilesKind(
+	checkpoint: TurnCheckpoint | undefined,
+): Promise<{ ok: true; kind: "worktree" | "snapshot" } | { ok: false; error: string }> {
+	if (!checkpoint) return { ok: false, error: NO_SNAPSHOT_ERROR };
+	if (!checkpoint.gitCommitSha) {
+		return {
+			ok: false,
+			error: "Only the files edit and write changed were saved at that point, not the whole folder",
+		};
+	}
+	if (checkpoint.shadowDir) {
+		return existsSync(checkpoint.shadowDir)
+			? { ok: true, kind: "snapshot" }
+			: { ok: false, error: "The snapshot of that folder is gone" };
+	}
+	return (await insideGitRepo(checkpoint.cwd))
+		? { ok: true, kind: "worktree" }
+		: { ok: false, error: "The repository this snapshot belongs to is gone" };
+}
+
+/**
+ * Builds a folder holding the files as they were when `checkpoint` was taken,
+ * for a fork to work in: a git worktree at the snapshot commit in a repository
+ * (beside the project's other worktrees), or a copy of the hidden snapshot in a
+ * new sandbox folder named after the fork otherwise. Ignored files (node_modules,
+ * build output) are not in a snapshot; a worktree also gets the project's small
+ * ignored config files, as `--worktree` does.
+ */
+export async function materializeCheckpoint(checkpoint: TurnCheckpoint, sessionId: string): Promise<ForkFiles> {
+	const kind = await forkFilesKind(checkpoint);
+	if (!kind.ok) return kind;
+	const sha = checkpoint.gitCommitSha as string;
+	if (kind.kind === "snapshot") {
+		const dest = join(homedir(), ".cast", "sandbox", `cast-${sessionId}`);
+		const indexDir = await mkdtemp(join(tmpdir(), "cast-fork-"));
+		try {
+			await mkdir(dest, { recursive: true });
+			const env = { ...shadowEnv(checkpoint), GIT_INDEX_FILE: join(indexDir, "index") };
+			const shadowDir = checkpoint.shadowDir as string;
+			const readTree = await gitRun(shadowDir, ["read-tree", sha], env);
+			if (!readTree.ok) return { ok: false, error: `Could not read the snapshot: ${readTree.stderr.trim()}` };
+			const out = await gitRun(shadowDir, ["checkout-index", "-a", "-f", `--prefix=${dest}/`], env);
+			if (!out.ok) return { ok: false, error: `Could not copy the snapshot: ${out.stderr.trim()}` };
+			return { ok: true, cwd: dest, kind: "snapshot" };
+		} finally {
+			await rm(indexDir, { recursive: true, force: true });
+		}
+	}
+	try {
+		const worktree = await ensureSessionWorktree(`fork-${sessionId}`, checkpoint.cwd, sha);
+		// The session may run from a folder inside the repository: the fork does too.
+		const prefix = (await runGitAsync(checkpoint.cwd, ["rev-parse", "--show-prefix"])) ?? "";
+		return { ok: true, cwd: prefix ? join(worktree.path, prefix) : worktree.path, kind: "worktree" };
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
 }

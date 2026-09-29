@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { latestPageUrl } from "./history-merge.js";
+import { forkNotice } from "./fork-flow.js";
 import { SANDBOX_CWD } from "./sidebar-utils.js";
 
 function setUrlSessionId(id, { push } = {}) {
@@ -441,16 +442,17 @@ export function useSessionController({
 	);
 
 	// cut: { beforeSeq } forks the history before that user message, { afterSeq }
-	// through that answer of the agent; omitted forks all of it.
+	// through that answer of the agent; omitted forks all of it. withFiles gives the
+	// fork its own folder with the files as they were at the cut.
 	const forkSession = useCallback(
-		async (id, cut) => {
+		async (id, cut, { withFiles = false } = {}) => {
 			try {
-				const data = await api("POST", `/api/sessions/${id}/fork`, cut);
+				const data = await api("POST", `/api/sessions/${id}/fork`, cut || withFiles ? { ...cut, withFiles } : undefined);
 				if (!data?.id) throw new Error("Could not fork session");
 				await loadSessions();
 				await selectSession(data.id);
-				// The conversation stops at the chosen point; the folder does not.
-				if (cut) showToast("Forked. Both sessions share the working folder, so the files are as they are now, not as they were at that point.");
+				// The conversation stops at the chosen point; the folder only does if it was copied.
+				if (cut) showToast(forkNotice({ withFiles, cwd: data.session?.cwd }));
 			} catch (err) {
 				showToast(err.message, "error");
 			}

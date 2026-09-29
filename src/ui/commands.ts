@@ -4,6 +4,7 @@ import { filesLostByRestore, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
+import { previewForkFiles } from "../core/fork-files.ts";
 import { clearGoal, editGoalObjective, formatGoalStatus, readGoal, startGoal } from "../core/goal.ts";
 import { runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
@@ -1557,9 +1558,40 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					beforeSeq = Number(picked.slice("before:".length));
 				}
 			}
+			// A point with a snapshot of its files can give the fork its own copy of them.
+			let withFiles = false;
+			if (beforeSeq !== undefined) {
+				const preview = await previewForkFiles({ ...session, checkpoints: loadCheckpoints(session.id) }, beforeSeq);
+				if (preview.canCopyFiles) {
+					const how = await deps.pickers.pickOption<string>(
+						[
+							{
+								value: "shared",
+								label: "Same folder",
+								description: "The conversation is cut there; the files stay as they are now",
+							},
+							{
+								value: "copy",
+								label: "Its own copy of the files as they were then",
+								description:
+									preview.kind === "worktree"
+										? "A git worktree at that point (files git ignores, like node_modules, are not in it)"
+										: "A new sandbox folder (dependency and build folders are left out)",
+							},
+						],
+						{ title: "Give the fork the files of that point?" },
+					);
+					if (!how) {
+						showNotice("[Cancelled]");
+						return;
+					}
+					withFiles = how === "copy";
+				}
+			}
+			const previousCwd = session.cwd;
 			let forked: SessionState | undefined;
 			try {
-				forked = await agent.forkSession(beforeSeq);
+				forked = await agent.forkSession(beforeSeq, withFiles);
 			} catch (err) {
 				showNotice(`[Could not fork this session: ${err instanceof Error ? err.message : String(err)}]`);
 				return;
@@ -1569,6 +1601,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				return;
 			}
 			restoreSessionState(session, forked);
+			// Its own copy of the files lives in another folder: work there.
+			if (withFiles && forked.cwd && forked.cwd !== previousCwd) deps.setCwd(forked.cwd);
 			agent.refresh();
 			deps.setPlanMode(forked.mode === "plan");
 			// A fork from a point is shorter than what's drawn: the later turns
@@ -1576,11 +1610,14 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			if (beforeSeq !== undefined) await deps.onRepaintHistory?.();
 			const point = points.find((p) => p.seq === beforeSeq);
 			const answered = points.find((p) => p.answerSeq === answerSeq);
+			const where = withFiles
+				? `with its own copy of the files in ${forked.cwd}`
+				: "Both sessions share the working folder: the files are as they are now";
 			showNotice(
 				answerSeq !== undefined && answered
-					? `[Forked session: ${forked.id}, through the answer to "${answered.text.slice(0, 70)}". Both sessions share the working folder: the files are as they are now.]`
+					? `[Forked session: ${forked.id}, through the answer to "${answered.text.slice(0, 70)}", ${where}.]`
 					: point
-						? `[Forked session: ${forked.id}, before "${point.text.slice(0, 70)}". Send it again, or something else.]`
+						? `[Forked session: ${forked.id}, before "${point.text.slice(0, 70)}"${withFiles ? `, ${where}.` : ". Send it again, or something else."}]`
 						: `[Forked session: ${forked.id}]`,
 			);
 			return;

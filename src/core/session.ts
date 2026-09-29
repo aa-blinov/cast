@@ -2392,6 +2392,11 @@ export function sessionHasMessages(id: string): boolean {
 	return getDb().prepare("SELECT 1 FROM messages WHERE session_id = ? LIMIT 1").get(id) !== undefined;
 }
 
+/** A fresh session id, for a caller that has to name something after it before the session exists. */
+export function newSessionId(): string {
+	return generateSessionId();
+}
+
 function generateSessionId(): string {
 	return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
@@ -2704,8 +2709,17 @@ function contextBefore(source: SessionState, beforeSeq: number): Message[] {
  * restoring only part of an old tool turn can produce an invalid provider
  * transcript, while the active context is already the safe continuation.
  */
-export function forkSession(source: SessionState, beforeSeq?: number): SessionState {
-	const fork = createSession(source.model, source.cwd ?? process.cwd());
+export function forkSession(
+	source: SessionState,
+	beforeSeq?: number,
+	/** A fork that gets its own folder (files as they were at the point) names it, and its id when the folder is named after it. */
+	options: { id?: string; cwd?: string } = {},
+): SessionState {
+	const fork = createSession(
+		source.model,
+		options.cwd ?? source.cwd ?? process.cwd(),
+		options.id ? { id: options.id } : {},
+	);
 	if (beforeSeq === undefined) {
 		fork.messages = JSON.parse(JSON.stringify(source.messages)) as Message[];
 		source.messages.forEach((message, i) => {

@@ -20,6 +20,7 @@ import {
 } from "../core/context-files.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { invalidateProjectFiles } from "../core/file-search.ts";
+import { type ForkFilesPreview, forkSessionWithFiles, previewForkFiles } from "../core/fork-files.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
@@ -386,6 +387,13 @@ export interface ServerBridge {
 	): WebAgentSession;
 	/** Creates an idle copy of the current safe context and registers it as a new session. */
 	forkSession(sessionId: string, beforeSeq?: number): WebAgentSession | undefined;
+	/** Like forkSession, with the fork's own folder holding the files as they were at that point. */
+	forkSessionWithFiles(
+		sessionId: string,
+		beforeSeq: number | undefined,
+	): Promise<{ session?: WebAgentSession; error?: string }>;
+	/** Whether a fork at this cut can have its own copy of the files. */
+	previewForkFiles(sessionId: string, beforeSeq: number | undefined): Promise<ForkFilesPreview | undefined>;
 	/** The session's `task` children, newest first, running ones marked. */
 	listAgents(sessionId: string): SubagentSummary[];
 	/** Stops a running child of this session; false when it isn't running. */
@@ -1149,7 +1157,31 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function forkSessionInstance(sessionId: string, beforeSeq?: number): WebAgentSession | undefined {
 		const source = getSession(sessionId);
 		if (!source || source.status === "running") return undefined;
-		const session = forkSession(source.session, beforeSeq);
+		return openFork(source, forkSession(source.session, beforeSeq));
+	}
+
+	/**
+	 * A fork whose own folder holds the files as they were at the cut: a git
+	 * worktree at the snapshot, or a copy of the hidden snapshot in a new sandbox
+	 * folder. `error` says why not (no snapshot for that point, ...).
+	 */
+	async function forkSessionWithFilesFor(
+		sessionId: string,
+		beforeSeq: number | undefined,
+	): Promise<{ session?: WebAgentSession; error?: string }> {
+		const source = getSession(sessionId);
+		if (!source) return { error: "Not found" };
+		if (source.status === "running") return { error: "Agent running: abort before forking" };
+		const made = await forkSessionWithFiles(source.session, beforeSeq);
+		return made.session ? { session: openFork(source, made.session) } : { error: made.error };
+	}
+
+	async function previewForkFilesFor(sessionId: string, beforeSeq: number | undefined) {
+		const source = getSession(sessionId);
+		return source ? previewForkFiles(source.session, beforeSeq) : undefined;
+	}
+
+	function openFork(source: WebAgentSession, session: SessionState): WebAgentSession {
 		rehomeForkedAttachments(source.session.id, session);
 		const persona = resolvePersona(session.persona ?? "") ?? currentPersona;
 		const runner = createAgentRunner();
@@ -3563,6 +3595,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	return {
 		createSession: createSessionInstance,
 		forkSession: forkSessionInstance,
+		forkSessionWithFiles: forkSessionWithFilesFor,
+		previewForkFiles: previewForkFilesFor,
 		listAgents: (sessionId) => {
 			const live = new Set(runningTaskIds(sessionId));
 			return listSubagentSessions(sessionId).map((child) => ({

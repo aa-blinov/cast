@@ -1962,3 +1962,84 @@ describe("every routed command dispatches", () => {
 		});
 	}
 });
+
+describe("/fork with the files of a point", () => {
+	it("offers the files when the point has a snapshot, forks with them and moves the TUI to the fork's folder", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.session.messages.push(
+			{ role: "user", content: "first ask" },
+			{ role: "assistant", content: "one" },
+			{ role: "user", content: "second ask" },
+			{ role: "assistant", content: "two" },
+		);
+		saveSession(deps.session);
+		const [, second] = listForkPoints(deps.session.id);
+		// A snapshot of the turn that starts with the second ask; the hidden repo only has to exist for the preview.
+		const shadowDir = mkdtempSync(join(tmpdir(), "cast-fake-shadow-"));
+		appendCheckpoint(deps.session.id, {
+			id: "chk-fork",
+			timestamp: "",
+			cwd: "/tmp/project",
+			gitCommitSha: "abc1234",
+			shadowDir,
+			userSeq: second!.seq,
+		});
+		const asked: Array<{ title?: string; labels: string[] }> = [];
+		deps.pickers = {
+			...deps.pickers,
+			pickOption: async (options, opts) => {
+				asked.push({ title: opts?.title, labels: options.map((o) => String(o.label)) });
+				const wanted =
+					opts?.title === "Fork from where?"
+						? "Before: second ask"
+						: "Its own copy of the files as they were then";
+				return options.find((o) => o.label === wanted)!.value;
+			},
+		};
+		const fork = createSession("test-model", "/tmp/forked-copy");
+		let forkedWith: { beforeSeq?: number; withFiles?: boolean } | undefined;
+		(deps.agent.forkSession as (beforeSeq?: number, withFiles?: boolean) => Promise<SessionState | undefined>) =
+			async (beforeSeq, withFiles) => {
+				forkedWith = { beforeSeq, withFiles };
+				return fork;
+			};
+
+		await handleInput("/fork", undefined, deps);
+
+		expect(asked.map((a) => a.title)).toEqual(["Fork from where?", "Give the fork the files of that point?"]);
+		expect(forkedWith).toEqual({ beforeSeq: second!.seq, withFiles: true });
+		expect(calls.setCwd?.[0]).toEqual(["/tmp/forked-copy"]);
+		expect(noticeText(calls)).toContain("its own copy of the files in /tmp/forked-copy");
+		rmSync(shadowDir, { recursive: true, force: true });
+	});
+
+	it("does not ask about files for a point without a snapshot", async () => {
+		const { deps } = createFakeDeps();
+		deps.session.messages.push(
+			{ role: "user", content: "first ask" },
+			{ role: "assistant", content: "one" },
+			{ role: "user", content: "second ask" },
+			{ role: "assistant", content: "two" },
+		);
+		saveSession(deps.session);
+		const titles: Array<string | undefined> = [];
+		deps.pickers = {
+			...deps.pickers,
+			pickOption: async (options, opts) => {
+				titles.push(opts?.title);
+				return options.find((o) => o.label === "Before: second ask")!.value;
+			},
+		};
+		let withFiles: boolean | undefined;
+		(deps.agent.forkSession as (beforeSeq?: number, withFiles?: boolean) => Promise<SessionState | undefined>) =
+			async (_beforeSeq, files) => {
+				withFiles = files;
+				return createSession("test-model", "/tmp");
+			};
+
+		await handleInput("/fork", undefined, deps);
+
+		expect(titles).toEqual(["Fork from where?"]);
+		expect(withFiles).toBe(false);
+	});
+});
