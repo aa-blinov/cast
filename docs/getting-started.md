@@ -82,7 +82,7 @@ When launched without a saved configuration, an interactive setup flow configure
 4. **Reasoning level**: Configure reasoning effort or request shape (`/reasoning-format`).
 5. **Session**: A new session starts automatically.
 
-Subsequent launches remember choices and enter the TUI directly.
+Subsequent launches remember choices and enter the TUI directly. A launch checks the saved model with one short request, at most once a day per provider, key and model; a later request rejected for the key or the model makes the next launch check again.
 
 ## Default Configuration
 

@@ -22,6 +22,7 @@ import {
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "./context-files.ts";
 import { type HooksFile, runHooksForEvent } from "./hooks.ts";
 import type { McpSetupResult } from "./mcp.ts";
+import { recentlyValidated } from "./model-validation.ts";
 import { fetchModelsDevCatalog, lookupContextWindowFromCatalog } from "./models-dev.ts";
 import { findPersona, type LoadPersonasOptions, listPersonas, type Persona } from "./personas.ts";
 import {
@@ -394,7 +395,10 @@ export async function runStartup(
 		// The model's metadata is fetched while the check runs, not after it:
 		// two provider round trips in sequence were most of a TUI start.
 		const early = warmModelMetadataInBackground(config, settings.model);
-		let ok = await runOnboardingCheck(config, settings.model, { silent: true });
+		// Checked within the day with this provider and key: skip the paid probe.
+		let ok =
+			recentlyValidated(config, settings.model) ||
+			(await runOnboardingCheck(config, settings.model, { silent: true }));
 		if (!ok) {
 			// The saved model failed — but that might be the *connection* (revoked
 			// key, dead endpoint), not the model. Re-prompt credentials if so. If

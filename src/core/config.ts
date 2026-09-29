@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { rememberValidated } from "./model-validation.ts";
 import {
 	fetchModelsDevCatalog,
 	lookupModelMetadataFromCatalog,
@@ -506,6 +507,7 @@ export async function runOnboardingCheck(
 		if (!silent) {
 			log(`Model "${model}": ok${result.responseSnippet ? ` — response: "${result.responseSnippet}"` : ""}`);
 		}
+		rememberValidated(config, model);
 		return true;
 	}
 
