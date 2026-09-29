@@ -1745,9 +1745,12 @@ const commandHandlers: Record<string, CommandHandler> = {
 				error: `Undo would delete ${lost.length} file(s) created since the checkpoint (${shown}${more}). Re-run as "/undo --force" to proceed.`,
 			};
 		}
-		checkpoints.pop();
 		const res = restoreCheckpoint(lastCheckpoint);
 		if (!res.ok) return { ok: false, error: `Undo failed: ${res.message}` };
+		// Popped only now, and from the live array: taking it off first meant a
+		// failed restore lost the checkpoint here (the store still had it) and the
+		// user could not retry until the daemon restarted.
+		checkpoints.pop();
 		// Drop the matching row so the persisted list stays in sync.
 		dropLastCheckpoint(ws.session.id);
 

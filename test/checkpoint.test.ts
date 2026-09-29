@@ -6,6 +6,7 @@ import {
 	backupFileForCheckpoint,
 	createCheckpoint,
 	filesLostByRestore,
+	releaseCheckpointRefs,
 	restoreCheckpoint,
 } from "../src/core/checkpoint.ts";
 import type { AppConfig } from "../src/core/config.ts";
@@ -199,5 +200,105 @@ describe("checkpoint module", () => {
 			const chk = await createCheckpoint(TEST_DIR, true);
 			expect(filesLostByRestore(chk)).toEqual([]);
 		});
+	});
+});
+
+describe("checkpoints in a git repository", () => {
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: TEST_DIR, encoding: "utf8" }).trim();
+
+	beforeEach(() => {
+		rmSync(TEST_DIR, { recursive: true, force: true });
+		mkdirSync(join(TEST_DIR, "sub"), { recursive: true });
+		git("init", "-q", "-b", "main");
+		git("config", "user.name", "Test");
+		git("config", "user.email", "test@example.com");
+		writeFileSync(join(TEST_DIR, ".gitignore"), "ignored.txt\nbuild/\n");
+		writeFileSync(join(TEST_DIR, "a.txt"), "A0\n");
+		writeFileSync(join(TEST_DIR, "ignored.txt"), "I0\n");
+		writeFileSync(join(TEST_DIR, "sub", "b.txt"), "B0\n");
+		git("add", "-A");
+		git("commit", "-qm", "init");
+	});
+
+	afterEach(() => rmSync(TEST_DIR, { recursive: true, force: true }));
+
+	it("restores a git-ignored file the write tool changed, and removes one it created", async () => {
+		const chk = await createCheckpoint(TEST_DIR);
+		backupFileForCheckpoint(chk, join(TEST_DIR, "ignored.txt"));
+		writeFileSync(join(TEST_DIR, "ignored.txt"), "I1\n");
+		mkdirSync(join(TEST_DIR, "build"));
+		backupFileForCheckpoint(chk, join(TEST_DIR, "build", "out.js"));
+		writeFileSync(join(TEST_DIR, "build", "out.js"), "made\n");
+
+		const res = restoreCheckpoint(chk);
+		expect(res.ok).toBe(true);
+		expect(res.message).toContain("2 ignored or outside-folder file(s)");
+		expect(readFileSync(join(TEST_DIR, "ignored.txt"), "utf8")).toBe("I0\n");
+		expect(existsSync(join(TEST_DIR, "build", "out.js"))).toBe(false);
+	});
+
+	it("does not copy a tracked file into the checkpoint: git already has it", async () => {
+		const chk = await createCheckpoint(TEST_DIR);
+		backupFileForCheckpoint(chk, join(TEST_DIR, "a.txt"));
+		expect(chk.backups ?? []).toEqual([]);
+	});
+
+	it("restores a file outside a subdirectory session that the write tool changed", async () => {
+		const sub = join(TEST_DIR, "sub");
+		const chk = await createCheckpoint(sub);
+		backupFileForCheckpoint(chk, join(TEST_DIR, "a.txt"));
+		writeFileSync(join(TEST_DIR, "a.txt"), "A-outside\n");
+		writeFileSync(join(sub, "b.txt"), "B1\n");
+
+		expect(restoreCheckpoint(chk).ok).toBe(true);
+		expect(readFileSync(join(TEST_DIR, "a.txt"), "utf8")).toBe("A0\n");
+		expect(readFileSync(join(sub, "b.txt"), "utf8")).toBe("B0\n");
+	});
+
+	it("keeps the checkpoint commit alive through git gc, and releases it when asked", async () => {
+		const chk = await createCheckpoint(TEST_DIR);
+		expect(git("for-each-ref", "refs/cast/checkpoints/")).toContain(chk.id);
+		writeFileSync(join(TEST_DIR, "a.txt"), "A1\n");
+		git("reflog", "expire", "--expire=now", "--all");
+		git("gc", "-q", "--prune=now");
+		expect(restoreCheckpoint(chk).ok).toBe(true);
+		expect(readFileSync(join(TEST_DIR, "a.txt"), "utf8")).toBe("A0\n");
+		// A successful restore lets go of the commit.
+		expect(git("for-each-ref", "refs/cast/checkpoints/")).toBe("");
+
+		const other = await createCheckpoint(TEST_DIR);
+		expect(git("for-each-ref", "refs/cast/checkpoints/")).toContain(other.id);
+		await releaseCheckpointRefs([other, { id: "chk-shadow", timestamp: "", cwd: TEST_DIR, backups: [] }]);
+		expect(git("for-each-ref", "refs/cast/checkpoints/")).toBe("");
+	});
+
+	it("a failed restore leaves the ref, so undo can be tried again", async () => {
+		const chk = await createCheckpoint(TEST_DIR);
+		const bad = { ...chk, gitCommitSha: "0".repeat(40) };
+		expect(restoreCheckpoint(bad).ok).toBe(false);
+		expect(git("for-each-ref", "refs/cast/checkpoints/")).toContain(chk.id);
+	});
+});
+
+describe("checkpoints outside a git repository", () => {
+	beforeEach(() => {
+		rmSync(TEST_DIR, { recursive: true, force: true });
+		mkdirSync(TEST_DIR, { recursive: true });
+	});
+	afterEach(() => rmSync(TEST_DIR, { recursive: true, force: true }));
+
+	it("says that shell changes are not covered, and leaves them alone", async () => {
+		writeFileSync(join(TEST_DIR, "edited.txt"), "E0\n");
+		writeFileSync(join(TEST_DIR, "shell.txt"), "S0\n");
+		const chk = await createCheckpoint(TEST_DIR, true);
+		backupFileForCheckpoint(chk, join(TEST_DIR, "edited.txt"));
+		writeFileSync(join(TEST_DIR, "edited.txt"), "E1\n");
+		writeFileSync(join(TEST_DIR, "shell.txt"), "S1\n");
+
+		const res = restoreCheckpoint(chk);
+		expect(res.ok).toBe(true);
+		expect(res.message).toContain("shell commands are not tracked without git");
+		expect(readFileSync(join(TEST_DIR, "edited.txt"), "utf8")).toBe("E0\n");
+		expect(readFileSync(join(TEST_DIR, "shell.txt"), "utf8")).toBe("S1\n");
 	});
 });

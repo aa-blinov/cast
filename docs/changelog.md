@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **`/undo` restored less than it claimed.** In a git repository it did not bring back a file that git ignores (`.env`, build output) and that the agent had edited or created with `edit`/`write`, nor a file outside a subfolder session's directory; both are now backed up and restored. Its snapshot was a commit that nothing pointed to, so `git gc` deleted it after two weeks and `/undo` on an older session failed; each snapshot now has a ref under `refs/cast/checkpoints/`, released when it is restored or the session is deleted. A failed restore in the daemon also dropped the checkpoint from memory, so a second try said there was nothing to undo until a restart.
+- **`/undo` outside git says what it can't do.** Without git only the files that `edit` and `write` touched are saved, so a change made by a shell command is not undone, and the message said "Restored 3 file(s)" as if it were. It now says shell changes are not tracked.
+
 ## 0.49.0
 
 ### Added
