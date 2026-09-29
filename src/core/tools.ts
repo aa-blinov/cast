@@ -162,7 +162,7 @@ export function getToolDefinitions(
 					type: "object",
 					properties: {
 						query: { type: "string", description: "One to three distinctive search terms" },
-						limit: { type: "number", description: "Maximum results, default 10" },
+						limit: { type: "number", description: "Maximum results, default and maximum 8" },
 						scope: {
 							type: "string",
 							enum: ["project", "global"],
