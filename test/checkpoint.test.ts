@@ -287,7 +287,7 @@ describe("checkpoints outside a git repository", () => {
 	});
 	afterEach(() => rmSync(TEST_DIR, { recursive: true, force: true }));
 
-	it("says that shell changes are not covered, and leaves them alone", async () => {
+	it("without a snapshot, says that shell changes are not covered and leaves them alone", async () => {
 		writeFileSync(join(TEST_DIR, "edited.txt"), "E0\n");
 		writeFileSync(join(TEST_DIR, "shell.txt"), "S0\n");
 		const chk = await createCheckpoint(TEST_DIR, true);
@@ -297,7 +297,7 @@ describe("checkpoints outside a git repository", () => {
 
 		const res = restoreCheckpoint(chk);
 		expect(res.ok).toBe(true);
-		expect(res.message).toContain("shell commands are not tracked without git");
+		expect(res.message).toContain("changes made by shell commands are not undone");
 		expect(readFileSync(join(TEST_DIR, "edited.txt"), "utf8")).toBe("E0\n");
 		expect(readFileSync(join(TEST_DIR, "shell.txt"), "utf8")).toBe("S1\n");
 	});
