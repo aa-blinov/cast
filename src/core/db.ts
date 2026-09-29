@@ -73,6 +73,11 @@ function dbPath(): string {
 	return join(dir, "sessions.db");
 }
 
+/** Where the store lives right now, for a reader on another thread. `:memory:` can't be shared. */
+export function sessionsDbPath(): string {
+	return dbPath();
+}
+
 /** The shared connection, opened (and schema-migrated) on first use. Reopens
  *  if CAST_SESSIONS_DB changes between calls — only ever happens in tests,
  *  which each point at their own temp file. */

@@ -9,7 +9,9 @@ import {
 	execSessionHistorySearch,
 	formatSessionHistoryToolResult,
 	searchSessionHistory,
+	searchSessionHistoryAsync,
 } from "../src/core/session-query.ts";
+import { stopSqliteReader } from "../src/core/sqlite-reader.ts";
 
 describe("session history search", () => {
 	let root = "";
@@ -20,7 +22,8 @@ describe("session history search", () => {
 		resetDbConnectionForTests();
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
+		await stopSqliteReader();
 		resetDbConnectionForTests();
 		delete process.env.CAST_SESSIONS_DB;
 		rmSync(root, { recursive: true, force: true });
@@ -139,14 +142,14 @@ describe("execSessionHistorySearch — argument validation", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
-	it("caps the number of search terms instead of stalling the daemon (regression)", () => {
+	it("caps the number of search terms instead of stalling the daemon (regression)", async () => {
 		// The terms are OR-ed into an FTS5 MATCH and node:sqlite is
 		// synchronous: a 100,000-word query measured 50 seconds with the event
 		// loop blocked for all of it — every session, the web UI and every SSE
 		// stream stalled. The input is whatever the model passes.
 		const words = Array.from({ length: 100_000 }, (_, i) => `w${i}`).join(" ");
 		const started = Date.now();
-		const result = execSessionHistorySearch({ query: words }, root);
+		const result = await execSessionHistorySearch({ query: words }, root);
 		const elapsed = Date.now() - started;
 
 		expect(result.isError).toBeFalsy();
@@ -156,30 +159,30 @@ describe("execSessionHistorySearch — argument validation", () => {
 		expect(result.content).toMatch(/searched the first 32 of 100000 terms/);
 	});
 
-	it("rejects a limit that is not a positive integer", () => {
+	it("rejects a limit that is not a positive integer", async () => {
 		// `Number(args.limit) || MAX_RESULTS` let anything through: a negative
 		// limit reached SQL as `LIMIT -3` and returned a single row, reported as
 		// "Found 1 session history result" — indistinguishable from there being
 		// exactly one. `limit: 0` silently meant the default, and a fractional
 		// one surfaced SQLite's "datatype mismatch" as an unexplained failure.
 		for (const limit of [-3, 0, 1.5, "5"]) {
-			const result = execSessionHistorySearch({ query: "anything", limit }, root);
+			const result = await execSessionHistorySearch({ query: "anything", limit }, root);
 			expect(result.isError).toBe(true);
 			expect(result.content).toMatch(/positive integer/);
 		}
 	});
 
-	it("rejects an unknown scope rather than answering from the project scope", () => {
-		const result = execSessionHistorySearch({ query: "anything", scope: "everything" }, root);
+	it("rejects an unknown scope rather than answering from the project scope", async () => {
+		const result = await execSessionHistorySearch({ query: "anything", scope: "everything" }, root);
 		expect(result.isError).toBe(true);
 		expect(result.content).toMatch(/unknown scope/i);
 	});
 
-	it("accepts the documented arguments", () => {
-		expect(execSessionHistorySearch({ query: "anything" }, root).isError).toBeFalsy();
-		expect(execSessionHistorySearch({ query: "anything", limit: 3 }, root).isError).toBeFalsy();
-		expect(execSessionHistorySearch({ query: "anything", scope: "global" }, root).isError).toBeFalsy();
-		expect(execSessionHistorySearch({ query: "anything", scope: "project" }, root).isError).toBeFalsy();
+	it("accepts the documented arguments", async () => {
+		expect((await execSessionHistorySearch({ query: "anything" }, root)).isError).toBeFalsy();
+		expect((await execSessionHistorySearch({ query: "anything", limit: 3 }, root)).isError).toBeFalsy();
+		expect((await execSessionHistorySearch({ query: "anything", scope: "global" }, root)).isError).toBeFalsy();
+		expect((await execSessionHistorySearch({ query: "anything", scope: "project" }, root)).isError).toBeFalsy();
 	});
 });
 
@@ -223,5 +226,80 @@ describe("compaction summary size", () => {
 		} as never);
 		expect(compacted.summary.summary).toContain("a concise summary");
 		expect(compacted.summary.summary).not.toContain("truncated");
+	});
+});
+
+describe("session history search on a worker thread", () => {
+	let root = "";
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "cast-session-query-worker-"));
+		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
+		resetDbConnectionForTests();
+	});
+
+	afterEach(async () => {
+		await stopSqliteReader();
+		resetDbConnectionForTests();
+		delete process.env.CAST_SESSIONS_DB;
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("returns what the in-thread search returns", async () => {
+		const project = join(root, "project");
+		const session = createSession("test-model", project);
+		session.messages = [
+			{ role: "user", content: "the reconnect watermark for SSE" },
+			{ role: "assistant", content: "watermark persisted with the client id" },
+		];
+		saveSession(session);
+		expect(await searchSessionHistoryAsync(project, "watermark")).toEqual(searchSessionHistory(project, "watermark"));
+		expect(await searchSessionHistoryAsync(project, "no-such-term")).toEqual([]);
+		expect(await searchSessionHistoryAsync(project, "")).toEqual([]);
+	});
+
+	it("sees a message written just before the search", async () => {
+		const project = join(root, "project");
+		const session = createSession("test-model", project);
+		session.messages = [{ role: "user", content: "first" }];
+		saveSession(session);
+		await searchSessionHistoryAsync(project, "first");
+		session.messages.push({ role: "user", content: "a brand-new zebra sentence" });
+		saveSession(session);
+		expect(await searchSessionHistoryAsync(project, "zebra")).toHaveLength(1);
+	});
+
+	it("keeps the event loop free while a big store is searched", async () => {
+		const project = join(root, "project");
+		for (let s = 0; s < 4; s++) {
+			const session = createSession("test-model", project);
+			session.messages = Array.from({ length: 5000 }, (_, i) => ({
+				role: "assistant" as const,
+				content: `line ${i} common words appear in every message of session ${s}`,
+			}));
+			saveSession(session);
+		}
+		const started = performance.now();
+		searchSessionHistory(project, "common words appear message session");
+		const inThread = performance.now() - started;
+
+		let worst = 0;
+		let last = performance.now();
+		const timer = setInterval(() => {
+			const now = performance.now();
+			worst = Math.max(worst, now - last);
+			last = now;
+		}, 5);
+		try {
+			await searchSessionHistoryAsync(project, "common words appear message session");
+			// A blocked loop only reports its gap on the next tick, so let one run
+			// before the timer is cleared.
+			await new Promise((resolve) => setTimeout(resolve, 15));
+		} finally {
+			clearInterval(timer);
+		}
+		// The in-thread search is the floor the worker has to beat: a blocked
+		// loop shows up as one long gap between ticks.
+		expect(worst).toBeLessThan(Math.max(60, inThread / 2));
 	});
 });

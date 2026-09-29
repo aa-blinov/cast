@@ -1020,7 +1020,7 @@ export function createToolExecutor(
 					case "memory":
 						return execMemorySearch(args, cwd);
 					case "session_history":
-						return execSessionHistorySearch(args, cwd);
+						return await execSessionHistorySearch(args, cwd);
 					case "ls":
 						return await execLs(args, cwd, config);
 					case "web_search":

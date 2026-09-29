@@ -1,5 +1,6 @@
-import { getDb } from "./db.ts";
+import { getDb, sessionsDbPath } from "./db.ts";
 import { findProjectRoot } from "./project-root.ts";
+import { queryReadOnly } from "./sqlite-reader.ts";
 import type { ToolResult } from "./tools/shared.ts";
 
 const MAX_RESULTS = 8;
@@ -53,18 +54,29 @@ function queryTermCount(raw: string): number {
 	return new Set(raw.match(/[\p{L}\p{N}_]+/gu) ?? []).size;
 }
 
-export function searchSessionHistory(
+interface HistoryRow {
+	session_id: string;
+	seq: number;
+	role: string;
+	snippet: string;
+	cwd: string;
+	title: string | null;
+	updated_at: string;
+	score: number;
+}
+
+/** The SQL and its parameters, shared by the in-thread and the worker path. */
+function historyRequest(
 	cwd: string,
 	query: string,
-	limit = MAX_RESULTS,
-	scope: "project" | "global" = "project",
-): SessionHistorySearchResult[] {
+	limit: number,
+	scope: "project" | "global",
+): { sql: string; params: (string | number)[] } | null {
 	const ftsQuery = buildSearchQuery(query);
-	if (!ftsQuery) return [];
+	if (!ftsQuery) return null;
 	const projectRoot = findProjectRoot(cwd);
-	const rows = getDb()
-		.prepare(
-			`SELECT m.session_id, m.seq, m.role, s.cwd, s.title, s.updated_at,
+	return {
+		sql: `SELECT m.session_id, m.seq, m.role, s.cwd, s.title, s.updated_at,
 				snippet(session_history_fts, 3, '', '', '…', 24) AS snippet,
 				-bm25(session_history_fts) AS score
 			FROM session_history_fts
@@ -73,45 +85,78 @@ export function searchSessionHistory(
 			WHERE session_history_fts MATCH ? ${scope === "project" ? "AND (s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')" : ""}
 			ORDER BY score DESC, s.updated_at DESC, m.seq DESC
 			LIMIT ?`,
-		)
-		.all(
-			// "project" means the whole checkout, not this one directory: an
-			// exact `s.cwd = ?` could not see the sessions run from the
-			// repository root, or from a sibling subdirectory, which is most of
-			// a project's history once any work happens in subdirectories.
+		// "project" means the whole checkout, not this one directory: an
+		// exact `s.cwd = ?` could not see the sessions run from the
+		// repository root, or from a sibling subdirectory, which is most of
+		// a project's history once any work happens in subdirectories.
+		params: [
 			...(scope === "project" ? [ftsQuery, projectRoot, `${likePrefix(projectRoot)}/%`] : [ftsQuery]),
 			Math.max(1, Math.min(limit, MAX_RESULTS)) * CANDIDATE_FACTOR,
-		) as Array<{
-		session_id: string;
-		seq: number;
-		role: string;
-		snippet: string;
-		cwd: string;
-		title: string | null;
-		updated_at: string;
-		score: number;
-	}>;
+		],
+	};
+}
 
+function toResults(rows: HistoryRow[], limit: number): SessionHistorySearchResult[] {
 	const perSession = new Map<string, number>();
 	const wanted = Math.max(1, Math.min(limit, MAX_RESULTS));
-	const diverse = rows
+	return rows
 		.filter((row) => {
 			const seen = perSession.get(row.session_id) ?? 0;
 			perSession.set(row.session_id, seen + 1);
 			return seen < MAX_PER_SESSION;
 		})
-		.slice(0, wanted);
+		.slice(0, wanted)
+		.map((row) => ({
+			sessionId: row.session_id,
+			seq: row.seq,
+			role: row.role,
+			snippet: row.snippet,
+			cwd: row.cwd,
+			...(row.title ? { title: row.title } : {}),
+			updatedAt: row.updated_at,
+			score: row.score,
+		}));
+}
 
-	return diverse.map((row) => ({
-		sessionId: row.session_id,
-		seq: row.seq,
-		role: row.role,
-		snippet: row.snippet,
-		cwd: row.cwd,
-		...(row.title ? { title: row.title } : {}),
-		updatedAt: row.updated_at,
-		score: row.score,
-	}));
+export function searchSessionHistory(
+	cwd: string,
+	query: string,
+	limit = MAX_RESULTS,
+	scope: "project" | "global" = "project",
+): SessionHistorySearchResult[] {
+	const request = historyRequest(cwd, query, limit, scope);
+	if (!request) return [];
+	return toResults(
+		getDb()
+			.prepare(request.sql)
+			.all(...request.params) as unknown as HistoryRow[],
+		limit,
+	);
+}
+
+/**
+ * The same search on a worker thread, so the daemon's event loop is not held
+ * for the 80 to 280ms a big store takes. If the worker can't run (or the
+ * store is in memory and can't be shared), the search runs in-thread instead:
+ * a slow answer beats none.
+ */
+export async function searchSessionHistoryAsync(
+	cwd: string,
+	query: string,
+	limit = MAX_RESULTS,
+	scope: "project" | "global" = "project",
+): Promise<SessionHistorySearchResult[]> {
+	const request = historyRequest(cwd, query, limit, scope);
+	if (!request) return [];
+	// Opens (and migrates) the store on the main connection first: the worker only reads.
+	getDb();
+	const path = sessionsDbPath();
+	if (path === ":memory:") return searchSessionHistory(cwd, query, limit, scope);
+	try {
+		return toResults((await queryReadOnly(path, request.sql, request.params)) as HistoryRow[], limit);
+	} catch {
+		return searchSessionHistory(cwd, query, limit, scope);
+	}
 }
 
 export function formatSessionHistoryToolResult(query: string, matches: SessionHistorySearchResult[]): string {
@@ -131,7 +176,7 @@ export function formatSessionHistoryToolResult(query: string, matches: SessionHi
 	].join("\n\n");
 }
 
-export function execSessionHistorySearch(args: Record<string, unknown>, cwd: string): ToolResult {
+export async function execSessionHistorySearch(args: Record<string, unknown>, cwd: string): Promise<ToolResult> {
 	const query = typeof args.query === "string" ? args.query : "";
 	if (!query.trim()) return { content: "Session history search requires a non-empty query.", isError: true };
 	// `Number(args.limit) || MAX_RESULTS` accepted anything: a negative limit
@@ -162,7 +207,7 @@ export function execSessionHistorySearch(args: Record<string, unknown>, cwd: str
 	return {
 		content: formatSessionHistoryToolResult(
 			query,
-			searchSessionHistory(cwd, query, limit, args.scope === "global" ? "global" : "project"),
+			await searchSessionHistoryAsync(cwd, query, limit, args.scope === "global" ? "global" : "project"),
 		),
 	};
 }
