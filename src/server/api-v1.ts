@@ -29,7 +29,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "GET",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|diff\/file|undo|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
+			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|diff\/file|undo|fork-preview|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
 	},
 	{ method: "DELETE", legacyPath: /^\/api\/sessions\/[^/]+(\/(permanent|share|fs|inputs))?$/ },
 	{
@@ -308,6 +308,23 @@ const additionalApiV1Paths: OpenApiObject = {
 				"The diff endpoint lists every change but carries hunks for only the first few hundred files; this returns the hunks of one path.",
 			parameters: [idParameter, { name: "path", in: "query", required: true, schema: { type: "string" } }],
 			responses: { "200": jsonResponse("Diff of one file", { type: "object" }), "400": errorResponse },
+		},
+	},
+	"/api/v1/sessions/{id}/fork-preview": {
+		get: {
+			summary: "Whether a fork at a point can have its own copy of the files",
+			description:
+				"Nothing is changed. Pass beforeSeq or afterSeq as for a fork (none means the whole session). canCopyFiles says whether POST fork with withFiles will work; kind is worktree or snapshot, reason says why not.",
+			parameters: [
+				idParameter,
+				{ name: "beforeSeq", in: "query", schema: { type: "integer" } },
+				{ name: "afterSeq", in: "query", schema: { type: "integer" } },
+			],
+			responses: {
+				"200": jsonResponse("Fork files preview", { type: "object" }),
+				"400": errorResponse,
+				"404": errorResponse,
+			},
 		},
 	},
 	"/api/v1/sessions/{id}/undo": {
@@ -955,6 +972,11 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 						type: "integer",
 						description:
 							"Fork the history before the message with this `seq` (a user message, from history) instead of the whole current context.",
+					},
+					withFiles: {
+						type: "boolean",
+						description:
+							"Give the fork its own folder with the files as they were at that point: a git worktree at the snapshot in a repository, or a copy of the hidden snapshot in a new sandbox folder. 409 with the reason when there is no snapshot for that point (an older session, a folder too big to snapshot) or when the fork is the whole session. GET fork-preview says beforehand.",
 					},
 					afterSeq: {
 						type: "integer",

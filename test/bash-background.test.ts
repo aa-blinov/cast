@@ -284,7 +284,11 @@ describe("BackgroundTaskRegistry", () => {
 		deps.registry = registry;
 		const task = registry.start("sleep 10", process.cwd(), mockConfig, 1000, deps);
 
-		await new Promise((r) => setTimeout(r, 1500));
+		// Polled, not a fixed sleep: the kill after the timeout takes longer than
+		// half a second when the machine is busy (a full-suite run), and a fixed
+		// wait turned that into a red run.
+		const deadline = Date.now() + 15_000;
+		while (task.status !== "exited" && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
 		expect(task.timedOut).toBe(true);
 		expect(task.status).toBe("exited");
 	});

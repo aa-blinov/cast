@@ -10,6 +10,7 @@ import { backupFileForCheckpoint, createCheckpoint } from "../core/checkpoint.ts
 import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
+import { forkSessionWithFiles } from "../core/fork-files.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { describeTurnError, isRetryableStreamError, type Message, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
@@ -307,7 +308,7 @@ export interface UseAgentSession {
 	abort: () => void;
 	clearContext: () => void;
 	/** Fork the current safe context; daemon mode performs the copy on the daemon. */
-	forkSession: (beforeSeq?: number) => Promise<SessionState | undefined>;
+	forkSession: (beforeSeq?: number, withFiles?: boolean) => Promise<SessionState | undefined>;
 	resetContext: () => string | undefined;
 	/** Re-reads the on-disk session messages into the in-memory list. */
 	refresh: () => void;
@@ -2034,10 +2035,15 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	);
 
 	const forkCurrentSession = useCallback(
-		async (beforeSeq?: number): Promise<SessionState | undefined> => {
+		async (beforeSeq?: number, withFiles = false): Promise<SessionState | undefined> => {
 			if (isClient && effectiveDaemonUrl) {
 				if (!serverClient) return undefined;
-				return forkServerSession(serverClient, session.id, beforeSeq);
+				return forkServerSession(serverClient, session.id, beforeSeq, withFiles);
+			}
+			if (withFiles) {
+				const made = await forkSessionWithFiles(session, beforeSeq);
+				if (!made.session) throw new Error(made.error ?? "could not copy the files");
+				return made.session;
 			}
 			return forkSession(session, beforeSeq);
 		},

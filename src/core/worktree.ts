@@ -194,7 +194,12 @@ function canonicalize(p: string): string {
  * `-w` is an explicit opt-in and silently ignoring it would mean the user's
  * mental model ("I'm in a worktree") is a lie.
  */
-export async function ensureSessionWorktree(name: string, startCwd: string): Promise<SessionWorktree> {
+export async function ensureSessionWorktree(
+	name: string,
+	startCwd: string,
+	/** A commit to start from instead of HEAD: a fork that wants the files as they were at a checkpoint. */
+	startPoint?: string,
+): Promise<SessionWorktree> {
 	validateWorktreeSlug(name);
 
 	const repoRoot = findCanonicalGitRoot(startCwd);
@@ -206,7 +211,7 @@ export async function ensureSessionWorktree(name: string, startCwd: string): Pro
 		);
 	}
 
-	const headCommit = runGit(repoRoot, ["rev-parse", "HEAD"]);
+	const headCommit = startPoint ?? runGit(repoRoot, ["rev-parse", "HEAD"]);
 	if (!headCommit) {
 		throw new Error(
 			"Worktree mode requires at least one commit, but the repository at " +
@@ -239,7 +244,14 @@ export async function ensureSessionWorktree(name: string, startCwd: string): Pro
 		};
 	}
 
-	const result = await runGitAsyncWithStatus(repoRoot, ["worktree", "add", "-B", branch, worktreePath, "HEAD"]);
+	const result = await runGitAsyncWithStatus(repoRoot, [
+		"worktree",
+		"add",
+		"-B",
+		branch,
+		worktreePath,
+		startPoint ?? "HEAD",
+	]);
 	if (!result.ok) {
 		throw new Error(`Failed to create worktree at ${worktreePath}: ${result.stderr}`);
 	}

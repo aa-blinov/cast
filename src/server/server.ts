@@ -1274,10 +1274,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (source.status === "running") return json(res, { error: "Agent running — abort before forking" }, 409);
 		let beforeSeq: number | undefined;
 		let afterSeq: number | undefined;
+		let withFiles = false;
 		const body = await readBody(req);
 		if (body.trim()) {
 			try {
-				const parsed = JSON.parse(body) as { beforeSeq?: unknown; afterSeq?: unknown };
+				const parsed = JSON.parse(body) as { beforeSeq?: unknown; afterSeq?: unknown; withFiles?: unknown };
+				if (parsed.withFiles !== undefined && typeof parsed.withFiles !== "boolean") throw new Error();
+				withFiles = parsed.withFiles === true;
 				if (parsed.beforeSeq !== undefined && parsed.afterSeq !== undefined) throw new Error();
 				if (parsed.beforeSeq !== undefined) {
 					if (!Number.isInteger(parsed.beforeSeq)) throw new Error();
@@ -1296,9 +1299,39 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			if (!cut.ok) return json(res, { error: cut.error }, 400);
 			beforeSeq = cut.beforeSeq;
 		}
+		if (withFiles) {
+			const made = await bridge.forkSessionWithFiles(params.id, beforeSeq);
+			if (!made.session) return json(res, { error: made.error ?? "Could not fork session" }, 409);
+			return json(res, { id: made.session.id, session: made.session.session }, 201);
+		}
 		const fork = bridge.forkSession(params.id, beforeSeq);
 		if (!fork) return json(res, { error: "Could not fork session" }, 400);
 		json(res, { id: fork.id, session: fork.session }, 201);
+	});
+
+	// Whether a fork at a point can have its own copy of the files, before the client offers it.
+	route("GET", "/api/sessions/:id/fork-preview", async (req, res, params) => {
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const beforeText = url.searchParams.get("beforeSeq");
+		const afterText = url.searchParams.get("afterSeq");
+		if (beforeText !== null && afterText !== null)
+			return json(res, { error: "Send one of beforeSeq or afterSeq" }, 400);
+		const seqText = beforeText ?? afterText;
+		let beforeSeq: number | undefined;
+		if (seqText !== null) {
+			const seq = Number(seqText);
+			if (!Number.isInteger(seq))
+				return json(res, { error: "beforeSeq or afterSeq must be an integer message seq" }, 400);
+			beforeSeq = seq;
+			if (afterText !== null) {
+				const cut = forkCutAfterReply(params.id, seq);
+				if (!cut.ok) return json(res, { error: cut.error }, 400);
+				beforeSeq = cut.beforeSeq;
+			}
+		}
+		const preview = await bridge.previewForkFiles(params.id, beforeSeq);
+		if (!preview) return json(res, { error: "Not found" }, 404);
+		json(res, preview);
 	});
 
 	// One stream per browser tab, independent of which session (if any) is

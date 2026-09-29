@@ -46,7 +46,8 @@ Messages labelled `you`, `agent`, `system`, `notice`, `error`. Per-message actio
 **Fork before** (a new session with the conversation up to here, without this message), and the last one also **Undo**
 (a dialog says which message goes, how files are restored and what gets deleted, then asks; typing `/undo` opens the same
 dialog); an agent answer that ends a turn has **Fork from here** (a new session through that answer). On touch screens
-they are always visible. A fork shares the working folder, so its files are as they are now. Assistant
+they are always visible. Forking from an earlier point asks whether the fork gets its own copy of the files as they were
+then (a git worktree, or a new sandbox folder) or shares the working folder as it is now. Assistant
 messages render as ordered blocks: optional `reasoning`, agent content
 (markdown), tool cards (collapsible args/result, MCP badge), and a turn footer
 `provider · model · Ns`. Pending user message shows `you · sending…`. While a

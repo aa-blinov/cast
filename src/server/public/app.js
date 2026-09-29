@@ -19,6 +19,7 @@ import { icons } from "./icons.js";
 import { lazy, prefetchWhenIdle } from "./lazy.js";
 import { isForkableAnswer, Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
+import { describeFork } from "./fork-flow.js";
 import { undoLastTurn } from "./undo-flow.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { BashConfirmCard, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
@@ -745,7 +746,7 @@ function App() {
 		return () => window.removeEventListener("popstate", onPop);
 	}, [applyView]);
 	const requestConfirm = useCallback(
-		(message, options = {}) => new Promise((resolve) => setConfirmState({ message, resolve, confirmLabel: options.confirmLabel })),
+		(message, options = {}) => new Promise((resolve) => setConfirmState({ message, resolve, ...options })),
 		[setConfirmState],
 	);
 	const cwd = selectedCwd ?? defaultCwd ?? "";
@@ -1001,19 +1002,37 @@ function App() {
 			applyTheme,
 		});
 	// Stable across renders: Message skips re-rendering on equal props.
-	const forkBeforeMessage = useCallback(
-		(seq) => {
-			if (activeSessionIdRef.current) forkSession(activeSessionIdRef.current, { beforeSeq: seq });
+	// Forking from an earlier point: when the point has a snapshot of the files, ask whether
+	// the fork gets its own copy of them or shares the folder as it is now.
+	const forkAt = useCallback(
+		async (cut) => {
+			const id = activeSessionIdRef.current;
+			if (!id) return;
+			let withFiles = false;
+			if (cut) {
+				try {
+					const query = cut.beforeSeq !== undefined ? `beforeSeq=${cut.beforeSeq}` : `afterSeq=${cut.afterSeq}`;
+					const preview = await api("GET", `/api/sessions/${id}/fork-preview?${query}`);
+					if (preview?.canCopyFiles) {
+						const answer = await requestConfirm(describeFork(preview), {
+							confirmLabel: "Fork with those files",
+							alternateLabel: "Same folder",
+							primary: true,
+						});
+						if (answer === false) return;
+						withFiles = answer === true;
+					}
+				} catch {
+					// The question is a courtesy: without it, fork into the shared folder as before.
+				}
+			}
+			await forkSession(id, cut, { withFiles });
 		},
-		[forkSession, activeSessionIdRef],
+		[forkSession, activeSessionIdRef, requestConfirm],
 	);
+	const forkBeforeMessage = useCallback((seq) => forkAt({ beforeSeq: seq }), [forkAt]);
 	// An answer without a seq yet is the one just finished: forking through it is forking all of it.
-	const forkAfterMessage = useCallback(
-		(seq) => {
-			if (activeSessionIdRef.current) forkSession(activeSessionIdRef.current, seq === undefined ? undefined : { afterSeq: seq });
-		},
-		[forkSession, activeSessionIdRef],
-	);
+	const forkAfterMessage = useCallback((seq) => forkAt(seq === undefined ? undefined : { afterSeq: seq }), [forkAt]);
 	useEffect(() => {
 		const pending = pendingPersonaSessionRef.current;
 		if (running || !pending) return;
@@ -2015,7 +2034,8 @@ function App() {
 				<div class="modal-confirm-body" id="confirm-message">${confirmState.message}</div>
 				<div class="modal-footer">
 					<button class="modal-btn" data-dismiss onClick=${() => closeConfirm(false)}>Cancel</button>
-					<button class="modal-btn modal-btn-danger" onClick=${() => closeConfirm(true)}>${confirmState.confirmLabel ?? "Confirm"}</button>
+					${confirmState.alternateLabel && html`<button class="modal-btn" onClick=${() => closeConfirm("alternate")}>${confirmState.alternateLabel}</button>`}
+					<button class="modal-btn ${confirmState.primary ? "modal-btn-primary" : "modal-btn-danger"}" onClick=${() => closeConfirm(true)}>${confirmState.confirmLabel ?? "Confirm"}</button>
 				</div>
 			</div>
 		</div>

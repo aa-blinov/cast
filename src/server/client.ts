@@ -203,10 +203,13 @@ export async function forkServerSession(
 	client: ServerClient,
 	sessionId: string,
 	beforeSeq?: number,
+	/** Give the fork its own folder with the files as they were at that point. */
+	withFiles = false,
 ): Promise<SessionState> {
+	const body = { ...(beforeSeq === undefined ? {} : { beforeSeq }), ...(withFiles ? { withFiles: true } : {}) };
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/fork`, {
 		method: "POST",
-		...(beforeSeq === undefined ? {} : { body: { beforeSeq } }),
+		...(Object.keys(body).length === 0 ? {} : { body }),
 	});
 	if (status !== 201 || !data || typeof data !== "object" || !("session" in data)) {
 		const message = data && typeof data === "object" && "error" in data ? String(data.error) : "fork failed";
