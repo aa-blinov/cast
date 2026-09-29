@@ -956,6 +956,11 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 						description:
 							"Fork the history before the message with this `seq` (a user message, from history) instead of the whole current context.",
 					},
+					afterSeq: {
+						type: "integer",
+						description:
+							"Fork the history through the agent's answer with this `seq`, keeping it. Must be an answer that ends a turn (no tool calls); 400 otherwise. The last answer is the whole session. Send one of beforeSeq or afterSeq, not both.",
+					},
 				},
 			},
 			ChatRequest: {

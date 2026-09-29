@@ -25,7 +25,14 @@ import {
 	listProjectMemoryCheckpoints,
 	searchProjectMemory,
 } from "../core/memory.ts";
-import { getHistoryPage, getMessageAudio, getMessageImage, getRunNotices, getSessionEvents } from "../core/session.ts";
+import {
+	forkCutAfterReply,
+	getHistoryPage,
+	getMessageAudio,
+	getMessageImage,
+	getRunNotices,
+	getSessionEvents,
+} from "../core/session.ts";
 import { loadSettings, updateSettings } from "../core/settings.ts";
 import {
 	countRecentLlmRequests,
@@ -1266,17 +1273,28 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!source) return json(res, { error: "Not found" }, 404);
 		if (source.status === "running") return json(res, { error: "Agent running — abort before forking" }, 409);
 		let beforeSeq: number | undefined;
+		let afterSeq: number | undefined;
 		const body = await readBody(req);
 		if (body.trim()) {
 			try {
-				const parsed = JSON.parse(body) as { beforeSeq?: unknown };
+				const parsed = JSON.parse(body) as { beforeSeq?: unknown; afterSeq?: unknown };
+				if (parsed.beforeSeq !== undefined && parsed.afterSeq !== undefined) throw new Error();
 				if (parsed.beforeSeq !== undefined) {
 					if (!Number.isInteger(parsed.beforeSeq)) throw new Error();
 					beforeSeq = parsed.beforeSeq as number;
 				}
+				if (parsed.afterSeq !== undefined) {
+					if (!Number.isInteger(parsed.afterSeq)) throw new Error();
+					afterSeq = parsed.afterSeq as number;
+				}
 			} catch {
-				return json(res, { error: "beforeSeq must be an integer message seq" }, 400);
+				return json(res, { error: "Send one of beforeSeq or afterSeq, an integer message seq" }, 400);
 			}
+		}
+		if (afterSeq !== undefined) {
+			const cut = forkCutAfterReply(params.id, afterSeq);
+			if (!cut.ok) return json(res, { error: cut.error }, 400);
+			beforeSeq = cut.beforeSeq;
 		}
 		const fork = bridge.forkSession(params.id, beforeSeq);
 		if (!fork) return json(res, { error: "Could not fork session" }, 400);

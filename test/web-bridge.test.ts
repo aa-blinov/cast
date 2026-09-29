@@ -11,7 +11,14 @@ import type { Persona } from "../src/core/personas.ts";
 import { getModelsCache, setModelsCache } from "../src/core/readline.ts";
 import type { Rule } from "../src/core/rules.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
-import { createSession, getFullHistory, listForkPoints, loadSession, saveSession } from "../src/core/session.ts";
+import {
+	createSession,
+	getFullHistory,
+	getFullHistoryWithReasoning,
+	listForkPoints,
+	loadSession,
+	saveSession,
+} from "../src/core/session.ts";
 import { setProjectTrust } from "../src/core/settings.ts";
 import type { StartupResult } from "../src/core/startup.ts";
 import { sessionInputsDir } from "../src/server/inputs.ts";
@@ -934,6 +941,31 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		ws.undoing = true;
 		await expect(bridge.submit(ws.id, "hello")).rejects.toThrow(/undo is in progress/i);
+	});
+
+	it("/fork after <seq> keeps the answer and stops there; a bad target is refused", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.messages = [
+			{ role: "user", content: "q1" },
+			{ role: "assistant", content: "a1" },
+			{ role: "user", content: "q2" },
+			{ role: "assistant", content: "a2" },
+		] as never;
+		saveSession(ws.session);
+		const { seqs } = getFullHistoryWithReasoning(ws.id);
+
+		const forked = await bridge.executeCommand(ws.id, `/fork after ${seqs[1]}`);
+		expect(forked.ok).toBe(true);
+		const child = loadSession((forked.result as { sessionId: string }).sessionId);
+		expect(
+			child?.messages.map((m) => m.content).filter((c) => c === "q1" || c === "a1" || c === "q2" || c === "a2"),
+		).toEqual(["q1", "a1"]);
+
+		expect((await bridge.executeCommand(ws.id, `/fork after ${seqs[0]}`)).ok).toBe(false);
+		expect((await bridge.executeCommand(ws.id, "/fork after")).error).toMatch(/Usage/);
+		expect((await bridge.executeCommand(ws.id, "/fork after x")).error).toMatch(/Usage/);
+		expect((await bridge.executeCommand(ws.id, "/fork 1 2")).error).toMatch(/Usage/);
 	});
 
 	it("/undo keeps the checkpoint when the restore fails, so it can be retried", async () => {

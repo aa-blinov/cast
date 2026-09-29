@@ -16,6 +16,17 @@ const SKILL_INVOCATION_RE = /^<skill name="([^"]+)" location="([^"]*)"[^>]*>[\s\
 /** A /skill command is sent to the model as the whole rendered SKILL.md
  *  (renderSkillInvocation), so the thread showed the file's full text as if
  *  the person had pasted it. Recognize that shape to show what they typed. */
+/**
+ * Whether a message can start a fork *through* it: an answer of the agent that
+ * ends a turn (no tool calls). Saved answers carry a seq; the one just streamed
+ * may not have it yet, which is fine only for the very last message (a fork of
+ * everything).
+ */
+export function isForkableAnswer(msg, isLast) {
+	if (msg.role !== "assistant" || !msg.content || msg.toolCalls?.length > 0) return false;
+	return typeof msg.seq === "number" || isLast;
+}
+
 export function parseSkillInvocation(content) {
 	if (typeof content !== "string" || !content.startsWith("<skill name=")) return null;
 	const match = SKILL_INVOCATION_RE.exec(content);
@@ -24,8 +35,13 @@ export function parseSkillInvocation(content) {
 	return { name: unescape(match[1]), location: unescape(match[2]), args: match[3]?.trim() ?? "" };
 }
 
-function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, onFork, onUndo }) {
+function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, onFork, onForkAfter, onUndo }) {
 	const role = msg.role || "assistant";
+	// Under an answer that ends a turn: fork through it (the conversation up to and including it).
+	const answerActions =
+		role === "assistant" && onForkAfter
+			? html`<div class="message-actions"><button type="button" class="message-fork" title="Fork from this answer: a new session with the conversation up to and including it" aria-label="Fork from this answer" onClick=${() => onForkAfter(msg.seq)}><${icons.fork} /> Fork from here</button></div>`
+			: null;
 	// Only used by the legacy floating image-result branch below (pre
 	// castToolCallId sessions) — declared unconditionally so hook order stays
 	// stable across renders regardless of which branch a given msg takes.
@@ -70,6 +86,7 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 			<div class="message-group">
 				${collapsed.map((block, i) => html`<${BlockView} key=${block.kind === "tool" ? block.call.id : `${block.kind}-${i}-${showReasoning ? "on" : "off"}`} block=${block} renderMarkdown=${renderMarkdown} showReasoning=${showReasoning} />`)}
 				<${TurnMetaLine} turnMeta=${msg.turnMeta} />
+				${answerActions}
 			</div>
 		`;
 	}
@@ -115,6 +132,7 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 				}
 				${msg.toolCalls?.map((tc) => html`<${ToolCard} key=${tc.id} call=${tc} renderMarkdown=${renderMarkdown} />`)}
 				<${TurnMetaLine} turnMeta=${msg.turnMeta} />
+				${answerActions}
 			</div>
 		`;
 	}
@@ -173,7 +191,7 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 			role === "user" &&
 			onFork &&
 			typeof msg.seq === "number" &&
-			html`<button type="button" class="message-fork" title="Fork: a new session with the conversation before this message" aria-label="Fork from before this message" onClick=${() => onFork(msg.seq)}><${icons.fork} /></button>`
+			html`<button type="button" class="message-fork" title="Fork before this message: a new session with the conversation up to here, without this message" aria-label="Fork before this message" onClick=${() => onFork(msg.seq)}><${icons.fork} /></button>`
 		}${
 			role === "user" &&
 			onUndo &&

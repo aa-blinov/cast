@@ -17,7 +17,7 @@ import { ElapsedTimer } from "./elapsed-timer.js";
 import { hotkeysHtml, modKey } from "./hotkeys.js";
 import { icons } from "./icons.js";
 import { lazy, prefetchWhenIdle } from "./lazy.js";
-import { Message as MessageModule } from "./message.js";
+import { isForkableAnswer, Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { undoLastTurn } from "./undo-flow.js";
 import { useModalFocusTrap } from "./modal-focus.js";
@@ -1003,7 +1003,14 @@ function App() {
 	// Stable across renders: Message skips re-rendering on equal props.
 	const forkBeforeMessage = useCallback(
 		(seq) => {
-			if (activeSessionIdRef.current) forkSession(activeSessionIdRef.current, seq);
+			if (activeSessionIdRef.current) forkSession(activeSessionIdRef.current, { beforeSeq: seq });
+		},
+		[forkSession, activeSessionIdRef],
+	);
+	// An answer without a seq yet is the one just finished: forking through it is forking all of it.
+	const forkAfterMessage = useCallback(
+		(seq) => {
+			if (activeSessionIdRef.current) forkSession(activeSessionIdRef.current, seq === undefined ? undefined : { afterSeq: seq });
 		},
 		[forkSession, activeSessionIdRef],
 	);
@@ -2248,7 +2255,7 @@ function App() {
 									onRetry: loadOlderMessages,
 								})
 							}
-							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${forkBeforeMessage} onUndo=${!running && activeId && msg === lastUserMessage ? undoTurn : undefined} />`)}
+							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${forkBeforeMessage} onForkAfter=${!running && activeId && isForkableAnswer(msg, msg === shownMessages[shownMessages.length - 1]) ? forkAfterMessage : undefined} onUndo=${!running && activeId && msg === lastUserMessage ? undoTurn : undefined} />`)}
 							${
 								!running &&
 								(messages[messages.length - 1]?.notice === "error" ||

@@ -8,7 +8,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 |---------|-------------|
 | `/new` | Start a new session (autosaves current if non-empty) |
 | `/continue` | Resume the most recent session (like `cast -c`, but mid-session) |
-| `/fork` | Branch into a new session: the whole current context, or the conversation before one of your messages |
+| `/fork` | Branch into a new session: the whole current context, the conversation before one of your messages, or (web UI, `/fork after <seq>`) through one of the agent's answers |
 | `/worktree <name>` | Switch current session into an isolated git worktree (`list`, `remove <name>`) |
 | `/sessions` | Session picker with type-to-filter search (by message text, project path, or id); switch or delete |
 | `/clear` | Clear conversation context (and save the cleared state) |
@@ -34,7 +34,7 @@ Removing files created during the turn also removes any *you* created in that wi
 
 In the web UI the last message you sent has an undo button (hover it; it is always visible on touch screens). It opens a dialog that says which message goes, how the files are restored, and what will be deleted, then asks before doing anything. Typing `/undo` opens the same dialog. `GET /api/v1/sessions/{id}/undo` returns the same preview for your own client.
 
-`/fork` leaves the original session unchanged and starts an independent new session. It asks where from: the whole session (the context currently sent to the model), or before any message you sent (the original conversation up to there, including what compaction had summarized). It does not copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
+`/fork` leaves the original session unchanged and starts an independent new session. It asks where from: the whole session (the context currently sent to the model), or before any message you sent (the original conversation up to there, including what compaction had summarized). In the web UI you can also fork through an answer that ends a turn (**Fork from here** under it), which keeps that answer. It does not copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
 
 ## Model and Provider
 

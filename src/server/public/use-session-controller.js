@@ -440,14 +440,17 @@ export function useSessionController({
 		],
 	);
 
-	// beforeSeq: fork the history before that user message instead of all of it.
+	// cut: { beforeSeq } forks the history before that user message, { afterSeq }
+	// through that answer of the agent; omitted forks all of it.
 	const forkSession = useCallback(
-		async (id, beforeSeq) => {
+		async (id, cut) => {
 			try {
-				const data = await api("POST", `/api/sessions/${id}/fork`, beforeSeq === undefined ? undefined : { beforeSeq });
+				const data = await api("POST", `/api/sessions/${id}/fork`, cut);
 				if (!data?.id) throw new Error("Could not fork session");
 				await loadSessions();
 				await selectSession(data.id);
+				// The conversation stops at the chosen point; the folder does not.
+				if (cut) showToast("Forked. Both sessions share the working folder, so the files are as they are now, not as they were at that point.");
 			} catch (err) {
 				showToast(err.message, "error");
 			}
