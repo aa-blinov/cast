@@ -2,6 +2,7 @@ import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import { CHECKPOINT_REF_PREFIX, createShadowSnapshot, releaseShadowRefs } from "./shadow-snapshot.ts";
 import { findCanonicalGitRoot } from "./worktree.ts";
 
 export interface CheckpointFileBackup {
@@ -19,6 +20,8 @@ export interface TurnCheckpoint {
 	timestamp: string;
 	cwd: string;
 	gitCommitSha?: string;
+	/** Set when gitCommitSha lives in a hidden repository (a folder that is not a git repo). */
+	shadowDir?: string;
 	backups?: CheckpointFileBackup[];
 }
 
@@ -34,10 +37,7 @@ const LEADING_DOT_SLASH_RE = /^\.\//;
  * multi-megabyte snapshot per edited file is not what /undo is worth. */
 const MAX_SHADOW_BACKUP_BYTES = 10 * 1024 * 1024;
 const TRAILING_SLASH_RE = /\/$/;
-/** A checkpoint commit is reachable from nothing else, so `git gc` deletes it once it is
- * two weeks old (the default prune window) and /undo on an older session then fails. */
-const CHECKPOINT_REF_PREFIX = "refs/cast/checkpoints/";
-
+const EMPTY_SOURCE_RE = /did not match any file\(s\) known to git/;
 function runGit(cwd: string, args: string[], env?: NodeJS.ProcessEnv): string | null {
 	try {
 		const out = execFileSync("git", args, {
@@ -79,7 +79,8 @@ const CHECKPOINT_IDENTITY_ENV = {
 /**
  * Create a checkpoint snapshot of the given workspace directory.
  * If inside a Git repository, creates a lightweight git commit object via write-tree/commit-tree.
- * If not in a Git repo, returns an empty non-git checkpoint initialized for shadow file backups.
+ * Otherwise a small folder is committed to a hidden repository, and a big one (or `forceShadow`) gets
+ * an empty checkpoint that only holds the per-file backups.
  */
 export async function createCheckpoint(cwd: string, forceShadow = false): Promise<TurnCheckpoint> {
 	const timestamp = new Date().toISOString();
@@ -126,6 +127,15 @@ export async function createCheckpoint(cwd: string, forceShadow = false): Promis
 		}
 	}
 
+	// Not a repository: snapshot the folder into a hidden one, unless it is too
+	// big, in which case only the per-file backups below apply.
+	if (!forceShadow) {
+		const snapshot = await createShadowSnapshot(cwd, id);
+		if (snapshot) {
+			return { id, timestamp, cwd, gitCommitSha: snapshot.commitSha, shadowDir: snapshot.shadowDir, backups: [] };
+		}
+	}
+
 	return {
 		id,
 		timestamp,
@@ -148,7 +158,12 @@ export function backupFileForCheckpoint(checkpoint: TurnCheckpoint, filePath: st
 	// file it ignores (.env, build output, coverage), which is exactly what an
 	// agent edits and /undo then silently left changed, nor one outside the
 	// directory the restore is scoped to.
-	if (checkpoint.gitCommitSha && !(relPath.startsWith("..") || isGitIgnored(checkpoint.cwd, absPath))) return;
+	if (
+		checkpoint.gitCommitSha &&
+		!checkpoint.shadowDir &&
+		!(relPath.startsWith("..") || isGitIgnored(checkpoint.cwd, absPath))
+	)
+		return;
 	if (!checkpoint.backups) checkpoint.backups = [];
 	if (checkpoint.backups.some((b) => b.relPath === relPath)) return;
 
@@ -191,24 +206,38 @@ export function backupFileForCheckpoint(checkpoint: TurnCheckpoint, filePath: st
  * the agent worked. Callers ask first.
  */
 export function filesLostByRestore(checkpoint: TurnCheckpoint): string[] {
-	if (!checkpoint.gitCommitSha || !findCanonicalGitRoot(checkpoint.cwd)) return [];
-	const wouldRemove = runGit(checkpoint.cwd, ["clean", "-nd"]);
+	if (!checkpoint.gitCommitSha) return [];
+	if (!checkpoint.shadowDir) {
+		if (!findCanonicalGitRoot(checkpoint.cwd)) return [];
+		return lostFiles(checkpoint);
+	}
+	// The hidden repository's own index describes some other checkpoint, so ask
+	// against a throwaway copy that holds this one's tree.
+	const indexDir = mkdtempSync(join(tmpdir(), "cast-lost-"));
+	try {
+		const env = { ...shadowEnv(checkpoint), GIT_INDEX_FILE: join(indexDir, "index") };
+		if (runGit(checkpoint.cwd, ["read-tree", checkpoint.gitCommitSha], env) === null) return [];
+		return lostFiles(checkpoint, env);
+	} finally {
+		rmSync(indexDir, { recursive: true, force: true });
+	}
+}
+
+/** The environment that points git at a checkpoint's hidden repository. */
+function shadowEnv(checkpoint: TurnCheckpoint): NodeJS.ProcessEnv | undefined {
+	return checkpoint.shadowDir ? { GIT_DIR: checkpoint.shadowDir, GIT_WORK_TREE: checkpoint.cwd } : undefined;
+}
+
+function lostFiles(checkpoint: TurnCheckpoint, env?: NodeJS.ProcessEnv): string[] {
+	const wouldRemove = runGit(checkpoint.cwd, ["clean", "-nd"], env);
 	if (!wouldRemove) return [];
+	const commit = checkpoint.gitCommitSha as string;
 	const inCheckpoint = new Set(
 		// --full-tree --full-name: without them ls-tree is scoped to the cwd and
 		// prints paths relative to it, so in a subdirectory the comparison below
 		// was between two different namespaces (and, before that, between
 		// "notes.txt" and git clean's "./notes.txt").
-		(
-			runGit(checkpoint.cwd, [
-				"ls-tree",
-				"-r",
-				"--full-tree",
-				"--full-name",
-				"--name-only",
-				checkpoint.gitCommitSha,
-			]) ?? ""
-		)
+		(runGit(checkpoint.cwd, ["ls-tree", "-r", "--full-tree", "--full-name", "--name-only", commit], env) ?? "")
 			.split("\n")
 			.filter(Boolean),
 	);
@@ -217,7 +246,7 @@ export function filesLostByRestore(checkpoint: TurnCheckpoint): string[] {
 	// repository root. Comparing the two directly meant that in a subdirectory
 	// nothing ever matched, so /undo warned that it would delete files its own
 	// restore puts straight back — including files the *user* had written.
-	const prefix = runGit(checkpoint.cwd, ["rev-parse", "--show-prefix"]) ?? "";
+	const prefix = runGit(checkpoint.cwd, ["rev-parse", "--show-prefix"], env) ?? "";
 	const removed: string[] = [];
 	for (const rawLine of wouldRemove.split("\n")) {
 		const line = rawLine.trim();
@@ -276,32 +305,49 @@ const tooLargeNote = (skipped: string[]): string =>
 
 export function restoreCheckpoint(checkpoint: TurnCheckpoint): { ok: boolean; message: string } {
 	const repoRoot = findCanonicalGitRoot(checkpoint.cwd);
+	const env = { ...process.env, ...GIT_NO_PROMPT_ENV, ...shadowEnv(checkpoint) };
 
-	if (checkpoint.gitCommitSha && repoRoot) {
+	if (checkpoint.gitCommitSha && (checkpoint.shadowDir || repoRoot)) {
 		try {
+			// The hidden repository's index describes the last snapshot, not this one;
+			// point it at this one's tree so `clean` below judges "created since".
+			if (checkpoint.shadowDir) {
+				execFileSync("git", ["read-tree", checkpoint.gitCommitSha], {
+					cwd: checkpoint.cwd,
+					env,
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+			}
 			// Remove post-checkpoint untracked files before restoring the tree.
 			// The restore then recreates files that were untracked at the checkpoint.
-			execFileSync("git", ["clean", "-fd"], {
-				cwd: checkpoint.cwd,
-				env: { ...process.env, ...GIT_NO_PROMPT_ENV },
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			execFileSync("git", ["restore", `--source=${checkpoint.gitCommitSha}`, "--worktree", "--", "."], {
-				cwd: checkpoint.cwd,
-				env: { ...process.env, ...GIT_NO_PROMPT_ENV },
-				stdio: ["ignore", "pipe", "pipe"],
-			});
+			execFileSync("git", ["clean", "-fd"], { cwd: checkpoint.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+			try {
+				execFileSync("git", ["restore", `--source=${checkpoint.gitCommitSha}`, "--worktree", "--", "."], {
+					cwd: checkpoint.cwd,
+					env,
+					stdio: ["ignore", "pipe", "pipe"],
+				});
+			} catch (err) {
+				// An empty checkpoint (a fresh sandbox at the first turn) has nothing
+				// under `.` to restore, and git treats that as an error; the clean
+				// above already removed everything created since.
+				const stderr = String((err as { stderr?: Buffer | string }).stderr ?? "");
+				if (!EMPTY_SOURCE_RE.test(stderr)) throw err;
+			}
 			// The ignored and out-of-scope files git doesn't cover.
 			const { restored, skipped } = applyBackups(checkpoint);
 			// Its job is done: let git collect the commit now.
 			spawnSync("git", ["update-ref", "-d", `${CHECKPOINT_REF_PREFIX}${checkpoint.id}`], {
 				cwd: checkpoint.cwd,
+				env,
 				stdio: "ignore",
 			});
-			const extra = restored > 0 ? ` and ${restored} ignored or outside-folder file(s)` : "";
+			const extra =
+				restored > 0 && !checkpoint.shadowDir ? ` and ${restored} ignored or outside-folder file(s)` : "";
+			const kind = checkpoint.shadowDir ? "snapshot" : "Git checkpoint";
 			return {
 				ok: true,
-				message: `Restored workspace to Git checkpoint ${checkpoint.gitCommitSha.slice(0, 7)}${extra}${tooLargeNote(skipped)}`,
+				message: `Restored workspace to ${kind} ${checkpoint.gitCommitSha.slice(0, 7)}${extra}${tooLargeNote(skipped)}`,
 			};
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
@@ -315,7 +361,7 @@ export function restoreCheckpoint(checkpoint: TurnCheckpoint): { ok: boolean; me
 		// the edit and write tools touched: what a shell command changed or
 		// created is not known, so say so instead of reporting a full restore.
 		const scope =
-			" (only files changed with edit/write are restored; changes made by shell commands are not tracked without git)";
+			" (only files changed with edit/write are restored; this folder is too big to snapshot, so changes made by shell commands are not undone)";
 		return {
 			ok: true,
 			message: `Restored ${restored} file(s) from shadow checkpoint${scope}${tooLargeNote(skipped)}`,
@@ -330,20 +376,21 @@ export function restoreCheckpoint(checkpoint: TurnCheckpoint): { ok: boolean; me
  * session was deleted). One `update-ref --stdin` per repository, best effort.
  */
 export async function releaseCheckpointRefs(checkpoints: TurnCheckpoint[]): Promise<void> {
-	const byCwd = new Map<string, string[]>();
+	const byRepo = new Map<string, { cwd: string; shadowDir?: string; ids: string[] }>();
 	for (const c of checkpoints) {
 		if (!c.gitCommitSha) continue;
-		const lines = byCwd.get(c.cwd) ?? [];
-		lines.push(`delete ${CHECKPOINT_REF_PREFIX}${c.id}`);
-		byCwd.set(c.cwd, lines);
+		const key = `${c.shadowDir ?? ""}\u0000${c.cwd}`;
+		const entry = byRepo.get(key) ?? { cwd: c.cwd, shadowDir: c.shadowDir, ids: [] };
+		entry.ids.push(c.id);
+		byRepo.set(key, entry);
 	}
 	await Promise.all(
-		[...byCwd].map(
-			([cwd, lines]) =>
-				new Promise<void>((done) => {
-					const child = execFile("git", ["update-ref", "--stdin"], { cwd }, () => done());
-					child.stdin?.end(`${lines.join("\n")}\n`);
-				}),
-		),
+		[...byRepo.values()].map(({ cwd, shadowDir, ids }) => {
+			if (shadowDir) return releaseShadowRefs(shadowDir, ids);
+			return new Promise<void>((done) => {
+				const child = execFile("git", ["update-ref", "--stdin"], { cwd }, () => done());
+				child.stdin?.end(`${ids.map((id) => `delete ${CHECKPOINT_REF_PREFIX}${id}`).join("\n")}\n`);
+			});
+		}),
 	);
 }
