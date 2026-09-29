@@ -172,6 +172,7 @@ export {
 } from "./bridge/display.ts";
 
 import type { RewindPreview } from "../core/rewind.ts";
+import { runDetached } from "./bridge/detached.ts";
 import { previewRewindFor, previewUndo, type UndoPreview } from "./bridge/undo.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
 
@@ -1046,7 +1047,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	// here before its textual definition is safe.
 	function makeBackgroundBash(runner: AgentRunner, sessionId: string): BashBackgroundDeps {
 		const registry = new BackgroundTaskRegistry();
-		registry.setOnIdleWake((text) => submit(sessionId, text));
+		registry.setOnIdleWake((text) =>
+			runDetached(submit(sessionId, text), "waking an idle session for a finished background job"),
+		);
 		return { registry, followUpQueue: runner.followUpQueue, isRunning: () => runner.isRunning };
 	}
 
@@ -2476,7 +2479,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const lastUser = [...ws.session.messages]
 			.reverse()
 			.find((m) => m.role === "user" && typeof m.content === "string");
-		void submit(sessionId, typeof lastUser?.content === "string" ? lastUser.content : "", undefined, undefined, []);
+		runDetached(
+			submit(sessionId, typeof lastUser?.content === "string" ? lastUser.content : "", undefined, undefined, []),
+			"resuming the turn",
+		);
 		return { ok: true };
 	}
 
@@ -2486,7 +2492,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// submit() itself enqueues into steeringQueue when a turn is running —
 		// this is the /steer path, so it must reach the running loop rather
 		// than start a fresh one.
-		void submit(sessionId, message);
+		runDetached(submit(sessionId, message), "steering the turn");
 	}
 
 	function followUp(sessionId: string, message: string): void {
@@ -2496,7 +2502,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// The TUI decides whether to call /followup from its last SSE status.
 			// A queued request can arrive after the daemon has already gone idle;
 			// leaving it on an idle queue would strand it forever.
-			void submit(sessionId, message);
+			runDetached(submit(sessionId, message), "sending a follow-up");
 			return;
 		}
 		ws.runner.followUpQueue.enqueue({ role: "user", content: message });
@@ -2637,7 +2643,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 
 		resolvePlanQuestion(planState);
-		void submit(sessionId, rendered.join("\n"));
+		runDetached(submit(sessionId, rendered.join("\n")), "answering the plan questions");
 		return { ok: true };
 	}
 

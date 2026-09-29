@@ -970,6 +970,29 @@ describe("web bridge", () => {
 		});
 	});
 
+	it("a background job that finishes after its session is gone is logged, not fatal", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const { registry, isRunning, followUpQueue } = ws.backgroundBash as NonNullable<typeof ws.backgroundBash>;
+		const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			bridge.closeSession(ws.id, "test");
+			// The registry's idle wake calls submit() for a session that no longer exists.
+			registry.deliver("background job finished", { registry, isRunning: () => false, followUpQueue } as never);
+			await new Promise((resolve) => setTimeout(resolve, 30));
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+		void isRunning;
+		expect(unhandled).toEqual([]);
+		expect(logged.mock.calls.map((c) => String(c[0])).join("\n")).toContain(
+			"waking an idle session for a finished background job failed",
+		);
+	});
+
 	it("a turn's checkpoint names the user message that started it", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

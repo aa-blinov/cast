@@ -112,6 +112,7 @@ import { ALL_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
+import { runDetached } from "./detached.ts";
 import { rewindTurn, undoLastTurn } from "./undo.ts";
 
 const execFileAsync = promisify(execFile);
@@ -485,7 +486,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 	"/steer": ({ ws, arg, submit }) => {
 		if (!arg) return { ok: false, error: "Usage: /steer <message> — injects it into the running turn" };
 		if (ws.status !== "running") {
-			submit(ws.id, arg);
+			runDetached(submit(ws.id, arg), "sending the message");
 			return { ok: true, result: "Sent" };
 		}
 		ws.runner.steeringQueue.enqueue({ role: "user", content: arg });
@@ -494,7 +495,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 	"/s": ({ ws, arg, submit }) => {
 		if (!arg) return { ok: false, error: "Usage: /steer <message> — injects it into the running turn" };
 		if (ws.status !== "running") {
-			submit(ws.id, arg);
+			runDetached(submit(ws.id, arg), "sending the message");
 			return { ok: true, result: "Sent" };
 		}
 		ws.runner.steeringQueue.enqueue({ role: "user", content: arg });
@@ -503,7 +504,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 	"/queue": ({ ws, arg, submit }) => {
 		if (!arg) return { ok: false, error: "Usage: /queue <message> — runs after the current turn" };
 		if (ws.status !== "running") {
-			submit(ws.id, arg);
+			runDetached(submit(ws.id, arg), "sending the message");
 			return { ok: true, result: "Sent" };
 		}
 		ws.runner.followUpQueue.enqueue({ role: "user", content: arg });
@@ -512,7 +513,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 	"/q": ({ ws, arg, submit }) => {
 		if (!arg) return { ok: false, error: "Usage: /queue <message> — runs after the current turn" };
 		if (ws.status !== "running") {
-			submit(ws.id, arg);
+			runDetached(submit(ws.id, arg), "sending the message");
 			return { ok: true, result: "Sent" };
 		}
 		ws.runner.followUpQueue.enqueue({ role: "user", content: arg });
@@ -1221,7 +1222,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 		const rule = sessionRules.find((r) => r.id === ruleId) ?? sessionRules.find((r) => r.name === ruleId);
 		if (!rule) return { ok: false, error: `Unknown rule: ${ruleId}. See /rules for the list.` };
 		fireUserPromptExpansion(ws.session.cwd ?? cwd, rule.name);
-		submit(ws.id, formatRuleInvocation(rule));
+		runDetached(submit(ws.id, formatRuleInvocation(rule)), "invoking a rule");
 		return { ok: true, result: `Invoked rule: ${rule.name}` };
 	},
 	"/quit": ({ ws }) => {
@@ -1953,6 +1954,9 @@ async function dispatchSkillInvocation(name: string, ctx: CommandContext): Promi
 		return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
 	}
 	fireUserPromptExpansion(sessionCwd, skill.name);
-	submit(ws.id, await renderSkillInvocation(skill, arg, undefined, { projectDir: sessionCwd }));
+	runDetached(
+		submit(ws.id, await renderSkillInvocation(skill, arg, undefined, { projectDir: sessionCwd })),
+		"invoking a skill",
+	);
 	return { ok: true, result: `Invoked skill: ${skill.name}` };
 }

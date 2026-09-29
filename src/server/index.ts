@@ -354,6 +354,14 @@ export async function runServerMain(args: string[], options: { foreground: boole
 	};
 	process.on("SIGTERM", () => void shutdown("SIGTERM"));
 	process.on("SIGINT", () => void shutdown("SIGINT"));
+	// One stray rejection must not end every session the daemon is serving: log it
+	// (server.log) and carry on. Callers that can fail on purpose use runDetached.
+	process.on("unhandledRejection", (reason) => {
+		console.error(
+			"[cast server] unhandled rejection:",
+			reason instanceof Error ? (reason.stack ?? reason.message) : reason,
+		);
+	});
 }
 
 async function main(): Promise<void> {
