@@ -4,6 +4,19 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Added
+
+- **A file explorer you can work in.** The web Files tab now creates files and folders (`a/b/c.txt` makes the folders too), uploads files with a progress bar (a button, or drop them on the tree or on a folder), moves items by dragging them onto a folder, and deletes several at once (Ctrl/Cmd-click to select). Uploading over an existing file asks first, and renaming or moving onto an existing name is refused instead of overwriting it. Long folders load 1000 entries at a time with "Show more", git-ignored entries are dimmed, and the search can include ignored files. A search that hit its limit says "Showing 200 of 30000". Download supports byte ranges, so video and audio seek, and a folder downloads as a `.tar.gz`. The panel button is now "Files and changes".
+- **API.** `POST /fs/create`, `/fs/move`, `/fs/delete` (several paths, each reported on its own), `PUT /fs/upload` and `PUT /inputs/upload` (the file as the raw request body, up to 1 GiB), `GET /diff/file`, and `offset`/`limit`/`hasMore` on `GET /fs`. They are in the OpenAPI document.
+
+### Fixed
+
+- **The daemon no longer freezes while you browse files.** Listing a folder, searching, the `@` file picker, deleting, uploading, downloading, the Changes tab and `/repo` ran synchronous file and git calls on the one thread that serves every session, so a big folder froze all of them (a 20 000-file delete stalled the daemon for 270ms, a 30 000-entry folder for 200ms, the `@` picker for 90ms). Everything now runs in child processes or async calls with bounded concurrency; the worst stall in a probe run of 19 file operations on a 30 000-file repository is under 100ms.
+- **Search finds files in ignored and huge folders.** It used to skip any folder named like `node_modules` or `dist` and silently cut the list at a few thousand entries. It now uses git's own file list (untracked files included, deleted ones dropped), matches every word of the query against the whole path, and reports the total. The list refreshes as soon as a tool, the watcher or the explorer changes files.
+- **The Changes tab on a large change.** With 20 000 deleted files `/diff` took 132s. It now lists everything, diffs the first 200 files (tracked changes first) and loads the rest on click.
+- **Escape in the explorer's rename field** saved the typed name instead of cancelling, because the input's blur committed it.
+- **Deleting a session** no longer blocks on removing its uploaded attachments.
+
 ### Changed
 
 - **Readable text on a phone.** The web UI's root size was 87.5% of the browser's (14px), so on a phone the chat text was 12.6px, secondary text 11.2px and small labels 10px: under Apple's 11pt floor and Material's 14sp body. On touch screens up to 768px wide it now follows the browser's own size: chat text 14.4px, secondary 12.8px, labels 11.5px. It is still a percentage, so the browser's or Android's text size setting and the Scale in Settings keep working.

@@ -1,5 +1,7 @@
 import htm from "htm";
 import { h } from "preact";
+import { useEffect, useState } from "preact/hooks";
+import { api } from "./api.js";
 import { pressable } from "./modal-focus.js";
 
 const html = htm.bind(h);
@@ -109,6 +111,26 @@ export function DiffPanel({
 		</aside>
 	`;
 
+	return html`<${ChangesView}
+		data=${data}
+		activeFile=${activeFile}
+		onSelectFile=${onSelectFile}
+		header=${header}
+		openClass=${openClass}
+		open=${open}
+		resizeHandleProps=${resizeHandleProps}
+		activeId=${activeId}
+	/>`;
+}
+
+/**
+ * The Changes tab. The server sends the diff of the first few hundred changed
+ * files with the list; any other file's diff is fetched when it is opened (a
+ * diff costs a git process each, and `git clean` can change 20,000 files).
+ */
+function ChangesView({ data, activeFile, onSelectFile, header, openClass, open, resizeHandleProps, activeId }) {
+	const [lazy, setLazy] = useState({});
+	const [loading, setLoading] = useState(null);
 	const allFiles = data.files || [];
 	const groups = data.groups || {};
 
@@ -131,23 +153,43 @@ export function DiffPanel({
 
 	const fileLookup = {};
 	for (const f of allFiles) fileLookup[f.path] = f;
+	// Diffs fetched on demand (see the note on ChangesView): kept per session.
+	const lazyKey = (path) => `${activeId}\u0000${path}`;
+	for (const [key, files] of Object.entries(lazy)) {
+		if (key.startsWith(`${activeId}\u0000`)) for (const f of files) fileLookup[f.path] = f;
+	}
+	// A path the list names but the response carried no diff for.
+	const stubFor = (path) => ({ path, stub: true, hunks: [], additions: null, deletions: null });
 
 	// Build grouped file list with section headers
 	const sections = [];
 	for (const g of groupDefs) {
 		const paths = groups[g.key];
 		if (!paths || paths.length === 0) continue;
-		const files = sortFiles(paths.map((p) => fileLookup[p]).filter(Boolean));
+		const files = sortFiles(paths.map((p) => fileLookup[p] ?? stubFor(p)));
 		if (files.length === 0) continue;
-		sections.push({ ...g, files });
+		sections.push({ ...g, files, total: data.groupTotals?.[g.key] ?? files.length });
 	}
 
 	const activePath = activeFile || (sections.length > 0 ? sections[0].files[0]?.path : null);
-	const file = activePath ? fileLookup[activePath] : null;
+	const file = activePath ? (fileLookup[activePath] ?? stubFor(activePath)) : null;
+	const wantsFetch = Boolean(file?.stub && activePath && lazy[lazyKey(activePath)] === undefined);
+
+	useEffect(() => {
+		if (!wantsFetch || !activePath) return;
+		const key = lazyKey(activePath);
+		const controller = new AbortController();
+		setLoading(activePath);
+		api("GET", `/api/sessions/${activeId}/diff/file?path=${encodeURIComponent(activePath)}`, undefined, { signal: controller.signal })
+			.then((res) => setLazy((prev) => ({ ...prev, [key]: res?.files ?? [] })))
+			.catch(() => setLazy((prev) => ({ ...prev, [key]: [] })))
+			.finally(() => setLoading((now) => (now === activePath ? null : now)));
+		return () => controller.abort();
+	}, [wantsFetch, activePath, activeId]);
 
 	// Pre-compute hunk lines
 	let diffContent = null;
-	if (file && file.hunks.length > 0) {
+	if (file && !file.stub && file.hunks.length > 0) {
 		diffContent = file.hunks.map((hunk, hi) => {
 			let addN = hunk.newStart;
 			let delN = hunk.oldStart;
@@ -177,7 +219,7 @@ export function DiffPanel({
 					<div key=${sec.key}>
 						<div class="diff-group-header">
 							<span class="diff-group-label">${sec.label}</span>
-							<span class="diff-group-count">${sec.files.length}</span>
+							<span class="diff-group-count">${sec.total}</span>
 						</div>
 						${sec.files.map(
 							(f) => html`
@@ -186,13 +228,18 @@ export function DiffPanel({
 								<span class="diff-file-path">
 									<span class="diff-file-dir">${f.path.slice(0, f.path.lastIndexOf("/") + 1)}</span><span class="diff-file-base">${f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
 								</span>
-								<span class="diff-file-stats">
+								${
+									f.stub
+										? null
+										: html`<span class="diff-file-stats">
 									<span class="add">+${f.additions}</span>
 									<span class="del">-${f.deletions}</span>
-								</span>
+								</span>`
+								}
 							</div>
 						`,
 						)}
+						${sec.total > sec.files.length ? html`<div class="diff-group-more">and ${sec.total - sec.files.length} more not listed</div>` : null}
 					</div>
 				`,
 				)}
@@ -215,7 +262,11 @@ export function DiffPanel({
 						</div>
 					`,
 							)
-						: data.noRepo
+						: file?.stub && loading === activePath
+							? html`<div class="diff-empty">Loading diff</div>`
+							: file?.stub
+								? html`<div class="diff-empty">No textual diff for this file</div>`
+								: data.noRepo
 							? html`
 						<div class="diff-empty diff-empty-hint">
 							<div>

@@ -5,7 +5,8 @@
  */
 
 import { randomBytes, randomUUID } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
@@ -18,6 +19,7 @@ import {
 	resolveNestedContextFiles,
 } from "../core/context-files.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
+import { invalidateProjectFiles } from "../core/file-search.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
@@ -170,6 +172,9 @@ import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
 export { type EvolveSkillSuggestion, parseEvolveJson, parseSuggestionJson } from "./bridge/parsers.ts";
 
 import { isSafeSessionId, sessionInputsDir } from "./inputs.ts";
+
+/** Tools whose calls can change which files exist. */
+const FILE_CHANGING_TOOLS = new Set(["write", "edit", "bash", "task", "ssh"]);
 
 const FRONTMATTER_STRIP_RE = /^---\n[\s\S]*?\n---\n?/;
 const EVOLVE_SYSTEM_PROMPT =
@@ -1950,6 +1955,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 							// end event carries the error flag, so recording only here
 							// avoids double-counting usage.
 							const t = event as { id: string; name: string; result: { isError?: boolean } };
+							// A tool that can create, move or delete files makes the search
+							// index (cached for a few seconds) stale: rebuild it on next use.
+							if (FILE_CHANGING_TOOLS.has(t.name)) invalidateProjectFiles(ws.session.cwd ?? cwd);
 							const started = toolStartTimes.get(t.id);
 							toolStartTimes.delete(t.id);
 							recordToolCall(
@@ -2686,7 +2694,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// to manage — that only holds if deleting the session also deletes
 		// them. force:true since a session that never had any attachments is
 		// the common case, not an error.
-		rmSync(sessionInputsDir(sessionId), { recursive: true, force: true });
+		// Not awaited: uploads can be gigabytes, and the caller only needs the
+		// session gone, not the disk space back.
+		void rm(sessionInputsDir(sessionId), { recursive: true, force: true }).catch(() => {});
 		return Boolean(ws) || removedFromDisk;
 	}
 

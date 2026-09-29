@@ -29,14 +29,15 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "GET",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
+			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|diff\/file|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
 	},
 	{ method: "DELETE", legacyPath: /^\/api\/sessions\/[^/]+(\/(permanent|share|fs|inputs))?$/ },
 	{
 		method: "POST",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|inputs\/upload)$/,
+			/^\/api\/sessions\/[^/]+\/(fork|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|fs\/create|fs\/move|fs\/delete|inputs\/upload)$/,
 	},
+	{ method: "PUT", legacyPath: /^\/api\/sessions\/[^/]+\/(fs\/upload|inputs\/upload)$/ },
 	{ method: "GET", legacyPath: /^\/api\/browse$/ },
 	{ method: "POST", legacyPath: /^\/api\/browse\/mkdir$/ },
 	{ method: "DELETE", legacyPath: /^\/api\/browse$/ },
@@ -300,6 +301,15 @@ const additionalApiV1Paths: OpenApiObject = {
 			responses: { "200": jsonResponse("Diff", { type: "object" }) },
 		},
 	},
+	"/api/v1/sessions/{id}/diff/file": {
+		get: {
+			summary: "Read the diff of one changed file",
+			description:
+				"The diff endpoint lists every change but carries hunks for only the first few hundred files; this returns the hunks of one path.",
+			parameters: [idParameter, { name: "path", in: "query", required: true, schema: { type: "string" } }],
+			responses: { "200": jsonResponse("Diff of one file", { type: "object" }), "400": errorResponse },
+		},
+	},
 	"/api/v1/sessions/{id}/reasoning-options": {
 		get: {
 			summary: "List session reasoning options",
@@ -309,8 +319,15 @@ const additionalApiV1Paths: OpenApiObject = {
 	},
 	"/api/v1/sessions/{id}/fs": {
 		get: {
-			summary: "List session files",
-			parameters: [idParameter],
+			summary: "List a session folder",
+			description:
+				"Folders first, then files; ignored, link and broken flags per entry. Long folders come in pages: pass offset and limit (default 1000, max 5000) and read hasMore.",
+			parameters: [
+				idParameter,
+				{ name: "path", in: "query", schema: { type: "string" } },
+				{ name: "offset", in: "query", schema: { type: "integer", minimum: 0 } },
+				{ name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 5000 } },
+			],
 			responses: { "200": jsonResponse("File listing", { type: "object" }) },
 		},
 		delete: {
@@ -321,20 +338,29 @@ const additionalApiV1Paths: OpenApiObject = {
 	},
 	"/api/v1/sessions/{id}/fs/search": {
 		get: {
-			summary: "Search session files",
-			parameters: [idParameter],
+			summary: "Search session files and folders by name",
+			description:
+				"Every word of q must appear in the path. The answer carries total and truncated, so a capped list is never mistaken for the whole result. Git-ignored paths are skipped unless ignored=1.",
+			parameters: [
+				idParameter,
+				{ name: "q", in: "query", required: true, schema: { type: "string" } },
+				{ name: "ignored", in: "query", schema: { type: "string", enum: ["1"] } },
+			],
 			responses: { "200": jsonResponse("Search results", { type: "object" }) },
 		},
 	},
 	"/api/v1/sessions/{id}/fs/download": {
 		get: {
-			summary: "Download a session file",
-			parameters: [idParameter],
+			summary: "Download a session file or folder",
+			description: "Supports byte ranges (Range, answered with 206 or 416). A folder is streamed as a tar.gz.",
+			parameters: [idParameter, { name: "path", in: "query", required: true, schema: { type: "string" } }],
 			responses: {
 				"200": {
 					description: "File bytes",
 					content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
 				},
+				"206": { description: "The requested byte range" },
+				"416": errorResponse,
 			},
 		},
 	},
@@ -344,6 +370,71 @@ const additionalApiV1Paths: OpenApiObject = {
 			parameters: [idParameter],
 			requestBody: requestBody({ type: "object" }),
 			responses: { "200": jsonResponse("Renamed", { type: "object" }), "400": errorResponse },
+		},
+	},
+	"/api/v1/sessions/{id}/fs/create": {
+		post: {
+			summary: "Create a file or folder",
+			description: "name may be a nested path such as a/b/c.txt; missing folders are created. 409 when it exists.",
+			parameters: [idParameter],
+			requestBody: requestBody({
+				type: "object",
+				required: ["name", "type"],
+				properties: {
+					path: { type: "string", description: "Parent folder, empty for the project root" },
+					name: { type: "string" },
+					type: { type: "string", enum: ["file", "dir"] },
+				},
+			}),
+			responses: { "201": jsonResponse("Created", { type: "object" }), "400": errorResponse, "409": errorResponse },
+		},
+	},
+	"/api/v1/sessions/{id}/fs/move": {
+		post: {
+			summary: "Move a file or folder into another folder",
+			description: "409 when the destination already has that name; a folder can't move into itself.",
+			parameters: [idParameter],
+			requestBody: requestBody({
+				type: "object",
+				required: ["path", "to"],
+				properties: { path: { type: "string" }, to: { type: "string", description: "Destination folder" } },
+			}),
+			responses: { "200": jsonResponse("Moved", { type: "object" }), "400": errorResponse, "409": errorResponse },
+		},
+	},
+	"/api/v1/sessions/{id}/fs/delete": {
+		post: {
+			summary: "Delete several files or folders",
+			description: "Each path succeeds or fails on its own; the answer lists both.",
+			parameters: [idParameter],
+			requestBody: requestBody({
+				type: "object",
+				required: ["paths"],
+				properties: { paths: { type: "array", items: { type: "string" } } },
+			}),
+			responses: { "200": jsonResponse("Per-path result", { type: "object" }), "400": errorResponse },
+		},
+	},
+	"/api/v1/sessions/{id}/fs/upload": {
+		put: {
+			summary: "Upload a file into the project",
+			description:
+				"The request body is the raw file, streamed to disk. 409 when the file exists unless overwrite=1; 413 above 1 GiB.",
+			parameters: [
+				idParameter,
+				{ name: "path", in: "query", required: true, schema: { type: "string" } },
+				{ name: "overwrite", in: "query", schema: { type: "string", enum: ["1"] } },
+			],
+			requestBody: {
+				required: true,
+				content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
+			},
+			responses: {
+				"201": jsonResponse("Uploaded", { type: "object" }),
+				"400": errorResponse,
+				"409": errorResponse,
+				"413": errorResponse,
+			},
 		},
 	},
 	"/api/v1/sessions/{id}/inputs": {
@@ -363,6 +454,16 @@ const additionalApiV1Paths: OpenApiObject = {
 			summary: "Upload a session attachment",
 			parameters: [idParameter],
 			requestBody: requestBody({ type: "object", required: ["name", "dataUrl"] }),
+			responses: { "200": jsonResponse("Uploaded attachment", { type: "object" }), "400": errorResponse },
+		},
+		put: {
+			summary: "Upload a session attachment as a raw body",
+			description: "Streams the file to disk instead of a base64 data URL; the name goes in the query.",
+			parameters: [idParameter, { name: "name", in: "query", required: true, schema: { type: "string" } }],
+			requestBody: {
+				required: true,
+				content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
+			},
 			responses: { "200": jsonResponse("Uploaded attachment", { type: "object" }), "400": errorResponse },
 		},
 	},

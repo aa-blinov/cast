@@ -12,8 +12,9 @@
  * these handlers are tested through it, not directly.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { clearGoal, editGoalObjective, formatGoalStatus, readGoal, startGoal } from "../../core/goal.ts";
 import { formatLspStatus, lspEnabled, lspStatus } from "../../core/lsp/index.ts";
 import {
@@ -110,6 +111,8 @@ import { ALL_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
+
+const execFileAsync = promisify(execFile);
 
 const WHITESPACE_RE = /\s+/;
 
@@ -401,54 +404,44 @@ const commandHandlers: Record<string, CommandHandler> = {
 		const status = lspStatus();
 		return { ok: true, result: { enabled: lspEnabled(), ...status, text: formatLspStatus(status) } };
 	},
-	"/repo": (ctx) => {
+	"/repo": async (ctx) => {
 		const { ws, cwd } = ctx;
 		const sessionCwd = ws.session.cwd ?? cwd;
-		const git = (args: string[]) =>
-			execFileSync("git", args, {
-				cwd: sessionCwd,
-				encoding: "utf-8",
-				timeout: 3000,
-				stdio: ["pipe", "pipe", "pipe"],
-			}).trim();
+		// Async, and the independent questions asked together: this runs every
+		// time the Status window opens, and five synchronous gits in a row
+		// (`status` alone is seconds in a large repository) froze the daemon.
+		const git = async (args: string[], at = sessionCwd) =>
+			(await execFileAsync("git", args, { cwd: at, encoding: "utf-8", timeout: 3000 })).stdout.trim();
 		try {
-			git(["rev-parse", "--is-inside-work-tree"]);
+			await git(["rev-parse", "--is-inside-work-tree"]);
 		} catch {
 			return { ok: true, result: { cwd: sessionCwd, isGit: false } };
 		}
-		let branch = "—";
-		let dirty = false;
-		try {
-			branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
-		} catch {}
-		try {
-			dirty = git(["status", "--porcelain"]).length > 0;
-		} catch {}
-		let worktree: string | null = null;
-		try {
-			const commonDir = git(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
-			const mainRepoRoot = join(commonDir, "..");
-			const list = execFileSync("git", ["worktree", "list", "--porcelain"], {
-				cwd: mainRepoRoot,
-				encoding: "utf-8",
-				timeout: 3000,
-				stdio: ["pipe", "pipe", "pipe"],
-			}).trim();
-			const blocks = list.split("\n\n");
-			for (const block of blocks) {
-				const pathLine = block.split("\n").find((l) => l.startsWith("worktree "));
-				if (!pathLine) continue;
-				const path = pathLine.substring("worktree ".length);
-				if (path === sessionCwd && path !== mainRepoRoot) {
-					worktree = path;
-					break;
+		const [branch, dirty, worktree] = await Promise.all([
+			git(["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "—"),
+			git(["status", "--porcelain"]).then(
+				(out) => out.length > 0,
+				() => false,
+			),
+			(async (): Promise<string | null> => {
+				try {
+					const commonDir = await git(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+					const mainRepoRoot = join(commonDir, "..");
+					const list = await git(["worktree", "list", "--porcelain"], mainRepoRoot);
+					for (const block of list.split("\n\n")) {
+						const pathLine = block.split("\n").find((l) => l.startsWith("worktree "));
+						if (!pathLine) continue;
+						const path = pathLine.substring("worktree ".length);
+						if (path === sessionCwd && path !== mainRepoRoot) return path;
+					}
+				} catch {
+					// git worktree list is best-effort; standalone clones without
+					// registered worktrees leave worktree = null and the UI shows
+					// the em-dash placeholder.
 				}
-			}
-		} catch {
-			// git worktree list is best-effort; standalone clones without
-			// registered worktrees leave worktree = null and the UI shows
-			// the em-dash placeholder.
-		}
+				return null;
+			})(),
+		]);
 		return {
 			ok: true,
 			result: { cwd: sessionCwd, isGit: true, branch, dirty, worktree },

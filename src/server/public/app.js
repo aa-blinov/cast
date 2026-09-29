@@ -2028,7 +2028,7 @@ function App() {
 					<button class="menu-toggle hotkeys-toggle" onClick=${() => setHotkeysOpen(true)} aria-label="Keyboard shortcuts" title=${`Shortcuts (${modKey}/)`}>
 						<${icons.keyboard} />
 					</button>
-					<button class="menu-toggle diff-toggle${diffOpen ? " active" : ""}" onClick=${toggleDiff} aria-label=${diffOpen ? "Close diff panel" : "Open diff panel"} title="Diff">
+					<button class="menu-toggle diff-toggle${diffOpen ? " active" : ""}" onClick=${toggleDiff} aria-label=${diffOpen ? "Close files panel" : "Open files panel"} title="Files and changes">
 						<${icons.chevronLeft} class="chevron-icon" />
 					</button>
 				</div>

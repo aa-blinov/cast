@@ -4,29 +4,20 @@
  * cookie so the browser never replaces Cast's UI with its own prompt.
  */
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import {
-	createReadStream,
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	realpathSync,
-	renameSync,
-	rmdirSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { createReadStream, createWriteStream, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdir, readdir, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import { brotliCompressSync, gzipSync } from "node:zlib";
+import { brotliCompressSync, gzipSync, constants as zlibConstants } from "node:zlib";
 import { createAgent, deleteAgent, getAgent, listAgents, updateAgent } from "../core/agents.ts";
 import { getDb } from "../core/db.ts";
-import { searchProjectFiles } from "../core/file-search.ts";
+import { searchProjectFiles, searchProjectNames } from "../core/file-search.ts";
 import { readGoal, startGoal } from "../core/goal.ts";
 import {
 	listProjectMemory,
@@ -80,11 +71,19 @@ import {
 import { buildGoalPrompt, GOAL_MAX_OUTER_ITERATIONS, goalIterationBudget } from "./commands.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
+import { isInsideRootAsync } from "./path-safety.ts";
+import {
+	archiveFolder,
+	createEntry,
+	deleteEntries,
+	FsError,
+	listDirectory,
+	moveEntry,
+	parseRange,
+	renameEntry,
+	saveUpload,
+} from "./project-fs.ts";
 
-/** True whenever `target` is `root` itself or somewhere underneath it — the
- * one check every /fs/* route relies on to keep a session's file browser from
- * reading/downloading/deleting anything outside its own cwd, no matter what
- * `..`-laden path (or symlink) a request goes through. Exported for tests. */
 /** HTTP status for a bridge result's error string.
  *
  * "Session not found" has to be a 404: it's what the v1 contract documents,
@@ -97,36 +96,8 @@ export function bridgeErrorStatus(error: string): number {
 	return 400;
 }
 
-export function isInsideRoot(root: string, target: string): boolean {
-	const rel = relative(root, target);
-	if (rel !== "" && (rel.startsWith("..") || isAbsolute(rel))) return false;
-	// The lexical check above can't see through a symlink, and every
-	// consumer below follows one (statSync, createReadStream, rmSync,
-	// renameSync) — so a link inside the cwd pointing at, say, /etc let the
-	// file browser list, download and delete outside the project, which is
-	// the one thing this check exists to prevent. Compare resolved paths
-	// too; a link the user put inside their own project to another of their
-	// own directories now reads as outside, which is the intended reading
-	// of "outside its own cwd".
-	const realRel = relative(realPathOrNearest(root), realPathOrNearest(target));
-	return realRel === "" || (!realRel.startsWith("..") && !isAbsolute(realRel));
-}
-
-/** realpath of `path`, or of its closest existing ancestor when it doesn't
- * exist yet — a rename destination or a not-yet-created directory still has
- * to be judged by where its parent actually lives. */
-function realPathOrNearest(path: string): string {
-	let current = path;
-	for (;;) {
-		try {
-			return realpathSync(current);
-		} catch {
-			const parent = dirname(current);
-			if (parent === current) return path;
-			current = parent;
-		}
-	}
-}
+/** The check every /fs/* route relies on; see path-safety.ts. Exported for tests. */
+export { isInsideRoot } from "./path-safety.ts";
 
 /** Constant-time comparison for a credential. Used for both the web password
  *  and the daemon token — the length check leaks only the length, which both
@@ -720,7 +691,15 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			const raw = Buffer.isBuffer(content) ? content : Buffer.from(content);
 			const encoding =
 				textAsset && accepts.includes("br") ? "br" : textAsset && accepts.includes("gzip") ? "gzip" : undefined;
-			const body = encoding === "br" ? brotliCompressSync(raw) : encoding === "gzip" ? gzipSync(raw) : raw;
+			// Brotli at its default quality 11 took 235ms for the 118KB app bundle,
+			// blocking the loop for every first request of every asset after a
+			// start; quality 5 takes 6ms for an answer 8% larger.
+			const body =
+				encoding === "br"
+					? brotliCompressSync(raw, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } })
+					: encoding === "gzip"
+						? gzipSync(raw)
+						: raw;
 			// A bundled chunk carries a content hash in its own filename (see
 			// scripts/build.mjs), so it needs no `?v=` to be cacheable forever.
 			const immutable =
@@ -1125,7 +1104,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// checkout with at least one commit. Cheap (one git rev-parse per
 	// request, with a hard 2s timeout) so the modal can call it on every
 	// cwd change without blocking the user.
-	route("GET", "/api/git-info", (req, res) => {
+	route("GET", "/api/git-info", async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const cwd = url.searchParams.get("cwd") ?? "";
 		if (!cwd || cwd === SANDBOX_CWD) {
@@ -1134,29 +1113,24 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			// response is exactly what the client wants.
 			return json(res, { isGit: false });
 		}
-		const run = (args: string[]) => {
+		// Async, and the three questions asked together: a synchronous git
+		// (2s timeout each) on a slow or network disk stalled the whole daemon.
+		const run = async (args: string[]) => {
 			try {
-				return execFileSync("git", args, {
-					cwd,
-					encoding: "utf-8",
-					timeout: 2000,
-					stdio: ["pipe", "pipe", "pipe"],
-				}).trim();
+				return (await execFileAsync("git", args, { cwd, encoding: "utf-8", timeout: 2000 })).stdout.trim();
 			} catch {
 				return null;
 			}
 		};
-		const inside = run(["rev-parse", "--is-inside-work-tree"]);
+		const inside = await run(["rev-parse", "--is-inside-work-tree"]);
 		if (inside !== "true") {
 			return json(res, { isGit: false, cwd });
 		}
-		const head = run(["rev-parse", "HEAD"]);
-		json(res, {
-			isGit: true,
-			hasCommits: !!head,
-			branch: run(["rev-parse", "--abbrev-ref", "HEAD"]) ?? "—",
-			cwd,
-		});
+		const [head, branch] = await Promise.all([
+			run(["rev-parse", "HEAD"]),
+			run(["rev-parse", "--abbrev-ref", "HEAD"]),
+		]);
+		json(res, { isGit: true, hasCommits: !!head, branch: branch ?? "—", cwd });
 	});
 
 	route("GET", "/api/sessions", (req, res) => {
@@ -1930,113 +1904,80 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			// `"has space.ts"` with an empty diff, because no such file exists.
 			// A rename in -z form is two records: `R  new\0old\0`.
 			const status = await git(["status", "--porcelain", "-z", "-u"]);
-			const groups: FileGroups = { untracked: [], added: [], modified: [], deleted: [], renamed: [] };
-			const diffTargets: Array<{ path: string; args: string[] }> = [];
+			const plans = planDiffs(status);
 
-			const records = status.split("\0");
-			for (let r = 0; r < records.length; r++) {
-				const line = records[r]!;
-				if (line.length < 4) continue;
-				const xy = line.slice(0, 2);
-				const path = line.slice(3);
-				// The old name of a rename/copy travels as the next record.
-				const oldPath = xy[0] === "R" || xy[0] === "C" ? records[++r] : undefined;
-				if (path.startsWith(".cast/") || path.includes("/.cast/")) continue;
+			// A diff costs one git process per file. Ten at a time, that was 132
+			// seconds for the 20,000 deleted files of a `git clean`, and 13 for a
+			// 2,000-file refactor: the Changes tab hung on exactly the changes most
+			// worth reviewing. So the first MAX_DIFFED_FILES get their diff here
+			// (tracked changes first: an untracked file is usually a build product)
+			// and the rest are listed, their diff fetched by /diff/file when the
+			// user opens one.
+			const byPriority = [...plans].sort(
+				(x, y) => Number(x.group === "untracked") - Number(y.group === "untracked"),
+			);
+			const diffed = new Set(byPriority.slice(0, MAX_DIFFED_FILES));
+			const diffTargets = plans.filter((plan) => diffed.has(plan)).flatMap((plan) => plan.targets);
 
-				if (xy === "??") {
-					groups.untracked.push(path);
-					diffTargets.push({
-						path,
-						args: ["diff", "--no-color", "--unified=3", "--no-index", "--", "/dev/null", path],
-					});
-				} else if (xy === "A " || xy === "A" + " ") {
-					groups.added.push(path);
-					diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--staged", "--", path] });
-				} else if (xy[0] === "R") {
-					// A single-pathspec diff can't detect a rename — git has nothing
-					// to compare the new name against — so it falls back to showing
-					// the whole file as freshly added. Passing both the old and new
-					// path lets git's own rename detection populate the diff header
-					// (and DiffFile.oldPath, parsed from it) correctly.
-					groups.renamed.push(path);
-					diffTargets.push({
-						path: `${path}:staged`,
-						args: ["diff", "--no-color", "--unified=3", "--staged", "--", ...(oldPath ? [oldPath] : []), path],
-					});
-					// "RM" — renamed and staged, with further unstaged edits on top.
-					if (xy[1] === "M") {
-						diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
-					}
-				} else if (xy === "D " || xy === " D") {
-					groups.deleted.push(path);
-					if (xy[0] === " ") diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
-					else diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--staged", "--", path] });
-				} else if (xy[0] === "M" || xy[1] === "M" || xy === "AM") {
-					groups.modified.push(path);
-					// Unstaged diff (working tree vs index)
-					if (xy[1] === "M" || xy[1] === " ") {
-						diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
-					}
-					// Staged diff (index vs HEAD) — append suffix to avoid key collision
-					if (xy[0] === "M" || xy[0] === "A") {
-						diffTargets.push({
-							path: `${path}:staged`,
-							args: ["diff", "--no-color", "--unified=3", "--staged", "--", path],
-						});
-					}
-				} else {
-					// Catch-all: anything else with changes goes to modified
-					groups.modified.push(path);
-					diffTargets.push({ path, args: ["diff", "--no-color", "--unified=3", "--", path] });
-				}
+			const groups: FileGroups = emptyGroups();
+			const groupTotals: Record<keyof FileGroups, number> = {
+				untracked: 0,
+				added: 0,
+				modified: 0,
+				deleted: 0,
+				renamed: 0,
+			};
+			for (const plan of plans) {
+				groupTotals[plan.group]++;
+				// A list of tens of thousands of rows is not something the panel can show.
+				if (groups[plan.group].length < MAX_LISTED_PER_GROUP) groups[plan.group].push(plan.path);
 			}
 
-			// Cap untracked to avoid huge diffs on first-open repos
-			const maxUntracked = 50;
-			if (diffTargets.filter((t) => groups.untracked.includes(t.path)).length > maxUntracked) {
-				const untrackedPaths = new Set(groups.untracked);
-				let kept = 0;
-				const filtered = diffTargets.filter((t) => {
-					if (!untrackedPaths.has(t.path)) return true;
-					kept++;
-					return kept <= maxUntracked;
-				});
-				diffTargets.length = 0;
-				diffTargets.push(...filtered);
-				groups.untracked = groups.untracked.slice(0, maxUntracked);
-			}
+			const allFiles = await runDiffTargets(diffTargets, gitDiff);
 
-			// Per-file diffs, ten git processes at a time. (The old loop said
-			// "parallel batches" over a synchronous map — nothing about it was.)
-			const allFiles: DiffFile[] = [];
-			const batchSize = 10;
-			for (let i = 0; i < diffTargets.length; i += batchSize) {
-				const batch = diffTargets.slice(i, i + batchSize);
-				// biome-ignore lint/performance/noAwaitInLoops: the await *is* the concurrency cap — one Promise.all over every target would spawn a git process per changed file at once.
-				const results = await Promise.all(
-					batch.map(async (t) => {
-						try {
-							return parseDiff(await gitDiff(t.args)).files;
-						} catch {
-							return [] as DiffFile[];
-						}
-					}),
-				);
-				for (let j = 0; j < results.length; j++) {
-					for (const f of results[j]) {
-						// Unstrip the :staged suffix we added for collision avoidance
-						const target = batch[j]!;
-						if (target.path.endsWith(":staged")) {
-							f.path = target.path.slice(0, -7);
-						}
-						allFiles.push(f);
-					}
-				}
-			}
-
-			json(res, { files: allFiles, groups });
+			json(res, { files: allFiles, groups, groupTotals, undiffed: plans.length - diffed.size });
 		} catch (err) {
 			json(res, { files: [], groups: emptyGroups(), error: err instanceof Error ? err.message : String(err) });
+		}
+	});
+
+	// One file's diff, for the Changes list entries that were not diffed with it
+	// (see MAX_DIFFED_FILES above).
+	route("GET", "/api/sessions/:id/diff/file", async (req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		const cwd = ws.session.cwd ?? process.cwd();
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const path = url.searchParams.get("path") ?? "";
+		if (!path || !(await isInsideRootAsync(cwd, resolve(cwd, path))))
+			return json(res, { error: "Invalid path" }, 400);
+		const git = async (args: string[]): Promise<string> => {
+			try {
+				return (
+					await execFileAsync("git", ["-c", "core.quotePath=false", ...args], {
+						cwd,
+						encoding: "utf-8",
+						timeout: 10_000,
+						maxBuffer: 20 * 1024 * 1024,
+					})
+				).stdout;
+			} catch (err: unknown) {
+				// `git diff` exits 1 when files differ: expected, not a failure.
+				const failure = err as { code?: number; stdout?: string };
+				if (failure.code === 1 && typeof failure.stdout === "string") return failure.stdout;
+				throw err;
+			}
+		};
+		try {
+			const plans = planDiffs(await git(["status", "--porcelain", "-z", "-u", "--", path]));
+			json(res, {
+				files: await runDiffTargets(
+					plans.flatMap((plan) => plan.targets),
+					git,
+				),
+			});
+		} catch (err) {
+			json(res, { files: [], error: err instanceof Error ? err.message : String(err) });
 		}
 	});
 
@@ -2046,98 +1987,67 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		return resolve(ws.session.cwd ?? bridge.getConfig().cwd);
 	}
 
-	// Single-directory, lazy listing — the client fetches one level at a time
-	// as folders are expanded, rather than one eager recursive walk. Without
-	// respecting .gitignore (deliberately, for now) a project's node_modules
-	// alone can be tens of thousands of entries; lazy listing keeps every
-	// request cheap regardless of project size.
-	route("GET", "/api/sessions/:id/fs", (req, res, params) => {
+	/** Answers with the status a file operation failed with. */
+	function fsFail(res: ServerResponse, error: unknown): void {
+		const failure =
+			error instanceof FsError ? error : new FsError(400, error instanceof Error ? error.message : String(error));
+		json(res, { error: failure.message }, failure.status);
+	}
+
+	const intParam = (url: URL, name: string): number | undefined => {
+		const value = url.searchParams.get(name);
+		return value === null || value === "" || Number.isNaN(Number(value)) ? undefined : Number(value);
+	};
+
+	// One page of a directory, lazily: the client fetches a level at a time as
+	// folders are expanded, and a folder of thousands of entries in pages, so
+	// no request costs more than the page it asks for whatever the project's
+	// size. Everything in project-fs.ts is async: the daemon serves every
+	// session from one thread, and a synchronous readdir/stat of a large folder
+	// froze all of them.
+	route("GET", "/api/sessions/:id/fs", async (req, res, params) => {
 		const cwd = sessionCwd(params.id);
 		if (!cwd) return json(res, { error: "Not found" }, 404);
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-		const target = resolve(cwd, url.searchParams.get("path") || ".");
-		if (!isInsideRoot(cwd, target)) return json(res, { error: "Path outside project" }, 400);
 		try {
-			const st = statSync(target);
-			if (!st.isDirectory()) return json(res, { error: "Not a directory" }, 400);
-			const entries = readdirSync(target, { withFileTypes: true })
-				.filter((e) => e.name !== ".git")
-				.map((e) => {
-					const full = join(target, e.name);
-					const isDir = e.isDirectory();
-					let size: number | undefined;
-					if (!isDir) {
-						try {
-							size = statSync(full).size;
-						} catch {
-							size = undefined;
-						}
-					}
-					return { name: e.name, type: isDir ? "dir" : "file", size };
-				})
-				.sort((a, b) => (a.type !== b.type ? (a.type === "dir" ? -1 : 1) : a.name.localeCompare(b.name)));
-			json(res, { path: relative(cwd, target), entries });
-		} catch (err) {
-			// A brand-new sandbox session's cwd (see bridge.ts's SANDBOX_CWD) is
-			// only created lazily on the first submitted message, not at session
-			// creation — the Files panel loading before that first send is a
-			// completely normal state, not an error. Without this, the raw ENOENT
-			// ("no such file or directory, stat '...'") surfaced verbatim in the
-			// UI, reading like a crash for something that just hadn't happened yet.
-			if (target === cwd && (err as NodeJS.ErrnoException)?.code === "ENOENT") {
-				return json(res, { path: "", entries: [] });
-			}
-			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+			json(
+				res,
+				await listDirectory(cwd, url.searchParams.get("path") || ".", {
+					offset: intParam(url, "offset"),
+					limit: intParam(url, "limit"),
+				}),
+			);
+		} catch (error) {
+			fsFail(res, error);
 		}
 	});
 
-	// Recursive name search across the whole project tree (not just expanded
-	// folders) — a synchronous walk, capped on both matches and nodes visited
-	// so a query with zero hits in a huge, gitignore-less tree still returns
-	// promptly instead of walking the entire filesystem underneath cwd.
-	// The composer's `@` picker: fuzzy, and .gitignore-aware in a repository,
-	// unlike the explorer's name search below.
-	route("GET", "/api/sessions/:id/fs/files", (req, res, params) => {
+	// The composer's `@` picker: fuzzy, and .gitignore-aware in a repository.
+	route("GET", "/api/sessions/:id/fs/files", async (req, res, params) => {
 		const cwd = sessionCwd(params.id);
 		if (!cwd) return json(res, { error: "Not found" }, 404);
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-		json(res, { files: searchProjectFiles(cwd, (url.searchParams.get("q") ?? "").trim(), 30) });
+		json(res, { files: await searchProjectFiles(cwd, (url.searchParams.get("q") ?? "").trim(), 30) });
 	});
 
-	route("GET", "/api/sessions/:id/fs/search", (req, res, params) => {
-		const sessionRoot = sessionCwd(params.id);
-		if (!sessionRoot) return json(res, { error: "Not found" }, 404);
-		const cwd = sessionRoot;
+	// The explorer's search: every word in the path, across the whole project,
+	// from the same git-aware index (so node_modules doesn't eat the budget
+	// that src/ needs). `ignored=1` searches ignored files too. `total` and
+	// `truncated` tell the client when it is looking at part of the answer.
+	route("GET", "/api/sessions/:id/fs/search", async (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-		const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
-		if (!q) return json(res, { results: [] });
-
-		const MAX_RESULTS = 200;
-		const MAX_VISITED = 20_000;
-		let visited = 0;
-		const results: Array<{ path: string; type: "file" | "dir" }> = [];
-
-		function walk(dir: string) {
-			if (results.length >= MAX_RESULTS || visited >= MAX_VISITED) return;
-			let entries: import("node:fs").Dirent[];
-			try {
-				entries = readdirSync(dir, { withFileTypes: true });
-			} catch {
-				return;
-			}
-			for (const e of entries) {
-				if (results.length >= MAX_RESULTS || visited >= MAX_VISITED) return;
-				if (e.name === ".git") continue;
-				visited++;
-				const full = join(dir, e.name);
-				if (e.name.toLowerCase().includes(q)) {
-					results.push({ path: relative(cwd, full), type: e.isDirectory() ? "dir" : "file" });
-				}
-				if (e.isDirectory()) walk(full);
-			}
+		try {
+			json(
+				res,
+				await searchProjectNames(cwd, url.searchParams.get("q") ?? "", {
+					includeIgnored: url.searchParams.get("ignored") === "1",
+				}),
+			);
+		} catch (error) {
+			fsFail(res, error);
 		}
-		walk(cwd);
-		json(res, { results, truncated: results.length >= MAX_RESULTS || visited >= MAX_VISITED });
 	});
 
 	// Extensions the preview modal can render directly in the browser (an
@@ -2154,25 +2064,44 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		bmp: "image/bmp",
 		ico: "image/x-icon",
 		svg: "image/svg+xml",
+		mp4: "video/mp4",
+		webm: "video/webm",
+		mp3: "audio/mpeg",
+		wav: "audio/wav",
 	};
 
 	// Streams one file's raw bytes — the whole point being this works
 	// regardless of git state (untracked, committed, no repo at all), unlike
-	// the Changes panel above. Defaults to a download disposition; the
-	// preview modal passes ?inline=1 to instead get a disposition (and, for
-	// known types, a real Content-Type) a browser will render in place
-	// rather than offering to save.
-	route("GET", "/api/sessions/:id/fs/download", (req, res, params) => {
+	// the Changes panel. Defaults to a download disposition; the preview modal
+	// passes ?inline=1 to instead get a disposition (and, for known types, a
+	// real Content-Type) a browser will render in place. Byte ranges are
+	// honoured (seeking in a video, resuming a download), and a folder comes
+	// down as a .tar.gz.
+	route("GET", "/api/sessions/:id/fs/download", async (req, res, params) => {
 		const cwd = sessionCwd(params.id);
 		if (!cwd) return json(res, { error: "Not found" }, 404);
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const rel = url.searchParams.get("path") ?? "";
 		const target = resolve(cwd, rel);
-		if (!rel || target === cwd || !isInsideRoot(cwd, target)) return json(res, { error: "Invalid path" }, 400);
+		if (!rel || target === cwd || !(await isInsideRootAsync(cwd, target))) {
+			return json(res, { error: "Invalid path" }, 400);
+		}
 		try {
-			const st = statSync(target);
-			if (!st.isFile()) return json(res, { error: "Not a file" }, 400);
+			const st = await stat(target);
 			const name = basename(target);
+			const disposition = (inline: boolean, fileName: string) =>
+				`${inline ? "inline" : "attachment"}; filename="${fileName.replace(FILENAME_QUOTE_RE, "")}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+			if (st.isDirectory()) {
+				const archive = archiveFolder(dirname(target), name);
+				res.writeHead(200, {
+					"Content-Type": "application/gzip",
+					"Content-Disposition": disposition(false, `${name}.tar.gz`),
+				});
+				archive.stdout?.pipe(res);
+				res.on("close", () => archive.kill());
+				return;
+			}
+			if (!st.isFile()) return json(res, { error: "Not a file" }, 400);
 			const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
 			const inline = url.searchParams.get("inline") === "1";
 			// Allow PDFs to be framed for preview — otherwise X-Frame-Options DENY / frame-ancestors 'none' blocks the <iframe> even same-origin, especially on mobile
@@ -2183,42 +2112,62 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 					"default-src 'self'; base-uri 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; frame-ancestors 'self'",
 				);
 			}
-			res.writeHead(200, {
+			const range = parseRange(req.headers.range, st.size);
+			if (range === "unsatisfiable") {
+				res.writeHead(416, { "Content-Range": `bytes */${st.size}` });
+				res.end();
+				return;
+			}
+			res.writeHead(range ? 206 : 200, {
 				"Content-Type": inline ? (PREVIEW_MIME[ext] ?? "application/octet-stream") : "application/octet-stream",
-				"Content-Length": st.size,
-				"Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(FILENAME_QUOTE_RE, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+				"Content-Length": range ? range.end - range.start + 1 : st.size,
+				"Accept-Ranges": "bytes",
+				"Last-Modified": st.mtime.toUTCString(),
+				...(range ? { "Content-Range": `bytes ${range.start}-${range.end}/${st.size}` } : {}),
+				"Content-Disposition": disposition(inline, name),
 			});
-			createReadStream(target).pipe(res);
-		} catch (err) {
-			if (!res.headersSent) json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+			// pipeline, not pipe(): a client that closes the tab mid-download
+			// must release the file descriptor now, not when the GC gets to it.
+			await pipeline(createReadStream(target, range ?? undefined), res).catch(() => {});
+		} catch (error) {
+			if (!res.headersSent) fsFail(res, error);
+			else res.destroy();
 		}
 	});
 
-	// Recursive delete — a file or an entire folder. The client is expected to
-	// have already confirmed with the user (a themed confirm dialog, worded
-	// harder for a folder than a file); this route's only job is the same
-	// path-containment check every other /fs/* route makes, refusing to ever
-	// touch cwd itself or anything outside it.
-	route("DELETE", "/api/sessions/:id/fs", (req, res, params) => {
+	// Deletes files and folders (a folder with everything in it). The client
+	// has already confirmed with the user (a themed dialog, worded harder for a
+	// folder); this route's job is the path-containment check every other /fs/*
+	// route makes, refusing cwd itself, anything outside it, and .git.
+	route("DELETE", "/api/sessions/:id/fs", async (req, res, params) => {
 		const cwd = sessionCwd(params.id);
 		if (!cwd) return json(res, { error: "Not found" }, 404);
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
-		const rel = url.searchParams.get("path") ?? "";
-		const target = resolve(cwd, rel);
-		if (!rel || target === cwd || !isInsideRoot(cwd, target)) {
-			return json(res, { error: "Refusing to delete this path" }, 400);
-		}
-		try {
-			rmSync(target, { recursive: true, force: false });
-			json(res, { ok: true });
-		} catch (err) {
-			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
-		}
+		const result = await deleteEntries(cwd, [url.searchParams.get("path") ?? ""]);
+		const failure = result.failed[0];
+		if (failure) return json(res, { error: failure.error }, failure.error === "Not found" ? 404 : 400);
+		json(res, { ok: true });
 	});
 
-	// Renames a file or folder in place (same parent directory) — the new
-	// name only, never a path, same rule as the "new folder" name field
-	// below: no separators, no "..", so this can never turn into a move.
+	route("POST", "/api/sessions/:id/fs/delete", async (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		let parsed: { paths?: unknown };
+		try {
+			parsed = JSON.parse(await readBody(req));
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		if (!Array.isArray(parsed.paths) || parsed.paths.some((p) => typeof p !== "string")) {
+			return json(res, { error: "paths must be a list of strings" }, 400);
+		}
+		json(res, { ok: true, ...(await deleteEntries(cwd, parsed.paths as string[])) });
+	});
+
+	// Renames a file or folder in place (same parent directory) — the new name
+	// only, never a path: no separators, no "..", so this can never turn into a
+	// move (that is /fs/move). A name that is already taken is a 409, not a
+	// silent overwrite.
 	route("POST", "/api/sessions/:id/fs/rename", async (req, res, params) => {
 		const cwd = sessionCwd(params.id);
 		if (!cwd) return json(res, { error: "Not found" }, 404);
@@ -2228,44 +2177,89 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
-		const rel = parsed.path ?? "";
-		const name = (parsed.name ?? "").trim();
-		if (!name || name.includes("/") || name.includes("\\") || name === "." || name === "..") {
-			return json(res, { error: "Invalid name" }, 400);
-		}
-		const target = resolve(cwd, rel);
-		if (!rel || target === cwd || !isInsideRoot(cwd, target)) {
-			return json(res, { error: "Invalid path" }, 400);
-		}
-		const dest = join(dirname(target), name);
-		if (!isInsideRoot(cwd, dest)) return json(res, { error: "Invalid destination" }, 400);
 		try {
-			renameSync(target, dest);
-			json(res, { ok: true, path: relative(cwd, dest) });
-		} catch (err) {
-			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+			json(res, { ok: true, ...(await renameEntry(cwd, parsed.path ?? "", parsed.name ?? "")) });
+		} catch (error) {
+			fsFail(res, error);
+		}
+	});
+
+	// New file or folder in `path` (default: the project root). `name` may be
+	// `a/b/c.txt`: the folders on the way are created.
+	route("POST", "/api/sessions/:id/fs/create", async (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		let parsed: { path?: string; name?: string; type?: string };
+		try {
+			parsed = JSON.parse(await readBody(req));
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		if (parsed.type !== "file" && parsed.type !== "dir")
+			return json(res, { error: 'type must be "file" or "dir"' }, 400);
+		try {
+			json(res, { ok: true, ...(await createEntry(cwd, parsed.path ?? "", parsed.name ?? "", parsed.type)) }, 201);
+		} catch (error) {
+			fsFail(res, error);
+		}
+	});
+
+	// Moves `path` into the folder `to`, keeping its name.
+	route("POST", "/api/sessions/:id/fs/move", async (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		let parsed: { path?: string; to?: string };
+		try {
+			parsed = JSON.parse(await readBody(req));
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		try {
+			json(res, { ok: true, ...(await moveEntry(cwd, parsed.path ?? "", parsed.to ?? "")) });
+		} catch (error) {
+			fsFail(res, error);
+		}
+	});
+
+	// Upload: the raw file as the request body, streamed to disk (never held in
+	// memory, so its size is bounded by the disk and `maxBytes`, not the heap),
+	// to `path` relative to the project. An existing file is a 409 unless
+	// `overwrite=1`.
+	route("PUT", "/api/sessions/:id/fs/upload", async (req, res, params) => {
+		const cwd = sessionCwd(params.id);
+		if (!cwd) return json(res, { error: "Not found" }, 404);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		try {
+			const saved = await saveUpload(cwd, req, url.searchParams.get("path") ?? "", {
+				overwrite: url.searchParams.get("overwrite") === "1",
+			});
+			json(res, { ok: true, ...saved }, 201);
+		} catch (error) {
+			fsFail(res, error);
+			// Whatever of the body is still coming isn't wanted.
+			res.on("finish", () => req.destroy());
 		}
 	});
 
 	// Attached documents (see inputs.ts) — a flat, session-scoped directory
 	// outside the project tree, so unlike /fs/* above there's no subdirectory
 	// nesting to walk and no cwd-relative path resolution needed.
-	route("GET", "/api/sessions/:id/inputs", (_req, res, params) => {
+	route("GET", "/api/sessions/:id/inputs", async (_req, res, params) => {
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
 		const dir = sessionInputsDir(params.id);
 		try {
-			const entries = readdirSync(dir, { withFileTypes: true })
-				.filter((e) => e.isFile())
-				.map((e) => {
-					let size: number | undefined;
-					try {
-						size = statSync(join(dir, e.name)).size;
-					} catch {
-						size = undefined;
-					}
-					return { name: e.name, size };
-				})
-				.sort((a, b) => a.name.localeCompare(b.name));
+			const files = (await readdir(dir, { withFileTypes: true })).filter((e) => e.isFile());
+			const entries = (
+				await Promise.all(
+					files.map(async (e) => ({
+						name: e.name,
+						size: await stat(join(dir, e.name)).then(
+							(st) => st.size,
+							() => undefined,
+						),
+					})),
+				)
+			).sort((a, b) => a.name.localeCompare(b.name));
 			json(res, { entries });
 		} catch (err) {
 			// No attachments yet is the common case, not an error — same
@@ -2281,6 +2275,27 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// threaten the heap is cut off earlier, while it streams in, by
 	// MAX_REQUEST_BODY_BYTES in readBody(); this check is the decoded-size rule.
 	const MAX_INPUT_FILE_BYTES = 25 * 1024 * 1024;
+
+	// Same name attached twice (re-upload, or two files that happen to share a
+	// name) gets a " (2)", " (3)", ... suffix rather than silently clobbering
+	// the first one — the model and the user both still have distinct files to
+	// refer to instead of one overwriting the other.
+	async function freeAttachmentName(dir: string, name: string): Promise<string> {
+		const taken = (candidate: string) =>
+			stat(join(dir, candidate)).then(
+				() => true,
+				() => false,
+			);
+		let finalName = name;
+		if (await taken(finalName)) {
+			const dot = name.lastIndexOf(".");
+			const stem = dot === -1 ? name : name.slice(0, dot);
+			const ext = dot === -1 ? "" : name.slice(dot);
+			// biome-ignore lint/performance/noAwaitInLoops: each candidate name depends on the previous one being taken
+			for (let n = 2; await taken(finalName); n++) finalName = `${stem} (${n})${ext}`;
+		}
+		return finalName;
+	}
 
 	route("POST", "/api/sessions/:id/inputs/upload", async (req, res, params) => {
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
@@ -2315,24 +2330,60 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			return json(res, { error: `File too large — max ${MAX_INPUT_FILE_BYTES / (1024 * 1024)}MB` }, 400);
 		}
 		const dir = sessionInputsDir(params.id);
-		mkdirSync(dir, { recursive: true });
-		// Same name attached twice (re-upload, or two files that happen to
-		// share a name) gets a " (2)", " (3)", ... suffix rather than silently
-		// clobbering the first one — the model and the user both still have
-		// distinct files to refer to instead of one overwriting the other.
-		let finalName = name;
-		if (existsSync(join(dir, finalName))) {
-			const dot = name.lastIndexOf(".");
-			const stem = dot === -1 ? name : name.slice(0, dot);
-			const ext = dot === -1 ? "" : name.slice(dot);
-			for (let n = 2; existsSync(join(dir, finalName)); n++) finalName = `${stem} (${n})${ext}`;
-		}
+		await mkdir(dir, { recursive: true });
+		const finalName = await freeAttachmentName(dir, name);
 		const target = join(dir, finalName);
-		writeFileSync(target, buf);
+		await writeFile(target, buf);
 		json(res, { ok: true, name: finalName, path: target, size: buf.length });
 	});
 
-	route("GET", "/api/sessions/:id/inputs/download", (req, res, params) => {
+	// The same upload without base64: the file is the request body, streamed to
+	// disk. The JSON form above holds the file three times over in memory (the
+	// text, its parse, the decoded bytes) and blocks the loop decoding it.
+	route("PUT", "/api/sessions/:id/inputs/upload", async (req, res, params) => {
+		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
+		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+		const name = basename((url.searchParams.get("name") ?? "").trim());
+		if (!name || name === "." || name === "..") return json(res, { error: "Invalid file name" }, 400);
+		if (isBlockedAttachmentName(name)) {
+			return json(res, { error: `Executable/binary files aren't accepted as attachments: "${name}"` }, 400);
+		}
+		const declared = Number(req.headers["content-length"]);
+		if (Number.isFinite(declared) && declared > MAX_INPUT_FILE_BYTES) {
+			res.on("finish", () => req.destroy());
+			return json(res, { error: `File too large — max ${MAX_INPUT_FILE_BYTES / (1024 * 1024)}MB` }, 413);
+		}
+		const dir = sessionInputsDir(params.id);
+		await mkdir(dir, { recursive: true });
+		const finalName = await freeAttachmentName(dir, name);
+		const target = join(dir, finalName);
+		const partial = `${target}.cast-part`;
+		let size = 0;
+		try {
+			await pipeline(
+				req,
+				new Transform({
+					transform(chunk: Buffer, _encoding, callback) {
+						size += chunk.length;
+						callback(size > MAX_INPUT_FILE_BYTES ? new Error("File too large") : null, chunk);
+					},
+				}),
+				createWriteStream(partial),
+			);
+			await rename(partial, target);
+			json(res, { ok: true, name: finalName, path: target, size });
+		} catch (err) {
+			await rm(partial, { force: true });
+			json(
+				res,
+				{ error: err instanceof Error ? err.message : String(err) },
+				size > MAX_INPUT_FILE_BYTES ? 413 : 400,
+			);
+			res.on("finish", () => req.destroy());
+		}
+	});
+
+	route("GET", "/api/sessions/:id/inputs/download", async (req, res, params) => {
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
 		const dir = sessionInputsDir(params.id);
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
@@ -2346,7 +2397,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		}
 		const target = join(dir, name);
 		try {
-			const st = statSync(target);
+			const st = await stat(target);
 			if (!st.isFile()) return json(res, { error: "Not a file" }, 400);
 			const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
 			const inline = url.searchParams.get("inline") === "1";
@@ -2355,13 +2406,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				"Content-Length": st.size,
 				"Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${name.replace(FILENAME_QUOTE_RE, "")}"; filename*=UTF-8''${encodeURIComponent(name)}`,
 			});
-			createReadStream(target).pipe(res);
+			await pipeline(createReadStream(target), res).catch(() => {});
 		} catch (err) {
 			if (!res.headersSent) json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+			else res.destroy();
 		}
 	});
 
-	route("DELETE", "/api/sessions/:id/inputs", (req, res, params) => {
+	route("DELETE", "/api/sessions/:id/inputs", async (req, res, params) => {
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
 		const dir = sessionInputsDir(params.id);
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
@@ -2370,7 +2422,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			return json(res, { error: "Refusing to delete this path" }, 400);
 		}
 		try {
-			rmSync(join(dir, name), { force: false });
+			await rm(join(dir, name), { force: false });
 			json(res, { ok: true });
 		} catch (err) {
 			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
@@ -2382,14 +2434,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// tool once it exists, so gating it behind the same Basic Auth as
 	// everything else (rather than a separate allowed-root) is consistent
 	// with the rest of this API's trust boundary.
-	route("GET", "/api/browse", (req, res) => {
+	route("GET", "/api/browse", async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const requested = url.searchParams.get("path");
 		const target = resolve(requested || bridge.getConfig().cwd || homedir());
 		try {
-			const st = statSync(target);
+			const st = await stat(target);
 			if (!st.isDirectory()) throw new Error("Not a directory");
-			const entries = readdirSync(target, { withFileTypes: true })
+			const entries = (await readdir(target, { withFileTypes: true }))
 				.filter((e) => e.isDirectory() && !e.name.startsWith("."))
 				.map((e) => e.name)
 				.sort((a, b) => a.localeCompare(b))
@@ -2423,7 +2475,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const parent = resolve(parsed.path || bridge.getConfig().cwd || homedir());
 		const target = join(parent, name);
 		try {
-			mkdirSync(target);
+			await mkdir(target);
 			json(res, { ok: true, path: target });
 		} catch (err) {
 			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
@@ -2434,7 +2486,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// modal, not a deliberate "rm -rf" the user typed out. An OS ENOTEMPTY
 	// error is the safety net for a directory that still has something in it;
 	// the client surfaces it as-is rather than silently escalating to -r.
-	route("DELETE", "/api/browse", (req, res) => {
+	route("DELETE", "/api/browse", async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const target = resolve(url.searchParams.get("path") ?? "");
 		const home = homedir();
@@ -2442,7 +2494,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			return json(res, { error: "Refusing to delete this directory" }, 400);
 		}
 		try {
-			rmdirSync(target);
+			await rmdir(target);
 			json(res, { ok: true });
 		} catch (err) {
 			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
@@ -2878,6 +2930,113 @@ interface FileGroups {
 
 function emptyGroups(): FileGroups {
 	return { untracked: [], added: [], modified: [], deleted: [], renamed: [] };
+}
+
+/** Files whose diff is computed with the Changes list; the rest are fetched one by one. */
+const MAX_DIFFED_FILES = 200;
+/** Paths listed per group; a group's true size travels beside it as `groupTotals`. */
+const MAX_LISTED_PER_GROUP = 1000;
+/** Git runs this many diffs at once. */
+const DIFF_CONCURRENCY = 10;
+
+interface DiffTarget {
+	path: string;
+	args: string[];
+}
+
+interface DiffPlan {
+	path: string;
+	group: keyof FileGroups;
+	targets: DiffTarget[];
+}
+
+const diffArgs = (...rest: string[]): string[] => ["diff", "--no-color", "--unified=3", ...rest];
+
+/** What to list a `git status --porcelain` record under, and which diffs show it. */
+function planDiff(xy: string, path: string, oldPath: string | undefined): DiffPlan {
+	if (xy === "??") {
+		return { path, group: "untracked", targets: [{ path, args: diffArgs("--no-index", "--", "/dev/null", path) }] };
+	}
+	if (xy === "A ") return { path, group: "added", targets: [{ path, args: diffArgs("--staged", "--", path) }] };
+	if (xy[0] === "R") {
+		// A single-pathspec diff can't detect a rename — git has nothing to
+		// compare the new name against — so it falls back to showing the whole
+		// file as freshly added. Passing both the old and new path lets git's
+		// own rename detection populate the diff header (and DiffFile.oldPath,
+		// parsed from it) correctly.
+		const targets: DiffTarget[] = [
+			{ path: `${path}:staged`, args: diffArgs("--staged", "--", ...(oldPath ? [oldPath] : []), path) },
+		];
+		// "RM" — renamed and staged, with further unstaged edits on top.
+		if (xy[1] === "M") targets.push({ path, args: diffArgs("--", path) });
+		return { path, group: "renamed", targets };
+	}
+	if (xy === "D " || xy === " D") {
+		return {
+			path,
+			group: "deleted",
+			targets: [{ path, args: xy[0] === " " ? diffArgs("--", path) : diffArgs("--staged", "--", path) }],
+		};
+	}
+	if (xy[0] === "M" || xy[1] === "M" || xy === "AM") {
+		const targets: DiffTarget[] = [];
+		// Unstaged diff (working tree vs index)
+		if (xy[1] === "M" || xy[1] === " ") targets.push({ path, args: diffArgs("--", path) });
+		// Staged diff (index vs HEAD) — append suffix to avoid key collision
+		if (xy[0] === "M" || xy[0] === "A") {
+			targets.push({ path: `${path}:staged`, args: diffArgs("--staged", "--", path) });
+		}
+		return { path, group: "modified", targets };
+	}
+	// Catch-all: anything else with changes goes to modified
+	return { path, group: "modified", targets: [{ path, args: diffArgs("--", path) }] };
+}
+
+/** Every changed path in `git status --porcelain -z -u` output, planned. */
+function planDiffs(status: string): DiffPlan[] {
+	const plans: DiffPlan[] = [];
+	const records = status.split("\0");
+	for (let r = 0; r < records.length; r++) {
+		const line = records[r] as string;
+		if (line.length < 4) continue;
+		const xy = line.slice(0, 2);
+		const path = line.slice(3);
+		// The old name of a rename/copy travels as the next record.
+		const oldPath = xy[0] === "R" || xy[0] === "C" ? records[++r] : undefined;
+		if (path.startsWith(".cast/") || path.includes("/.cast/")) continue;
+		plans.push(planDiff(xy, path, oldPath));
+	}
+	return plans;
+}
+
+/** Runs the diffs, `DIFF_CONCURRENCY` git processes at a time. */
+async function runDiffTargets(
+	targets: DiffTarget[],
+	gitDiff: (args: string[]) => Promise<string>,
+): Promise<DiffFile[]> {
+	const files: DiffFile[] = [];
+	for (let i = 0; i < targets.length; i += DIFF_CONCURRENCY) {
+		const batch = targets.slice(i, i + DIFF_CONCURRENCY);
+		// biome-ignore lint/performance/noAwaitInLoops: the await *is* the concurrency cap — one Promise.all over every target would spawn a git process per changed file at once.
+		const results = await Promise.all(
+			batch.map(async (target) => {
+				try {
+					return parseDiff(await gitDiff(target.args)).files;
+				} catch {
+					return [] as DiffFile[];
+				}
+			}),
+		);
+		for (let j = 0; j < results.length; j++) {
+			for (const file of results[j] as DiffFile[]) {
+				const target = batch[j] as DiffTarget;
+				// Unstrip the :staged suffix we added for collision avoidance
+				if (target.path.endsWith(":staged")) file.path = target.path.slice(0, -7);
+				files.push(file);
+			}
+		}
+	}
+	return files;
 }
 
 function parseDiff(raw: string): { files: DiffFile[] } {
