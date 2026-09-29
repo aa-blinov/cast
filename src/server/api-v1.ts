@@ -29,7 +29,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "GET",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|diff\/file|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
+			/^\/api\/sessions\/[^/]+(\/(history|events|events\/history|image|audio|diff|diff\/file|undo|reasoning-options|fs|fs\/search|fs\/download|inputs|inputs\/download))?$/,
 	},
 	{ method: "DELETE", legacyPath: /^\/api\/sessions\/[^/]+(\/(permanent|share|fs|inputs))?$/ },
 	{
@@ -308,6 +308,15 @@ const additionalApiV1Paths: OpenApiObject = {
 				"The diff endpoint lists every change but carries hunks for only the first few hundred files; this returns the hunks of one path.",
 			parameters: [idParameter, { name: "path", in: "query", required: true, schema: { type: "string" } }],
 			responses: { "200": jsonResponse("Diff of one file", { type: "object" }), "400": errorResponse },
+		},
+	},
+	"/api/v1/sessions/{id}/undo": {
+		get: {
+			summary: "Preview what undoing the last turn would do",
+			description:
+				"Nothing is changed. available says whether /undo can run now (reason says why not). kind is git, snapshot or files: how the folder is restored, and shellChangesCovered is false when only edit/write changes come back. removedMessage and removedMessages name what leaves the conversation. lost lists (at most 20 of lostTotal) the files created since the checkpoint that the restore deletes; POST the command /undo --force to proceed when it is not empty.",
+			parameters: [idParameter],
+			responses: { "200": jsonResponse("Undo preview", { type: "object" }), "404": errorResponse },
 		},
 	},
 	"/api/v1/sessions/{id}/reasoning-options": {

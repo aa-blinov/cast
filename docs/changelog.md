@@ -4,7 +4,14 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Added
+
+- **An undo button and a dialog that says what it does.** In the web UI the last message you sent has an undo button. It opens a dialog that names the message that will go and how many messages with it, says how the files are restored, and lists the files it would delete, then asks; the button is named Undo. A typed `/undo` opens the same dialog, and only `/undo --force` skips it. Before, the web answered with an error asking you to re-run as `/undo --force`. `GET /api/v1/sessions/{id}/undo` returns the same preview.
+
 ### Fixed
+
+- **An undone turn came back after a reload.** `/undo` (in the TUI and the web UI) rewound the files and removed the turn from the conversation in memory only: the saved history was never shortened, so the turn, its replies and its search hits reappeared on the next page load or restart while the files stayed rewound. The messages are now deleted from the store as well.
+- **`/undo` no longer stalls the daemon.** Checking what it would delete and restoring took 73 and 117ms on a 30 000-file repository, synchronously, with every session waiting; both are async now. A message sent while an undo is rewinding the folder waits instead of starting a turn on it.
 
 - **`/undo` restored less than it claimed.** In a git repository it did not bring back a file that git ignores (`.env`, build output) and that the agent had edited or created with `edit`/`write`, nor a file outside a subfolder session's directory; both are now backed up and restored. Its snapshot was a commit that nothing pointed to, so `git gc` deleted it after two weeks and `/undo` on an older session failed; each snapshot now has a ref under `refs/cast/checkpoints/`, released when it is restored or the session is deleted. A failed restore in the daemon also dropped the checkpoint from memory, so a second try said there was nothing to undo until a restart.
 - **`/undo` outside git now undoes shell commands too.** Without git it only had a copy of each file `edit` and `write` touched, so `sed -i`, `rm`, `mv` or a generator stayed applied, and the message said "Restored 3 file(s)" anyway; sandbox sessions, the default start in the web UI, are never repositories. The folder is now committed each turn to a hidden repository under `~/.cast/shadow` (deduplicated by git, so a turn that changed one file costs one file), and `/undo` restores it, including files a command created or deleted; dependency and build folders (`node_modules`, `dist`, ...) are left alone. Folders over 3000 files or 50MB, the home directory and `/` are not snapshotted, and `/undo` there says that shell changes are not undone. The hidden repository is deleted with the session.

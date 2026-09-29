@@ -943,6 +943,41 @@ function persistedMessageSeq(sessionId: string, message: Message): number | unde
 	return row?.seq;
 }
 
+/**
+ * Deletes `fromMessage` and every message stored after it: what /undo takes
+ * back. saveSession only ever appends, so a conversation shortened in memory
+ * came back in full on the next load (the undone turn reappeared after a page
+ * reload or a daemon restart, with the files already rewound). Returns how
+ * many rows went.
+ */
+export function deleteMessagesFrom(session: SessionState, fromMessage: Message): number {
+	const db = getDb();
+	const seq = persistedMessageSeq(session.id, fromMessage);
+	if (seq === undefined) return 0;
+	const run = (): number => {
+		const removed = Number(
+			db.prepare("DELETE FROM messages WHERE session_id = ? AND seq >= ?").run(session.id, seq).changes,
+		);
+		// A watermark that names a deleted message would claim coverage of history that is gone.
+		db.prepare(
+			`UPDATE sessions SET checkpoint_watermark_message_id = NULL
+			 WHERE id = ? AND checkpoint_watermark_message_id IS NOT NULL
+			   AND NOT EXISTS (SELECT 1 FROM messages WHERE session_id = ? AND message_id = sessions.checkpoint_watermark_message_id)`,
+		).run(session.id, session.id);
+		return removed;
+	};
+	if (db.isTransaction) return run();
+	db.exec("BEGIN IMMEDIATE");
+	try {
+		const removed = run();
+		db.exec("COMMIT");
+		return removed;
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
+	}
+}
+
 function persistedMessageId(sessionId: string, message: Message): string | undefined {
 	const serialized = JSON.stringify(message);
 	const known = messageMessageId.get(message);

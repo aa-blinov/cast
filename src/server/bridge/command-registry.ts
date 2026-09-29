@@ -49,7 +49,6 @@ const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
 const WORKTREE_FORCE_FLAG_RE = /(^|\s)(--force|-f)(\s|$)/;
 const WORKTREE_FORCE_STRIP_RE = /(^|\s)(--force|-f)(?=\s|$)/g;
 
-import { filesLostByRestore, restoreCheckpoint } from "../../core/checkpoint.ts";
 import type { AppConfig, ModelInfo } from "../../core/config.ts";
 import { fetchModels, probeProvider } from "../../core/config.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
@@ -75,13 +74,7 @@ import {
 import { setModelsCache } from "../../core/readline.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
-import {
-	addUsage,
-	clearSessionMessages,
-	dropLastCheckpoint,
-	listSubagentSessions,
-	recordCompaction,
-} from "../../core/session.ts";
+import { addUsage, clearSessionMessages, listSubagentSessions, recordCompaction } from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import {
 	checkpointFork,
@@ -111,6 +104,7 @@ import { ALL_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
+import { undoLastTurn } from "./undo.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -1728,48 +1722,10 @@ const commandHandlers: Record<string, CommandHandler> = {
 	},
 	"/reload": ({ ws, cwd, reloadBridgeState }) => reloadBridgeState(ws.session.cwd ?? cwd),
 	"/evolve": ({ ws, evolveSkills }) => evolveSkills(ws),
-	"/undo": ({ ws, arg, saveSession, broadcaster }) => {
-		const checkpoints = ws.session.checkpoints || [];
-		if (checkpoints.length === 0) return { ok: false, error: "No checkpoint available to undo" };
-		const lastCheckpoint = checkpoints[checkpoints.length - 1]!;
-		// `git clean -fd` runs as part of the restore and takes untracked
-		// files created after the checkpoint with it — including anything the
-		// user wrote while the agent worked. There is no picker on this path,
-		// so name them and refuse; `/undo --force` proceeds.
-		const lost = filesLostByRestore(lastCheckpoint);
-		if (lost.length > 0 && !arg.includes("--force") && !arg.includes("-f")) {
-			const shown = lost.slice(0, 10).join(", ");
-			const more = lost.length > 10 ? `, and ${lost.length - 10} more` : "";
-			return {
-				ok: false,
-				error: `Undo would delete ${lost.length} file(s) created since the checkpoint (${shown}${more}). Re-run as "/undo --force" to proceed.`,
-			};
-		}
-		const res = restoreCheckpoint(lastCheckpoint);
-		if (!res.ok) return { ok: false, error: `Undo failed: ${res.message}` };
-		// Popped only now, and from the live array: taking it off first meant a
-		// failed restore lost the checkpoint here (the store still had it) and the
-		// user could not retry until the daemon restarted.
-		checkpoints.pop();
-		// Drop the matching row so the persisted list stays in sync.
-		dropLastCheckpoint(ws.session.id);
-
-		const msgs = ws.session.messages;
-		let lastUserIdx = -1;
-		for (let i = msgs.length - 1; i >= 0; i--) {
-			if (msgs[i]?.role === "user") {
-				lastUserIdx = i;
-				break;
-			}
-		}
-		if (lastUserIdx !== -1) {
-			ws.session.messages = msgs.slice(0, lastUserIdx);
-		}
-		ws.session.checkpoints = checkpoints;
-		saveSession(ws.session);
-		broadcaster.broadcastSessionUpdate(ws);
-		return { ok: true, result: `Undone: ${res.message}` };
-	},
+	"/undo": ({ ws, arg, saveSession, broadcaster }) =>
+		undoLastTurn(ws, { force: arg.includes("--force") || arg.includes("-f"), saveSession }, () =>
+			broadcaster.broadcastSessionUpdate(ws),
+		),
 	"/worktree": async (ctx) => {
 		const {
 			ws,

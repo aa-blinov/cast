@@ -884,6 +884,58 @@ describe("web bridge", () => {
 		expect(result).toEqual({ ok: false, error: "No checkpoint available to undo" });
 	});
 
+	it("/undo removes the turn from the store, so it does not come back on reload", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.messages = [
+			{ role: "user", content: "first" },
+			{ role: "assistant", content: "one" },
+			{ role: "user", content: "second" },
+			{ role: "assistant", content: "two" },
+		] as never;
+		saveSession(ws.session);
+		ws.session.checkpoints = [{ id: "chk-shadow", timestamp: "", cwd: ws.session.cwd ?? "", backups: [] }];
+		const result = await bridge.executeCommand(ws.id, "/undo");
+		expect(result.ok).toBe(true);
+		expect(ws.session.messages.map((m) => m.content)).toEqual(["first", "one"]);
+		expect(loadSession(ws.id)?.messages.map((m) => m.content)).toEqual(["first", "one"]);
+	});
+
+	it("previews an undo: what goes, and that it can't run while a turn is", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect(await bridge.previewUndo("nope")).toBeUndefined();
+		expect((await bridge.previewUndo(ws.id))?.available).toBe(false);
+
+		ws.session.messages = [
+			{ role: "user", content: "fix   the\nbug" },
+			{ role: "assistant", content: "done" },
+		] as never;
+		ws.session.checkpoints = [{ id: "chk-shadow", timestamp: "", cwd: ws.session.cwd ?? "", backups: [] }];
+		const preview = await bridge.previewUndo(ws.id);
+		expect(preview).toMatchObject({
+			available: true,
+			kind: "files",
+			shellChangesCovered: false,
+			removedMessage: "fix the bug",
+			removedMessages: 2,
+			lostTotal: 0,
+		});
+
+		ws.status = "running";
+		expect(await bridge.previewUndo(ws.id)).toMatchObject({
+			available: false,
+			reason: expect.stringMatching(/still working/),
+		});
+	});
+
+	it("refuses a message while an undo is rewinding the folder", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.undoing = true;
+		await expect(bridge.submit(ws.id, "hello")).rejects.toThrow(/undo is in progress/i);
+	});
+
 	it("/undo keeps the checkpoint when the restore fails, so it can be retried", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

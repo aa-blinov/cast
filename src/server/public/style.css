@@ -207,6 +207,8 @@ body.resizing-sidebar * { user-select: none; }
 	padding: 16px 14px 4px;
 	font-size: var(--fs-body);
 	color: var(--text);
+	/* Some confirmations (undo) are several short paragraphs. */
+	white-space: pre-line;
 	/* Same reason as .modal-status-body — a long message (a path-heavy confirm)
 	   would otherwise run past the bottom edge. */
 	min-height: 0;

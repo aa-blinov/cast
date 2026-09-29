@@ -169,6 +169,7 @@ export {
 	toDisplayMessages,
 } from "./bridge/display.ts";
 
+import { previewUndo, type UndoPreview } from "./bridge/undo.ts";
 import { isCommandBlocking, SLASH_COMMANDS } from "./commands.ts";
 
 export { type EvolveSkillSuggestion, parseEvolveJson, parseSuggestionJson } from "./bridge/parsers.ts";
@@ -253,6 +254,8 @@ export interface PendingBashConfirm {
 export interface WebAgentSession {
 	id: string;
 	session: SessionState;
+	/** True while /undo is rewinding the folder: a message sent now must wait. */
+	undoing?: boolean;
 	/** Per-session override of the bridge-wide permission mode. Set by a
 	 * client that created the session with one (`cast run
 	 * --bypass-permissions`), which otherwise had nowhere to go: the flag never
@@ -392,6 +395,8 @@ export interface ServerBridge {
 	 *  handlers: building the cold list is 85ms and growing on a real store, on
 	 *  the one thread every session shares. */
 	listSessionsAsync(): Promise<SessionSummary[]>;
+	/** What /undo would do in this session, for a confirmation dialog; undefined for an unknown session. */
+	previewUndo(sessionId: string): Promise<UndoPreview | undefined>;
 	/** True when a turn is in progress in a live session. Cold sessions can't be
 	 *  running, so this never touches the database. */
 	hasRunningSession(): boolean;
@@ -1441,6 +1446,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (ws.session.sessionKind === "subagent") {
 			throw new Error("This is a subagent's session: continue it from its parent session.");
 		}
+		if (ws.undoing) throw new Error("An undo is in progress: send again in a moment.");
 		if (clientMessageId) {
 			if (ws.acceptedClientMessageIds.has(clientMessageId)) return;
 			const alreadyPersisted = hasRecentClientMessageId(ws.id, clientMessageId);
@@ -2871,6 +2877,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return withColdSessions(await listSessionSummariesAsync());
 	}
 
+	async function previewUndoFor(sessionId: string): Promise<UndoPreview | undefined> {
+		const ws = sessions.get(sessionId);
+		return ws ? previewUndo(ws) : undefined;
+	}
+
 	function hasRunningSession(): boolean {
 		for (const ws of sessions.values()) if (ws.status === "running") return true;
 		return false;
@@ -3564,6 +3575,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		lastActivityAt: () => lastActivityAtRef.value,
 		listSessions,
 		listSessionsAsync,
+		previewUndo: previewUndoFor,
 		hasRunningSession,
 		searchSessions,
 		searchSessionsAsync,
