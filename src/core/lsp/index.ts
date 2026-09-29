@@ -29,7 +29,9 @@ const restarts = new Map<string, number>();
 let reaper: NodeJS.Timeout | undefined;
 let exitHooked = false;
 
+/** `lsp: false` in settings, or CAST_LSP=off for one run (CI, the test suite). */
 export function lspEnabled(): boolean {
+	if (process.env.CAST_LSP === "off" || process.env.CAST_LSP === "0") return false;
 	return loadSettings().lsp !== false;
 }
 

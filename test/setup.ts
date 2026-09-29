@@ -25,6 +25,10 @@ if (!process.env.CAST_SESSIONS_DB) {
 	process.env.CAST_SESSIONS_DB = join(tmpdir(), "cast-test-sessions.db");
 	originalEnvironment.CAST_SESSIONS_DB = process.env.CAST_SESSIONS_DB;
 }
+// A read or an edit starts the file's language server, and may install one
+// (npm, go install, a GitHub download): never from the suite. test/lsp.test.ts
+// turns it back on against its own fake server.
+process.env.CAST_LSP = "off";
 let testEnvironment: TestEnvironment | undefined;
 
 beforeEach(() => {

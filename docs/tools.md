@@ -94,7 +94,7 @@ The `lsp` tool asks the same servers directly. Positions are 1-based, as `read` 
 | `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls` | who calls the function at the cursor, and what it calls |
 | `diagnostics` | the compiler's errors and warnings for the file, without a build |
 
-A server starts the first time a file needs it, one per project root, and is shared by every session; one idle for 10 minutes is stopped. Servers run without the credentials in cast's environment (API keys, tokens), and are not handed files over 4MB. Reading a file starts its server in the background. A server that crashes is restarted, twice at most. `/lsp` shows which servers run and why others don't; `cast lsp <operation> <file> [line character | query]` asks one from the shell.
+A server starts the first time a file needs it, one per project root, and is shared by every session; one idle for 10 minutes is stopped. Servers run without the credentials in cast's environment (API keys, tokens), and are not handed files over 4MB. Reading a file starts its server in the background. A server that crashes is restarted, twice at most. The web UI's Status window (the ⓘ button) lists the running servers; in the TUI, turn on the Language servers segment in `/statusbar` to see them (`lsp typescript`). `/lsp` shows which servers run and why others don't; `cast lsp <operation> <file> [line character | query]` asks one from the shell.
 
 | Language | Server | Found |
 |----------|--------|-------|
@@ -106,7 +106,7 @@ A server starts the first time a file needs it, one per project root, and is sha
 | ESLint, oxlint, Biome | the project's own linter as a server (its config and plugins apply) | when the project has it |
 | Deno, Ruby, C#, F#, Java, Kotlin, Swift, Elixir, Dart, OCaml, Haskell, Gleam, Clojure, Nix, Julia, Terraform | deno, ruby-lsp/rubocop, roslyn/csharp-ls, fsautocomplete, jdtls, kotlin-lsp, sourcekit-lsp, elixir-ls, dart, ocamllsp, haskell-language-server, gleam, clojure-lsp, nixd, julia, terraform-ls | `PATH` |
 
-"Installed" means cast installs the npm package into `~/.cast/lsp` on first use (`npm install --ignore-scripts`, no install hooks run); "downloaded" means the server's latest GitHub release for your OS and CPU, into `~/.cast/lsp/bin`. Turn that off with `lspAutoInstall: false`, and language servers altogether with `lsp: false`. Add a server, or change a built-in one, in `lspServers`:
+"Installed" means cast installs the npm package into `~/.cast/lsp` on first use (`npm install --ignore-scripts`, no install hooks run); "downloaded" means the server's latest GitHub release for your OS and CPU, into `~/.cast/lsp/bin`. Turn that off with `lspAutoInstall: false`, and language servers altogether with `lsp: false` (or `CAST_LSP=off` for one run, as in CI). Add a server, or change a built-in one, in `lspServers`:
 
 ```json
 {

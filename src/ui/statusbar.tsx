@@ -32,6 +32,8 @@ export interface SegmentContext {
 	messages: import("../core/llm.ts").Message[];
 	sessionId: string;
 	worktree?: string;
+	/** Language servers running for this cast (ids), for the `lsp` segment. */
+	lspServers?: string[];
 }
 
 // ============================================================================
@@ -63,6 +65,55 @@ export function getStatusBarSegments(): readonly StatusBarSegment[] {
 	return segments;
 }
 
+/**
+ * Which segments go first when the bar is wider than the terminal: the least
+ * useful at a glance first. Mode, model and the running time stay longest.
+ * A segment not listed (a plugin's) goes before all of these.
+ */
+export const SEGMENT_DROP_ORDER = [
+	"session",
+	"subagent",
+	"speed",
+	"cost",
+	"lsp",
+	"usage",
+	"context",
+	"worktree",
+	"persona",
+	"model",
+	"mode",
+	"elapsed",
+];
+
+/**
+ * The segments that fit `columns`, whole: cutting one mid-text (`Senior
+ * Developer │ …ctx`) lost the mode and model while keeping the token count.
+ * Widths come from each segment's plain text; ` │ ` joins a group, and one
+ * column separates the two groups.
+ */
+export function fitSegments<T extends { id: string; text: string; side: "left" | "right" }>(
+	items: T[],
+	columns: number,
+	width: (text: string) => number,
+): T[] {
+	const kept = [...items];
+	const total = () => {
+		let sum = 0;
+		for (const side of ["left", "right"] as const) {
+			const group = kept.filter((i) => i.side === side);
+			if (group.length) sum += group.reduce((acc, i) => acc + width(i.text), 0) + 3 * (group.length - 1);
+		}
+		return sum + (kept.some((i) => i.side === "left") && kept.some((i) => i.side === "right") ? 1 : 0);
+	};
+	const rank = (id: string) => SEGMENT_DROP_ORDER.indexOf(id);
+	while (kept.length > 1 && total() > columns) {
+		let drop = 0;
+		for (let i = 1; i < kept.length; i++) if (rank(kept[i]!.id) < rank(kept[drop]!.id)) drop = i;
+		kept.splice(drop, 1);
+	}
+	return kept;
+}
+
 /** Default config derived from registry defaults. */
 export function defaultStatusBarConfig(): StatusBarConfig {
 	const all = getStatusBarSegments();
@@ -86,6 +137,7 @@ export const SEGMENT_MAX_WIDTH: Record<string, number> = {
 	speed: 12,
 	elapsed: 7,
 	subagent: 9,
+	lsp: 20,
 };
 
 // ============================================================================
@@ -228,6 +280,18 @@ registerStatusBarSegment({
 		const tps = ctx.lastTurnUsage?.tokensPerSecond;
 		return tps ? `${tps.toFixed(1)} tok/s` : null;
 	},
+});
+
+registerStatusBarSegment({
+	id: "lsp",
+	label: "Language servers",
+	defaultOn: false,
+	side: "right",
+	render: (ctx) => {
+		if (!ctx.lspServers?.length) return null;
+		return <Text color={theme().muted}>lsp {ctx.lspServers.join(",")}</Text>;
+	},
+	formatValue: (ctx) => (ctx.lspServers?.length ? ctx.lspServers.join(", ") : null),
 });
 
 registerStatusBarSegment({
