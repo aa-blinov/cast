@@ -41,9 +41,16 @@ function likePrefix(path: string): string {
  */
 const MAX_QUERY_TERMS = 32;
 
+// Russian function words (в, на, по, и, с, ...): two letters at most, all Cyrillic.
+// OR-ed into the match they hit almost every message, and a real question
+// ("поиск по файлам") ranked "замечаний по этим файлам" above what was asked.
+// Two-letter Latin terms (db, ui, ci) stay: those are identifiers.
+const SHORT_CYRILLIC_RE = /^[\u0400-\u04FF]{1,2}$/u;
+
 function buildSearchQuery(raw: string): string {
 	const tokens = raw.match(/[\p{L}\p{N}_]+/gu) ?? [];
-	return [...new Set(tokens)]
+	const meaningful = tokens.filter((token) => !SHORT_CYRILLIC_RE.test(token));
+	return [...new Set(meaningful.length > 0 ? meaningful : tokens)]
 		.slice(0, MAX_QUERY_TERMS)
 		.map((token) => `"${token.replaceAll('"', '""')}"`)
 		.join(" OR ");
@@ -71,6 +78,7 @@ function historyRequest(
 	query: string,
 	limit: number,
 	scope: "project" | "global",
+	excludeSessionId?: string,
 ): { sql: string; params: (string | number)[] } | null {
 	const ftsQuery = buildSearchQuery(query);
 	if (!ftsQuery) return null;
@@ -82,7 +90,7 @@ function historyRequest(
 			FROM session_history_fts
 			JOIN messages AS m ON m.session_id = session_history_fts.session_id AND m.seq = session_history_fts.seq
 			JOIN sessions AS s ON s.id = m.session_id
-			WHERE session_history_fts MATCH ? ${scope === "project" ? "AND (s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')" : ""}
+			WHERE session_history_fts MATCH ? ${scope === "project" ? "AND (s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')" : ""}${excludeSessionId ? " AND m.session_id != ?" : ""}
 			ORDER BY score DESC, s.updated_at DESC, m.seq DESC
 			LIMIT ?`,
 		// "project" means the whole checkout, not this one directory: an
@@ -91,6 +99,7 @@ function historyRequest(
 		// a project's history once any work happens in subdirectories.
 		params: [
 			...(scope === "project" ? [ftsQuery, projectRoot, `${likePrefix(projectRoot)}/%`] : [ftsQuery]),
+			...(excludeSessionId ? [excludeSessionId] : []),
 			Math.max(1, Math.min(limit, MAX_RESULTS)) * CANDIDATE_FACTOR,
 		],
 	};
@@ -123,8 +132,9 @@ export function searchSessionHistory(
 	query: string,
 	limit = MAX_RESULTS,
 	scope: "project" | "global" = "project",
+	excludeSessionId?: string,
 ): SessionHistorySearchResult[] {
-	const request = historyRequest(cwd, query, limit, scope);
+	const request = historyRequest(cwd, query, limit, scope, excludeSessionId);
 	if (!request) return [];
 	return toResults(
 		getDb()
@@ -145,17 +155,18 @@ export async function searchSessionHistoryAsync(
 	query: string,
 	limit = MAX_RESULTS,
 	scope: "project" | "global" = "project",
+	excludeSessionId?: string,
 ): Promise<SessionHistorySearchResult[]> {
-	const request = historyRequest(cwd, query, limit, scope);
+	const request = historyRequest(cwd, query, limit, scope, excludeSessionId);
 	if (!request) return [];
 	// Opens (and migrates) the store on the main connection first: the worker only reads.
 	getDb();
 	const path = sessionsDbPath();
-	if (path === ":memory:") return searchSessionHistory(cwd, query, limit, scope);
+	if (path === ":memory:") return searchSessionHistory(cwd, query, limit, scope, excludeSessionId);
 	try {
 		return toResults((await queryReadOnly(path, request.sql, request.params)) as HistoryRow[], limit);
 	} catch {
-		return searchSessionHistory(cwd, query, limit, scope);
+		return searchSessionHistory(cwd, query, limit, scope, excludeSessionId);
 	}
 }
 
@@ -165,7 +176,7 @@ export function formatSessionHistoryToolResult(query: string, matches: SessionHi
 	const terms = queryTermCount(query);
 	const clipped = terms > MAX_QUERY_TERMS ? ` (searched the first ${MAX_QUERY_TERMS} of ${terms} terms)` : "";
 	if (matches.length === 0) {
-		return `No session history matched "${query.slice(0, 200)}"${clipped}. Try fewer, more distinctive terms or use memory for durable project facts.`;
+		return `No session history matched "${query.slice(0, 200)}"${clipped}. Try fewer, more distinctive terms or use memory for durable project facts. If a few different queries have found nothing, stop and tell the user it is not in the history instead of searching further.`;
 	}
 	return [
 		`Found ${matches.length} session histor${matches.length === 1 ? "y result" : "y results"}, ranked by relevance${clipped}:`,
@@ -176,7 +187,17 @@ export function formatSessionHistoryToolResult(query: string, matches: SessionHi
 	].join("\n\n");
 }
 
-export async function execSessionHistorySearch(args: Record<string, unknown>, cwd: string): Promise<ToolResult> {
+/**
+ * `currentSessionId` is left out of the results: the question the user just
+ * asked (and the answer to a previous search) is in this session's own
+ * history, so it matched its own words and took the top slots, on real
+ * questions three of eight.
+ */
+export async function execSessionHistorySearch(
+	args: Record<string, unknown>,
+	cwd: string,
+	currentSessionId?: string,
+): Promise<ToolResult> {
 	const query = typeof args.query === "string" ? args.query : "";
 	if (!query.trim()) return { content: "Session history search requires a non-empty query.", isError: true };
 	// `Number(args.limit) || MAX_RESULTS` accepted anything: a negative limit
@@ -207,7 +228,13 @@ export async function execSessionHistorySearch(args: Record<string, unknown>, cw
 	return {
 		content: formatSessionHistoryToolResult(
 			query,
-			await searchSessionHistoryAsync(cwd, query, limit, args.scope === "global" ? "global" : "project"),
+			await searchSessionHistoryAsync(
+				cwd,
+				query,
+				limit,
+				args.scope === "global" ? "global" : "project",
+				currentSessionId,
+			),
 		),
 	};
 }

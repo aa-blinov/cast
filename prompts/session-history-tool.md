@@ -4,7 +4,7 @@ This searches the raw conversation transcripts (full-text, BM25), deliberately s
 
 - `scope=project` (default) searches only sessions in the current working directory.
 - `scope=global` searches across every project — use it for questions about anything you ever worked on, not just the current repo.
-- Search with one to three distinctive terms (a function name, id, unusual error, exact number). A no-result search is not proof it never happened — retry with fewer or different terms first.
+- Search with one to three distinctive terms (a function name, id, unusual error, exact number). A no-result search is not proof it never happened, so retry once or twice with fewer or different terms, in the language the work was done in. After about three different queries with nothing relevant, stop searching and tell the user it is not in the history: the work may have been in a session that was compacted, or never written down.
 
 ## Rules for answering from history — do NOT fabricate
 
