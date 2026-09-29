@@ -1547,12 +1547,19 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	.code-copy-btn, .dir-item-delete,
 	.fs-row-actions { opacity: 1; }
 }
-@media (pointer: coarse) {
-	/* iOS zooms into any focused field under 16px, and with pinch zoom allowed
-	 * that zoom stays after the keyboard closes. !important because it is a
-	 * floor over every per-field class size (.composer-input is .85rem). */
-	input, textarea, select { font-size: max(16px, 1rem) !important; }
+/* iOS zooms into any focused field under 16px, and with pinch zoom allowed
+ * that zoom stays after the keyboard closes. !important because it is a
+ * floor over every per-field class size (.composer-input is .85rem).
+ * Only iOS does it (-webkit-touch-callout is WebKit-on-iOS only): on Android
+ * the floor just made every field, and the composer most of all, larger than
+ * the chat text next to it. */
+@supports (-webkit-touch-callout: none) {
+	@media (pointer: coarse) {
+		input, textarea, select { font-size: max(16px, 1rem) !important; }
+	}
+}
 
+@media (pointer: coarse) {
 	/* Stand-alone controls grow to a real 44px target. */
 	.header-btn, .menu-toggle, .composer-send, .composer-abort, .composer-attach,
 	.modal-close, .verify-btn, .sidebar-logout, .new-session-btn, .new-session-btn-quick,
@@ -1574,6 +1581,37 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 		width: max(100%, 44px); height: max(100%, 44px);
 		transform: translate(-50%, -50%);
 	}
+}
+
+/* The composer on a phone. Three 44px buttons and roomy padding left the field
+ * 176px of a 358px row and the whole block ~100px of the screen. The buttons
+ * keep their 36px look and a 44px touch target (the ::after, as elsewhere in
+ * this file), and the padding tightens. */
+@media (pointer: coarse) and (max-width: 768px) {
+	.composer {
+		padding: 6px 8px;
+		gap: 4px;
+		margin-bottom: max(8px, env(safe-area-inset-bottom));
+		margin-left: max(10px, env(safe-area-inset-left));
+		margin-right: max(10px, env(safe-area-inset-right));
+	}
+	.composer-input { padding: 6px 4px; }
+	.composer-send, .composer-abort, .composer-attach {
+		min-width: 36px; min-height: 36px;
+		position: relative;
+	}
+	.composer-send::after, .composer-abort::after, .composer-attach::after {
+		content: "";
+		position: absolute;
+		top: 50%; left: 50%;
+		width: 44px; height: 44px;
+		transform: translate(-50%, -50%);
+	}
+	.composer-role, .pending-items, .composer-images {
+		padding-left: max(10px, env(safe-area-inset-left));
+		padding-right: max(10px, env(safe-area-inset-right));
+	}
+	.scroll-bottom-btn { bottom: 76px; }
 }
 
 /* ── Reduced motion ──────────────────────────────────────────────── */

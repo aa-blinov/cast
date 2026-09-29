@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Changed
+
+- **A smaller message box on a phone.** The web composer took ~100px of the screen: three 44px buttons left the field 176px wide, and its font was forced to 16px everywhere. The buttons keep a 44px touch target but look 36px, the padding is tighter (the box is 50px, the field 238px wide), and the 16px floor now applies only on iOS, where a smaller font makes the page zoom on focus. On Android the field uses the chat's own text size.
+
 ## 0.48.0
 
 ### Added
