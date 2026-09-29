@@ -6,12 +6,13 @@ import type { DatabaseSync } from "node:sqlite";
 import type { TurnCheckpoint } from "./checkpoint.ts";
 import { type AppConfig, inputTokenBudget } from "./config.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
-import { getDb } from "./db.ts";
+import { getDb, sessionsDbPath } from "./db.ts";
 import { clearGoal } from "./goal.ts";
 import type { Message, Usage } from "./llm.ts";
 import { sessionMemoryDir } from "./memory-files.ts";
 import type { PlanQuestion, PlanTransition } from "./plan.ts";
 import { deriveSessionTitle } from "./session-title.ts";
+import { queryReadOnly } from "./sqlite-reader.ts";
 import { extractSystemReminders } from "./system-reminder.ts";
 import type { TodoItem } from "./todo.ts";
 
@@ -2077,7 +2078,7 @@ export function getFirstUserMessage(subject: { messages: Message[] }): string {
  *  (idx_messages_role for user/assistant counts, MIN(seq) index lookup for
  *  the first user message) — two queries per call regardless of history
  *  depth. perf: 218-session DB drops from ~424 ms TTFB to well under 50 ms. */
-function buildSummaries(db: DatabaseSync, rows: SessionRow[]): SessionSummary[] {
+function* summariesPlan(rows: SessionRow[]): SqlPlan<SessionSummary[]> {
 	if (rows.length === 0) return [];
 	const ids = rows.map((r) => r.id);
 	const placeholders = ids.map(() => "?").join(",");
@@ -2086,20 +2087,20 @@ function buildSummaries(db: DatabaseSync, rows: SessionRow[]): SessionSummary[] 
 	// is computed in JS below by subtracting the indexed tool-call count.
 	const userCountById = new Map<string, number>();
 	const asstCountById = new Map<string, number>();
-	const userCountStmt = db.prepare(
-		`SELECT session_id, COUNT(*) AS c FROM messages
+	for (const r of (yield {
+		sql: `SELECT session_id, COUNT(*) AS c FROM messages
 		 WHERE session_id IN (${placeholders}) AND role = 'user'
 		 GROUP BY session_id`,
-	);
-	for (const r of userCountStmt.all(...ids) as Array<{ session_id: string; c: number }>) {
+		params: ids,
+	}) as Array<{ session_id: string; c: number }>) {
 		userCountById.set(r.session_id, r.c);
 	}
-	const asstCountStmt = db.prepare(
-		`SELECT session_id, COUNT(*) AS c FROM messages
+	for (const r of (yield {
+		sql: `SELECT session_id, COUNT(*) AS c FROM messages
 		 WHERE session_id IN (${placeholders}) AND role = 'assistant'
 		 GROUP BY session_id`,
-	);
-	for (const r of asstCountStmt.all(...ids) as Array<{ session_id: string; c: number }>) {
+		params: ids,
+	}) as Array<{ session_id: string; c: number }>) {
 		asstCountById.set(r.session_id, r.c);
 	}
 	// Assistant messages whose content_json.tool_calls is a non-empty array
@@ -2108,28 +2109,28 @@ function buildSummaries(db: DatabaseSync, rows: SessionRow[]): SessionSummary[] 
 	// the same "exclude intermediate tool-call-only" semantics as
 	// countTurnMessages.
 	const asstWithToolById = new Map<string, number>();
-	const asstWithToolStmt = db.prepare(
-		`SELECT session_id, COUNT(*) AS c FROM messages
+	for (const r of (yield {
+		sql: `SELECT session_id, COUNT(*) AS c FROM messages
 		 WHERE session_id IN (${placeholders}) AND role = 'assistant'
 		   AND has_tool_calls = 1
 		 GROUP BY session_id`,
-	);
-	for (const r of asstWithToolStmt.all(...ids) as Array<{ session_id: string; c: number }>) {
+		params: ids,
+	}) as Array<{ session_id: string; c: number }>) {
 		asstWithToolById.set(r.session_id, r.c);
 	}
 	// First user message text per session — picked by MIN(seq) (covering
 	// index) then a single PK lookup for the content_json. Still O(N)
 	// queries, but each is one index read instead of a full history scan.
 	const firstUserById = new Map<string, string>();
-	const firstUserStmt = db.prepare(
-		`SELECT m.session_id, m.content_json FROM messages m
+	for (const r of (yield {
+		sql: `SELECT m.session_id, m.content_json FROM messages m
 		 JOIN (
 		   SELECT session_id, MIN(seq) AS min_seq FROM messages
 		   WHERE session_id IN (${placeholders}) AND role = 'user'
 		   GROUP BY session_id
 		 ) f ON f.session_id = m.session_id AND f.min_seq = m.seq`,
-	);
-	for (const r of firstUserStmt.all(...ids) as Array<{ session_id: string; content_json: string }>) {
+		params: ids,
+	}) as Array<{ session_id: string; content_json: string }>) {
 		try {
 			const msg = JSON.parse(r.content_json) as Message;
 			firstUserById.set(r.session_id, firstUserTextFromMessage(msg));
@@ -2156,6 +2157,44 @@ function buildSummaries(db: DatabaseSync, rows: SessionRow[]): SessionSummary[] 
 	});
 }
 
+/**
+ * A query as a sequence of SQL steps: the plan yields a statement, gets its
+ * rows back, and finally returns the result. The steps run either in-thread
+ * (the TUI's pickers, which are synchronous) or on the sqlite worker (the
+ * daemon, whose one thread serves every session). One plan, so the sync and
+ * the async version can't drift apart.
+ */
+interface SqlStep {
+	sql: string;
+	params: (string | number)[];
+}
+type SqlPlan<T> = Generator<SqlStep, T, unknown[]>;
+
+function runPlanSync<T>(plan: SqlPlan<T>): T {
+	const db = getDb();
+	let step = plan.next();
+	while (!step.done) step = plan.next(db.prepare(step.value.sql).all(...step.value.params) as unknown[]);
+	return step.value;
+}
+
+/** Runs a plan on the worker; if the worker fails, or the store is in memory, it runs in-thread. */
+async function runPlanAsync<T>(makePlan: () => SqlPlan<T>): Promise<T> {
+	getDb();
+	const path = sessionsDbPath();
+	if (path === ":memory:") return runPlanSync(makePlan());
+	try {
+		const plan = makePlan();
+		let step = plan.next();
+		while (!step.done) {
+			// biome-ignore lint/performance/noAwaitInLoops: each statement's rows feed the next one
+			step = plan.next(await queryReadOnly(path, step.value.sql, step.value.params));
+		}
+		return step.value;
+	} catch {
+		return runPlanSync(makePlan());
+	}
+}
+
 /** Same shaping as getFirstUserMessage but operates on a single parsed
  *  message — extracted so the new SQL-driven path keeps the same
  *  newline-flatten / trim behavior the picker row's description has had
@@ -2164,17 +2203,24 @@ function firstUserTextFromMessage(msg: Message): string {
 	return messageText(msg).replace(NEWLINE_RE_G, " ").trim();
 }
 
+const LIST_SESSIONS_SQL =
+	"SELECT * FROM sessions WHERE session_kind = 'conversation' OR session_kind IS NULL ORDER BY updated_at DESC";
+
+function* listSummariesPlan(): SqlPlan<SessionSummary[]> {
+	const rows = (yield { sql: LIST_SESSIONS_SQL, params: [] }) as unknown as SessionRow[];
+	return yield* summariesPlan(rows);
+}
+
 /** Every session's summary, built from full history (not just the
  *  in-context working set) so a compacted session's picker row still
  *  reflects everything that was ever said in it. */
 export function listSessionSummaries(): SessionSummary[] {
-	const db = getDb();
-	const rows = db
-		.prepare(
-			"SELECT * FROM sessions WHERE session_kind = 'conversation' OR session_kind IS NULL ORDER BY updated_at DESC",
-		)
-		.all() as unknown as SessionRow[];
-	return buildSummaries(db, rows);
+	return runPlanSync(listSummariesPlan());
+}
+
+/** The same list without holding the caller's thread: 85ms on a 900-session store, growing with history. */
+export function listSessionSummariesAsync(): Promise<SessionSummary[]> {
+	return runPlanAsync(listSummariesPlan);
 }
 
 /** Turns one word into a safe FTS5 MATCH term: quoted (neutralizes MATCH's
@@ -2198,10 +2244,9 @@ function toFtsTerm(token: string): string {
  *    on the visible label beat a fuzzy match buried in the body.
  * Empty query returns the unranked full list, same as listSessionSummaries.
  */
-export function searchSessionSummaries(query: string): SessionSummary[] {
+function* searchSummariesPlan(query: string): SqlPlan<SessionSummary[]> {
 	const q = query.trim();
-	if (!q) return listSessionSummaries();
-	const db = getDb();
+	if (!q) return yield* listSummariesPlan();
 
 	const tokens = q.split(WHITESPACE_RE).filter(Boolean);
 	// The index has one row per message, not one per session — a combined
@@ -2216,15 +2261,16 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 	// same text: messages_fts held exactly the user/assistant subset of this
 	// one — verified identical result sets on a real store — and every message
 	// write paid for both. Its content copy alone was ~11MB of a 547MB store.
-	const contentStmt = db.prepare(
-		`SELECT session_id, bm25(session_history_fts) AS rank
+	const contentSql = `SELECT session_id, bm25(session_history_fts) AS rank
 		 FROM session_history_fts
-		 WHERE session_history_fts MATCH ? AND role IN ('user', 'assistant')`,
-	);
+		 WHERE session_history_fts MATCH ? AND role IN ('user', 'assistant')`;
 	let matchedSessionIds: Set<string> | null = null;
 	const bestRankById = new Map<string, number>();
 	for (const token of tokens) {
-		const rows = contentStmt.all(toFtsTerm(token)) as Array<{ session_id: string; rank: number }>;
+		const rows = (yield { sql: contentSql, params: [toFtsTerm(token)] }) as Array<{
+			session_id: string;
+			rank: number;
+		}>;
 		const idsForToken = new Set<string>();
 		for (const row of rows) {
 			idsForToken.add(row.session_id);
@@ -2243,11 +2289,10 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 	// Escape LIKE's own wildcards so a literal "%" or "_" in the typed query
 	// matches itself instead of acting as a pattern character.
 	const like = `%${q.replace(SQL_LIKE_SPECIAL_RE, "\\$&")}%`;
-	const metaMatches = db
-		.prepare(
-			"SELECT id FROM sessions WHERE (session_kind = 'conversation' OR session_kind IS NULL) AND (cwd LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR persona LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\')",
-		)
-		.all(like, like, like, like, like) as Array<{ id: string }>;
+	const metaMatches = (yield {
+		sql: "SELECT id FROM sessions WHERE (session_kind = 'conversation' OR session_kind IS NULL) AND (cwd LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR persona LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\')",
+		params: [like, like, like, like, like],
+	}) as Array<{ id: string }>;
 
 	const rankById = new Map<string, number>();
 	for (const id of matchedSessionIds ?? []) rankById.set(id, bestRankById.get(id) ?? 0);
@@ -2257,14 +2302,22 @@ export function searchSessionSummaries(query: string): SessionSummary[] {
 
 	const ids = [...rankById.keys()];
 	const placeholders = ids.map(() => "?").join(",");
-	const rows = db
-		.prepare(
-			`SELECT * FROM sessions WHERE id IN (${placeholders}) AND (session_kind = 'conversation' OR session_kind IS NULL)`,
-		)
-		.all(...ids) as unknown as SessionRow[];
-	const summaries = buildSummaries(db, rows);
+	const rows = (yield {
+		sql: `SELECT * FROM sessions WHERE id IN (${placeholders}) AND (session_kind = 'conversation' OR session_kind IS NULL)`,
+		params: ids,
+	}) as unknown as SessionRow[];
+	const summaries = yield* summariesPlan(rows);
 	summaries.sort((a, b) => (rankById.get(a.id) ?? 0) - (rankById.get(b.id) ?? 0));
 	return summaries;
+}
+
+export function searchSessionSummaries(query: string): SessionSummary[] {
+	return runPlanSync(searchSummariesPlan(query));
+}
+
+/** The same search without holding the caller's thread: 15 to 285ms per keystroke on a real store. */
+export function searchSessionSummariesAsync(query: string): Promise<SessionSummary[]> {
+	return runPlanAsync(() => searchSummariesPlan(query));
 }
 
 /**

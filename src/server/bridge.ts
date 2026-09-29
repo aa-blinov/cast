@@ -86,6 +86,7 @@ import {
 	hasRecentClientMessageId,
 	lastPersistedSeq,
 	listSessionSummaries,
+	listSessionSummariesAsync,
 	listSubagentSessions,
 	loadSession,
 	loadSessionByShareToken,
@@ -95,6 +96,7 @@ import {
 	type SessionState,
 	saveSession,
 	searchSessionSummaries,
+	searchSessionSummariesAsync,
 	type TurnMeta,
 	updateLastCheckpoint,
 } from "../core/session.ts";
@@ -150,7 +152,7 @@ import { appendActiveText, type DisplayMessage, type DisplayStreamBlock, toDispl
 import { createFsWatcher } from "./bridge/fs-watcher.ts";
 // Idle-session eviction timer (syncIdleSessionEviction) lives in
 // ./bridge/idle.ts. Takes fsWatcher.stopFsWatcher as a dep so a fired
-// eviction can release the chokidar handle. fsWatcher takes
+// eviction can release the directory watchers. fsWatcher takes
 // idleEvictor.syncIdleSessionEviction back via a setter to keep the
 // original "every session-state transition triggers both" semantics.
 import { createIdleEvictor } from "./bridge/idle.ts";
@@ -386,6 +388,13 @@ export interface ServerBridge {
 	cancelAgent(sessionId: string, taskId: string): boolean;
 	getSession(id: string): WebAgentSession | undefined;
 	listSessions(): SessionSummary[];
+	/** listSessions() with the on-disk part read on the sqlite worker, for HTTP
+	 *  handlers: building the cold list is 85ms and growing on a real store, on
+	 *  the one thread every session shares. */
+	listSessionsAsync(): Promise<SessionSummary[]>;
+	/** True when a turn is in progress in a live session. Cold sessions can't be
+	 *  running, so this never touches the database. */
+	hasRunningSession(): boolean;
 	/**
 	 * Nothing is happening here and nobody is watching: no turn running, no
 	 * client subscribed, no background bash task alive, no agent actor (a
@@ -402,6 +411,8 @@ export interface ServerBridge {
 	 *  `query` (message content via SQLite FTS, plus cwd/id/title/persona/
 	 *  model). Empty/whitespace-only query is equivalent to listSessions(). */
 	searchSessions(query: string): SessionSummary[];
+	/** searchSessions() on the sqlite worker (15 to 285ms per keystroke in-thread). */
+	searchSessionsAsync(query: string): Promise<SessionSummary[]>;
 	/** Swaps in a freshly-connected MCP result — for the web daemon's deferred
 	 *  startup (see ParsedArgs.deferMcp): the server starts with an
 	 *  unconnected placeholder so it can begin listening immediately, then
@@ -1280,7 +1291,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	});
 
 	// fsWatcher and idleEvictor have a circular dep: fsWatcher's eviction
-	// path needs to release chokidar handles (idleEvictor takes
+	// path needs to release directory watchers (idleEvictor takes
 	// fsWatcher.stopFsWatcher as a dep), but fsWatcher.syncFsWatcher also
 	// re-triggers the eviction timer (fsWatcher takes
 	// idleEvictor.syncIdleSessionEviction as onIdle). Build fsWatcher first
@@ -2835,7 +2846,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		return !agentActorRegistry.list().some((actor) => actor.status === "running" || actor.status === "pending");
 	}
 
-	function listSessions(): SessionSummary[] {
+	function withColdSessions(colds: ReturnType<typeof listSessionSummaries>): SessionSummary[] {
 		const out: SessionSummary[] = [];
 		const seen = new Set<string>();
 		for (const ws of sessions.values()) {
@@ -2845,11 +2856,24 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// Every other session that's ever been saved to disk (any project,
 		// any prior process) — cold, not yet hydrated into a live runner, but
 		// still a real thread the user should be able to find and reopen.
-		for (const cold of listSessionSummaries()) {
+		for (const cold of colds) {
 			if (seen.has(cold.id)) continue;
 			out.push(coldSummary(cold));
 		}
 		return out;
+	}
+
+	function listSessions(): SessionSummary[] {
+		return withColdSessions(listSessionSummaries());
+	}
+
+	async function listSessionsAsync(): Promise<SessionSummary[]> {
+		return withColdSessions(await listSessionSummariesAsync());
+	}
+
+	function hasRunningSession(): boolean {
+		for (const ws of sessions.values()) if (ws.status === "running") return true;
+		return false;
 	}
 
 	/** Same live/cold split as listSessions, but ranked by relevance against
@@ -2861,7 +2885,16 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 *  state, so there's no meaningful window where the index is stale. */
 	function searchSessions(query: string): SessionSummary[] {
 		if (!query.trim()) return listSessions();
-		return searchSessionSummaries(query).map((cold) => {
+		return liveOrCold(searchSessionSummaries(query));
+	}
+
+	async function searchSessionsAsync(query: string): Promise<SessionSummary[]> {
+		if (!query.trim()) return listSessionsAsync();
+		return liveOrCold(await searchSessionSummariesAsync(query));
+	}
+
+	function liveOrCold(found: ReturnType<typeof searchSessionSummaries>): SessionSummary[] {
+		return found.map((cold) => {
 			const live = sessions.get(cold.id);
 			return live ? summaryFor(live.session, live.status) : coldSummary(cold);
 		});
@@ -3530,7 +3563,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		isFullyIdle,
 		lastActivityAt: () => lastActivityAtRef.value,
 		listSessions,
+		listSessionsAsync,
+		hasRunningSession,
 		searchSessions,
+		searchSessionsAsync,
 		applyMcpResult,
 		closeSession,
 		deleteSessionPermanently,
