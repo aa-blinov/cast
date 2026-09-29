@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **`/quit` did not print the command to resume the session.** Ink redraws its last frame on exit and erased the line, so only Ctrl+C left `cast --resume=<id>` on screen. The frame is now unmounted first, and the line prints once on every way out.
+
 ## 0.50.2
 
 ### Fixed
