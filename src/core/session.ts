@@ -928,6 +928,11 @@ export function getCheckpointWatermark(sessionId: string): string | undefined {
 	return row?.checkpoint_watermark_message_id ?? undefined;
 }
 
+/** The stored seq of a message that has been saved, if it has. */
+export function seqOfMessage(sessionId: string, message: Message): number | undefined {
+	return persistedMessageSeq(sessionId, message);
+}
+
 function persistedMessageSeq(sessionId: string, message: Message): number | undefined {
 	const serialized = JSON.stringify(message);
 	const known = messageSeq.get(message);
@@ -2621,6 +2626,8 @@ export function listBackgroundSessions(parentSessionId?: string): SessionState[]
 export interface ForkPoint {
 	seq: number;
 	text: string;
+	/** The agent's final answer to this prompt, when the turn has one: a point to fork *through*. */
+	answerSeq?: number;
 }
 
 /** The prompts the user typed, oldest first: the points a fork can start before. */
@@ -2628,6 +2635,13 @@ export function listForkPoints(sessionId: string): ForkPoint[] {
 	const { messages, seqs } = getFullHistoryWithReasoning(sessionId);
 	const points: ForkPoint[] = [];
 	messages.forEach((m, i) => {
+		if (m.role === "assistant") {
+			// The last tool-free answer before the next prompt is the turn's final one.
+			const current = points[points.length - 1];
+			const callsTools = ((m as { tool_calls?: unknown[] }).tool_calls?.length ?? 0) > 0;
+			if (current && !callsTools && messageText(m).trim()) current.answerSeq = seqs[i]!;
+			return;
+		}
 		if (m.role !== "user") return;
 		const text = extractSystemReminders(messageText(m)).cleaned;
 		if (text && !text.startsWith("<checkpoint-boundary>")) points.push({ seq: seqs[i]!, text });

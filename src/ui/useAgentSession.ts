@@ -37,6 +37,7 @@ import {
 	type SessionState,
 	type SessionUsage,
 	saveSession,
+	seqOfMessage,
 	updateLastCheckpoint,
 } from "../core/session.ts";
 import { loadSettings, type PermissionMode, turnIterationCap, updateSettings } from "../core/settings.ts";
@@ -1079,6 +1080,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						]
 					: text;
 			appendMessage(session, { role: "user", content: userContent });
+			// Saved now (the daemon does the same) so the checkpoint can name this
+			// message: rewind and fork-with-files find a snapshot by it.
+			saveSession(session);
+			const turnStartSeq = seqOfMessage(session.id, session.messages[session.messages.length - 1] as Message);
+			if (turnStartSeq !== undefined) {
+				chk.userSeq = turnStartSeq;
+				updateLastCheckpoint(session.id, chk);
+			}
 			// Append directly rather than refresh()'s rebuild-from-session.messages —
 			// an aborted or errored run doesn't merge its (possibly partial)
 			// assistant turn back into session.messages (see the "aborted" case in

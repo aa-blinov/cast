@@ -901,7 +901,7 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain(`Forked session: ${fork.id}`);
 	});
 
-	it("/fork offers the whole session or a point before any of your messages", async () => {
+	it("/fork offers the whole session, a point through an answer, or one before any of your messages", async () => {
 		const { deps, calls } = createFakeDeps();
 		deps.session.messages.push(
 			{ role: "user", content: "first ask" },
@@ -911,11 +911,12 @@ describe("handleInput", () => {
 		);
 		saveSession(deps.session);
 		let offered: string[] = [];
+		const choose = "Before: first ask";
 		deps.pickers = {
 			...deps.pickers,
 			pickOption: async (options) => {
 				offered = options.map((o) => String(o.label));
-				return options[2]!.value;
+				return options.find((o) => o.label === choose)!.value;
 			},
 		};
 		let repainted = 0;
@@ -929,14 +930,47 @@ describe("handleInput", () => {
 			return fork;
 		};
 
-		const firstAsk = listForkPoints(deps.session.id)[0]!.seq;
+		const [first] = listForkPoints(deps.session.id);
 		await handleInput("/fork", undefined, deps);
 
-		// Newest first, after the whole-session option.
-		expect(offered).toEqual(["Whole session", "Before: second ask", "Before: first ask"]);
-		expect(asked).toBe(firstAsk);
+		// Newest first, after the whole-session option; the last answer is the whole session, so it has no row.
+		expect(offered).toEqual([
+			"Whole session",
+			"Before: second ask",
+			"Through the answer to: first ask",
+			"Before: first ask",
+		]);
+		expect(asked).toBe(first!.seq);
 		expect(repainted).toBe(1);
 		expect(noticeText(calls)).toContain('before "first ask"');
+	});
+
+	it("/fork through an answer cuts before the message after it, and says the folder is shared", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.session.messages.push(
+			{ role: "user", content: "first ask" },
+			{ role: "assistant", content: "one" },
+			{ role: "user", content: "second ask" },
+			{ role: "assistant", content: "two" },
+		);
+		saveSession(deps.session);
+		deps.pickers = {
+			...deps.pickers,
+			pickOption: async (options) => options.find((o) => o.label === "Through the answer to: first ask")!.value,
+		};
+		let asked: number | undefined;
+		const fork = createSession("test-model", "/tmp");
+		(deps.agent.forkSession as (beforeSeq?: number) => Promise<SessionState | undefined>) = async (beforeSeq) => {
+			asked = beforeSeq;
+			return fork;
+		};
+
+		const [, second] = listForkPoints(deps.session.id);
+		await handleInput("/fork", undefined, deps);
+
+		expect(asked).toBe(second!.seq);
+		expect(noticeText(calls)).toContain('through the answer to "first ask"');
+		expect(noticeText(calls)).toContain("share the working folder");
 	});
 
 	it("/continue refreshes SSH hosts for the resumed project", async () => {
