@@ -2,23 +2,24 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.50.0
 
 ### Added
 
 - **A fork can take the files of its point.** Forking from an earlier point used to share the working folder, so the fork's conversation talked about files that had moved on. Every turn now records which message it started with, and forking from an earlier point (web UI and TUI) offers the fork its own copy of the files as they were then: a git worktree at that turn's snapshot in a repository, or a copy of the snapshot in a new sandbox folder outside git. Files git ignores (`node_modules`, build output) are not in a snapshot, and older sessions, whose turns did not record this, fork into the shared folder as before. The fork endpoint takes `withFiles`, and `GET /sessions/{id}/fork-preview` says beforehand whether it can.
 - **Fork from an answer.** In the web UI, an answer of the agent that ends a turn has a "Fork from here" button that starts a new session with the conversation up to and including that answer, so you can carry on from the answer instead of from the question after it. Until now only your own messages could be fork points ("fork before this message", now labelled as such). An answer that calls tools is not a point, since the cut would separate the call from its result. The fork endpoint takes `afterSeq`, and `/fork after <seq>` does the same. Forking from an earlier point now says that the two sessions share the working folder, so the files are as they are now.
-
-- **Clearer, touch-friendly message actions.** The buttons on your messages now say what they do ("Fork before", "Rewind") instead of being unlabelled icons, which a phone has no tooltip to explain; on touch screens they are 44px or more to tap (they were 20px), with room between the rows. The undo dialog no longer counts raw messages (tool calls included), it says your message and everything the agent did after it are removed.
 - **`/rewind`: go back to before any message, and choose what goes back.** `/undo` only ever took the last turn. Every turn now records a snapshot of the folder and the message it started with, so you can pick any of your messages and rewind the files and the conversation, only the files (the conversation and every snapshot stay, so the files can go forward again), or only the conversation. The TUI has a `/rewind` picker; in the web UI each such message has a **Rewind** button that opens a dialog naming what each choice does and which files would be deleted. `GET /sessions/{id}/rewind-points`, `GET .../rewind?userSeq=` and `POST .../rewind` are the API. Sessions from before this version recorded no per-message snapshots and keep `/undo` only. A typed `/undo` in the web UI opens a dialog that says which message goes, how the files come back and what will be deleted, then asks; `GET /sessions/{id}/undo` returns the same preview.
 
 ### Fixed
 
 - **An undone turn came back after a reload.** `/undo` (in the TUI and the web UI) rewound the files and removed the turn from the conversation in memory only: the saved history was never shortened, so the turn, its replies and its search hits reappeared on the next page load or restart while the files stayed rewound. The messages are now deleted from the store as well.
 - **`/undo` no longer stalls the daemon.** Checking what it would delete and restoring took 73 and 117ms on a 30 000-file repository, synchronously, with every session waiting; both are async now. A message sent while an undo is rewinding the folder waits instead of starting a turn on it.
-
 - **`/undo` restored less than it claimed.** In a git repository it did not bring back a file that git ignores (`.env`, build output) and that the agent had edited or created with `edit`/`write`, nor a file outside a subfolder session's directory; both are now backed up and restored. Its snapshot was a commit that nothing pointed to, so `git gc` deleted it after two weeks and `/undo` on an older session failed; each snapshot now has a ref under `refs/cast/checkpoints/`, released when it is restored or the session is deleted. A failed restore in the daemon also dropped the checkpoint from memory, so a second try said there was nothing to undo until a restart.
 - **`/undo` outside git now undoes shell commands too.** Without git it only had a copy of each file `edit` and `write` touched, so `sed -i`, `rm`, `mv` or a generator stayed applied, and the message said "Restored 3 file(s)" anyway; sandbox sessions, the default start in the web UI, are never repositories. The folder is now committed each turn to a hidden repository under `~/.cast/shadow` (deduplicated by git, so a turn that changed one file costs one file), and `/undo` restores it, including files a command created or deleted; dependency and build folders (`node_modules`, `dist`, ...) are left alone. Folders over 3000 files or 50MB, the home directory and `/` are not snapshotted, and `/undo` there says that shell changes are not undone. The hidden repository is deleted with the session.
+
+### Changed
+
+- **Clearer, touch-friendly message actions.** The buttons on your messages now say what they do ("Fork before", "Rewind") instead of being unlabelled icons, which a phone has no tooltip to explain; on touch screens they are 44px or more to tap (they were 20px), with room between the rows. The undo dialog no longer counts raw messages (tool calls included), it says your message and everything the agent did after it are removed.
 
 ## 0.49.0
 
