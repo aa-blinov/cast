@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **The TUI could stay on "Daemon connection lost" for good.** The reconnect attempt ran once per stream; if the daemon was not back yet, nothing retried. A failed attempt now re-arms, so the next retry of the stream tries again.
+
 ## 0.50.1
 
 ### Fixed
