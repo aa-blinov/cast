@@ -907,6 +907,9 @@ async function withDiagnostics(
 	return note ? { ...result, content: `${result.content}${note}` } : result;
 }
 
+/** Searches of past sessions one turn may run before the tool refuses. */
+export const MAX_HISTORY_SEARCHES_PER_TURN = 8;
+
 export function createToolExecutor(
 	cwd: string,
 	config: AppConfig,
@@ -918,7 +921,13 @@ export function createToolExecutor(
 	skillDeps?: SkillToolDeps,
 	beforeFileWrite?: (path: string) => void,
 	personaDeps?: PersonaToolDeps,
+	currentSessionId?: string,
 ): ToolExecutor {
+	// One executor serves one turn. A weaker model that can't find what it is
+	// after keeps rewording the query: 50 searches in a row on a real store,
+	// each returning eight unrelated hits, so "nothing found" never showed and
+	// no instruction to stop was ever reached.
+	let historySearches = 0;
 	return async (
 		name: string,
 		args: Record<string, unknown>,
@@ -1020,7 +1029,13 @@ export function createToolExecutor(
 					case "memory":
 						return execMemorySearch(args, cwd);
 					case "session_history":
-						return await execSessionHistorySearch(args, cwd);
+						if (++historySearches > MAX_HISTORY_SEARCHES_PER_TURN) {
+							return {
+								content: `Error: ${MAX_HISTORY_SEARCHES_PER_TURN} history searches already ran this turn. Stop searching: answer from what you found, or tell the user it is not in the history.`,
+								isError: true,
+							};
+						}
+						return await execSessionHistorySearch(args, cwd, currentSessionId);
 					case "ls":
 						return await execLs(args, cwd, config);
 					case "web_search":

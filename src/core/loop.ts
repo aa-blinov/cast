@@ -2340,6 +2340,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					},
 				}
 			: undefined,
+		loopConfig.memory?.sessionId ?? loopConfig.sessionId,
 	);
 	const executeTool = async (
 		name: string,

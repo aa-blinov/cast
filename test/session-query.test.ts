@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { AppConfig } from "../src/core/config.ts";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import { appendMessage, compactMessages, createSession, recordCompaction, saveSession } from "../src/core/session.ts";
@@ -12,6 +13,7 @@ import {
 	searchSessionHistoryAsync,
 } from "../src/core/session-query.ts";
 import { stopSqliteReader } from "../src/core/sqlite-reader.ts";
+import { createToolExecutor, MAX_HISTORY_SEARCHES_PER_TURN } from "../src/core/tools.ts";
 
 describe("session history search", () => {
 	let root = "";
@@ -64,6 +66,48 @@ describe("session history search", () => {
 		const results = searchSessionHistory(project, "sandbox");
 		expect(results.filter((r) => r.sessionId === noisy.id)).toHaveLength(2);
 		expect(results.some((r) => r.sessionId === quiet.id)).toBe(true);
+	});
+
+	it("leaves the asking session out, so its own question is not the top hit", async () => {
+		const project = join(root, "project");
+		const past = createSession("test-model", project);
+		past.messages = [{ role: "assistant", content: "we fixed the zebra crossing bug" }];
+		saveSession(past);
+		const current = createSession("test-model", project);
+		current.messages = [{ role: "user", content: "when did we fix the zebra crossing bug?" }];
+		saveSession(current);
+
+		expect(searchSessionHistory(project, "zebra crossing")).toHaveLength(2);
+		const without = searchSessionHistory(project, "zebra crossing", 8, "project", current.id);
+		expect(without.map((r) => r.sessionId)).toEqual([past.id]);
+		const viaTool = await execSessionHistorySearch({ query: "zebra crossing" }, project, current.id);
+		expect(viaTool.content).toContain("fixed the zebra");
+		expect(viaTool.content).not.toContain("when did we fix");
+		expect(
+			(await searchSessionHistoryAsync(project, "zebra crossing", 8, "project", current.id)).map((r) => r.sessionId),
+		).toEqual([past.id]);
+	});
+
+	it("ignores short Russian function words, but keeps a query made only of them", () => {
+		const project = join(root, "project");
+		const session = createSession("test-model", project);
+		session.messages = [
+			{ role: "assistant", content: "поиск по файлам сделан" },
+			{ role: "assistant", content: "замечаний по этим строкам нет" },
+		];
+		saveSession(session);
+		expect(searchSessionHistory(project, "поиск по файлам").map((r) => r.snippet)).toEqual([
+			expect.stringContaining("поиск"),
+		]);
+		expect(searchSessionHistory(project, "по")).toHaveLength(2);
+	});
+
+	it("keeps two-letter Latin terms", () => {
+		const project = join(root, "project");
+		const session = createSession("test-model", project);
+		session.messages = [{ role: "assistant", content: "the db layer changed" }];
+		saveSession(session);
+		expect(searchSessionHistory(project, "db")).toHaveLength(1);
 	});
 
 	it("scope=global searches across every project, not just the current cwd", () => {
@@ -301,5 +345,35 @@ describe("session history search on a worker thread", () => {
 		// The in-thread search is the floor the worker has to beat: a blocked
 		// loop shows up as one long gap between ticks.
 		expect(worst).toBeLessThan(Math.max(60, inThread / 2));
+	});
+});
+
+describe("history searches per turn", () => {
+	let root = "";
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "cast-session-query-cap-"));
+		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
+		resetDbConnectionForTests();
+	});
+
+	afterEach(async () => {
+		await stopSqliteReader();
+		resetDbConnectionForTests();
+		delete process.env.CAST_SESSIONS_DB;
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("refuses further searches after the per-turn cap, and a new turn starts fresh", async () => {
+		const config = { baseURL: "http://127.0.0.1:1/v1", apiKey: "k", maxResponseTokens: 100 } as unknown as AppConfig;
+		const turn = createToolExecutor(root, config);
+		for (let i = 0; i < MAX_HISTORY_SEARCHES_PER_TURN; i++) {
+			expect((await turn("session_history", { query: `term${i}` })).isError).toBeFalsy();
+		}
+		const refused = await turn("session_history", { query: "one more" });
+		expect(refused.isError).toBe(true);
+		expect(refused.content).toContain("Stop searching");
+
+		expect((await createToolExecutor(root, config)("session_history", { query: "fresh" })).isError).toBeFalsy();
 	});
 });
