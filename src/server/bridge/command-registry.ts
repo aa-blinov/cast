@@ -73,6 +73,7 @@ import {
 	resolveMcpForCwd,
 } from "../../core/project.ts";
 import { setModelsCache } from "../../core/readline.ts";
+import { REWIND_MODES, type RewindMode } from "../../core/rewind.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
 import {
@@ -111,7 +112,7 @@ import { ALL_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
-import { undoLastTurn } from "./undo.ts";
+import { rewindTurn, undoLastTurn } from "./undo.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -1741,6 +1742,20 @@ const commandHandlers: Record<string, CommandHandler> = {
 		undoLastTurn(ws, { force: arg.includes("--force") || arg.includes("-f"), saveSession }, () =>
 			broadcaster.broadcastSessionUpdate(ws),
 		),
+	"/rewind": ({ ws, arg, saveSession, broadcaster }) => {
+		const words = arg.split(WHITESPACE_RE).filter(Boolean);
+		const force = words.includes("--force") || words.includes("-f");
+		const [seqText, modeText = "both"] = words.filter((w) => w !== "--force" && w !== "-f");
+		const userSeq = Number(seqText);
+		if (!seqText || !Number.isInteger(userSeq) || !REWIND_MODES.includes(modeText as RewindMode)) {
+			return { ok: false, error: "Usage: /rewind <message seq> [both|conversation|code] [--force]" };
+		}
+		return rewindTurn(
+			ws,
+			{ userSeq, mode: modeText as RewindMode, force },
+			{ saveSession, onDone: () => broadcaster.broadcastSessionUpdate(ws) },
+		);
+	},
 	"/worktree": async (ctx) => {
 		const {
 			ws,

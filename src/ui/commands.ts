@@ -42,6 +42,7 @@ import {
 	parseReviewArgs,
 	startReviewState,
 } from "../core/review.ts";
+import { listRewindPoints, type RewindMode, rewindSession } from "../core/rewind.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
 import {
 	addUsage,
@@ -110,6 +111,7 @@ import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type Stat
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
+const FORCE_HINT_RE = / Re-run with --force to proceed\.$/;
 const WHITESPACE_RE = /\s+/;
 
 interface ModelWithReasoningSelection {
@@ -246,6 +248,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/reload", description: "Reload skills, rules, MCP, and personas for cwd" },
 	{ name: "/repo", description: "Show cwd and git branch" },
 	{ name: "/review", description: "Ask the agent to review and verify its own work" },
+	{ name: "/rewind", description: "Rewind to before a message: files, conversation or both" },
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
@@ -2338,6 +2341,101 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			} catch (err) {
 				showNotice(`[Worktree failed: ${err instanceof Error ? err.message : String(err)}]`);
 			}
+			return;
+		},
+	},
+	{
+		match: (input) => input === "/rewind",
+		run: async ({ deps, agent, session, showNotice }) => {
+			if (deps.running) {
+				showNotice("[Agent running — finish the run or /abort before /rewind]");
+				return;
+			}
+			// The persisted list, as for /undo: a daemon writes the checkpoints itself.
+			const points = listRewindPoints({ ...session, checkpoints: loadCheckpoints(session.id) }).reverse();
+			if (points.length === 0) {
+				showNotice(
+					"[Nothing to rewind to: this session has no snapshots of its turns. /undo takes the last turn back.]",
+				);
+				return;
+			}
+			const picked = await deps.pickers.pickOption<string>(
+				points.map((p) => ({
+					value: String(p.userSeq),
+					label: p.text.slice(0, 70),
+					description: "Rewind to before this message",
+				})),
+				{ title: "Rewind to before which message?" },
+			);
+			if (!picked) {
+				showNotice("[Cancelled]");
+				return;
+			}
+			const mode = await deps.pickers.pickOption<RewindMode>(
+				[
+					{
+						value: "both",
+						label: "Files and conversation",
+						description: "The files go back as they were then; this message and everything after it is removed",
+					},
+					{
+						value: "code",
+						label: "Files only",
+						description: "The files go back; the conversation stays as it is",
+					},
+					{
+						value: "conversation",
+						label: "Conversation only",
+						description: "This message and everything after it is removed; the files stay as they are",
+					},
+				],
+				{ title: "What goes back?" },
+			);
+			if (!mode) {
+				showNotice("[Cancelled]");
+				return;
+			}
+			const userSeq = Number(picked);
+			// A daemon owns its sessions: it does the rewind. Otherwise this process does.
+			const attempt = async (
+				force: boolean,
+			): Promise<{ ok: true; message: string } | { ok: false; error: string }> => {
+				if (agent.daemonMode) {
+					try {
+						return {
+							ok: true,
+							message: String(await agent.runCommand(`/rewind ${userSeq} ${mode}${force ? " --force" : ""}`)),
+						};
+					} catch (err) {
+						return { ok: false, error: err instanceof Error ? err.message : String(err) };
+					}
+				}
+				return rewindSession(session, userSeq, mode, { force });
+			};
+			let result = await attempt(false);
+			// Restoring the files would delete files created since: the refusal names them, ask before going on.
+			if (!result.ok && result.error.includes("--force")) {
+				const go = await deps.pickers.pickOption<boolean>(
+					[
+						{ value: false, label: "Cancel — keep these files" },
+						{ value: true, label: "Rewind anyway, deleting them" },
+					],
+					{ title: result.error.replace(FORCE_HINT_RE, "") },
+				);
+				if (go !== true) {
+					showNotice("[Rewind cancelled — nothing was changed]");
+					return;
+				}
+				result = await attempt(true);
+			}
+			if (!result.ok) {
+				showNotice(`[Rewind failed: ${result.error}]`);
+				return;
+			}
+			if (!agent.daemonMode) saveSession(session);
+			agent.refresh();
+			if (mode !== "code") await deps.onRepaintHistory?.();
+			showNotice(`[${result.message}]`);
 			return;
 		},
 	},

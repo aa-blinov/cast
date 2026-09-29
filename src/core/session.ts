@@ -1628,6 +1628,16 @@ export function appendCheckpoint(sessionId: string, checkpoint: TurnCheckpoint):
 		.run(sessionId, sessionId, JSON.stringify(checkpoint));
 }
 
+/** Removes the checkpoint at `index` (in list order) and every later one: the turns a rewind takes back. */
+export function dropCheckpointsFrom(sessionId: string, index: number): void {
+	getDb()
+		.prepare(
+			`DELETE FROM session_checkpoints WHERE session_id = ? AND seq >= (
+			   SELECT seq FROM session_checkpoints WHERE session_id = ? ORDER BY seq LIMIT 1 OFFSET ?)`,
+		)
+		.run(sessionId, sessionId, index);
+}
+
 export function dropLastCheckpoint(sessionId: string): void {
 	getDb()
 		.prepare(

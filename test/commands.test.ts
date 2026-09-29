@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2041,5 +2041,151 @@ describe("/fork with the files of a point", () => {
 
 		expect(titles).toEqual(["Fork from where?"]);
 		expect(withFiles).toBe(false);
+	});
+});
+
+describe("/rewind", () => {
+	/** Two turns saved with file-only checkpoints: before turn 2 the file read v1. */
+	function twoTurnSession(deps: CommandDeps) {
+		const dir = mkdtempSync(join(tmpdir(), "cast-rewind-tui-"));
+		const file = join(dir, "a.txt");
+		writeFileSync(file, "v2");
+		deps.session.messages.push(
+			{ role: "user", content: "first ask" },
+			{ role: "assistant", content: "one" },
+			{ role: "user", content: "second ask" },
+			{ role: "assistant", content: "two" },
+		);
+		saveSession(deps.session);
+		const [first, second] = listForkPoints(deps.session.id);
+		const checkpoints = [
+			{
+				id: "c1",
+				timestamp: "",
+				cwd: dir,
+				userSeq: first!.seq,
+				backups: [{ relPath: "a.txt", existedBefore: false }],
+			},
+			{
+				id: "c2",
+				timestamp: "",
+				cwd: dir,
+				userSeq: second!.seq,
+				backups: [
+					{
+						relPath: "a.txt",
+						existedBefore: true,
+						content: Buffer.from("v1").toString("base64"),
+						encoding: "base64" as const,
+					},
+				],
+			},
+		];
+		for (const c of checkpoints) appendCheckpoint(deps.session.id, c);
+		deps.session.checkpoints = checkpoints;
+		return { dir, file, second: second!.seq };
+	}
+
+	const pick = (deps: CommandDeps, ...labels: string[]) => {
+		const shown: Array<{ title?: string; labels: string[] }> = [];
+		const queue = [...labels];
+		deps.pickers = {
+			...deps.pickers,
+			pickOption: async (options, opts) => {
+				shown.push({ title: opts?.title, labels: options.map((o) => String(o.label)) });
+				const wanted = queue.shift();
+				return options.find((o) => o.label === wanted)?.value;
+			},
+		};
+		return shown;
+	};
+
+	it("rewinds this process's own session to the chosen message, in the chosen mode", async () => {
+		const { deps, calls } = createFakeDeps();
+		const { dir, file } = twoTurnSession(deps);
+		const shown = pick(deps, "second ask", "Files only");
+
+		await handleInput("/rewind", undefined, deps);
+
+		// Newest first.
+		expect(shown[0]).toEqual({ title: "Rewind to before which message?", labels: ["second ask", "first ask"] });
+		expect(shown[1]?.labels).toEqual(["Files and conversation", "Files only", "Conversation only"]);
+		expect(readFileSync(file, "utf8")).toBe("v1");
+		// Files only: the conversation stays.
+		expect(deps.session.messages).toHaveLength(4);
+		expect(noticeText(calls)).toContain("Rewound: files; the conversation was kept");
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("takes the turns out of the conversation and the saved history for files and conversation", async () => {
+		const { deps, calls } = createFakeDeps();
+		const { dir, file } = twoTurnSession(deps);
+		pick(deps, "second ask", "Files and conversation");
+		let repainted = 0;
+		deps.onRepaintHistory = () => {
+			repainted++;
+		};
+
+		await handleInput("/rewind", undefined, deps);
+
+		expect(readFileSync(file, "utf8")).toBe("v1");
+		expect(deps.session.messages.map((m) => m.content)).toContain("first ask");
+		expect(deps.session.messages.map((m) => m.content)).not.toContain("second ask");
+		expect(loadSession(deps.session.id)?.messages.map((m) => m.content)).not.toContain("second ask");
+		expect(repainted).toBe(1);
+		expect(noticeText(calls)).toContain("Rewound: files and conversation (1 turn)");
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("on a daemon asks before deleting files the daemon named, then retries with --force", async () => {
+		const { deps, calls } = createFakeDeps();
+		twoTurnSession(deps);
+		const shown = pick(deps, "second ask", "Files and conversation", "Rewind anyway, deleting them");
+		const sent: string[] = [];
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async (command) => {
+			sent.push(command);
+			if (!command.includes("--force")) {
+				throw new Error(
+					"Rewinding would delete 2 file(s) created since (a.txt, b.txt). Re-run with --force to proceed.",
+				);
+			}
+			return "Rewound: files and conversation (1 turn)";
+		};
+
+		await handleInput("/rewind", undefined, deps);
+
+		expect(sent).toHaveLength(2);
+		expect(sent[0]).toMatch(/^\/rewind \d+ both$/);
+		expect(sent[1]).toMatch(/^\/rewind \d+ both --force$/);
+		expect(shown[2]?.title).toBe("Rewinding would delete 2 file(s) created since (a.txt, b.txt).");
+		expect(noticeText(calls)).toContain("Rewound: files and conversation (1 turn)");
+	});
+
+	it("stops when the user declines to delete those files", async () => {
+		const { deps, calls } = createFakeDeps();
+		twoTurnSession(deps);
+		pick(deps, "second ask", "Files and conversation", "Cancel — keep these files");
+		let runs = 0;
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async () => {
+			runs++;
+			throw new Error("Rewinding would delete 1 file(s) created since (x). Re-run with --force to proceed.");
+		};
+
+		await handleInput("/rewind", undefined, deps);
+
+		expect(runs).toBe(1);
+		expect(noticeText(calls)).toContain("Rewind cancelled");
+	});
+
+	it("says so when there is nothing to rewind to, and while the agent runs", async () => {
+		const first = createFakeDeps();
+		await handleInput("/rewind", undefined, first.deps);
+		expect(noticeText(first.calls)).toContain("Nothing to rewind to");
+
+		const busy = createFakeDeps({ running: true });
+		await handleInput("/rewind", undefined, busy.deps);
+		expect(noticeText(busy.calls)).toContain("Agent running");
 	});
 });

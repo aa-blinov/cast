@@ -251,8 +251,6 @@
 	.message-user .message-fork { height: 32px; }
 }
 .message-group:hover .message-actions .message-fork { opacity: 1; }
-/* The last turn's undo is the one you reach for right after a bad answer: always visible there. */
-.message-undo { opacity: .55; }
 .message-attachments {
 	display: flex; flex-wrap: wrap; gap: 4px;
 	margin-top: 6px;

@@ -35,7 +35,7 @@ export function parseSkillInvocation(content) {
 	return { name: unescape(match[1]), location: unescape(match[2]), args: match[3]?.trim() ?? "" };
 }
 
-function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, onFork, onForkAfter, onUndo }) {
+function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, onFork, onForkAfter, onRewind }) {
 	const role = msg.role || "assistant";
 	// Under an answer that ends a turn: fork through it (the conversation up to and including it).
 	const answerActions =
@@ -194,8 +194,9 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 			html`<button type="button" class="message-fork" title="Fork before this message: a new session with the conversation up to here, without this message" aria-label="Fork before this message" onClick=${() => onFork(msg.seq)}><${icons.fork} /> Fork before</button>`
 		}${
 			role === "user" &&
-			onUndo &&
-			html`<button type="button" class="message-fork message-undo" title="Undo this turn: put the files back and remove this message and the replies" aria-label="Undo this turn" onClick=${onUndo}><${icons.arrowUturnLeft} /> Undo</button>`
+			onRewind &&
+			typeof msg.seq === "number" &&
+			html`<button type="button" class="message-fork message-rewind" title="Rewind to before this message: put the files back, remove the conversation from here, or both" aria-label="Rewind to before this message" onClick=${() => onRewind(msg.seq)}><${icons.arrowUturnLeft} /> Rewind</button>`
 		}</div>
 		<div class="message-content ${role === "user" ? "" : "md-body"}" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
 		${

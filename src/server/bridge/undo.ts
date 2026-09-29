@@ -6,6 +6,7 @@
 
 import { filesLostByRestore, restoreCheckpoint } from "../../core/checkpoint.ts";
 import type { Message } from "../../core/llm.ts";
+import { previewRewind, type RewindMode, type RewindPreview, rewindSession } from "../../core/rewind.ts";
 import { deleteMessagesFrom, dropLastCheckpoint } from "../../core/session.ts";
 import type { WebAgentSession } from "../bridge.ts";
 import type { CommandResult } from "./command-registry.ts";
@@ -121,6 +122,33 @@ export async function undoLastTurn(
 		options.saveSession(ws.session);
 		onDone();
 		return { ok: true, result: `Undone: ${res.message}` };
+	} finally {
+		ws.undoing = false;
+	}
+}
+
+/** What rewinding to before the message `userSeq` would do; not available while a turn runs. */
+export async function previewRewindFor(ws: WebAgentSession, userSeq: number): Promise<RewindPreview> {
+	if (ws.status === "running")
+		return { available: false, reason: "The agent is still working: stop it or wait first." };
+	if (ws.undoing) return { available: false, reason: "An undo or rewind is already in progress." };
+	return previewRewind(ws.session, userSeq);
+}
+
+/** Rewinds to before the message `userSeq` (files, conversation or both), with the same race guard as undo. */
+export async function rewindTurn(
+	ws: WebAgentSession,
+	request: { userSeq: number; mode: RewindMode; force: boolean },
+	hooks: { saveSession: (session: WebAgentSession["session"]) => void; onDone: () => void },
+): Promise<CommandResult> {
+	if (ws.undoing) return { ok: false, error: "An undo or rewind is already in progress" };
+	ws.undoing = true;
+	try {
+		const result = await rewindSession(ws.session, request.userSeq, request.mode, { force: request.force });
+		if (!result.ok) return { ok: false, error: result.error };
+		hooks.saveSession(ws.session);
+		hooks.onDone();
+		return { ok: true, result: result.message };
 	} finally {
 		ws.undoing = false;
 	}

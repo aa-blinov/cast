@@ -20,6 +20,7 @@ import { lazy, prefetchWhenIdle } from "./lazy.js";
 import { isForkableAnswer, Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { describeFork } from "./fork-flow.js";
+import { rewindTo } from "./rewind-flow.js";
 import { undoLastTurn } from "./undo-flow.js";
 import { useModalFocusTrap } from "./modal-focus.js";
 import { BashConfirmCard, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
@@ -1241,6 +1242,37 @@ function App() {
 		setSidebarWidth,
 	});
 
+	// Which user messages a rewind can go back to (their turn recorded a snapshot); refetched
+	// when a turn ends, since every new turn adds one.
+	const [rewindSeqs, setRewindSeqs] = useState(() => new Set());
+	const messageCount = session?.messages?.length ?? 0;
+	useEffect(() => {
+		if (!activeId || running) return;
+		let cancelled = false;
+		api("GET", `/api/sessions/${activeId}/rewind-points`)
+			.then((data) => {
+				if (!cancelled) setRewindSeqs(new Set(data?.userSeqs ?? []));
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [activeId, running, messageCount]);
+	const rewindToMessage = useCallback(
+		(userSeq) =>
+			activeId
+				? rewindTo({
+						id: activeId,
+						userSeq,
+						confirm: requestConfirm,
+						addNotice,
+						showToast,
+						refresh: () => selectSession(activeId, { push: false }),
+					})
+				: Promise.resolve(false),
+		[activeId, requestConfirm, addNotice, showToast, selectSession],
+	);
+
 	// Undo the last turn: ask the daemon what it would do, confirm, then do it.
 	// Shared by the button on the last message and a typed /undo.
 	const undoTurn = useCallback(
@@ -1928,8 +1960,6 @@ function App() {
 	const [fullyMountedId, setFullyMountedId] = useState(null);
 	const firstPaintOnly = !!session?.id && fullyMountedId !== session.id && messages.length > FIRST_PAINT_MESSAGES;
 	const shownMessages = firstPaintOnly ? messages.slice(-FIRST_PAINT_MESSAGES) : messages;
-	// The one turn /undo can take back is the last: its user message carries the button.
-	const lastUserMessage = [...shownMessages].reverse().find((m) => m.role === "user");
 	firstPaintOnlyRef.current = firstPaintOnly;
 	useEffect(() => {
 		if (!session?.id || fullyMountedId === session.id) return;
@@ -2030,12 +2060,17 @@ function App() {
 		confirmState &&
 		html`
 		<div class="modal-backdrop" onClick=${() => closeConfirm(false)}>
-			<div class="modal modal-confirm" role="alertdialog" aria-modal="true" aria-label="Confirm" aria-describedby="confirm-message" tabIndex="-1" ref=${confirmModalRef} onClick=${(e) => e.stopPropagation()}>
+			<div class="modal modal-confirm${confirmState.choices || confirmState.alternateLabel ? " modal-confirm-wide" : ""}" role="alertdialog" aria-modal="true" aria-label="Confirm" aria-describedby="confirm-message" tabIndex="-1" ref=${confirmModalRef} onClick=${(e) => e.stopPropagation()}>
 				<div class="modal-confirm-body" id="confirm-message">${confirmState.message}</div>
 				<div class="modal-footer">
 					<button class="modal-btn" data-dismiss onClick=${() => closeConfirm(false)}>Cancel</button>
+					${
+						confirmState.choices
+							? confirmState.choices.map((choice) => html`<button key=${choice.value} class="modal-btn${choice.primary ? " modal-btn-primary" : ""}" onClick=${() => closeConfirm(choice.value)}>${choice.label}</button>`)
+							: html`
 					${confirmState.alternateLabel && html`<button class="modal-btn" onClick=${() => closeConfirm("alternate")}>${confirmState.alternateLabel}</button>`}
-					<button class="modal-btn ${confirmState.primary ? "modal-btn-primary" : "modal-btn-danger"}" onClick=${() => closeConfirm(true)}>${confirmState.confirmLabel ?? "Confirm"}</button>
+					<button class="modal-btn ${confirmState.primary ? "modal-btn-primary" : "modal-btn-danger"}" onClick=${() => closeConfirm(true)}>${confirmState.confirmLabel ?? "Confirm"}</button>`
+					}
 				</div>
 			</div>
 		</div>
@@ -2275,7 +2310,7 @@ function App() {
 									onRetry: loadOlderMessages,
 								})
 							}
-							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${forkBeforeMessage} onForkAfter=${!running && activeId && isForkableAnswer(msg, msg === shownMessages[shownMessages.length - 1]) ? forkAfterMessage : undefined} onUndo=${!running && activeId && msg === lastUserMessage ? undoTurn : undefined} />`)}
+							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${forkBeforeMessage} onForkAfter=${!running && activeId && isForkableAnswer(msg, msg === shownMessages[shownMessages.length - 1]) ? forkAfterMessage : undefined} onRewind=${!running && activeId && rewindSeqs.has(msg.seq) ? rewindToMessage : undefined} />`)}
 							${
 								!running &&
 								(messages[messages.length - 1]?.notice === "error" ||

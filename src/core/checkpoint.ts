@@ -316,7 +316,11 @@ const tooLargeNote = (skipped: string[]): string =>
 /**
  * Restore a workspace to the state captured by checkpoint.
  */
-export async function restoreCheckpoint(checkpoint: TurnCheckpoint): Promise<{ ok: boolean; message: string }> {
+export async function restoreCheckpoint(
+	checkpoint: TurnCheckpoint,
+	/** Keep the snapshot pinned: a files-only rewind leaves it in the list, to be restored again. */
+	options: { keepRef?: boolean } = {},
+): Promise<{ ok: boolean; message: string }> {
 	const env = shadowEnv(checkpoint);
 	const failed = (result: GitResult): { ok: false; message: string } => ({
 		ok: false,
@@ -343,7 +347,9 @@ export async function restoreCheckpoint(checkpoint: TurnCheckpoint): Promise<{ o
 		// The ignored and out-of-scope files git doesn't cover.
 		const { restored, skipped } = await applyBackups(checkpoint);
 		// Its job is done: let git collect the commit now.
-		await gitRun(checkpoint.cwd, ["update-ref", "-d", `${CHECKPOINT_REF_PREFIX}${checkpoint.id}`], env);
+		if (!options.keepRef) {
+			await gitRun(checkpoint.cwd, ["update-ref", "-d", `${CHECKPOINT_REF_PREFIX}${checkpoint.id}`], env);
+		}
 		const extra = restored > 0 && !checkpoint.shadowDir ? ` and ${restored} ignored or outside-folder file(s)` : "";
 		const kind = checkpoint.shadowDir ? "snapshot" : "Git checkpoint";
 		return { ok: true, message: `Restored workspace to ${kind} ${sha.slice(0, 7)}${extra}${tooLargeNote(skipped)}` };
