@@ -7,6 +7,7 @@ import OpenAI, {
 } from "openai";
 import type { ChatCompletionFunctionTool, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { type AppConfig, providerFetch } from "./config.ts";
+import { forgetValidated } from "./model-validation.ts";
 import { estimateRequestCost } from "./models-dev.ts";
 import { type LoggedRequest, logRequest, type RequestLogTarget } from "./request-log.ts";
 import { retryMaxWaitSeconds, retryQuotaWaitSeconds } from "./settings.ts";
@@ -1064,6 +1065,11 @@ export async function streamAndCollect(
 		}
 	} catch (error) {
 		logged?.fail(error);
+		// The key or the model is no longer good: let the next start check again.
+		const status = (error as { status?: number } | undefined)?.status;
+		if (status === 401 || status === 403 || status === 404) {
+			forgetValidated({ baseURL: client.baseURL, apiKey: client.apiKey ?? "" }, model);
+		}
 		throw error;
 	}
 	// Capture wall-clock end after the stream is fully consumed (tsLastByte
