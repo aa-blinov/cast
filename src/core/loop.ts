@@ -3921,9 +3921,17 @@ export async function waitForToolBatch<T extends { id: string; name: string }>(
 
 	return new Promise<ToolCallResult[]>((resolve) => {
 		let done = false;
+		const onAbort = () => {
+			setTimeout(finish, TOOL_ABORT_GRACE_MS);
+		};
 		const finish = () => {
 			if (done) return;
 			done = true;
+			// `once` only removes the listener when the signal fires. A batch that
+			// finishes normally left one behind on the turn's signal, each holding
+			// this batch's results: a long run piled up hundreds (Node's "101 abort
+			// listeners" warning after 100 tool rounds) and kept every result alive.
+			signal.removeEventListener("abort", onAbort);
 			// Real results for tools that settled (in prepared order); ABORTED
 			// placeholders for anything the grace caught still running.
 			resolve(prepared.map((tc) => settled.get(tc.id) ?? abortedToolResult(tc)));
@@ -3935,13 +3943,7 @@ export async function waitForToolBatch<T extends { id: string; name: string }>(
 			// must resolve so the UI lands on "aborted" and the session saves.
 			setTimeout(finish, TOOL_ABORT_GRACE_MS);
 		} else {
-			signal.addEventListener(
-				"abort",
-				() => {
-					setTimeout(finish, TOOL_ABORT_GRACE_MS);
-				},
-				{ once: true },
-			);
+			signal.addEventListener("abort", onAbort, { once: true });
 		}
 	});
 }

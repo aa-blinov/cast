@@ -1,3 +1,6 @@
+import { appendFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { Box, render, Text } from "ink";
 import type { JSX } from "react";
 import { runHooksForEvent } from "../core/hooks.ts";
@@ -41,6 +44,21 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// "EventSource is experimental" (code UNDICI-ES) warning on first use —
 	// it's noisy and meaningless for us, so suppress just that code. Other
 	// warnings are replayed to the original listener so nothing else is lost.
+	// A rejection nobody handled ends the process by default, mid-turn, with a
+	// stack dumped into the alternate screen. Keep the session alive and leave a
+	// trail in ~/.cast/tui-errors.log instead.
+	process.on("unhandledRejection", (reason) => {
+		try {
+			mkdirSync(join(homedir(), ".cast"), { recursive: true });
+			const text = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+			appendFileSync(
+				join(homedir(), ".cast", "tui-errors.log"),
+				`${new Date().toISOString()} unhandled rejection: ${text}\n`,
+			);
+		} catch {
+			// Nowhere to write: still better than dying.
+		}
+	});
 	const warningListeners = process.listeners("warning");
 	process.removeAllListeners("warning");
 	process.on("warning", (w) => {

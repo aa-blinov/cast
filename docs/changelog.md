@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **Abort listeners piled up in long turns.** Every batch of tool calls added an `abort` listener to the turn's signal and never removed it, so a turn with hundreds of tool rounds kept every batch's results alive and ended in `MaxListenersExceededWarning: 101 abort listeners`. The listener is now removed when the batch settles.
+- **A finished background job could crash the server.** When a background command exited after its session was gone, waking the session threw `Session not found` as an unhandled rejection and killed the daemon (and with it every other session). Those follow-up submits are now logged instead of thrown, and the server and the TUI both have an `unhandledRejection` handler as a last net (the TUI writes to `~/.cast/tui-errors.log` and stays up).
+
 ## 0.50.0
 
 ### Added

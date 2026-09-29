@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6000,6 +6001,36 @@ describe("waitForToolBatch", () => {
 			// No timers to advance — the already-settled promise resolves it.
 			const results = await batch;
 			expect(results[0]?.result.content).toBe("A");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
+
+describe("waitForToolBatch — abort listeners", () => {
+	it("leaves no listener on the turn's signal once a batch has finished, however many batches ran", async () => {
+		const ac = new AbortController();
+		for (let round = 0; round < 250; round++) {
+			const settled = new Map<string, { id: string; name: string; result: { content: string } }>();
+			const result = { id: `t${round}`, name: "bash", result: { content: "x".repeat(100) } };
+			settled.set(result.id, result);
+			await waitForToolBatch([Promise.resolve(result)], [{ id: result.id, name: "bash" }], settled, ac.signal);
+		}
+		// Node warns at 100 ("Possible EventTarget memory leak"): 250 rounds used to leave 250.
+		expect(getEventListeners(ac.signal, "abort")).toHaveLength(0);
+	});
+
+	it("still closes the batch when the signal fires before it settles", async () => {
+		vi.useFakeTimers();
+		try {
+			const ac = new AbortController();
+			const hung = new Promise<never>(() => {});
+			const batch = waitForToolBatch([hung], [{ id: "h", name: "h" }], new Map(), ac.signal);
+			ac.abort();
+			await vi.advanceTimersByTimeAsync(TOOL_ABORT_GRACE_MS + 10);
+			const results = await batch;
+			expect(results[0]?.result.content).toContain("ABORTED");
+			expect(getEventListeners(ac.signal, "abort")).toHaveLength(0);
 		} finally {
 			vi.useRealTimers();
 		}
