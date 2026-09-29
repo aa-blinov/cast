@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { latestPageUrl } from "./history-merge.js";
+import { SANDBOX_CWD } from "./sidebar-utils.js";
 
 function setUrlSessionId(id, { push } = {}) {
 	const url = id ? `${window.location.pathname}?session=${encodeURIComponent(id)}` : window.location.pathname;
@@ -540,7 +541,7 @@ export function useSessionController({
 				if (urlId) showToast("Session not found — started a new session", "error");
 				const current = personasRef.current;
 				const defaultP = current.find((x) => x.name === "senior") ?? current[0];
-				if (defaultP) startDraft(defaultP.name, undefined);
+				if (defaultP) startDraft(defaultP.name, SANDBOX_CWD);
 			}
 			return true;
 		} catch {

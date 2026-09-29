@@ -31,6 +31,7 @@ import { usePanelResize } from "./use-panel-resize.js";
 import { readOlderPages, useSessionController } from "./use-session-controller.js";
 import { useSessionState } from "./use-session-state.js";
 import { useWorkspaceState } from "./use-workspace-state.js";
+import { SANDBOX_CWD } from "./sidebar-utils.js";
 
 const FRONTMATTER_LINE_RE = /^- (.+?): (.+)$/;
 
@@ -1089,7 +1090,7 @@ function App() {
 				return;
 			}
 			const defaultP = personas.find((x) => x.name === "senior") ?? personas[0];
-			if (defaultP) startDraft(defaultP.name, undefined);
+			if (defaultP) startDraft(defaultP.name, SANDBOX_CWD);
 			else {
 				setActiveId(null);
 				setSession(null);
