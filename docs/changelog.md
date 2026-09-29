@@ -4,6 +4,24 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+## 0.48.0
+
+### Added
+
+- **Language servers.** After every `edit` and `write`, cast asks the project's language server about the file and adds the errors the change introduced to the result, including other open files it broke, so the model fixes them in the same turn without running a build. Errors that were already there are counted, not listed. The new `lsp` tool asks the same servers: definition, type definition, implementation, references, hover, file outline, workspace symbols, call hierarchy and diagnostics, 1-based, with the line of code. About 40 languages work out of the box: TypeScript (including TypeScript 7's own server), Python (pyright), ESLint, Go, Rust, C/C++ and more; npm servers install into `~/.cast/lsp` on first use and clangd, lua-language-server, zls, texlab, tinymist and rust-analyzer download from their GitHub releases (`lspAutoInstall: false` stops that). `/lsp` and `cast lsp` show and query them, the web UI's Status window lists them, and the TUI has an optional `/statusbar` segment. `lsp: false` or `CAST_LSP=off` turns it all off; `lspServers` adds or overrides a server.
+- **Fork from any point.** `/fork` asks where from: the whole session, or before any message you sent, with the full conversation up to there, even what compaction had summarized. The web UI has a fork button on each of your messages, and the API takes `beforeSeq`.
+- **The request log.** Every request cast sends to the model is stored exactly as it went out (system prompt, reminders, history after compaction, tools, retries, usage and the raw answer), so a bad turn can be replayed as it happened. `cast requests <session> [n]` reads it; it goes with its session.
+
+### Changed
+
+- **Faster TUI start.** The saved model is checked with a real request at most once a day per provider, key and model, not on every launch (a rejected key or model makes the next launch check again); the model's details load alongside that check, and the launchers keep Node's compile cache. On a slow provider, from ~10s to ~2s.
+- **A lighter TUI while the model works.** The spinners and the elapsed time tick on one clock: half the frames and half the CPU while waiting for an answer. A status bar too wide for the terminal drops whole segments, least useful first, instead of cutting off the mode and model.
+
+### Fixed
+
+- **A slow agent through tool calls.** The model catalog (~5MB) was read and parsed on every request to estimate its cost: over half of cast's CPU in a run of tool calls. It is now parsed once.
+- `cast --resume <id>` opened the session picker and then sent the id to the model as the first message; it now resumes that session.
+
 ## 0.47.1
 
 ### Changed
