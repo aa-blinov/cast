@@ -6,6 +6,8 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
+- **Fork from an answer.** In the web UI, an answer of the agent that ends a turn has a "Fork from here" button that starts a new session with the conversation up to and including that answer, so you can carry on from the answer instead of from the question after it. Until now only your own messages could be fork points ("fork before this message", now labelled as such). An answer that calls tools is not a point, since the cut would separate the call from its result. The fork endpoint takes `afterSeq`, and `/fork after <seq>` does the same. Forking from an earlier point now says that the two sessions share the working folder, so the files are as they are now.
+
 - **An undo button and a dialog that says what it does.** In the web UI the last message you sent has an undo button. It opens a dialog that names the message that will go and how many messages with it, says how the files are restored, and lists the files it would delete, then asks; the button is named Undo. A typed `/undo` opens the same dialog, and only `/undo --force` skips it. Before, the web answered with an error asking you to re-run as `/undo --force`. `GET /api/v1/sessions/{id}/undo` returns the same preview.
 
 ### Fixed

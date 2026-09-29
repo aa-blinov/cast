@@ -25,6 +25,7 @@ import {
 	startReviewState,
 } from "../../core/review.ts";
 
+const WHITESPACE_RE = /\s+/;
 const ARG_WHITESPACE_SPLIT = /\s+/;
 
 // /memory subcommand parsing — ten subcommands, each a single regex. Lived
@@ -74,7 +75,13 @@ import {
 import { setModelsCache } from "../../core/readline.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
-import { addUsage, clearSessionMessages, listSubagentSessions, recordCompaction } from "../../core/session.ts";
+import {
+	addUsage,
+	clearSessionMessages,
+	forkCutAfterReply,
+	listSubagentSessions,
+	recordCompaction,
+} from "../../core/session.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import {
 	checkpointFork,
@@ -107,8 +114,6 @@ import type { Broadcaster } from "./broadcaster.ts";
 import { undoLastTurn } from "./undo.ts";
 
 const execFileAsync = promisify(execFile);
-
-const WHITESPACE_RE = /\s+/;
 
 /**
  * Public result shape of `bridge.executeCommand`. Defined here (not imported
@@ -442,9 +447,19 @@ const commandHandlers: Record<string, CommandHandler> = {
 		};
 	},
 	"/fork": ({ ws, arg, forkSessionInstance }) => {
-		const beforeSeq = arg ? Number(arg) : undefined;
-		if (beforeSeq !== undefined && !Number.isInteger(beforeSeq))
-			return { ok: false, error: "Usage: /fork [message seq]" };
+		const usage = { ok: false, error: "Usage: /fork [message seq | after <answer seq>]" };
+		const words = arg.split(WHITESPACE_RE).filter(Boolean);
+		const after = words[0] === "after";
+		const seqText = after ? words[1] : words[0];
+		const seq = seqText === undefined ? undefined : Number(seqText);
+		if ((after && seq === undefined) || words.length > (after ? 2 : 1)) return usage;
+		if (seq !== undefined && !Number.isInteger(seq)) return usage;
+		let beforeSeq = seq;
+		if (after && seq !== undefined) {
+			const cut = forkCutAfterReply(ws.id, seq);
+			if (!cut.ok) return { ok: false, error: cut.error };
+			beforeSeq = cut.beforeSeq;
+		}
 		const fork = forkSessionInstance(ws.id, beforeSeq);
 		if (!fork) return { ok: false, error: "Could not fork session" };
 		return { ok: true, result: { sessionId: fork.id } };

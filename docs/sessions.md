@@ -88,6 +88,7 @@ When enabled, cast creates (or reuses) a git worktree at `.cast/worktrees/<name>
 /sessions                  # Opens session picker
 /continue                  # Resume the most recent session
 /fork                      # Branch the session, whole or from before one of your messages
+/fork after <answer seq>   # Branch through one of the agent's answers (web UI and API)
 /worktree <name>           # Switch current session to a git worktree
 ```
 
@@ -97,7 +98,9 @@ The `/sessions` picker shows each session's project, first message, last-updated
 
 `/fork` asks where to branch from: the whole session, or before any message you sent. **Whole session** keeps only the context currently sent to the model. **Before a message** takes the conversation up to that point, with every original message, even ones compaction has since summarized (a fork too large for the model is compacted on its first request); send the message again, or something else. In the web UI, the fork button next to a message you sent does the same.
 
-`/fork` creates a new session and switches to it; the source is not changed. Compacted-out history (in the whole-session form), pending questions and plan approvals, undo checkpoints, and usage counters are not copied. A fork shares the same working directory; use `/worktree` afterwards when file isolation is needed.
+ **Through an answer** keeps the conversation up to and including one of the agent's answers, so you can carry on from that answer instead of from the question after it. In the web UI, an answer that ends a turn has a **Fork from here** button under it (hover it; always visible on touch screens); the same is `/fork after <seq>` and `{"afterSeq": n}` on the fork endpoint. An answer that calls tools is not a fork point, because the cut would separate the call from its result; use the turn's final answer. Forking through the last answer is the whole-session fork.
+
+`/fork` creates a new session and switches to it; the source is not changed. Compacted-out history (in the whole-session form), pending questions and plan approvals, undo checkpoints, and usage counters are not copied. A fork shares the same working directory, so its files are the files as they are now, not as they were at the point you forked from (the web UI says so when you fork from an earlier point); use `/worktree` afterwards when file isolation is needed.
 
 ### Web UI Sidebar
 

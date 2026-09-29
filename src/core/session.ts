@@ -2635,6 +2635,30 @@ export function listForkPoints(sessionId: string): ForkPoint[] {
 	return points;
 }
 
+export type ForkCut = { ok: true; beforeSeq?: number } | { ok: false; error: string };
+
+/**
+ * Where to cut to fork *through* the agent's answer at `afterSeq`, keeping the
+ * answer itself. It is the same boundary as "before the next message", so it
+ * comes out as that message's seq (which forkSession already takes); an answer
+ * that is the last message in the conversation gives no seq, meaning the whole
+ * session. Only an answer that ends a turn qualifies: cutting after a message
+ * that calls tools would leave the call without its result.
+ */
+export function forkCutAfterReply(sessionId: string, afterSeq: number): ForkCut {
+	const { messages, seqs } = getFullHistoryWithReasoning(sessionId);
+	const index = seqs.indexOf(afterSeq);
+	const message = messages[index];
+	if (index === -1 || !message) return { ok: false, error: "No message with that seq in this session" };
+	if (message.role !== "assistant") {
+		return { ok: false, error: "Fork from the agent's answer, or from before one of your own messages" };
+	}
+	if ((message as { tool_calls?: unknown[] }).tool_calls?.length) {
+		return { ok: false, error: "That message calls tools; fork from the agent's final answer of the turn" };
+	}
+	return { ok: true, beforeSeq: seqs[index + 1] };
+}
+
 /**
  * The conversation up to the message at `beforeSeq`: the source's current
  * system prompt, then every original message before that point. Compaction

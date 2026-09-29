@@ -238,6 +238,10 @@
 .message-user:hover .message-fork, .message-fork:focus-visible { opacity: 1; }
 .message-fork:hover { color: var(--text); background: var(--bg-hover, rgba(127,127,127,.12)); }
 @media (hover: none) { .message-fork { opacity: .7; } }
+/* Under an answer: the action row appears with the answer and reads as a labelled button. */
+.message-actions { display: flex; gap: 6px; margin-top: 2px; }
+.message-actions .message-fork { width: auto; padding: 0 6px; gap: 4px; font: inherit; font-size: var(--fs-micro, 11px); }
+.message-group:hover .message-actions .message-fork { opacity: 1; }
 /* The last turn's undo is the one you reach for right after a bad answer: always visible there. */
 .message-undo { opacity: .55; }
 .message-attachments {

@@ -17,7 +17,7 @@ vi.mock("../src/server/public/streaming-blocks.js", () => ({ BlockView: () => nu
 vi.mock("../src/server/public/tool-card.js", () => ({ ToolCard: () => null }));
 vi.mock("../src/server/public/turn-meta.js", () => ({ TurnMetaLine: () => null }));
 
-import { Message, parseSkillInvocation } from "../src/server/public/message.js";
+import { isForkableAnswer, Message, parseSkillInvocation } from "../src/server/public/message.js";
 
 const renderMarkdown = (s: string) => s;
 const escapeHtml = (s: string) => s;
@@ -67,5 +67,27 @@ describe("parseSkillInvocation", () => {
 		expect(parseSkillInvocation("please use <skill name=x> tags")).toBeNull();
 		expect(parseSkillInvocation('<skill name="x" location="y">unterminated')).toBeNull();
 		expect(parseSkillInvocation(undefined)).toBeNull();
+	});
+});
+
+describe("isForkableAnswer", () => {
+	it("accepts a saved answer that ends a turn", () => {
+		expect(isForkableAnswer({ role: "assistant", content: "done", seq: 7 }, false)).toBe(true);
+		expect(isForkableAnswer({ role: "assistant", content: "done", seq: 7, toolCalls: [] }, false)).toBe(true);
+	});
+
+	it("takes an answer without a seq only when it is the last message", () => {
+		expect(isForkableAnswer({ role: "assistant", content: "done" }, true)).toBe(true);
+		expect(isForkableAnswer({ role: "assistant", content: "done" }, false)).toBe(false);
+	});
+
+	it("refuses a message that calls tools, an empty one, and anything that is not an answer", () => {
+		expect(isForkableAnswer({ role: "assistant", content: "", seq: 3, toolCalls: [{ id: "c" }] }, true)).toBe(false);
+		expect(isForkableAnswer({ role: "assistant", content: "x", seq: 3, toolCalls: [{ id: "c" }] }, false)).toBe(
+			false,
+		);
+		expect(isForkableAnswer({ role: "assistant", content: null, seq: 3 }, true)).toBe(false);
+		expect(isForkableAnswer({ role: "user", content: "hi", seq: 1 }, true)).toBe(false);
+		expect(isForkableAnswer({ role: "warning", content: "w", seq: 2 }, true)).toBe(false);
 	});
 });
