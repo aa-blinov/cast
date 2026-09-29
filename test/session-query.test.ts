@@ -46,6 +46,23 @@ describe("session history search", () => {
 		expect(formatSessionHistoryToolResult("reconnect watermark", results)).toContain("SSE");
 	});
 
+	it("does not let one chatty session fill the whole answer", () => {
+		const project = join(root, "project");
+		const noisy = createSession("test-model", project);
+		noisy.messages = Array.from({ length: 6 }, (_, i) => ({
+			role: "assistant" as const,
+			content: `sandbox note ${i} about sandbox sandbox sandbox`,
+		}));
+		saveSession(noisy);
+		const quiet = createSession("test-model", project);
+		quiet.messages = [{ role: "user", content: "what is the sandbox for?" }];
+		saveSession(quiet);
+
+		const results = searchSessionHistory(project, "sandbox");
+		expect(results.filter((r) => r.sessionId === noisy.id)).toHaveLength(2);
+		expect(results.some((r) => r.sessionId === quiet.id)).toBe(true);
+	});
+
 	it("scope=global searches across every project, not just the current cwd", () => {
 		const project = join(root, "project");
 		const otherProject = join(root, "other");

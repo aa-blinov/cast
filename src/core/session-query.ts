@@ -3,6 +3,9 @@ import { findProjectRoot } from "./project-root.ts";
 import type { ToolResult } from "./tools/shared.ts";
 
 const MAX_RESULTS = 8;
+/** One session that says a word a lot would otherwise fill the whole answer with near-copies of itself. */
+const MAX_PER_SESSION = 2;
+const CANDIDATE_FACTOR = 8;
 
 export const SESSION_HISTORY_TOOL_DESCRIPTION =
 	"Search previous user, assistant, and tool messages in past sessions. This is conversation history, not durable project memory: use it when the exact earlier discussion or decision is needed. By default it searches sessions from the current project; pass scope=\"global\" to search across EVERY project (the agent's whole history — 'when did we fix X anywhere').";
@@ -77,7 +80,7 @@ export function searchSessionHistory(
 			// repository root, or from a sibling subdirectory, which is most of
 			// a project's history once any work happens in subdirectories.
 			...(scope === "project" ? [ftsQuery, projectRoot, `${likePrefix(projectRoot)}/%`] : [ftsQuery]),
-			Math.max(1, Math.min(limit, MAX_RESULTS)),
+			Math.max(1, Math.min(limit, MAX_RESULTS)) * CANDIDATE_FACTOR,
 		) as Array<{
 		session_id: string;
 		seq: number;
@@ -89,7 +92,17 @@ export function searchSessionHistory(
 		score: number;
 	}>;
 
-	return rows.map((row) => ({
+	const perSession = new Map<string, number>();
+	const wanted = Math.max(1, Math.min(limit, MAX_RESULTS));
+	const diverse = rows
+		.filter((row) => {
+			const seen = perSession.get(row.session_id) ?? 0;
+			perSession.set(row.session_id, seen + 1);
+			return seen < MAX_PER_SESSION;
+		})
+		.slice(0, wanted);
+
+	return diverse.map((row) => ({
 		sessionId: row.session_id,
 		seq: row.seq,
 		role: row.role,
