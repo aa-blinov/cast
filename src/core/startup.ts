@@ -391,6 +391,9 @@ export async function runStartup(
 		}
 	} else if (settings.model) {
 		onProgress?.("Connecting to model...");
+		// The model's metadata is fetched while the check runs, not after it:
+		// two provider round trips in sequence were most of a TUI start.
+		const early = warmModelMetadataInBackground(config, settings.model);
 		let ok = await runOnboardingCheck(config, settings.model, { silent: true });
 		if (!ok) {
 			// The saved model failed — but that might be the *connection* (revoked
@@ -404,7 +407,7 @@ export async function runStartup(
 		}
 		if (ok) {
 			model = settings.model;
-			const p = warmModelMetadataInBackground(config, model);
+			const p = early ?? warmModelMetadataInBackground(config, model);
 			if (p) {
 				const metadata = await p;
 				reasoningMeta = metadata?.reasoning;

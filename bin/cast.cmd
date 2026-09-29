@@ -4,4 +4,6 @@ rem See bin/cast (the macOS/Linux equivalent) for why the two targeted
 rem warning suppressions and CAST_CWD are both here.
 setlocal
 set "CAST_CWD=%CD%"
+rem Keeps V8's compiled code between runs; see bin/cast.
+if not defined NODE_COMPILE_CACHE set "NODE_COMPILE_CACHE=%USERPROFILE%\.cast\cache\compile"
 node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --max-semi-space-size=64 "%~dp0..\dist\index.js" %*

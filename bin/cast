@@ -23,4 +23,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 # other warnings visible instead of suppressing the process-wide warning stream.
 # --max-semi-space-size=64: the daemon streams many small objects (SSE events,
 # provider chunks); a bigger young generation means fewer, amortized minor GCs.
-exec env CAST_CWD="$ORIGINAL_CWD" node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --max-semi-space-size=64 "$SCRIPT_DIR/../dist/index.js" "$@"
+# NODE_COMPILE_CACHE keeps V8's compiled code for dist/index.js between runs
+# (Node 22.1+; older ones ignore it): compiling the 5MB bundle was a quarter
+# of every start, ~0.4s. The daemon the TUI starts inherits it.
+exec env CAST_CWD="$ORIGINAL_CWD" NODE_COMPILE_CACHE="${NODE_COMPILE_CACHE:-$HOME/.cast/cache/compile}" node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --max-semi-space-size=64 "$SCRIPT_DIR/../dist/index.js" "$@"
