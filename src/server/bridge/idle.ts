@@ -6,7 +6,7 @@
  *
  * Moved out of server/bridge.ts as the third of three planned extractions
  * (broadcaster / fs-watcher / idle). idle consumes fs-watcher.stopFsWatcher
- * to release the chokidar handle when evicting, and the bridge's
+ * to release the directory watchers when evicting, and the bridge's
  * releaseProjectMcpForCwd + countTurnMessages + saveSession helpers as
  * deps. fsWatcher.syncFsWatcher calls into idle via the onIdle callback
  * so the original "every session-state transition triggers both fs
