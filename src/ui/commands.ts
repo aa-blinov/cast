@@ -48,6 +48,7 @@ import {
 	createSession,
 	deleteMessagesFrom,
 	dropLastCheckpoint,
+	forkCutAfterReply,
 	listForkPoints,
 	listSessionSummaries,
 	listSubagentSessions,
@@ -1513,15 +1514,30 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			// Newest first: going back a step or two is the common case.
 			const points = listForkPoints(session.id).reverse();
 			let beforeSeq: number | undefined;
+			let answerSeq: number | undefined;
 			if (points.length > 0) {
 				const picked = await deps.pickers.pickOption<string>(
 					[
 						{ value: "all", label: "Whole session", description: "Everything up to now" },
-						...points.map((p) => ({
-							value: String(p.seq),
-							label: `Before: ${p.text.split(WHITESPACE_RE).join(" ").slice(0, 70)}`,
-							description: "The conversation up to this message, which you can then send again or change",
-						})),
+						...points.flatMap((p) => {
+							const line = p.text.split(WHITESPACE_RE).join(" ").slice(0, 70);
+							const rows = [];
+							// Through the last answer is the whole session, which has its own row.
+							const cut = p.answerSeq === undefined ? undefined : forkCutAfterReply(session.id, p.answerSeq);
+							if (cut?.ok && cut.beforeSeq !== undefined) {
+								rows.push({
+									value: `after:${p.answerSeq}`,
+									label: `Through the answer to: ${line}`,
+									description: "The conversation up to and including the agent's answer, to carry on from it",
+								});
+							}
+							rows.push({
+								value: `before:${p.seq}`,
+								label: `Before: ${line}`,
+								description: "The conversation up to this message, which you can then send again or change",
+							});
+							return rows;
+						}),
 					],
 					{ title: "Fork from where?" },
 				);
@@ -1529,7 +1545,17 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					showNotice("[Cancelled]");
 					return;
 				}
-				beforeSeq = picked === "all" ? undefined : Number(picked);
+				if (picked.startsWith("after:")) {
+					const cut = forkCutAfterReply(session.id, Number(picked.slice("after:".length)));
+					if (!cut.ok) {
+						showNotice(`[Could not fork: ${cut.error}]`);
+						return;
+					}
+					beforeSeq = cut.beforeSeq;
+					answerSeq = Number(picked.slice("after:".length));
+				} else if (picked.startsWith("before:")) {
+					beforeSeq = Number(picked.slice("before:".length));
+				}
 			}
 			let forked: SessionState | undefined;
 			try {
@@ -1549,10 +1575,13 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			// would stay on screen, looking like part of the new session.
 			if (beforeSeq !== undefined) await deps.onRepaintHistory?.();
 			const point = points.find((p) => p.seq === beforeSeq);
+			const answered = points.find((p) => p.answerSeq === answerSeq);
 			showNotice(
-				point
-					? `[Forked session: ${forked.id}, before "${point.text.slice(0, 70)}". Send it again, or something else.]`
-					: `[Forked session: ${forked.id}]`,
+				answerSeq !== undefined && answered
+					? `[Forked session: ${forked.id}, through the answer to "${answered.text.slice(0, 70)}". Both sessions share the working folder: the files are as they are now.]`
+					: point
+						? `[Forked session: ${forked.id}, before "${point.text.slice(0, 70)}". Send it again, or something else.]`
+						: `[Forked session: ${forked.id}]`,
 			);
 			return;
 		},

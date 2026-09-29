@@ -891,6 +891,19 @@ describe("web bridge", () => {
 		expect(result).toEqual({ ok: false, error: "No checkpoint available to undo" });
 	});
 
+	it("a turn's checkpoint names the user message that started it", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		await bridge.submit(ws.id, "first task");
+		const seqs = getFullHistoryWithReasoning(ws.id);
+		const userIndex = seqs.messages.findIndex((m) => m.role === "user" && m.content === "first task");
+		expect(userIndex).toBeGreaterThan(-1);
+		const checkpoint = ws.session.checkpoints?.[0];
+		expect(checkpoint?.userSeq).toBe(seqs.seqs[userIndex]);
+		// Persisted with the row, so it survives a restart.
+		expect(loadSession(ws.id)?.checkpoints?.[0]?.userSeq).toBe(seqs.seqs[userIndex]);
+	});
+
 	it("/undo removes the turn from the store, so it does not come back on reload", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

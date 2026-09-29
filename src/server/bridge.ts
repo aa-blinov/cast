@@ -97,6 +97,7 @@ import {
 	saveSession,
 	searchSessionSummaries,
 	searchSessionSummariesAsync,
+	seqOfMessage,
 	type TurnMeta,
 	updateLastCheckpoint,
 } from "../core/session.ts";
@@ -1667,6 +1668,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// the session stuck "running", every later send steered into nothing.
 		try {
 			chk = await createCheckpoint(sessionCwd);
+			// Which point in the conversation this snapshot is the start of: rewind and
+			// fork-with-files look it up by that message.
+			const turnStart = ws.session.messages[startCount - (queuedMessages?.length ?? 1)];
+			const turnStartSeq = turnStart ? seqOfMessage(ws.session.id, turnStart) : undefined;
+			if (turnStartSeq !== undefined) chk.userSeq = turnStartSeq;
 			if (!ws.session.checkpoints) ws.session.checkpoints = [];
 			ws.session.checkpoints.push(chk);
 			// Persist alongside the in-memory array (session.checkpoints isn't in

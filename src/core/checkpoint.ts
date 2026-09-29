@@ -22,6 +22,8 @@ export interface TurnCheckpoint {
 	gitCommitSha?: string;
 	/** Set when gitCommitSha lives in a hidden repository (a folder that is not a git repo). */
 	shadowDir?: string;
+	/** seq of the user message that started this turn: what ties the snapshot to a point in the conversation. */
+	userSeq?: number;
 	backups?: CheckpointFileBackup[];
 }
 

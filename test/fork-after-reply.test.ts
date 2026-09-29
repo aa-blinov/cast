@@ -11,6 +11,7 @@ import {
 	forkCutAfterReply,
 	forkSession,
 	getFullHistoryWithReasoning,
+	listForkPoints,
 	saveSession,
 } from "../src/core/session.ts";
 import type { ServerBridge } from "../src/server/bridge.ts";
@@ -191,5 +192,22 @@ describe("POST /fork with afterSeq", () => {
 		status = "running";
 		expect((await fork({ afterSeq: seqs.firstAnswer })).status).toBe(409);
 		expect(captured.called).toBe(false);
+	});
+});
+
+describe("listForkPoints answers", () => {
+	it("names each prompt's final answer, skipping the tool round in between", () => {
+		const { session, seqs } = conversation();
+		expect(listForkPoints(session.id)).toEqual([
+			{ seq: seqs.firstUser, text: "first question", answerSeq: seqs.firstAnswer },
+			{ seq: seqs.secondUser, text: "second question", answerSeq: seqs.secondAnswer },
+		]);
+	});
+
+	it("leaves answerSeq out for a prompt that was never answered", () => {
+		const session = createSession("test-model", join(root, "project"));
+		session.messages = [{ role: "user", content: "unanswered" }] as Message[];
+		saveSession(session);
+		expect(listForkPoints(session.id)).toEqual([{ seq: expect.any(Number), text: "unanswered" }]);
 	});
 });
