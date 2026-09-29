@@ -191,11 +191,11 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 			role === "user" &&
 			onFork &&
 			typeof msg.seq === "number" &&
-			html`<button type="button" class="message-fork" title="Fork before this message: a new session with the conversation up to here, without this message" aria-label="Fork before this message" onClick=${() => onFork(msg.seq)}><${icons.fork} /></button>`
+			html`<button type="button" class="message-fork" title="Fork before this message: a new session with the conversation up to here, without this message" aria-label="Fork before this message" onClick=${() => onFork(msg.seq)}><${icons.fork} /> Fork before</button>`
 		}${
 			role === "user" &&
 			onUndo &&
-			html`<button type="button" class="message-fork message-undo" title="Undo this turn: put the files back and remove this message and the replies" aria-label="Undo this turn" onClick=${onUndo}><${icons.arrowUturnLeft} /></button>`
+			html`<button type="button" class="message-fork message-undo" title="Undo this turn: put the files back and remove this message and the replies" aria-label="Undo this turn" onClick=${onUndo}><${icons.arrowUturnLeft} /> Undo</button>`
 		}</div>
 		<div class="message-content ${role === "user" ? "" : "md-body"}" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
 		${

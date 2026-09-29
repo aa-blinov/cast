@@ -55,9 +55,10 @@ Advertised in `initialize`:
 }
 ```
 
-- `fork` and `resume` are deliberately absent: cast has no fork semantics, and
-  `session/resume` is a synonym of `session/load`, so advertising it separately
-  would make an editor show a distinct affordance for the same thing.
+- `fork` and `resume` are deliberately absent: cast forks with `/fork` (in its own UIs and the REST API), but
+  the ACP `session/fork` is not wired to it, and `session/resume` is a synonym of
+  `session/load`, so advertising it separately would make an editor show a distinct
+  affordance for the same thing.
 - `mcpCapabilities.{http,sse}` are `true`: an editor may pass HTTP/SSE MCP
   servers in `session/new`, and their tools are merged with cast's own for the
   life of that session. `stdio` and the experimental `acp` transport are

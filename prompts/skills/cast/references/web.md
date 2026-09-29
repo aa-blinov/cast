@@ -27,7 +27,7 @@ Web settings configure the same global providers, models, skills, MCP servers, h
 
 Sidebar toggle; status dot (green connected / yellow reconnecting / red offline);
 Status popover; **Dashboard** (chart icon → `/dashboard?session=...`);
-**Settings** (gear → `/settings?session=...`); **Shortcuts**; **Diff** toggle.
+**Settings** (gear → `/settings?session=...`); **Shortcuts**; the right-panel toggle ("Files and changes").
 The status popover shows persona, provider, model, mode, status, messages,
 tokens in/out, cache %, cost, last-turn tok/s, directory, git branch, worktree.
 
@@ -42,7 +42,11 @@ Rename / Share / Fork / Delete. Footer: default model + logout.
 
 ### Chat transcript
 
-Messages labelled `you`, `agent`, `system`, `notice`, `error`. Assistant
+Messages labelled `you`, `agent`, `system`, `notice`, `error`. Per-message actions: your message has
+**Fork before** (a new session with the conversation up to here, without this message), and the last one also **Undo**
+(a dialog says which message goes, how files are restored and what gets deleted, then asks; typing `/undo` opens the same
+dialog); an agent answer that ends a turn has **Fork from here** (a new session through that answer). On touch screens
+they are always visible. A fork shares the working folder, so its files are as they are now. Assistant
 messages render as ordered blocks: optional `reasoning`, agent content
 (markdown), tool cards (collapsible args/result, MCP badge), and a turn footer
 `provider · model · Ns`. Pending user message shows `you · sending…`. While a
@@ -70,7 +74,11 @@ is requested on the first send).
 ### Right panel tabs
 
 - **Inputs** — uploaded attachment files for the session.
-- **Files** — searchable lazy directory tree of the session cwd with download/rename/delete.
+- **Files** — the session cwd as a lazy tree, 1000 entries per folder with "Show more"; git-ignored entries are dimmed.
+  Search matches every word against the path (a "ignored" checkbox includes git-ignored files) and says "Showing N of M" when
+  it was cut. **+ File / + Folder** (a name like `a/b/c.txt` creates the folders), **Upload** (or drop files on the tree or a
+  folder; progress bar; asks before replacing), drag a row onto a folder to move it, Ctrl/Cmd-click to select several and
+  delete them together, per-row download (a folder downloads as `.tar.gz`), rename, delete.
 - **Memory** — "Search project memory", notes count, current checkpoint
   (Intent/Next), reusable workflows, memory cards with type and importance badge
   (CRITICAL/HIGH/MEDIUM/LOW).

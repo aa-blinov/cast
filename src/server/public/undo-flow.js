@@ -11,9 +11,8 @@ const MAX_QUOTE_CHARS = 90;
 export function describeUndo(preview) {
 	const lines = [];
 	if (preview.removedMessage) {
-		const count = preview.removedMessages ?? 1;
 		const quote = preview.removedMessage.length > MAX_QUOTE_CHARS ? `${preview.removedMessage.slice(0, MAX_QUOTE_CHARS)}…` : preview.removedMessage;
-		lines.push(`Undo the last turn? Your message "${quote}" and the ${count === 1 ? "message" : `${count} messages`} from it on are removed.`);
+		lines.push(`Undo the last turn? Your message "${quote}" and everything the agent did after it are removed.`);
 	} else {
 		lines.push("Undo the last turn?");
 	}
