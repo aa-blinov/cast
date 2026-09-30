@@ -74,6 +74,23 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 		}
 	});
 
+	// A crash or a signal must not leave the terminal in the alternate screen with
+	// raw input: hand it back first, whatever ends the process.
+	const restore = () => {
+		try {
+			tui.stop();
+		} catch {
+			// already stopped
+		}
+	};
+	process.once("exit", restore);
+	for (const signal of ["SIGTERM", "SIGHUP"] as const) {
+		process.once(signal, () => {
+			restore();
+			process.exit(128 + (signal === "SIGTERM" ? 15 : 1));
+		});
+	}
+
 	tui.start();
 	app.start();
 	root = mountHeadless(
