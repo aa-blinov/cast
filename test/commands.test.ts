@@ -514,6 +514,73 @@ describe("handleInput", () => {
 		expect(shown).toContain("Auth starts in src/auth.ts:12.");
 	});
 
+	it("/agents watches a subagent live where the front end can: the view reads its saved session and knows when it is done", async () => {
+		type View = { title: string; read(): { text: string; running: boolean }; stop?(): void };
+		let seen: View | undefined;
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async (options) => options[0]!.value,
+			pickMulti: async () => null,
+			viewLive: async (view: View) => {
+				seen = view;
+			},
+			log: () => {},
+		} as Pickers;
+		const { deps } = createFakeDeps({ pickers });
+		saveSession(deps.session);
+		const child = createSession("test-model", "/tmp", {
+			sessionKind: "subagent",
+			parentSessionId: deps.session.id,
+			title: "Map auth",
+		});
+		child.persona = "explore";
+		child.messages.push({ role: "user", content: "map the auth flow" });
+		saveSession(child);
+
+		await handleInput("/agents", undefined, deps);
+
+		expect(seen?.title).toBe("explore · Map auth");
+		expect(seen?.read()).toEqual({ text: "› map the auth flow", running: false });
+		expect(seen?.stop).toBeTypeOf("function");
+	});
+
+	it("/settings opens one menu of the settings, each with its value, and runs the one you pick", async () => {
+		let offered: Array<{ value: string; label: string; hint?: string }> = [];
+		let title: string | undefined;
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async (options, opts) => {
+				offered = options as typeof offered;
+				title = opts?.title;
+				return "/reasoning-display" as never;
+			},
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ pickers });
+		await handleInput("/settings", undefined, deps);
+		expect(title).toBe("Settings");
+		expect(offered.map((o) => o.value)).toEqual(
+			expect.arrayContaining(["/model", "/provider", "/persona", "/permissions", "/theme", "/statusbar"]),
+		);
+		expect(offered.find((o) => o.value === "/model")?.hint).toBe("test-model");
+		expect(offered.find((o) => o.value === "/permissions")?.hint).toBe(deps.permissionMode);
+		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
+	});
+
+	it("/settings cancelled runs nothing", async () => {
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async () => null,
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps, calls } = createFakeDeps({ pickers });
+		await handleInput("/settings", undefined, deps);
+		expect(calls["agent.toggleReasoning"]).toBeUndefined();
+		expect(calls.showNotice).toBeUndefined();
+	});
+
 	it("/agents says so when the session has none", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/agents", undefined, deps);
