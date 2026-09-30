@@ -61,7 +61,7 @@ export const QUESTION_TOOL_NAME = "question";
 /**
  * Terminal (signal) tools: a successful call ends the turn. Their contract is
  * "call it, then wait for the user" — the UI opens a mode-transition dialog
- * once the run settles (App.tsx waits for status !== "running"). Enforced by
+ * once the run settles (the front end waits for status !== "running"). Enforced by
  * the loop rather than the model's goodwill: the model returning a slightly
  * reworded summary on every call used to keep the run alive forever, and the
  * doom-loop detector (keyed on exact args) couldn't catch the varying args.

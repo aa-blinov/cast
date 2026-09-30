@@ -1,14 +1,11 @@
-import { Text } from "ink";
-import type { JSX } from "react";
 import { inputTokenBudget } from "../core/config.ts";
 import type { SessionUsage } from "../core/session.ts";
 import { estimateTokens } from "../core/session.ts";
 import type { StatusBarConfig } from "../core/settings.ts";
-import { abbreviateTokens } from "./App.tsx";
-import { theme } from "./themes/index.ts";
+import { abbreviateTokens } from "./format-tokens.ts";
 
 // ============================================================================
-// Segment context — data passed to every segment's render function
+// Segment context — data passed to every segment's text function
 // ============================================================================
 
 export interface SegmentContext {
@@ -45,12 +42,10 @@ export interface StatusBarSegment {
 	label: string;
 	defaultOn: boolean;
 	side: "left" | "right";
-	render: (ctx: SegmentContext) => JSX.Element | null;
 	/**
-	 * Plain-text rendering of this segment's data for the /current command.
-	 * Returning null means "no data" and the command prints an em-dash, the
-	 * same default it used when the segment wasn't recognized. The visible
-	 * status bar uses `render`; this is only read by /current.
+	 * The segment's text for the status bar and the /current command.
+	 * Returning null means "no data": the bar leaves the segment out and the
+	 * command prints an em-dash.
 	 */
 	formatValue: (ctx: SegmentContext) => string | null;
 }
@@ -154,7 +149,6 @@ registerStatusBarSegment({
 	label: "Persona",
 	defaultOn: true,
 	side: "left",
-	render: (ctx) => <Text color={theme().persona}>{ctx.persona}</Text>,
 	formatValue: (ctx) => ctx.persona,
 });
 
@@ -163,8 +157,6 @@ registerStatusBarSegment({
 	label: "Mode",
 	defaultOn: true,
 	side: "left",
-	render: (ctx) =>
-		ctx.planMode ? <Text color={theme().warning}>PLAN</Text> : <Text color={theme().muted}>BUILD</Text>,
 	formatValue: (ctx) => (ctx.planMode ? "PLAN" : "BUILD"),
 });
 
@@ -173,7 +165,6 @@ registerStatusBarSegment({
 	label: "Model",
 	defaultOn: true,
 	side: "left",
-	render: (ctx) => <Text color={theme().muted}>{ctx.activeModel}</Text>,
 	// When plan mode swaps in a separate plan model, /current shows the
 	// configured model and tags the live one in parens — otherwise the
 	// status bar reads one model and the user wonders where the other came from.
@@ -190,7 +181,6 @@ registerStatusBarSegment({
 	label: "Git Worktree",
 	defaultOn: true,
 	side: "left",
-	render: (ctx) => (ctx.worktree ? <Text color={theme().warning}>wt:{ctx.worktree}</Text> : null),
 	formatValue: (ctx) => (ctx.worktree ? `wt:${ctx.worktree}` : null),
 });
 
@@ -199,7 +189,6 @@ registerStatusBarSegment({
 	label: "Session",
 	defaultOn: false,
 	side: "left",
-	render: (ctx) => <Text color={theme().muted}>{ctx.sessionId}</Text>,
 	formatValue: (ctx) => ctx.sessionId,
 });
 
@@ -208,19 +197,6 @@ registerStatusBarSegment({
 	label: "Context %",
 	defaultOn: false,
 	side: "right",
-	render: (ctx) => {
-		if (ctx.messages.length === 0) return null;
-		const used = estimateTokens(ctx.messages);
-		if (!(ctx.contextWindow > 0)) return <Text color={theme().muted}>ctx ?</Text>;
-		const budget = inputTokenBudget(ctx);
-		const pct = Math.round((used / budget) * 100);
-		return (
-			<Text color={theme().muted}>
-				{/* Budget, not the raw window — see formatContextPct in App.tsx. */}
-				ctx {abbreviateTokens(used)}/{abbreviateTokens(budget)} ({pct}%)
-			</Text>
-		);
-	},
 	formatValue: (ctx) => {
 		if (ctx.messages.length === 0) return null;
 		const used = estimateTokens(ctx.messages);
@@ -241,15 +217,6 @@ registerStatusBarSegment({
 	label: "Tokens in/out",
 	defaultOn: false,
 	side: "right",
-	render: (ctx) => {
-		if (!ctx.usage || ctx.usage.totalTokens <= 0) return null;
-		return (
-			<Text color={theme().muted}>
-				{abbreviateTokens(ctx.usage.promptTokens)} in{usageCacheSuffix(ctx.usage)} /{" "}
-				{abbreviateTokens(ctx.usage.completionTokens)} out
-			</Text>
-		);
-	},
 	formatValue: (ctx) => {
 		const u = ctx.usage;
 		if (!u || u.totalTokens <= 0) return null;
@@ -262,10 +229,6 @@ registerStatusBarSegment({
 	label: "Cost",
 	defaultOn: false,
 	side: "right",
-	render: (ctx) => {
-		if (!ctx.usage?.cost) return null;
-		return <Text color={theme().muted}>${ctx.usage.cost.toFixed(2)}</Text>;
-	},
 	formatValue: (ctx) => {
 		const cost = ctx.usage?.cost;
 		return cost ? `$${cost.toFixed(2)}` : null;
@@ -277,10 +240,6 @@ registerStatusBarSegment({
 	label: "Tok/s",
 	defaultOn: false,
 	side: "right",
-	render: (ctx) => {
-		if (!ctx.lastTurnUsage?.tokensPerSecond) return null;
-		return <Text color={theme().muted}>{ctx.lastTurnUsage.tokensPerSecond.toFixed(1)} tok/s</Text>;
-	},
 	formatValue: (ctx) => {
 		const tps = ctx.lastTurnUsage?.tokensPerSecond;
 		return tps ? `${tps.toFixed(1)} tok/s` : null;
@@ -292,10 +251,6 @@ registerStatusBarSegment({
 	label: "Language servers",
 	defaultOn: false,
 	side: "right",
-	render: (ctx) => {
-		if (!ctx.lspServers?.length) return null;
-		return <Text color={theme().muted}>lsp {ctx.lspServers.join(",")}</Text>;
-	},
 	formatValue: (ctx) => (ctx.lspServers?.length ? ctx.lspServers.join(", ") : null),
 });
 
@@ -304,10 +259,6 @@ registerStatusBarSegment({
 	label: "Elapsed",
 	defaultOn: true,
 	side: "right",
-	render: (ctx) => {
-		if (ctx.elapsedMs <= 0) return null;
-		return <Text color={theme().muted}>{formatElapsed(ctx.elapsedMs)}</Text>;
-	},
 	formatValue: (ctx) => (ctx.elapsedMs > 0 ? formatElapsed(ctx.elapsedMs) : null),
 });
 
@@ -316,10 +267,6 @@ registerStatusBarSegment({
 	label: "Subagent tokens",
 	defaultOn: false,
 	side: "right",
-	render: (ctx) => {
-		if (!ctx.usage || ctx.usage.subagentTokens <= 0) return null;
-		return <Text color={theme().muted}>{abbreviateTokens(ctx.usage.subagentTokens)} sub</Text>;
-	},
 	formatValue: (ctx) => {
 		const u = ctx.usage;
 		return u && u.subagentTokens > 0 ? `${abbreviateTokens(u.subagentTokens)} sub` : null;

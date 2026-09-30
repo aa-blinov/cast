@@ -43,7 +43,6 @@ import {
 } from "../core/session.ts";
 import { skillInvocationLabel } from "../core/session-title.ts";
 import { loadSettings, type PermissionMode, turnIterationCap, updateSettings } from "../core/settings.ts";
-import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import { extractSystemReminders } from "../core/system-reminder.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import type { PersonaActivation } from "../core/tools/persona.ts";
@@ -1131,8 +1130,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			pendingDoomWarningsRef.current = [];
 			toolNamesByIdRef.current.clear();
 			updateStreaming(() => ({ blocks: [] }), true);
-			setStreamingActive(true);
-			setLastTurnAborted(false);
 
 			try {
 				if (!session.lastAnnouncedLocalDate) {
@@ -1412,7 +1409,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							case "end":
 								if (event.reason !== "aborted") notifyTerminal(turnEndNotice(event.reason));
 								if (event.reason === "aborted") {
-									setLastTurnAborted(true);
 									setMessages((msgs) => [...msgs, { role: "warning", content: "[aborted]" }]);
 								} else if (event.reason === "disconnected") {
 									setMessages((msgs) => [...msgs, { role: "warning", content: "[terminated]" }]);
@@ -1457,7 +1453,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// lose each tool call's real status (see promoteStreamingToHistory).
 				promoteStreamingToHistory();
 				updateStreaming(() => null, true);
-				setStreamingActive(false);
 				displayWidthCacheFlush();
 				setRetry(null);
 				setStatus("idle");
@@ -1742,11 +1737,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					if (typeof event.startedAt === "number") backendStartRef.current = event.startedAt;
 					setStatus(event.status);
 					if (event.status === "running") {
-						setStreamingActive(true);
-						setLastTurnAborted(false);
 						updateStreaming(() => ({ blocks: [] }), true);
 					} else {
-						setStreamingActive(false);
 					}
 					break;
 				case "decision_state":
@@ -1872,7 +1864,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				case "session_end":
 					promoteStreamingToHistory();
 					updateStreaming(() => null, true);
-					setStreamingActive(false);
 					setStatus("idle");
 					// Daemon path never clears the live error on its own — a normal
 					// completion must drop any stale one (compaction-failed, etc.).
@@ -1882,7 +1873,6 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				case "end":
 					if (event.reason !== "aborted") notifyTerminal(turnEndNotice(event.reason));
 					if (event.reason === "aborted") {
-						setLastTurnAborted(true);
 						setMessages((msgs) => [...msgs, { role: "warning", content: "[aborted]" }]);
 					} else if (event.reason === "error") {
 						// Turn-level error belongs in the transcript chronology, not as a

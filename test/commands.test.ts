@@ -20,7 +20,7 @@ import { type PermissionMode, updateSettings } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
 import { buildSettingsForm, parseTurnCap } from "../src/ui/settings-form.ts";
-import { defaultStatusBarConfig } from "../src/ui/statusbar.tsx";
+import { defaultStatusBarConfig } from "../src/ui/statusbar.ts";
 import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
 
 // /compact runs a real summarization call; stub it so the hook wiring can be

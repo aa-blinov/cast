@@ -208,7 +208,7 @@ export function discoverSkillsForCwd(deps: ProjectResolverDeps, cwd: string, tru
 		skillLoadOptionsForCwd(cwd, trusted, { noSkills: deps.noSkills, cliSkillPaths: deps.cliSkillPaths }),
 	);
 	// Diagnostics are intentionally not printed here: this runs in the TUI
-	// process too, where a raw console.log writes into Ink's managed frame and
+	// process too, where a raw console.log writes into the screen being drawn and
 	// tears the layout. Callers surface warnings through the UI instead.
 	return skillsResult.skills;
 }
@@ -330,7 +330,7 @@ export async function resolveMcpForCwd(
 	result.allServerNames = allNames.sort((a, b) => a.localeCompare(b));
 	result.serverSources = serverSources;
 	// Diagnostics are intentionally not printed here: this runs in the TUI
-	// process too, where a raw console.log writes into Ink's managed frame and
+	// process too, where a raw console.log writes into the screen being drawn and
 	// tears the layout. Callers surface warnings through the UI instead.
 	return result;
 }

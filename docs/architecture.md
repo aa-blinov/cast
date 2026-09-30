@@ -40,14 +40,13 @@ src/
     subagents.ts      Sub-agent prompt loading
     help.ts           Banner, help text, changelog
     ...
-  ui/                 Shared TUI behaviour, and the legacy Ink front end (CAST_TUI=ink)
-    app-model.ts      Session, modals, plan decisions: headless React hooks both front ends run
+  ui/                 Behaviour shared by the terminal front end
+    app-model.ts      Session, modals, plan decisions: headless React hooks the front end runs
     commands.ts       Slash command handlers
-    App.tsx, Composer.tsx, ChatLog.tsx   The Ink front end
     themes/           Color theme registry and definitions
     input/            Keybindings, input handling
     ...
-  ui-pi/              The pi-tui front end (default)
+  ui-pi/              The pi-tui front end
     run.ts            Screen, headless model host, quit and signal handling
     app.ts            Layout, editor, keys, footer
     transcript.ts     The conversation as one document in a scroll view

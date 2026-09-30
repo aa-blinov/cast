@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { KeybindingsManager, sanitizeKeybindings } from "../src/ui/input/keybindings.ts";
-import { decodePrintableKey, Key, matchesKey } from "../src/ui/input/keys.ts";
+import { Key, matchesKey } from "../src/ui/input/keys.ts";
 
 describe("keys.ts — matchesKey", () => {
 	it("matches Enter (\\r)", () => {
@@ -122,20 +122,6 @@ describe("keys.ts — matchesKey", () => {
 		// \x1b[13;2~ is key 13 with shift modifier — not a standard Shift+Enter
 		// sequence. Standard ones are \x1b[13;2u (CSI-u) and \x1b[27;2;13~ (modifyOtherKeys).
 		expect(matchesKey("\x1b[13;2~", Key.shift("enter"))).toBe(false);
-	});
-});
-
-describe("keys.ts — decodePrintableKey", () => {
-	it("decodes CSI-u 'a' (\\x1b[97u)", () => {
-		expect(decodePrintableKey("\x1b[97u")).toBe("a");
-	});
-
-	it("decodes CSI-u shifted key (shift modifier present)", () => {
-		expect(decodePrintableKey("\x1b[97:65;2u")).toBe("A");
-	});
-
-	it("returns undefined for non-printable", () => {
-		expect(decodePrintableKey("\x1b[A")).toBeUndefined();
 	});
 });
 

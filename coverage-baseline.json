@@ -392,18 +392,6 @@
 			"functions": 80,
 			"statements": 94.44
 		},
-		"src/ui/ChatLog.tsx": {
-			"lines": 79.87,
-			"branches": 79.24,
-			"functions": 94.11,
-			"statements": 79.87
-		},
-		"src/ui/Spinner.tsx": {
-			"lines": 100,
-			"branches": 100,
-			"functions": 100,
-			"statements": 100
-		},
 		"src/ui/commands.ts": {
 			"lines": 75.49,
 			"branches": 64.43,
@@ -417,10 +405,10 @@
 			"statements": 92
 		},
 		"src/ui/markdown-terminal.ts": {
-			"lines": 96.45,
-			"branches": 91.78,
-			"functions": 91.3,
-			"statements": 96.45
+			"lines": 96.3,
+			"branches": 92.14,
+			"functions": 90.9,
+			"statements": 96.3
 		},
 		"src/ui/paste.ts": {
 			"lines": 100,
@@ -440,12 +428,6 @@
 			"functions": 100,
 			"statements": 70
 		},
-		"src/ui/statusbar.tsx": {
-			"lines": 83.97,
-			"branches": 82,
-			"functions": 73.07,
-			"statements": 83.97
-		},
 		"src/ui/syntax.ts": {
 			"lines": 97.36,
 			"branches": 93.02,
@@ -458,18 +440,6 @@
 			"functions": 100,
 			"statements": 100
 		},
-		"src/ui/input/draft-layout.ts": {
-			"lines": 80.43,
-			"branches": 95.23,
-			"functions": 66.66,
-			"statements": 80.43
-		},
-		"src/ui/input/input-parser.ts": {
-			"lines": 89.88,
-			"branches": 85.71,
-			"functions": 60,
-			"statements": 89.88
-		},
 		"src/ui/input/keybindings.ts": {
 			"lines": 98.24,
 			"branches": 86.66,
@@ -477,28 +447,10 @@
 			"statements": 98.24
 		},
 		"src/ui/input/keys.ts": {
-			"lines": 82.14,
-			"branches": 66.02,
-			"functions": 70,
-			"statements": 82.14
-		},
-		"src/ui/input/path-complete.ts": {
-			"lines": 100,
-			"branches": 87.5,
-			"functions": 100,
-			"statements": 100
-		},
-		"src/ui/input/prompt-history.ts": {
-			"lines": 100,
-			"branches": 100,
-			"functions": 100,
-			"statements": 100
-		},
-		"src/ui/input/textarea.ts": {
-			"lines": 73.05,
-			"branches": 86,
-			"functions": 77.41,
-			"statements": 73.05
+			"lines": 73.23,
+			"branches": 47.59,
+			"functions": 68.42,
+			"statements": 73.23
 		},
 		"src/ui/themes/ayu.ts": {
 			"lines": 100,
@@ -615,6 +567,18 @@
 			"statements": 100
 		},
 		"src/ui/themes/tomorrow-night.ts": {
+			"lines": 100,
+			"branches": 100,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/statusbar.ts": {
+			"lines": 100,
+			"branches": 93.75,
+			"functions": 100,
+			"statements": 100
+		},
+		"src/ui/format-tokens.ts": {
 			"lines": 100,
 			"branches": 100,
 			"functions": 100,

@@ -18,7 +18,7 @@ import { SLASH_COMMANDS } from "../ui/commands.ts";
 import { editInExternalEditor } from "../ui/external-editor.ts";
 import { getKeybindings } from "../ui/input/keybindings.ts";
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
-import type { SegmentContext } from "../ui/statusbar.tsx";
+import type { SegmentContext } from "../ui/statusbar.ts";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON, setTerminalFocused } from "../ui/terminal-notify.ts";
 import { theme } from "../ui/themes/index.ts";
 import { workingTitle } from "../ui/working-title.ts";

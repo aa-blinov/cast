@@ -1,9 +1,7 @@
 /**
- * The live region's row budget is computed from these numbers while Ink
- * measures the same text with `string-width` — so the two have to agree.
- * Overcounting drops text that would have fitted; undercounting lets the live
- * region overrun the viewport, which is the failure this module exists to
- * prevent. The old hand-rolled table did both: `👨‍👩‍👧‍👦` measured 11 cells
+ * Row budgets are computed from these numbers while terminals lay the same text
+ * out as `string-width` measures it, so the two have to agree. Overcounting
+ * drops text that would have fitted; undercounting overruns the viewport. The old hand-rolled table did both: `👨‍👩‍👧‍👦` measured 11 cells
  * instead of 2, `🀄` measured 1 instead of 2.
  */
 import stringWidth from "string-width";

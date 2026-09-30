@@ -1,13 +1,13 @@
 /**
  * Flat-chat summary for the `task` tool — full assignment text, not JSON
- * `key=value` dumps. Pure so it can be unit-tested without mounting Ink.
+ * `key=value` dumps. Pure so it can be unit-tested without a screen.
  */
 
 /** Safety cap so a pathological model arg can't blow the viewport. */
 const ASSIGNMENT_CAP = 2000;
 
 /**
- * Format task tool args for the ChatLog row. Returns null when args aren't
+ * Format task tool args for the transcript row. Returns null when args aren't
  * usable task JSON yet (partial stream) — caller falls back to generic.
  */
 export function formatTaskToolSummary(argsJson: string): string | null {

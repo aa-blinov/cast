@@ -1,6 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { defaultStatusBarConfig, type SegmentContext } from "../src/ui/statusbar.tsx";
+import { defaultStatusBarConfig, type SegmentContext } from "../src/ui/statusbar.ts";
 import { statusLine } from "../src/ui-pi/status.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes

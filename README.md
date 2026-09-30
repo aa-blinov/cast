@@ -269,9 +269,8 @@ src/
   ui/             Behaviour shared by the terminal front ends
     app-model.ts    Session, modals, plan decisions (headless React hooks)
     commands.ts     Slash command handlers
-    App.tsx ...     The legacy Ink front end (CAST_TUI=ink)
     ...
-  ui-pi/          The pi-tui front end (default): transcript, editor, modals, status row
+  ui-pi/          The pi-tui front end: transcript, editor, modals, status row
     ...
   pickers/        Onboarding pickers (model, persona, reasoning)
   index.ts        CLI entry point

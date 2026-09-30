@@ -449,7 +449,7 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
  * while they kept going — nothing killed them, nothing said so, and a session
  * with a running task is never idle-evicted either. Verified live: the run
  * printed "DONE", exited 0, and `sleep 432` was still running afterwards.
- * The TUI has always killed its own on exit (tui.tsx), and the daemon kills a
+ * The TUI has always killed its own on exit (ui/tui.ts), and the daemon kills a
  * session's when it is closed or deleted; a one-shot run was the only surface
  * that leaked.
  *

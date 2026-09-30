@@ -1,6 +1,6 @@
 import type { PermissionMode, StatusBarConfig } from "../core/settings.ts";
 import type { ModelReasoningMeta } from "../core/vendors.ts";
-import type { StatusBarSegment } from "../ui/statusbar.tsx";
+import type { StatusBarSegment } from "../ui/statusbar.ts";
 
 export interface PickOption<T> {
 	value: T;
@@ -49,7 +49,7 @@ export interface PickOptions<T = unknown> {
 }
 
 /**
- * UI-agnostic picker surface. Both the readline CLI and the Ink TUI implement
+ * UI-agnostic picker surface. Both the readline CLI and the TUI implement
  * this same interface — the domain functions in `domain.ts` call these methods
  * and never know whether a list was rendered as a numbered prompt or a
  * scrollable menu. Either method resolving to `null` means "user cancelled"
@@ -108,7 +108,7 @@ export interface Pickers {
 	/**
 	 * The settings screen: rows that change in place, and rows that open their own picker.
 	 * Resolves with the follow-up a row asked for (the screen is closed by then), or null when dismissed.
-	 * Optional: the readline CLI and the Ink front end have no such screen.
+	 * Optional: the readline CLI has no such screen.
 	 */
 	settings?(form: SettingsForm): Promise<SettingFollowUp | null>;
 	/** Follows a running thing until dismissed. Optional: the readline CLI has no such screen. */
@@ -121,16 +121,14 @@ export interface Pickers {
 	/**
 	 * Show a spinner with a label while an async step runs (model validation,
 	 * fetching the model list); returns a function that dismisses it. Optional —
-	 * implementations without a live Ink tree (startup's one-shot pickers, test
-	 * fakes) omit it and callers fall back to no spinner.
+	 * implementations without a live screen (test fakes) omit it and callers fall back to no spinner.
 	 */
 	status?(label: string): () => void;
 	/**
 	 * One-off status text (connection checks, trust prompts, etc.) — readline
 	 * just `console.log`s it; the TUI routes it through the same notice line
 	 * used elsewhere instead of writing straight to stdout, which would
-	 * corrupt Ink's managed frame (raw writes and Ink's own redraw fight over
-	 * the same terminal rows).
+	 * land in the middle of the frame the screen is drawing.
 	 */
 	log(text: string): void;
 }

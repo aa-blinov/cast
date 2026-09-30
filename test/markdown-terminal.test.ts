@@ -7,12 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { displayWidth } from "../src/ui/display-width.ts";
-import {
-	isTableLine,
-	renderMarkdownLines,
-	renderMarkdownTail,
-	trailingOpenFence,
-} from "../src/ui/markdown-terminal.ts";
+import { isTableLine, renderMarkdownLines, trailingOpenFence } from "../src/ui/markdown-terminal.ts";
 
 const plain = (line: { spans: Array<{ text: string }> }) => line.spans.map((s) => s.text).join("");
 const render = (text: string, width = 60, indent = "") => renderMarkdownLines(text, { width, indent });
@@ -104,33 +99,6 @@ describe("renderMarkdownLines", () => {
 	it("is deterministic for the same input and width", () => {
 		const text = "## h\n\n- one\n- two\n\n```\ncode\n```\n";
 		expect(render(text, 50)).toEqual(render(text, 50));
-	});
-});
-
-describe("renderMarkdownTail", () => {
-	const long = Array.from({ length: 200 }, (_, i) => `line ${i} of the answer`).join("\n");
-
-	it("returns at most the requested number of lines, from the end", () => {
-		const { lines, truncated } = renderMarkdownTail(long, { width: 60, maxLines: 5 });
-
-		expect(lines).toHaveLength(5);
-		expect(truncated).toBe(true);
-		expect(plain(lines.at(-1)!)).toContain("line 199");
-	});
-
-	it("keeps code styling for a fence opened before the tail", () => {
-		const text = `\`\`\`ts\n${Array.from({ length: 100 }, (_, i) => `const x${i} = ${i};`).join("\n")}`;
-
-		const { lines } = renderMarkdownTail(text, { width: 60, maxLines: 4 });
-
-		expect(lines.every((line) => line.code)).toBe(true);
-	});
-
-	it("returns everything when it fits, and says so", () => {
-		const { lines, truncated } = renderMarkdownTail("one\ntwo", { width: 60, maxLines: 20 });
-
-		expect(truncated).toBe(false);
-		expect(lines.map(plain).join("\n")).toContain("one");
 	});
 });
 

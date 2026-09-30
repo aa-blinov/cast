@@ -82,7 +82,6 @@ import {
 } from "../core/skills.ts";
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
-import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
 import { activeTaskIds, cancelTask, queuedTaskIds, summarizeToolArgs } from "../core/tools/task.ts";
 import {
 	buildReasoningParams,
@@ -108,7 +107,7 @@ import type { Pickers, PickOption } from "../pickers/types.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
 import { getKeybindings, type Keybinding, TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import { applyPermissionMode, buildSettingsForm, pickSettingFallback, setTheme, setWebTools } from "./settings-form.ts";
-import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
+import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.ts";
 import { ALL_THEMES, getActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
@@ -727,15 +726,6 @@ async function reloadMcpAfterChange(deps: CommandDeps, disabledServers: string[]
 	const newResult = await resolveMcpForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted, disabledServers);
 	deps.setMcpResult(newResult);
 	rebuildSystemPrompt(deps, deps.cwd);
-	// Re-connecting MCP can leave Ink's stdin control unref'd (pauseInput), so
-	// the stream stalls and keystrokes echo below the composer. Run a no-op
-	// suspension to re-run Ink's resumeInput (like the /reload path — no clear,
-	// which would make the screen visibly jump). Cancel any in-flight \x1b[6n
-	// and give it a beat to land first: its reply echoes as visible ^[[6;1R
-	// garbage once the suspension drops raw mode.
-	cancelActiveDecxprQuery();
-	await new Promise((resolve) => setTimeout(resolve, 30));
-	await suspendAndRun(async () => {});
 }
 
 async function applyMcpUninstall(deps: CommandDeps, name: string): Promise<void> {
@@ -2252,15 +2242,6 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			deps.setMcpResult(
 				await resolveMcpForCwd(deps.projectDeps, deps.cwd, trusted, loadSettings().disabledMcpServers ?? []),
 			);
-			// Re-resolving skills/MCP/personas can leave Ink's input control in a
-			// bad state (stdin unref'd / readable listener dropped), so keystrokes
-			// echo below the composer until a resize re-runs resumeInput. Run a
-			// no-op suspension so Ink's endSuspend → resumeInput reinstates stdin.
-			// Cancel an in-flight \x1b[6n first so its reply can't echo as garbage
-			// once the suspension drops raw mode.
-			cancelActiveDecxprQuery();
-			await new Promise((resolve) => setTimeout(resolve, 30));
-			await suspendAndRun(async () => {});
 			showNotice(
 				`[Reloaded: ${newSkills.length} skill(s), ${resolvedRules.directoryRules.length} rule(s), ${deps.mcpResult.connections.length} mcp server(s), personas]`,
 			);
