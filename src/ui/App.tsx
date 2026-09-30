@@ -37,6 +37,7 @@ import { ChatLog } from "./ChatLog.tsx";
 import { Composer } from "./Composer.tsx";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
 import { displayWidth } from "./display-width.ts";
+import { LiveViewer } from "./live-viewer.tsx";
 import { imageFilePathsInText } from "./paste.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { resolvePlanQuestionWithPicker } from "./plan-question.ts";
@@ -915,6 +916,7 @@ export function App(props: AppProps): JSX.Element {
 					<Text> {modalRequest.label}</Text>
 				</Box>
 			)}
+			{modalRequest?.kind === "view" && <LiveViewer view={modalRequest.view} onClose={modalRequest.resolve} />}
 			{modalRequest?.kind === "statusbar" && (
 				<StatusBarPicker
 					segments={modalRequest.segments}

@@ -71,7 +71,7 @@ You explore the codebase and report findings. You cannot edit files.
 ## Watching Sub-agents
 
 - **Web UI**: a `task` card shows the sub-agent, its title, the tool call it is on and how many it has made. **Open** shows its session (view only, with a way back to the thread); **Stop** ends a running one.
-- **TUI**: a running `task` row leads with `[explore ↳ read src/auth.ts · 3]`. `/agents` lists the session's sub-agents: pick one to see its session as a digest (the assignment, each tool call, the report), or stop a running one.
+- **TUI**: a running `task` row leads with `[explore ↳ read src/auth.ts · 3]`. `/agents` works while the turn is still running: it lists the session's sub-agents (● marks a running one), and **Watch it** opens a live view of its session (the assignment, each tool call, the report) that refreshes every second and follows the newest lines. `↑↓` and `PgUp`/`PgDn` scroll, `s` stops a running one, and `Esc` (or `q`, `←`) goes back to the thread. **Stop it** in the menu ends one without opening it.
 - **API**: `GET /api/sessions/:id/agents` lists them; `POST /api/sessions/:id/agents/:taskId/cancel` stops one.
 
 ## Inherited Restrictions & Security

@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+
+- **Watch a subagent live in the TUI, and come back.** `/agents` now works while a turn is running. Pick a subagent and **Watch it**: its session (the assignment, each tool call, the report) refreshes every second and follows the newest lines; `↑↓`/`PgUp`/`PgDn` scroll, `s` stops a running one, `Esc` returns to the thread. In the web UI the `task` card's **Open** does the same, with a banner to go back.
+
+### Fixed
+
+- **A subagent was invisible until its first model turn ended.** Its session was saved only after that, so `/agents` said "No subagents" and Open had nothing to show while it ran a long first command. It is now saved when it starts.
+
 ## 0.50.3
 
 ### Fixed
