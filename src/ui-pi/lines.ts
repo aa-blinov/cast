@@ -5,6 +5,7 @@ import { theme } from "../ui/themes/index.ts";
 import { formatTimeout, isMcpTool, mcpToolLabel, oneLineSummary, parseToolSummary } from "../ui/tool-summary.ts";
 import type { ChatMessage, StreamBlock, ToolCallEntry } from "../ui/useAgentSession.ts";
 import { band, paint } from "./paint.ts";
+import { surfaceBand } from "./surface.ts";
 
 // The transcript as rows of text, with no terminal in it: the same words, rails
 // and colours the Ink transcript draws, so the two front ends read alike. A row
@@ -180,7 +181,7 @@ export function messageLines(
 		return railLines(renderMarkdownLines(message.content, { width: bodyWidth(width) }), {
 			gutter: colors.user,
 			label: "you",
-			bg: colors.bgSurface,
+			bg: surfaceBand(),
 			width,
 		});
 	}

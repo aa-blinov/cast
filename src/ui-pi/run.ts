@@ -1,4 +1,4 @@
-import { ProcessTerminal, TuiAltScreen } from "@earendil-works/pi-tui";
+import { ProcessTerminal, type TerminalColors, TuiAltScreen } from "@earendil-works/pi-tui";
 import { createElement, useEffect } from "react";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
@@ -10,6 +10,7 @@ import { PiApp } from "./app.ts";
 import { createStore, mountHeadless } from "./headless.ts";
 import { applyUserKeybindings } from "./keys.ts";
 import { paint } from "./paint.ts";
+import { setSurfaces } from "./surface.ts";
 
 export interface PiFrontEndOptions {
 	result: StartupResult;
@@ -100,6 +101,12 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 
 	tui.start();
 	app.start();
+	// Ask the terminal what its colours are, so bands and highlights fit it; a slow link may answer late.
+	const useSurfaces = (colors: TerminalColors) => {
+		setSurfaces(colors);
+		app.repaint();
+	};
+	void tui.queryTerminalColors({ timeoutMs: 400, onLateReply: useSurfaces }).then(useSurfaces);
 	root = mountHeadless(
 		createElement(ModelHost, {
 			model: {

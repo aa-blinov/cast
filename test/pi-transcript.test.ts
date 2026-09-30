@@ -1,6 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "../src/ui/useAgentSession.ts";
+import { setSurfaces } from "../src/ui-pi/surface.ts";
 import { Transcript } from "../src/ui-pi/transcript.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
@@ -70,11 +71,15 @@ describe("Transcript", () => {
 		expect(rows).toEqual(["▌ you", "▌ q", "", "▌ agent", "▌ a", "▌ agent", "▌ b", "", "▌ you", "▌ q2"]);
 	});
 
-	it("sets the person's turn on a band as wide as the screen", () => {
+	it("sets the person's turn on a band as wide as the screen once the terminal has said its colours, and plain before", () => {
 		const transcript = new Transcript();
 		transcript.set({ ...base, messages: [user("hi")] });
-		const rows = transcript.render(40);
-		expect(visibleWidth(rows[1]!)).toBe(40);
+		setSurfaces({});
+		expect(visibleWidth(transcript.render(40)[1]!)).toBeLessThan(40);
+		setSurfaces({ foreground: { r: 230, g: 230, b: 230 }, background: { r: 10, g: 10, b: 12 } });
+		transcript.invalidate();
+		expect(visibleWidth(transcript.render(40)[1]!)).toBe(40);
+		setSurfaces({});
 	});
 
 	it("shows an error and a retry notice ahead of the live answer", () => {
