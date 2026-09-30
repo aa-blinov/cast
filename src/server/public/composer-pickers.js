@@ -14,7 +14,7 @@ export function CommandPalette({ items, selectedIndex, running, onHover, onSelec
 	return html`<div class="cmd-palette open" id=${PICKER_LIST_ID} role="listbox" aria-label="Commands">${items.map((command, index) => {
 		const disabled = command.blocking && running;
 		const className = `cmd-item${disabled ? " disabled" : ""}${index === selectedIndex ? " selected" : ""}`;
-		return html`<div key=${command.name} id=${pickerOptionId(index)} role="option" aria-selected=${index === selectedIndex} aria-disabled=${disabled ? "true" : undefined} class=${className} onMouseEnter=${() => onHover(index)} onClick=${() => !disabled && onSelect(command.name)}><span class="cmd-name">${command.name}</span><span class="cmd-desc">${command.description}</span>${disabled && html`<span class="cmd-blocked-hint">idle only</span>`}</div>`;
+		return html`<div key=${command.name} id=${pickerOptionId(index)} role="option" aria-selected=${index === selectedIndex} aria-disabled=${disabled ? "true" : undefined} class=${className} onMouseEnter=${() => onHover(index)} onClick=${() => !disabled && onSelect(command.name)}><span class="cmd-name">${command.name}</span>${command.argumentHint && html`<span class="cmd-hint">${command.argumentHint}</span>`}<span class="cmd-desc">${command.description}</span>${disabled && html`<span class="cmd-blocked-hint">idle only</span>`}</div>`;
 	})}</div>`;
 }
 

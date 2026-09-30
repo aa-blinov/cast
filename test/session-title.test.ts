@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveSessionTitle } from "../src/core/session-title.ts";
+import { deriveSessionTitle, skillInvocationLabel } from "../src/core/session-title.ts";
 
 describe("deriveSessionTitle", () => {
 	it("collapses whitespace and truncates a long first message", () => {
@@ -14,5 +14,11 @@ describe("deriveSessionTitle", () => {
 			"/web-artifacts-builder build a dashboard",
 		);
 		expect(deriveSessionTitle(block)).toBe("/web-artifacts-builder");
+	});
+
+	it("labels a skill invocation as typed, and leaves other text alone", () => {
+		const block = '<skill name="demo" location="/s/SKILL.md">\nbody\n</skill>';
+		expect(skillInvocationLabel(`${block}\n\nUser: a b`)).toBe("/demo a b");
+		expect(skillInvocationLabel("plain text")).toBeUndefined();
 	});
 });
