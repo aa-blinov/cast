@@ -1,6 +1,6 @@
 import { type Component, type OverlayHandle, ProcessTerminal, TuiAltScreen } from "@earendil-works/pi-tui";
 import type { Pickers, PickOption, PickOptions } from "../pickers/types.ts";
-import { MultiModal, OptionModal, StatusModal, TextModal } from "./modals.ts";
+import { MultiModal, OptionModal, Sheet, StatusModal, TextModal } from "./modals.ts";
 
 /**
  * What the person sees before the app mounts: a progress line while it starts,
@@ -37,7 +37,12 @@ export function createStartupUi(): {
 	const show = (component: Component, nonCapturing = false) => {
 		const tui = ensure();
 		hide();
-		overlay = tui.showOverlay(component, { anchor: "center", width: "80%", maxHeight: "80%", nonCapturing });
+		overlay = tui.showOverlay(nonCapturing ? component : new Sheet(component), {
+			anchor: "center",
+			width: nonCapturing ? "80%" : "100%",
+			maxHeight: "80%",
+			nonCapturing,
+		});
 		tui.requestRender();
 	};
 

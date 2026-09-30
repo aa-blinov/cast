@@ -37,12 +37,49 @@ function pickerRows(): number {
 	return Math.max(3, Math.min(PICKER_MAX_ROWS, (process.stdout.rows || 24) - 10));
 }
 
+const SHEET_MAX_WIDTH = 104;
+
+/**
+ * Lays a modal over the whole width of the screen: the box itself is centred and
+ * capped (a settings list stretched over 200 columns is not readable), and the
+ * columns either side are blanked, so no half a word of the transcript shows
+ * beside it.
+ */
+export class Sheet implements Component, Focusable {
+	constructor(private readonly inner: Component) {}
+
+	get focused(): boolean {
+		return (this.inner as Partial<Focusable>).focused === true;
+	}
+
+	set focused(value: boolean) {
+		if ("focused" in this.inner) (this.inner as Focusable).focused = value;
+	}
+
+	invalidate(): void {
+		this.inner.invalidate();
+	}
+
+	handleInput(data: string): void {
+		this.inner.handleInput?.(data);
+	}
+
+	render(width: number): string[] {
+		const box = Math.min(width, SHEET_MAX_WIDTH);
+		const left = Math.floor((width - box) / 2);
+		return this.inner.render(box).map((line) => {
+			const right = Math.max(0, width - left - visibleWidth(line));
+			return `${" ".repeat(left)}${line}${" ".repeat(right)}`;
+		});
+	}
+}
+
 /** A titled box round `body`, every row padded so it covers what lies under the overlay. */
 export function frame(title: string | undefined, body: string[], footer: string, width: number): string[] {
 	const accent = theme().accent;
 	const inner = Math.max(10, width - 4);
 	const edge = (text: string) => paint(text, { color: accent });
-	const head = title ? ` ${title} ` : "";
+	const head = title ? ` ${truncateToWidth(title, Math.max(4, inner - 4), "…")} ` : "";
 	const top =
 		edge("╭─") +
 		paint(head, { color: accent, bold: true }) +
@@ -481,7 +518,8 @@ export class SettingsModal implements Component {
 			lines.push({ text: settingRow(row, selected, inner), at: i });
 		});
 		// Keep the chosen row in view; headings and blanks scroll with it.
-		const rows = Math.max(6, (process.stdout.rows || 24) - 12);
+		// The overlay may take 85% of the screen; the box itself, the blank row, the description and the footer take five.
+		const rows = Math.max(3, Math.floor((process.stdout.rows || 24) * 0.85) - 5);
 		const selectedLine = lines.findIndex((l) => l.at === selectedAt);
 		this.scroll = keepVisible(Math.max(0, selectedLine), this.scroll, rows, lines.length);
 		const body = lines.slice(this.scroll, this.scroll + rows).map((l) => l.text);
@@ -503,7 +541,11 @@ function settingRow(row: ItemRow, selected: boolean, inner: number): string {
 	} else if (row.kind === "choice") {
 		value = paint(`‹ ${row.value} ›`, { color: colors.accent, bg });
 	} else {
-		value = paint(`${row.value} ›`, { color: colors.muted, bg });
+		// A long value (a provider URL) gives way, so the name beside it stays whole.
+		value = paint(`${truncateToWidth(row.value, Math.max(12, Math.floor(inner / 2)), "…")} ›`, {
+			color: colors.muted,
+			bg,
+		});
 	}
 	const left = paint(selected ? "▸ " : "  ", { color: selected ? colors.accent : colors.muted, bg });
 	const room = inner - visibleWidth(left) - visibleWidth(value) - 2;
@@ -612,12 +654,13 @@ export class ModalHost {
 		if (!request) return;
 		const build = this.build(request);
 		if (!build) return;
-		this.handle = this.tui.showOverlay(build.component, {
+		const transient = request.kind === "status";
+		this.handle = this.tui.showOverlay(transient ? build.component : new Sheet(build.component), {
 			anchor: "bottom-center",
-			width: "90%",
+			width: transient ? "90%" : "100%",
 			maxHeight: "85%",
 			margin: { bottom: 3 },
-			nonCapturing: request.kind === "status",
+			nonCapturing: transient,
 		});
 		if (build.every) {
 			this.timer = setInterval(() => {

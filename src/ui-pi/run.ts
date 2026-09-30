@@ -1,4 +1,4 @@
-import { ProcessTerminal, type TerminalColors, TuiAltScreen } from "@earendil-works/pi-tui";
+import { ProcessTerminal, type TerminalColors, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
 import { createElement, useEffect } from "react";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
@@ -9,8 +9,25 @@ import { theme } from "../ui/themes/index.ts";
 import { PiApp } from "./app.ts";
 import { createStore, mountHeadless } from "./headless.ts";
 import { applyUserKeybindings } from "./keys.ts";
-import { paint } from "./paint.ts";
+import { type Paint, paint } from "./paint.ts";
 import { setSurfaces } from "./surface.ts";
+
+const HINTS = ["/ commands", "/settings", "Esc Esc stops a turn", "PageUp scrolls", "Ctrl+C twice quits"];
+
+/** The parts joined by `separator`, the last ones dropped whole until the line fits `width`. */
+export function fitParts(parts: string[], separator: string, width: number): string {
+	const kept = [...parts];
+	while (kept.length > 1 && visibleWidth(kept.join(separator)) > width) kept.pop();
+	return kept.join(separator);
+}
+
+/** `cast vX  ·  persona  ·  model  ·  folder`, dropping the folder, then the model, before anything is cut. */
+export function bannerLine(version: string, parts: string[], width: number, style: Paint): string {
+	const name = `cast v${version}`;
+	const kept = fitParts(parts, "  ·  ", Math.max(0, width - visibleWidth(name) - 5));
+	const fits = kept !== "" && visibleWidth(kept) + visibleWidth(name) + 5 <= width;
+	return gradientAnsi(name) + (fits ? paint(`  ·  ${kept}`, style) : "");
+}
 
 export interface PiFrontEndOptions {
 	result: StartupResult;
@@ -62,9 +79,9 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 	const where =
 		options.result.cwd.startsWith(home) && home ? `~${options.result.cwd.slice(home.length)}` : options.result.cwd;
 	const muted = { color: theme().muted };
-	const banner = [
-		`${gradientAnsi(`cast v${options.version}`)}${paint(`  ·  ${options.result.persona.label}  ·  ${options.result.session.model}  ·  ${where}`, muted)}`,
-		paint("/ commands · /settings · Esc Esc stops a turn · PageUp scrolls · Ctrl+C twice quits", muted),
+	const banner = (width: number) => [
+		bannerLine(options.version, [options.result.persona.label, options.result.session.model, where], width, muted),
+		paint(fitParts(HINTS, " · ", width), muted),
 		"",
 	];
 	const app = new PiApp(tui, quit, options.onPasteImage, banner);

@@ -92,7 +92,7 @@ export class PiApp {
 		private readonly tui: ViewportTUI,
 		private readonly onQuit: () => void,
 		private readonly onPasteImage?: () => Promise<ClipboardPasteResult>,
-		banner: string[] = [],
+		banner: string[] | ((width: number) => string[]) = [],
 	) {
 		this.transcript.header = banner;
 		this.editor = new CastEditor(

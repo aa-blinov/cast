@@ -3248,6 +3248,11 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	{
 		match: (input) => input === "/sessions",
 		run: async ({ deps, agent, session, config, showNotice }) => {
+			// selectSession reports an empty history in its startup wording ("starting fresh"); here it is just empty.
+			if (!listSessionSummaries().some((s) => s.msgCount > 0)) {
+				showNotice("[No saved sessions yet]");
+				return;
+			}
 			const chosen = await selectSession(deps.pickers, { cwd: deps.cwd });
 			if (!chosen) {
 				showNotice("[Cancelled — current session unchanged]");

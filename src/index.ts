@@ -187,6 +187,12 @@ async function main(): Promise<void> {
 		version: VERSION,
 	};
 
+	// The screen writes cursor and mode sequences: into a pipe they are noise, and nothing reads the keys.
+	if (!process.stdin.isTTY || !process.stdout.isTTY) {
+		console.error("cast needs an interactive terminal. For scripts and pipes use `cast run`.");
+		process.exit(1);
+	}
+
 	await runTui(parsedArgs, await ensureDaemon());
 }
 

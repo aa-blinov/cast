@@ -1,6 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { frame, MultiModal, OptionModal, printable, SettingsModal } from "../src/ui-pi/modals.ts";
+import { frame, MultiModal, OptionModal, printable, SettingsModal, Sheet } from "../src/ui-pi/modals.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
 const plain = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, "");
@@ -200,5 +200,39 @@ describe("SettingsModal", () => {
 	it("never draws a line wider than the screen", () => {
 		const { modal } = build();
 		for (const row of modal.render(40)) expect(visibleWidth(row)).toBeLessThanOrEqual(40);
+	});
+});
+
+describe("Sheet", () => {
+	const inner = { render: (width: number) => [`[${"x".repeat(width - 2)}]`], invalidate() {} };
+
+	it("centres a capped box and blanks the columns either side of it", () => {
+		const rows = new Sheet(inner).render(200);
+		expect(rows.every((row) => visibleWidth(row) === 200)).toBe(true);
+		const box = rows[0]!;
+		expect(box.startsWith(" ".repeat(48))).toBe(true);
+		expect(box.trim().length).toBe(104);
+	});
+
+	it("uses the whole width when the screen is narrower than the cap", () => {
+		const rows = new Sheet(inner).render(60);
+		expect(rows[0]).toBe(`[${"x".repeat(58)}]`);
+	});
+
+	it("passes keys and focus through to the modal", () => {
+		const seen: string[] = [];
+		const modal = { render: () => [], invalidate() {}, handleInput: (d: string) => seen.push(d), focused: false };
+		const sheet = new Sheet(modal);
+		sheet.handleInput("a");
+		sheet.focused = true;
+		expect(seen).toEqual(["a"]);
+		expect(modal.focused).toBe(true);
+	});
+});
+
+describe("modal chrome on small screens", () => {
+	it("cuts a title that is wider than the box instead of running past its corner", () => {
+		const rows = frame("T".repeat(80), ["body"], "hint", 40).map(plain);
+		expect(rows.every((row) => visibleWidth(row) === 40)).toBe(true);
 	});
 });
