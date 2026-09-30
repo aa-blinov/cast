@@ -241,6 +241,10 @@ export interface Settings {
 	memorySearchScoreFloor?: number;
 	/** Safety cap on model calls per turn (loop runaway backstop). Default 500. */
 	maxTurnIterations?: number;
+	/** No animation in the TUI: a static spinner and no ticking counter, so nothing is
+	 *  written to the terminal between real changes. A terminal that jumps to the bottom
+	 *  on output otherwise undoes a scroll up during a turn. Also `CAST_REDUCE_MOTION=1`. */
+	reduceMotion?: boolean;
 	/** Reconcile project memory files before search operations. */
 	memoryReconcileOnSearch?: boolean;
 	/** Index Claude Code memory files (~/.claude/projects/<slug>/memory) into search. */

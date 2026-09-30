@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Added
+
+- **`reduceMotion` for a terminal that jumps to the bottom on every repaint.** With `"reduceMotion": true` in `settings.json` (or `CAST_REDUCE_MOTION=1`) the TUI draws no animation: the spinner stays still and the counter does not tick, so during a turn nothing is written to the terminal between real changes (measured: one screen change in six seconds instead of about seven) and scrolling up is left alone.
+
 ### Changed
 
 - **The TUI repaints about four times less while a turn runs.** The spinner and the elapsed counter ticked at 8 frames a second, and a terminal jumps back to the bottom on every write, so scrolling up during a turn was undone within a frame. The clock is now 2 frames a second and the counter shows whole seconds (`41s`).
