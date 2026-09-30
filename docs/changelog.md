@@ -11,6 +11,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **A line could be drawn twice in the TUI while a command ran.** A running `bash` row with a long command wrapped to four lines in the live region, which the layout counts as one, so the region outgrew the terminal and Ink left stale copies of the rows below it (the status bar, the spinner). A running tool row is now one truncated line; the full command is wrapped once the turn is committed.
 - **The subagent viewer said "running" for up to two seconds after the subagent had answered.** It now reads the saved final answer too.
 - **A `/skill` command filled the TUI thread with the whole SKILL.md.** The model has to receive the skill's text, but the thread showed it as if the person had typed it. The TUI now shows what was typed (`/name args`), as the web UI already did.
 - **Skills did not suggest their arguments.** A skill's `argument-hint` was read and never shown. The `/` palette (TUI and web) now lists it after the skill's name, and the TUI shows it under the composer once `/name ` is typed.
