@@ -51,6 +51,8 @@ In the TUI, `/rewind` shows a picker of your messages (newest first) and then of
 
 `/fork` leaves the original session unchanged and starts an independent new session. It asks where from: the whole session (the context currently sent to the model), or before any message you sent (the original conversation up to there, including what compaction had summarized). In the web UI you can also fork through an answer that ends a turn (**Fork from here** under it), which keeps that answer; the TUI picker has a row for it too. Forking from an earlier point asks whether the fork gets its own copy of the files as they were then (a worktree or a snapshot copy); see [Sessions](sessions.md). It does not copy checkpoints or pending pickers, or create a Git worktree: both sessions use the same working directory unless you switch one with `/worktree`.
 
+The `/` palette lists the actions. The commands that only change a setting are left out of it because `/settings` opens each one; typed in full they work as before, for example `/model gpt-x` or `/turn-cap 800`.
+
 ## Model and Provider
 
 | Command | Description |

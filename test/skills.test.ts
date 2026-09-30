@@ -487,6 +487,15 @@ describe("formatSkillsForPrompt with persona allowlist", () => {
 });
 
 describe("formatSkillInvocation", () => {
+	it("carries what was typed on the tag, so a body that consumed it can still be shown as typed", () => {
+		writeSkill(GLOBAL_DIR, "echo/SKILL.md", { name: "echo", description: "Repeats." }, "You said: $ARGUMENTS");
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		const withArgs = formatSkillInvocation(skills[0]!, ' hello "world" ');
+		expect(withArgs).toContain('arguments="hello &quot;world&quot;"');
+		expect(withArgs).toContain('You said:  hello "world" ');
+		expect(formatSkillInvocation(skills[0]!)).not.toContain("arguments=");
+	});
+
 	it("wraps the skill body in a <skill> block, appending user args", () => {
 		writeSkill(
 			GLOBAL_DIR,

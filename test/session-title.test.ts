@@ -16,6 +16,13 @@ describe("deriveSessionTitle", () => {
 		expect(deriveSessionTitle(block)).toBe("/web-artifacts-builder");
 	});
 
+	it("takes the typed arguments from the tag when the body consumed them", () => {
+		const block =
+			'<skill name="allargs" location="/s/SKILL.md" arguments="fix &quot;the&quot; &lt;bug&gt;">\nBODY: [fix &quot;the&quot; bug]\n</skill>';
+		expect(skillInvocationLabel(block)).toBe('/allargs fix "the" <bug>');
+		expect(deriveSessionTitle(block)).toBe('/allargs fix "the" <bug>');
+	});
+
 	it("labels a skill invocation as typed, and leaves other text alone", () => {
 		const block = '<skill name="demo" location="/s/SKILL.md">\nbody\n</skill>';
 		expect(skillInvocationLabel(`${block}\n\nUser: a b`)).toBe("/demo a b");

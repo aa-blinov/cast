@@ -32,7 +32,10 @@ export function parseSkillInvocation(content) {
 	const match = SKILL_INVOCATION_RE.exec(content);
 	if (!match) return null;
 	const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
-	return { name: unescape(match[1]), location: unescape(match[2]), args: match[3]?.trim() ?? "" };
+	// The typed arguments are on the tag; a body that used $ARGUMENTS has no `User:` line.
+	const onTag = /\sarguments="([^"]*)"/.exec(content.slice(0, content.indexOf(">") + 1));
+	const args = onTag ? unescape(onTag[1]) : (match[3] ?? "");
+	return { name: unescape(match[1]), location: unescape(match[2]), args: args.trim() };
 }
 
 function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, onFork, onForkAfter, onRewind }) {

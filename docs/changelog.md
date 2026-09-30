@@ -11,11 +11,13 @@ All notable user-facing changes to cast, newest first.
 ### Fixed
 
 - **A `question` tool call showed its whole form as JSON in the transcript.** The row now says how many questions were asked and what the first one is (`2 questions: Which database?`).
+- **A skill whose text used `$ARGUMENTS` showed as a bare `/name` in the thread.** The arguments you typed now ride on the skill tag (`arguments="…"`), so the thread shows `/name your arguments` however the skill used them, in the terminal UI and the web UI.
 - **The bands and highlights in the terminal UI follow the terminal, not the theme.** The band behind the person's turns and the highlight on a list row were the theme's own surface colours, which put a dark stripe under dark text on a light terminal. They are now the terminal's background nudged toward its foreground (asked of the terminal at start), and are left out where the terminal does not answer.
 
 ### Changed
 
 - **A more finished look for the terminal UI.** A blank row between the person's turns and the agent's, the person's turns on a band, a bold speaker label, the brand gradient along the composer's edges, a persona and mode in colour in the status row, the running tool's rail in the accent colour, a themed scrollbar, and a banner with the persona, model and folder. In pickers the highlighted row sits on a band with a `▸` marker, and a row can carry a hint (a setting's value) against its right edge.
+- **The `/` palette no longer lists the commands that only change a setting.** `/settings` reaches every one of them (`/model`, `/provider`, `/persona`, `/permissions`, `/reasoning`, `/theme`, `/statusbar`, `/web`, `/skills`, `/mcp`, `/memory`, `/turn-cap`, `/keys`, the plan and subagent model commands, `/ssh`). They still run when typed in full, with or without an argument, and `/help` still lists them.
 
 ## 0.51.0
 
