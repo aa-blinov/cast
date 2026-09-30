@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import {
 	CombinedAutocompleteProvider,
+	type Component,
 	Container,
 	Editor,
 	ScrollView,
@@ -10,6 +12,7 @@ import {
 	VStack,
 } from "@earendil-works/pi-tui";
 import { countTurnMessages } from "../core/session.ts";
+import type { StatusBarConfig } from "../core/settings.ts";
 import { reduceMotion } from "../ui/animation-clock.ts";
 import type { AppModel } from "../ui/app-model.ts";
 import { SLASH_COMMANDS } from "../ui/commands.ts";
@@ -24,6 +27,37 @@ import { ModalHost } from "./modals.ts";
 import { paint } from "./paint.ts";
 import { statusLine } from "./status.ts";
 import { Transcript } from "./transcript.ts";
+
+/** The status bar, laid out for whatever width the screen has when it is drawn. */
+class StatusRow implements Component {
+	private ctx: SegmentContext | undefined;
+	private config: StatusBarConfig | undefined;
+
+	set(ctx: SegmentContext, config: StatusBarConfig): void {
+		this.ctx = ctx;
+		this.config = config;
+	}
+
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		if (!this.ctx || !this.config) return [];
+		return [statusLine(this.ctx, this.config, Math.max(20, width))];
+	}
+}
+
+/** Where `fd` is, if anywhere: `@` file suggestions are fuzzy only with it. */
+function findFd(): string | null {
+	for (const name of ["fd", "fdfind"]) {
+		try {
+			const found = execFileSync("which", [name], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+			if (found) return found;
+		} catch {
+			// not installed under this name
+		}
+	}
+	return null;
+}
 
 const HINT_MS = 2000;
 const SPINNER_MS = 200;
@@ -40,7 +74,7 @@ export class PiApp {
 	private readonly notice = new Text("", 1, 0);
 	private readonly pending = new Text("", 1, 0);
 	private readonly hint = new Text("", 1, 0);
-	private readonly status = new Text("", 0, 0);
+	private readonly status = new StatusRow();
 	private readonly editor: Editor;
 	private readonly modals: ModalHost;
 	private lastCtrlC = 0;
@@ -50,12 +84,15 @@ export class PiApp {
 	private spinner: NodeJS.Timeout | undefined;
 	private historySeen = 0;
 	private commandKey = "";
+	private readonly fdPath = findFd();
 
 	constructor(
 		private readonly tui: ViewportTUI,
 		private readonly onQuit: () => void,
 		private readonly onPasteImage?: () => Promise<ClipboardPasteResult>,
+		banner: string[] = [],
 	) {
+		this.transcript.header = banner;
 		this.editor = new Editor(
 			tui,
 			{
@@ -196,7 +233,7 @@ export class PiApp {
 
 	private syncCommands(model: AppModel): void {
 		const skills = model.skills;
-		const key = skills.map((s) => `${s.name}:${s.argumentHint ?? ""}`).join("|");
+		const key = `${model.cwd}|${skills.map((s) => `${s.name}:${s.argumentHint ?? ""}`).join("|")}`;
 		if (key === this.commandKey) return;
 		this.commandKey = key;
 		const builtin = new Set(SLASH_COMMANDS.map((c) => c.name));
@@ -206,7 +243,7 @@ export class PiApp {
 				.filter((s) => !builtin.has(`/${s.name}`))
 				.map((s) => ({ name: s.name, description: s.description, argumentHint: s.argumentHint })),
 		];
-		this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(commands, process.cwd()));
+		this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(commands, model.cwd, this.fdPath));
 	}
 
 	private syncHistory(prompts: readonly string[]): void {
@@ -235,7 +272,6 @@ export class PiApp {
 			}
 		}
 		this.pending.setText(rows.join("\n"));
-		const columns = this.tui.terminal.columns;
 		const { agent, session, config } = model;
 		const ctx: SegmentContext = {
 			persona: model.currentPersona.label,
@@ -256,7 +292,7 @@ export class PiApp {
 				: undefined,
 			lspServers: model.lspServers,
 		};
-		this.status.setText(statusLine(ctx, model.statusBar, Math.max(20, columns)));
+		this.status.set(ctx, model.statusBar);
 	}
 
 	/** Called on every render of the app model. */

@@ -23,6 +23,8 @@ export interface TranscriptState {
  * is laid out again on each frame.
  */
 export class Transcript implements Component {
+	/** Rows above the first message: the banner, and what to do in an empty session. */
+	header: string[] = [];
 	private state: TranscriptState = { messages: [], streaming: null, error: null, retry: null, showReasoning: false };
 	private fences: Array<OpenFence | null> = [];
 	private cache = new WeakMap<ChatMessage, { key: string; lines: string[] }>();
@@ -54,7 +56,7 @@ export class Transcript implements Component {
 	render(width: number): string[] {
 		const { messages, streaming, error, retry, showReasoning } = this.state;
 		const w = Math.max(20, width);
-		const out: string[] = [];
+		const out: string[] = [...this.header];
 		messages.forEach((message, i) => {
 			const fence = this.fences[i] ?? null;
 			const key = `${w}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;

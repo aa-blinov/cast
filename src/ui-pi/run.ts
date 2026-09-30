@@ -3,6 +3,7 @@ import { createElement, useEffect } from "react";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { type AppModel, type AppModelProps, useAppModel } from "../ui/app-model.ts";
+import { gradientAnsi } from "../ui/gradient.ts";
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import { theme } from "../ui/themes/index.ts";
 import { PiApp } from "./app.ts";
@@ -53,7 +54,15 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 		tui.stop();
 	};
 	const quit = () => options.quit(stopScreen);
-	const app = new PiApp(tui, quit, options.onPasteImage);
+	const banner = [
+		`${gradientAnsi(`cast v${options.version}`)}`,
+		paint("Type a message, or / for commands · Esc Esc stops a turn · PageUp scrolls", {
+			color: theme().muted,
+			dim: true,
+		}),
+		"",
+	];
+	const app = new PiApp(tui, quit, options.onPasteImage, banner);
 	store.subscribe((model) => app.update(model));
 
 	setSuspendHook(async (run) => {
