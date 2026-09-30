@@ -2077,6 +2077,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	const recentToolCalls: Array<{ name: string; argsKey: string }> = [];
 	// Outputs seen this user turn, for noteRepeatedOutputs.
 	const repeatedOutputs = new Map<string, number>();
+	let runawayOutput = false;
 
 	// Hooks in force for this run. Seeded from the caller's set and extended
 	// when a skill with a `hooks:` block is invoked — a skill whose whole point
@@ -2834,12 +2835,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				const goalCap = loopConfig.maxOuterIterations;
 				const activeCap = goalCap ?? loopConfig.defaultOuterIterations ?? DEFAULT_OUTER_ITERATION_CAP;
 				outerIteration += 1;
-				if (outerIteration > activeCap) {
+				if (outerIteration > activeCap || runawayOutput) {
 					goalCapHit = true;
 					loopConfig.onWarning?.(
-						goalCap !== undefined
-							? `Autonomous goal hit its iteration budget (${goalCap}) — stopping.`
-							: `Turn hit the iteration safety cap (${activeCap}) — stopping. This may be a runaway loop; check the recent tool calls.`,
+						runawayOutput
+							? `A tool returned the same output ${REPEATED_OUTPUT_STOP} times — stopping. The model is stuck; check the recent tool calls.`
+							: goalCap !== undefined
+								? `Autonomous goal hit its iteration budget (${goalCap}) — stopping.`
+								: `Turn hit the iteration safety cap (${activeCap}) — stopping. This may be a runaway loop; check the recent tool calls.`,
 					);
 					hasMoreToolCalls = false;
 					// A steer already drained out of the queue must not vanish
@@ -3253,7 +3256,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						recentToolCalls,
 						DOOM_LOOP_THRESHOLD,
 					);
-					noteRepeatedOutputs(executedToolBatch, repeatedOutputs);
+					if (noteRepeatedOutputs(executedToolBatch, repeatedOutputs)) runawayOutput = true;
 					toolResults.push(...executedToolBatch);
 					hasMoreToolCalls = true;
 
@@ -3712,6 +3715,10 @@ interface ToolCallResult {
 /** How many times a tool may return the same output before the model is told
  *  that repeating it won't change anything. */
 const REPEATED_OUTPUT_THRESHOLD = 4;
+/** Where the reminder gives way to stopping the turn. A subagent once ran 335
+ *  model calls of parallel globs that all found nothing: the reminder was
+ *  ignored ~490 times and the iteration cap counts model calls, not tools. */
+const REPEATED_OUTPUT_STOP = 100;
 const DIGITS_RE = /\d+/g;
 
 /**
@@ -3721,21 +3728,26 @@ const DIGITS_RE = /\d+/g;
  * interpreter held one run for 227 calls and 15 minutes. This counts
  * outputs instead, numbers masked so timings and PIDs don't hide a repeat,
  * and on every REPEATED_OUTPUT_THRESHOLD-th repeat tells the model so. The call
- * still runs: rerunning a check after a real change is legitimate.
+ * still runs: rerunning a check after a real change is legitimate. Returns true
+ * once an output has repeated REPEATED_OUTPUT_STOP times: the caller ends the turn.
  */
-export function noteRepeatedOutputs(batch: ToolCallResult[], seen: Map<string, number>): void {
+export function noteRepeatedOutputs(batch: ToolCallResult[], seen: Map<string, number>): boolean {
+	let runaway = false;
 	for (const call of batch) {
 		const content = call.result.content;
 		if (typeof content !== "string" || !content.trim()) continue;
 		const key = `${call.name}\0${content.slice(0, 4000).replace(DIGITS_RE, "#")}`;
 		const count = (seen.get(key) ?? 0) + 1;
 		seen.set(key, count);
+		// Polling a running job legitimately returns the same output over and over.
+		if (count >= REPEATED_OUTPUT_STOP && !DOOM_LOOP_EXEMPT.has(call.name)) runaway = true;
 		if (count % REPEATED_OUTPUT_THRESHOLD !== 0) continue;
 		call.result = {
 			...call.result,
 			content: `${content}\n\n<system-reminder>This is the ${count}th time ${call.name} has returned this same output. Repeating the check won't change it. Either do something materially different, or stop and tell the user what is blocking you and what you already tried.</system-reminder>`,
 		};
 	}
+	return runaway;
 }
 
 async function executeToolCalls(

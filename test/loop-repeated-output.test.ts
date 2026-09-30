@@ -25,4 +25,14 @@ describe("noteRepeatedOutputs", () => {
 		expect(fourth[0]!.result.content).toContain("4th time bash");
 		expect(seen.get("read\0same")).toBe(1);
 	});
+
+	it("asks the caller to stop at the 100th repeat, but never for a polled job", () => {
+		const seen = new Map<string, number>();
+		const results: boolean[] = [];
+		for (let i = 0; i < 100; i++) results.push(noteRepeatedOutputs([call("No files found", "glob")], seen));
+		expect(results.indexOf(true)).toBe(99);
+		const polled = new Map<string, number>();
+		for (let i = 0; i < 150; i++)
+			expect(noteRepeatedOutputs([call("still running", "bash_output")], polled)).toBe(false);
+	});
 });

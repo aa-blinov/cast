@@ -46,6 +46,7 @@ export function extractTaskResult(messages: Message[]): string {
  * once, so a model that fans out ten tasks doesn't open ten provider streams. */
 export const MAX_CONCURRENT_TASKS = 4;
 const TASK_RESULT_MAX_CHARS = 30_000;
+const SUBAGENT_MAX_ITERATIONS = 150;
 const WHITESPACE_RUN_RE = /\s+/g;
 
 const slots = new Map<string, { active: number; waiters: Array<() => void> }>();
@@ -457,6 +458,9 @@ export async function execTask(
 							}
 						},
 						signal: actorSignal,
+						// A subagent maps or checks something; the parent's 500 is far past
+						// any real one, and nobody watches a child run its budget out.
+						defaultOuterIterations: SUBAGENT_MAX_ITERATIONS,
 						steeringQueue: steering,
 						// Serialize confirmations so parallel subagents don't race the terminal.
 						confirmBash: serializeConfirm(deps.confirmBash),
