@@ -2,7 +2,6 @@ import {
 	CombinedAutocompleteProvider,
 	Container,
 	Editor,
-	matchesKey,
 	ScrollView,
 	type SlashCommand,
 	Text,
@@ -14,8 +13,13 @@ import { countTurnMessages } from "../core/session.ts";
 import { reduceMotion } from "../ui/animation-clock.ts";
 import type { AppModel } from "../ui/app-model.ts";
 import { SLASH_COMMANDS } from "../ui/commands.ts";
+import { editInExternalEditor } from "../ui/external-editor.ts";
+import { getKeybindings } from "../ui/input/keybindings.ts";
+import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import type { SegmentContext } from "../ui/statusbar.tsx";
+import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON, setTerminalFocused } from "../ui/terminal-notify.ts";
 import { theme } from "../ui/themes/index.ts";
+import { workingTitle } from "../ui/working-title.ts";
 import { ModalHost } from "./modals.ts";
 import { paint } from "./paint.ts";
 import { statusLine } from "./status.ts";
@@ -50,6 +54,7 @@ export class PiApp {
 	constructor(
 		private readonly tui: ViewportTUI,
 		private readonly onQuit: () => void,
+		private readonly onPasteImage?: () => Promise<ClipboardPasteResult>,
 	) {
 		this.editor = new Editor(
 			tui,
@@ -99,11 +104,56 @@ export class PiApp {
 		this.tui.requestRender();
 	}
 
+	/** Puts the saved clipboard image's path into the draft, the way the Ink composer does. */
+	private attachImage(): void {
+		if (!this.onPasteImage) {
+			this.flash("[Image paste not available]");
+			return;
+		}
+		this.flash("[Reading clipboard...]");
+		void this.onPasteImage().then((result) => {
+			if (result.ok) {
+				this.editor.insertTextAtCursor(result.path);
+				this.flash(`[Image saved: ${result.path}]`);
+			} else if (result.error) this.flash(`[${result.error}]`);
+			else this.flash("[No image in clipboard — copy a screenshot or image file first]");
+		});
+	}
+
+	/** The draft goes to $VISUAL / $EDITOR and comes back as the new draft. */
+	private editExternally(): void {
+		void editInExternalEditor(this.editor.getExpandedText()).then((result) => {
+			if (result.ok) this.editor.setText(result.text);
+			else this.flash(`[${result.error}]`);
+			this.tui.requestRender(true);
+		});
+	}
+
 	private onKey(data: string): TuiInputListenerResult | undefined {
+		// The terminal says when its window gains or loses focus (DEC mode 1004);
+		// a notification is only worth sending while it is out of focus.
+		if (data === "\x1b[I" || data === "\x1b[O") {
+			setTerminalFocused(data === "\x1b[I");
+			return { consume: true };
+		}
 		const model = this.model;
 		if (!model) return undefined;
+		const keys = getKeybindings();
+		if (keys.matches(data, "input.attachImage")) {
+			this.attachImage();
+			return { consume: true };
+		}
+		if (keys.matches(data, "input.externalEditor")) {
+			this.editExternally();
+			return { consume: true };
+		}
+		if (keys.matches(data, "editor.clearBuffer")) {
+			this.editor.setText("");
+			this.tui.requestRender();
+			return { consume: true };
+		}
 		// Ctrl+C: exit, after confirming, in every state. Stopping a turn is Esc's job.
-		if (matchesKey(data, "ctrl+c")) {
+		if (keys.matches(data, "input.abort")) {
 			const now = Date.now();
 			if (now - this.lastCtrlC < HINT_MS) this.onQuit();
 			else {
@@ -116,7 +166,7 @@ export class PiApp {
 		// draft is left as it is. Anything else Esc does (closing the autocomplete)
 		// is the editor's, so it only counts when nothing of the kind is open.
 		if (
-			matchesKey(data, "escape") &&
+			keys.matches(data, "input.escape") &&
 			model.running &&
 			!this.tui.hasOverlay() &&
 			!this.editor.isShowingAutocomplete()
@@ -238,6 +288,7 @@ export class PiApp {
 			if (!this.model) return;
 			this.paintFooter(this.model);
 			this.tui.requestRender();
+			if (reduceMotion()) process.stdout.write(workingTitle(this.model.agent.getElapsedMs()));
 		}, 1000);
 		if (!reduceMotion()) {
 			this.spinner = setInterval(() => {
@@ -251,6 +302,7 @@ export class PiApp {
 		if (this.spinner) clearInterval(this.spinner);
 		this.clock = undefined;
 		this.spinner = undefined;
+		if (reduceMotion()) process.stdout.write("\x1b]0;cast\x07");
 	}
 
 	/** The transcript's colours or contents changed under what is drawn. */
@@ -259,7 +311,13 @@ export class PiApp {
 		this.tui.requestRender(true);
 	}
 
+	/** Asks the terminal to report focus changes; undone by `dispose`. */
+	start(): void {
+		process.stdout.write(FOCUS_REPORTING_ON);
+	}
+
 	dispose(): void {
+		process.stdout.write(FOCUS_REPORTING_OFF);
 		this.stopClocks();
 		if (this.hintTimer) clearTimeout(this.hintTimer);
 		this.modals.dispose();

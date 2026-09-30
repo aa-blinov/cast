@@ -194,6 +194,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 			daemonUrl,
 			daemonToken,
 			quit: (stopScreen) => endSession(stopScreen, false),
+			onPasteImage,
 			onError: (error) => logTuiError("render error", error.stack ?? error.message),
 		});
 		return;

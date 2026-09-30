@@ -3,9 +3,11 @@ import { createElement, useEffect } from "react";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { type AppModel, type AppModelProps, useAppModel } from "../ui/app-model.ts";
+import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import { theme } from "../ui/themes/index.ts";
 import { PiApp } from "./app.ts";
 import { createStore, mountHeadless } from "./headless.ts";
+import { applyUserKeybindings } from "./keys.ts";
 import { paint } from "./paint.ts";
 
 export interface PiFrontEndOptions {
@@ -16,6 +18,8 @@ export interface PiFrontEndOptions {
 	daemonToken?: string;
 	/** Ends the session: the caller saves it, closes what it opened and exits, after `stopScreen` hands the terminal back. */
 	quit: (stopScreen: () => void) => void;
+	/** Saves the clipboard's image and says where (Ctrl+G). */
+	onPasteImage?: () => Promise<ClipboardPasteResult>;
 	/** Writes what could not be drawn (a React error in the model). */
 	onError: (error: Error) => void;
 }
@@ -34,6 +38,7 @@ function ModelHost(props: { model: AppModelProps; publish: (model: AppModel) => 
  * `useAppModel`'s, running in a headless React root; this draws what it returns.
  */
 export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
+	applyUserKeybindings();
 	const terminal = new ProcessTerminal();
 	const tui = new TuiAltScreen(terminal, false, undefined, {
 		mouse: true,
@@ -48,7 +53,7 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 		tui.stop();
 	};
 	const quit = () => options.quit(stopScreen);
-	const app = new PiApp(tui, quit);
+	const app = new PiApp(tui, quit, options.onPasteImage);
 	store.subscribe((model) => app.update(model));
 
 	setSuspendHook(async (run) => {
@@ -61,6 +66,7 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 	});
 
 	tui.start();
+	app.start();
 	root = mountHeadless(
 		createElement(ModelHost, {
 			model: {
