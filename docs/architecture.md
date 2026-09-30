@@ -36,18 +36,24 @@ src/
     prompts.ts        Prompt file loading
     readline.ts       Readline utilities, models cache
     settings.ts       User settings persistence
-    stdin-manager.ts  Stdin ownership between Ink and child processes
+    stdin-manager.ts  Stdin ownership between the TUI and child processes
     subagents.ts      Sub-agent prompt loading
     help.ts           Banner, help text, changelog
     ...
-  ui/                 Ink TUI components
-    App.tsx           Top-level layout
-    Composer.tsx      Input with autocomplete, image paste
-    ChatLog.tsx       Message rendering
+  ui/                 Shared TUI behaviour, and the legacy Ink front end (CAST_TUI=ink)
+    app-model.ts      Session, modals, plan decisions: headless React hooks both front ends run
     commands.ts       Slash command handlers
+    App.tsx, Composer.tsx, ChatLog.tsx   The Ink front end
     themes/           Color theme registry and definitions
     input/            Keybindings, input handling
     ...
+  ui-pi/              The pi-tui front end (default)
+    run.ts            Screen, headless model host, quit and signal handling
+    app.ts            Layout, editor, keys, footer
+    transcript.ts     The conversation as one document in a scroll view
+    lines.ts          Rows for messages, blocks and tool calls
+    modals.ts         Pickers, prompts, live views as overlays
+    startup.ts        Onboarding questions before the app mounts
   pickers/            Onboarding pickers (model, persona, reasoning)
   server/             HTTP server, REST/SSE bridge, browser client
   index.ts            CLI entry point

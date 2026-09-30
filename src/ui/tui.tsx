@@ -77,7 +77,8 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	const daemonUrl = daemonState ? daemonBaseUrl(daemonState) : undefined;
 	// The pi-tui front end asks its startup questions on its own screen; the Ink
 	// one keeps using Ink's short-lived instances.
-	const usePi = process.env.CAST_TUI === "pi";
+	// pi-tui is the front end; CAST_TUI=ink brings back the old Ink one.
+	const usePi = process.env.CAST_TUI !== "ink";
 	const piStartup = usePi ? createStartupUi() : undefined;
 	let loader: ReturnType<typeof render> | null = null;
 	const showLoader = (text: string) => {
@@ -200,7 +201,6 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	const onQuit = () => endSession(() => ink.unmount(), true);
 	const onPasteImage = (): Promise<ClipboardPasteResult> => saveClipboardImageToTempFile();
 
-	// The pi-tui front end, behind CAST_TUI=pi while it reaches parity.
 	if (usePi) {
 		await runPiFrontEnd({
 			result,

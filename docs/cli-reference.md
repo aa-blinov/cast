@@ -13,7 +13,7 @@ cast requests <session> [n]           What the model was sent
 cast lsp <operation> <file> [...]     Ask a language server, as the lsp tool does
 ```
 
-TUI mode (Ink-based, multiline paste, image attachments) is the default. Non-TTY contexts (pipes, CI) are not supported. Use `cast run` for scripting.
+TUI mode (full-screen, own scrolling, multiline paste, image attachments) is the default. `CAST_TUI=ink` starts the older Ink front end instead. Non-TTY contexts (pipes, CI) are not supported. Use `cast run` for scripting.
 
 ## Subcommands
 
