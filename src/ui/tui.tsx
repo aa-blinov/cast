@@ -12,11 +12,22 @@ import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts
 import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
 import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
+import { runPiFrontEnd } from "../ui-pi/run.ts";
 import { App } from "./App.tsx";
 import { gradientAnsi } from "./gradient.ts";
 import { type ClipboardPasteResult, saveClipboardImageToTempFile } from "./readClipboardImage.ts";
 import { Spinner } from "./Spinner.tsx";
 import { loadTheme } from "./themes/index.ts";
+
+/** A trail in ~/.cast/tui-errors.log for what the screen cannot show. */
+function logTuiError(what: string, text: string): void {
+	try {
+		mkdirSync(join(homedir(), ".cast"), { recursive: true });
+		appendFileSync(join(homedir(), ".cast", "tui-errors.log"), `${new Date().toISOString()} ${what}: ${text}\n`);
+	} catch {
+		// Nowhere to write: still better than dying.
+	}
+}
 
 function StartupLoader({ text }: { text: string }): JSX.Element {
 	return (
@@ -48,16 +59,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// stack dumped into the alternate screen. Keep the session alive and leave a
 	// trail in ~/.cast/tui-errors.log instead.
 	process.on("unhandledRejection", (reason) => {
-		try {
-			mkdirSync(join(homedir(), ".cast"), { recursive: true });
-			const text = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
-			appendFileSync(
-				join(homedir(), ".cast", "tui-errors.log"),
-				`${new Date().toISOString()} unhandled rejection: ${text}\n`,
-			);
-		} catch {
-			// Nowhere to write: still better than dying.
-		}
+		logTuiError("unhandled rejection", reason instanceof Error ? (reason.stack ?? reason.message) : String(reason));
 	});
 	const warningListeners = process.listeners("warning");
 	process.removeAllListeners("warning");
@@ -149,7 +151,9 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		process.stdout.write(`\x1b[2mResume this session:\x1b[22m cast --resume=${result.session.id}\n`);
 	};
 
-	const onQuit = () => {
+	// Ends the session from either front end: save it, close what was opened,
+	// hand the terminal back with `stopScreen`, say how to resume, exit.
+	const endSession = (stopScreen: () => void, clearScreen: boolean) => {
 		saveSession(result.session);
 		if (result.hooks) {
 			void runHooksForEvent(result.hooks, {
@@ -169,16 +173,31 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		void drainProjectCheckpointWriters(2_500)
 			.finally(() => closeMcpConnections(result.mcpResult.connections))
 			.then(async () => {
-				// Unmount first: Ink redraws its last frame on exit and erases the
+				// Stop drawing first: Ink redraws its last frame on exit and erases the
 				// lines above the cursor, which wiped the resume hint printed below.
-				ink.unmount();
-				process.stdout.write("\x1b[2J\x1b[H");
+				stopScreen();
+				if (clearScreen) process.stdout.write("\x1b[2J\x1b[H");
 				printResumeHint();
 				await new Promise((resolve) => setTimeout(resolve, 60));
 				process.exit(0);
 			});
 	};
+	const onQuit = () => endSession(() => ink.unmount(), true);
 	const onPasteImage = (): Promise<ClipboardPasteResult> => saveClipboardImageToTempFile();
+
+	// The pi-tui front end, behind CAST_TUI=pi while it reaches parity.
+	if (process.env.CAST_TUI === "pi") {
+		await runPiFrontEnd({
+			result,
+			version: args.version,
+			initialPrompt: args.initialPrompt,
+			daemonUrl,
+			daemonToken,
+			quit: (stopScreen) => endSession(stopScreen, false),
+			onError: (error) => logTuiError("render error", error.stack ?? error.message),
+		});
+		return;
+	}
 
 	// Clear the screen for a terminal resync. Ink's frame is torn down first
 	// (suspendAndRun) so these raw writes don't fight it, and App replays the

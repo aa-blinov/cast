@@ -1,19 +1,17 @@
 import { Box, Static, Text } from "ink";
 import { type JSX, useMemo, useRef } from "react";
-import { DEFAULT_BASH_TIMEOUT_MS } from "../core/config.ts";
 import { getLastFrameOverflow } from "../core/stdin-manager.ts";
-import { readBashTimeout } from "../core/tools/bash.ts";
 import {
 	type OpenFence,
 	type RenderedLine,
 	renderMarkdownLines,
 	renderMarkdownTail,
-	type Span,
 	trailingOpenFence,
 } from "./markdown-terminal.ts";
 import { Spinner } from "./Spinner.tsx";
-import { formatTaskToolSummary } from "./task-tool-summary.ts";
+import { railMuted, spanProps } from "./span-style.ts";
 import { theme } from "./themes/index.ts";
+import { formatTimeout, isMcpTool, mcpToolLabel, oneLineSummary, parseToolSummary } from "./tool-summary.ts";
 import type { ChatMessage, RetryInfo, StreamBlock, StreamingState, ToolCallEntry } from "./useAgentSession.ts";
 
 // Vendors are supposed to split reasoning out of the content stream; when one
@@ -34,158 +32,6 @@ interface ChatLogProps {
 	 * on-screen history with no way to redraw it. See App.tsx's resize effect.
 	 */
 	repaintKey?: number;
-}
-
-type ToolSummaryModel =
-	| { kind: "edit"; path: string; added: number; removed: number }
-	/** `timeout` is the one that will actually apply: the call's own, or the
-	 *  foreground default. Undefined means nothing will stop it — a background
-	 *  task that asked for no timer. */
-	| { kind: "bash"; command: string; timeoutMs?: number }
-	| { kind: "read"; path: string; range: string }
-	| { kind: "write"; path: string; lines: number }
-	| { kind: "task"; text: string }
-	| { kind: "generic"; text: string };
-
-/**
- * Data half of the tool-call summary. edit/write get a readable file + change
- * summary instead of a truncated JSON blob; every other tool keeps the generic
- * `key=value` args. Args stream in as partial JSON, so anything that fails to
- * parse (or doesn't match the expected shape) falls back to the raw/generic
- * form — the rich view only kicks in once the call is complete.
- */
-/** Exported for unit tests. */
-export function parseToolSummary(name: string, args: string): ToolSummaryModel {
-	let parsed: Record<string, unknown> | null = null;
-	try {
-		parsed = JSON.parse(args) as Record<string, unknown>;
-	} catch {
-		parsed = null;
-	}
-
-	if (
-		parsed &&
-		name === "edit" &&
-		typeof parsed.filePath === "string" &&
-		typeof parsed.oldString === "string" &&
-		typeof parsed.newString === "string"
-	) {
-		const removed = parsed.oldString.length === 0 ? 0 : parsed.oldString.split("\n").length;
-		const added = parsed.newString.length === 0 ? 0 : parsed.newString.split("\n").length;
-		return { kind: "edit", path: parsed.filePath, added, removed };
-	}
-
-	if (parsed && name === "read" && typeof parsed.path === "string") {
-		// `offset` is 1-indexed (same contract as the read tool). Omitted/0 → line 1.
-		const offset = typeof parsed.offset === "number" ? parsed.offset : 0;
-		const limit = typeof parsed.limit === "number" ? parsed.limit : undefined;
-		const start = offset > 0 ? offset : 1;
-		const range = limit ? `${start}-${start + limit - 1}` : "all";
-		return { kind: "read", path: parsed.path, range };
-	}
-
-	if (parsed && name === "write" && typeof parsed.path === "string") {
-		const lines = typeof parsed.content === "string" ? parsed.content.split("\n").length : 0;
-		return { kind: "write", path: parsed.path, lines };
-	}
-
-	// `findReferences src/a.ts:12:5`, `workspaceSymbol "parseArgs"`.
-	if (parsed && name === "lsp" && typeof parsed.operation === "string") {
-		const at =
-			typeof parsed.line === "number"
-				? `:${parsed.line}${typeof parsed.character === "number" ? `:${parsed.character}` : ""}`
-				: "";
-		const target =
-			parsed.operation === "workspaceSymbol" && typeof parsed.query === "string"
-				? JSON.stringify(parsed.query)
-				: `${typeof parsed.file_path === "string" ? parsed.file_path : ""}${at}`;
-		return { kind: "generic", text: `${parsed.operation} ${target}` };
-	}
-
-	if (name === "task") {
-		const taskText = formatTaskToolSummary(args);
-		if (taskText) return { kind: "task", text: taskText };
-	}
-
-	// The raw args are the full todo list as one unindented JSON blob — fine
-	// for the model (it's what gets echoed back to keep it grounded), but
-	// unreadable as a terminal one-liner. "N/M done — current item" instead.
-	if (parsed && name === "todo_write" && Array.isArray(parsed.todos)) {
-		const todos = parsed.todos as Array<{ content?: unknown; status?: unknown }>;
-		const done = todos.filter((t) => t.status === "completed").length;
-		const active = todos.find((t) => t.status === "in_progress");
-		const activeText = typeof active?.content === "string" ? active.content : "";
-		const suffix = activeText ? ` — ${activeText.slice(0, 60)}` : "";
-		return { kind: "generic", text: `${done}/${todos.length} done${suffix}` };
-	}
-
-	// A bash row carries its deadline: the reason a command is about to be cut
-	// off is worth seeing before it happens, not in the [TIMED OUT] afterwards.
-	// Same rules the tool applies — an explicit `timeout` wins; 0 or negative
-	// counts as not asking, so the foreground default still applies; and a
-	// background task that asked for nothing runs open-ended.
-	if (parsed && name === "bash" && typeof parsed.command === "string") {
-		const requested = typeof parsed.timeout === "number" && parsed.timeout > 0 ? parsed.timeout : undefined;
-		// Read the same way the tool reads it — milliseconds converted, cap
-		// applied — so the row shows the deadline that will actually fire
-		// rather than the number that was asked for.
-		const explicitMs = readBashTimeout(requested)?.ms;
-		const background = parsed.run_in_background === true;
-		return {
-			kind: "bash",
-			command: parsed.command,
-			timeoutMs: explicitMs ?? (background ? undefined : DEFAULT_BASH_TIMEOUT_MS),
-		};
-	}
-
-	// `command="ls -la /tmp"` spent a third of the row on the key and the
-	// quotes. A command, a pattern or a path is self-describing: print the
-	// value. Several arguments still get the `k=v` list, which is the only
-	// case where the keys carry information.
-	const entries = parsed ? Object.entries(parsed) : [];
-	const primary =
-		name === "bash" && typeof parsed?.command === "string"
-			? parsed.command
-			: entries.length === 1 && typeof entries[0]![1] === "string"
-				? (entries[0]![1] as string)
-				: undefined;
-	const generic =
-		primary !== undefined
-			? primary
-			: parsed
-				? entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ")
-				: args.slice(0, 200);
-	return { kind: "generic", text: generic };
-}
-
-/**
- * Collapse a summary to one physical line for the live region.
- *
- * Ink's `wrap="truncate"` truncates the string, but it does not remove
- * newlines: a value that already fits the terminal width comes back
- * unchanged, so a multi-line `task` assignment ("Do X\nThen Y\nReport
- * back") rendered three rows while clampStreamingBlocks had charged the tool
- * block exactly one — and a live region taller than the viewport is what
- * makes Ink stack duplicate frames into scrollback. Streaming args arrive as
- * raw text too, so a model that emits pretty-printed JSON hits this on every
- * tool call, not just `task`.
- */
-const NEWLINE_RUN_RE = /\s*\n\s*/g;
-/** @internal exported for unit tests */
-export function oneLineSummary(text: string): string {
-	return text.replace(NEWLINE_RUN_RE, " ");
-}
-
-/** Milliseconds as the shortest thing that still reads as a duration: 90s, 3m, 1h. */
-function formatTimeout(ms: number): string {
-	const seconds = ms / 1000;
-	if (seconds < 60) return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
-	if (seconds < 3600) {
-		const minutes = seconds / 60;
-		return `${Number.isInteger(minutes) ? minutes : minutes.toFixed(1)}m`;
-	}
-	const hours = seconds / 3600;
-	return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
 }
 
 /**
@@ -306,94 +152,6 @@ const BLOCK_STYLE = {
 	thinking: { label: "reasoning", bar: "┆" },
 } as const;
 
-/** Ink props for one rendered span, with tones resolved against the theme. */
-/**
- * highlight.js scope → theme colour, in five buckets rather than a full
- * editor palette: a terminal theme has one hue per role, and a snippet in a
- * reply needs the shape (what is a string, what is a comment, where a name is)
- * rather than a colour per token class. `text` is a piece the grammar left
- * plain and keeps the default foreground — flat `accent` on everything is what
- * the highlighting replaces.
- *
- * Scopes arrive dotted ("title.function", "meta.string"), so the lookup walks
- * from the most specific prefix down.
- */
-function syntaxColor(scope: string): string | undefined {
-	const colors = theme();
-	const buckets: Record<string, string | undefined> = {
-		text: undefined,
-		comment: colors.muted,
-		quote: colors.muted,
-		meta: colors.muted,
-		string: colors.success,
-		char: colors.success,
-		regexp: colors.success,
-		addition: colors.success,
-		number: colors.warning,
-		literal: colors.warning,
-		symbol: colors.warning,
-		deletion: colors.error,
-		keyword: colors.accent,
-		built_in: colors.accent,
-		operator: colors.accent,
-		// Not `agent`: that is the colour of the rail this code sits behind, and
-		// a function name in the rail's own hue reads as chrome.
-		title: colors.user,
-		section: colors.user,
-		name: colors.user,
-		tag: colors.user,
-		type: colors.user,
-		class: colors.user,
-		"selector-tag": colors.user,
-	};
-	let key = scope;
-	for (;;) {
-		if (key in buckets) return buckets[key];
-		const dot = key.lastIndexOf(".");
-		if (dot === -1) return undefined;
-		key = key.slice(0, dot);
-	}
-}
-
-function spanProps(span: Span): {
-	color?: string;
-	bold?: boolean;
-	italic?: boolean;
-	dimColor?: boolean;
-	underline?: boolean;
-} {
-	const colors = theme();
-	const color =
-		span.scope !== undefined
-			? syntaxColor(span.scope)
-			: span.tone === "code"
-				? colors.accent
-				: span.tone === "heading"
-					? colors.agent
-					: span.tone === "link"
-						? colors.accent
-						: span.tone === "quote" || span.tone === "marker" || span.tone === "rule"
-							? colors.muted
-							: undefined;
-	return {
-		...(color ? { color } : {}),
-		...(span.bold ? { bold: true } : {}),
-		...(span.italic ? { italic: true } : {}),
-		...(span.dim ? { dimColor: true } : {}),
-		...(span.underline ? { underline: true } : {}),
-	};
-}
-
-/**
- * The rail's own colour for a scaffolding row: `muted` is right in most
- * themes, but nord and solarized put it within 1.7–2.8:1 of the background,
- * where a one-cell bar disappears — those give the rail its own value.
- */
-function railMuted(): string {
-	const colors = theme();
-	return colors.rail ?? colors.muted;
-}
-
 /**
  * Rendered markdown lines behind one rail.
  *
@@ -459,18 +217,6 @@ function MarkdownBody({
 			))}
 		</Box>
 	);
-}
-
-// MCP tools are exposed to the model as "mcp_<server>_<tool>" (see
-// core/mcp.ts's mcpToolName) — same prefix-strip-and-loosen treatment the
-// web UI already applies (app.js's isMcpTool/mcpToolLabel), so the TUI
-// doesn't show the raw underscored wire name where the web UI shows a
-// readable "server – tool" label.
-function isMcpTool(name: string): boolean {
-	return name.startsWith("mcp_");
-}
-function mcpToolLabel(name: string): string {
-	return name.slice(4).replace(/_/g, " – ");
 }
 
 /**
@@ -842,3 +588,6 @@ export function ChatLog({
 		</>
 	);
 }
+
+// Tests and other callers import these from here.
+export { oneLineSummary, parseToolSummary } from "./tool-summary.ts";
