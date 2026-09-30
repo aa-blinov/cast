@@ -83,7 +83,7 @@ import {
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { cancelActiveDecxprQuery, suspendAndRun } from "../core/stdin-manager.ts";
-import { cancelTask, runningTaskIds, summarizeToolArgs } from "../core/tools/task.ts";
+import { activeTaskIds, cancelTask, queuedTaskIds, summarizeToolArgs } from "../core/tools/task.ts";
 import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,
@@ -3443,17 +3443,23 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		run: async ({ deps, session, showNotice }) => {
 			// Subagents run where the agent loop runs: the daemon when attached,
 			// so ask it which are live; their saved sessions are shared either way.
-			type Row = { id: string; title?: string; subagent: string; running: boolean };
+			// `running` covers a queued one too: both can be watched and stopped.
+			type Row = { id: string; title?: string; subagent: string; running: boolean; queued?: boolean };
 			let rows: Row[];
 			if (deps.agent.daemonMode) {
-				rows = ((await deps.agent.runCommand("/agents")) as Row[] | undefined) ?? [];
+				rows = (((await deps.agent.runCommand("/agents")) as Row[] | undefined) ?? []).map((r) => ({
+					...r,
+					running: r.running || r.queued === true,
+				}));
 			} else {
-				const live = runningTaskIds(session.id);
+				const live = activeTaskIds(session.id);
+				const waiting = queuedTaskIds(session.id);
 				rows = listSubagentSessions(session.id).map((child) => ({
 					id: child.id,
 					title: child.title,
 					subagent: child.persona ?? "worker",
 					running: live.includes(child.id),
+					queued: waiting.includes(child.id),
 				}));
 			}
 			if (rows.length === 0) {
@@ -3463,7 +3469,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			const chosen = await deps.pickers.pickOption(
 				rows.map((row) => ({
 					value: row,
-					label: `${row.running ? "● " : "  "}${row.subagent} · ${row.title ?? row.id}`,
+					label: `${row.queued ? "◌ " : row.running ? "● " : "  "}${row.subagent} · ${row.title ?? row.id}`,
 				})),
 				{ title: "Subagents of this session" },
 			);
@@ -3509,13 +3515,13 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				if (deps.agent.daemonMode) {
 					void deps.agent.runCommand("/agents").then(
 						(rows) => {
-							running = ((rows as Array<{ id: string; running: boolean }> | undefined) ?? []).some(
-								(r) => r.id === chosen.id && r.running,
-							);
+							running = (
+								(rows as Array<{ id: string; running: boolean; queued?: boolean }> | undefined) ?? []
+							).some((r) => r.id === chosen.id && (r.running || r.queued === true));
 						},
 						() => {},
 					);
-				} else running = runningTaskIds(session.id).includes(chosen.id);
+				} else running = activeTaskIds(session.id).includes(chosen.id);
 			};
 			await deps.pickers.viewLive({
 				title: label,

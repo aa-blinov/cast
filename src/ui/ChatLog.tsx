@@ -281,7 +281,7 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 				{progress && (
 					<Text color={colors.accent}>
 						[{progress.subagent}
-						{step ? ` ${step}` : ""} · {progress.toolCount}]{" "}
+						{progress.status === "queued" ? " queued" : step ? ` ${step}` : ""} · {progress.toolCount}]{" "}
 					</Text>
 				)}
 				<Text color={failed ? colors.error : colors.muted} dimColor={!failed && !running}>

@@ -104,7 +104,7 @@ import {
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../../core/skills-sh.ts";
 import type { SshHost, saveSshConfig } from "../../core/ssh.ts";
 import { recordLlmRequest } from "../../core/telemetry.ts";
-import { cancelTask, runningTaskIds } from "../../core/tools/task.ts";
+import { activeTaskIds, cancelTask, queuedTaskIds, runningTaskIds } from "../../core/tools/task.ts";
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
 import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { createSessionWorktree, listWorktrees, removeSessionWorktree } from "../../core/worktree.ts";
@@ -1175,8 +1175,9 @@ const commandHandlers: Record<string, CommandHandler> = {
 		// client can only learn which are live, or stop one, by asking here.
 		const [action, taskId] = arg.split(WHITESPACE_RE);
 		const live = runningTaskIds(ws.id);
+		const waiting = queuedTaskIds(ws.id);
 		if (action === "stop") {
-			if (!taskId || !live.includes(taskId)) return { ok: false, error: "No such running subagent" };
+			if (!taskId || !activeTaskIds(ws.id).includes(taskId)) return { ok: false, error: "No such running subagent" };
 			cancelTask(taskId);
 			return { ok: true, result: { stopped: taskId } };
 		}
@@ -1188,6 +1189,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 				subagent: child.persona ?? "worker",
 				updatedAt: child.updatedAt,
 				running: live.includes(child.id),
+				queued: waiting.includes(child.id),
 			})),
 		};
 	},

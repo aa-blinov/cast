@@ -119,7 +119,7 @@ function TaskLine({ call }) {
 				html`<button type="button" class="tool-card-task-btn" onClick=${() => window.dispatchEvent(new CustomEvent("cast:open-session", { detail: taskId }))}>Open</button>`
 			}
 			${
-				running &&
+				(running || state === "queued") &&
 				taskId &&
 				progress?.parentSessionId &&
 				html`<button type="button" class="tool-card-task-btn" onClick=${() => void api("POST", `/api/sessions/${progress.parentSessionId}/agents/${taskId}/cancel`).catch(() => {})}>Stop</button>`

@@ -14,6 +14,8 @@ import {
 	execTask,
 	extractTaskResult,
 	isTaskRunning,
+	MAX_CONCURRENT_TASKS,
+	queuedTaskIds,
 	runningTaskIds,
 	type SubagentProgress,
 } from "../src/core/tools/task.ts";
@@ -446,6 +448,7 @@ describe("execTask — child sessions, resume, background", () => {
 			},
 		});
 		expect(progress.map((p) => [p.status, p.tool?.summary, p.toolCount])).toEqual([
+			["queued", undefined, 0],
 			["running", undefined, 0],
 			["running", "src/a.ts", 1],
 			["completed", undefined, 1],
@@ -533,6 +536,44 @@ describe("execTask — child sessions, resume, background", () => {
 		expect(loadSession(taskId)?.messages.at(-1)).toMatchObject({ role: "user", content: "slow first tool" });
 		release();
 		await vi.waitFor(() => expect(isTaskRunning(taskId)).toBe(false));
+	});
+
+	it("lists a task waiting for a slot as queued: saved, reported, and cancellable on its own", async () => {
+		const sessionId = parent();
+		const finishers: Array<() => void> = [];
+		const progress: SubagentProgress[] = [];
+		const runs = Array.from({ length: MAX_CONCURRENT_TASKS + 1 }, (_, i) =>
+			execTask({ assignment: `job ${i}`, description: `job ${i}` }, "/tmp", testConfig, {
+				model: "test-model",
+				sessionId,
+				subagentPrompts: [worker],
+				onProgress: (p) => progress.push(p),
+				runAgentLoop: (messages, config) =>
+					new Promise((resolveRun) => {
+						finishers.push(() => {
+							config.onEvent({ type: "end", reason: "stop" });
+							resolveRun([...messages, { role: "assistant", content: "done" }]);
+						});
+						config.signal?.addEventListener("abort", () => {
+							config.onEvent({ type: "end", reason: "aborted" });
+							resolveRun(messages);
+						});
+					}),
+			}),
+		);
+		await vi.waitFor(() => expect(runningTaskIds(sessionId)).toHaveLength(MAX_CONCURRENT_TASKS));
+		const waiting = queuedTaskIds(sessionId);
+		expect(waiting).toHaveLength(1);
+		expect(runningTaskIds(sessionId)).not.toContain(waiting[0]);
+		expect(loadSession(waiting[0]!)?.messages.at(-1)).toMatchObject({ role: "user" });
+		expect(progress.some((p) => p.taskId === waiting[0] && p.status === "queued")).toBe(true);
+
+		expect(cancelTask(waiting[0]!)).toBe(true);
+		await vi.waitFor(() => expect(queuedTaskIds(sessionId)).toHaveLength(0));
+		for (const finish of finishers) finish();
+		const results = await Promise.all(runs);
+		expect(results.filter((r) => r.isError)).toHaveLength(1);
+		expect(runningTaskIds(sessionId)).toHaveLength(0);
 	});
 
 	it("steers a still-running task given its task_id, and cancels it on request", async () => {

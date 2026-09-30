@@ -10,7 +10,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
-- **A subagent was invisible until its first model turn ended.** Its session was saved only after that, so `/agents` said "No subagents" and Open had nothing to show while it ran a long first command. It is now saved when it starts.
+- **A subagent was invisible until its first model turn ended, and a queued one for much longer.** Its session was saved only after that, so `/agents` said "No subagents" and Open had nothing to show while it ran a long first command; with more than four in one response, the rest were missing from the list until a slot freed up. A subagent is now saved when it starts, and one waiting for a slot shows as **queued** (`◌` in `/agents`, `queued` on the web card and in the API's `queued` field). A queued one can be stopped like a running one.
 
 ## 0.50.3
 
