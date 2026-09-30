@@ -2,17 +2,18 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { StatusBarConfig } from "../core/settings.ts";
 import { fitSegments, getStatusBarSegments, type SegmentContext } from "../ui/statusbar.tsx";
 import { theme } from "../ui/themes/index.ts";
-import { paint } from "./paint.ts";
+import { type Paint, paint } from "./paint.ts";
 
 const SEPARATOR = " │ ";
 
-/** Segments that are not plain muted text, as the Ink status bar colours them. */
-function segmentColor(id: string, ctx: SegmentContext): string {
+/** Who and what mode you are in stand out; the numbers behind them stay quiet. */
+function segmentStyle(id: string, ctx: SegmentContext): Paint {
 	const colors = theme();
-	if (id === "persona") return colors.persona;
-	if (id === "worktree") return colors.warning;
-	if (id === "mode" && ctx.planMode) return colors.warning;
-	return colors.muted;
+	if (id === "persona") return { color: colors.persona, bold: true };
+	if (id === "worktree") return { color: colors.warning };
+	if (id === "mode") return ctx.planMode ? { color: colors.warning, bold: true } : { color: colors.muted };
+	if (id === "model") return { color: colors.muted };
+	return { color: colors.muted, dim: true };
 }
 
 /**
@@ -36,7 +37,7 @@ export function statusLine(ctx: SegmentContext, config: StatusBarConfig, columns
 	const group = (side: "left" | "right") =>
 		fitted
 			.filter((item) => item.side === side)
-			.map((item) => paint(item.text, { color: segmentColor(item.id, ctx), dim: true }))
+			.map((item) => paint(item.text, segmentStyle(item.id, ctx)))
 			.join(paint(SEPARATOR, { color: theme().muted, dim: true }));
 	const left = group("left");
 	const right = group("right");

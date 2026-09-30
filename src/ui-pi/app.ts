@@ -24,7 +24,7 @@ import { theme } from "../ui/themes/index.ts";
 import { workingTitle } from "../ui/working-title.ts";
 import { CastAutocompleteProvider, CastEditor } from "./editor.ts";
 import { ModalHost } from "./modals.ts";
-import { paint } from "./paint.ts";
+import { gradientLine, paint } from "./paint.ts";
 import { statusLine } from "./status.ts";
 import { Transcript } from "./transcript.ts";
 
@@ -100,7 +100,8 @@ export class PiApp {
 		this.editor = new CastEditor(
 			tui,
 			{
-				borderColor: (line) => paint(line, { color: theme().muted, dim: true }),
+				// The brand gradient runs along the composer's edges.
+				borderColor: (line) => gradientLine(line, { dim: true }),
 				selectList: {
 					selectedPrefix: (text) => paint(text, { color: theme().accent }),
 					selectedText: (text) => paint(text, { color: theme().accent, bold: true }),
@@ -118,6 +119,8 @@ export class PiApp {
 			primary: true,
 			overscroll: "chain",
 			scrollbar: "auto",
+			scrollbarTrackStyle: (text) => paint(text, { color: theme().border }),
+			scrollbarThumbStyle: (text) => paint(text, { color: theme().accent, dim: true }),
 		});
 		const footer = new Container();
 		for (const child of [this.notice, this.pending, this.hint, this.editor, this.status]) footer.addChild(child);

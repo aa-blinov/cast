@@ -9,6 +9,8 @@ export interface PickOption<T> {
 	/** Optional haystack for fuzzy search; concatenated into the match query
 	 *  alongside label + description. Not rendered. */
 	searchText?: string;
+	/** Short text set against the right edge of the row (a setting's current value); the terminal front end draws it. */
+	hint?: string;
 	/** Dimmed label for a row that is shown but not selectable. */
 	muted?: boolean;
 	/** Space cannot toggle this row (still navigable). */

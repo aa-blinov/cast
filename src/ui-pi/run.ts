@@ -57,10 +57,14 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 		tui.stop();
 	};
 	const quit = () => options.quit(stopScreen);
+	const home = process.env.HOME ?? "";
+	const where =
+		options.result.cwd.startsWith(home) && home ? `~${options.result.cwd.slice(home.length)}` : options.result.cwd;
+	const muted = { color: theme().muted };
 	const banner = [
-		`${gradientAnsi(`cast v${options.version}`)}`,
-		paint("Type a message, or / for commands · Esc Esc stops a turn · PageUp scrolls", {
-			color: theme().muted,
+		`${gradientAnsi(`cast v${options.version}`)}${paint(`  ·  ${options.result.persona.label}  ·  ${options.result.session.model}  ·  ${where}`, muted)}`,
+		paint("/ commands · /settings · Esc Esc stops a turn · PageUp scrolls · Ctrl+C twice quits", {
+			...muted,
 			dim: true,
 		}),
 		"",
