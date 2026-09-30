@@ -4,6 +4,10 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Added
+
+- **`/settings` is a settings screen, not a menu of commands.** Toggles, the permission mode and the theme change in place (Space, Enter or ← → ) and are saved at once; each row shows what it is set to. Rows that need a list or a prompt (model, provider, persona, turn cap, status bar, skills, MCP) open it and bring the screen back after. Choosing `bypass` still asks first. `/theme`, `/permissions` and `/web` share the setters, so the screen and the commands cannot disagree.
+
 ### Changed
 
 - **`/sessions` (and `cast --resume`) list this directory's sessions first.** The picker opens on the sessions whose folder is the one you are in; **Show all sessions (N)** on the next row lists every project's, and **Only this directory** comes back. ←, → or Tab flip between the two views without moving to that row (the footer says so). Search stays inside the scope you are in. When the directory has no sessions yet it shows all of them and says so. Sessions with no messages, which every launch leaves behind, are no longer listed.

@@ -19,6 +19,7 @@ import {
 import { type PermissionMode, updateSettings } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
+import { buildSettingsForm, parseTurnCap } from "../src/ui/settings-form.ts";
 import { defaultStatusBarConfig } from "../src/ui/statusbar.tsx";
 import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
 
@@ -544,41 +545,129 @@ describe("handleInput", () => {
 		expect(seen?.stop).toBeTypeOf("function");
 	});
 
-	it("/settings opens one menu of the settings, each with its value, and runs the one you pick", async () => {
-		let offered: Array<{ value: string; label: string; hint?: string }> = [];
-		let title: string | undefined;
-		const pickers: Pickers = {
-			promptText: async () => null,
-			pickOption: async (options, opts) => {
-				offered = options as typeof offered;
-				title = opts?.title;
-				return "/reasoning-display" as never;
-			},
-			pickMulti: async () => null,
-			log: () => {},
-		};
-		const { deps, calls } = createFakeDeps({ pickers });
-		await handleInput("/settings", undefined, deps);
-		expect(title).toBe("Settings");
-		expect(offered.map((o) => o.value)).toEqual(
-			expect.arrayContaining(["/model", "/provider", "/persona", "/permissions", "/theme", "/statusbar"]),
-		);
-		expect(offered.find((o) => o.value === "/model")?.hint).toBe("test-model");
-		expect(offered.find((o) => o.value === "/permissions")?.hint).toBe(deps.permissionMode);
-		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
-	});
-
-	it("/settings cancelled runs nothing", async () => {
+	it("/settings hands the front end one form, runs a row's follow-up, and shows the screen again", async () => {
+		let opened = 0;
+		let labels: string[] = [];
 		const pickers: Pickers = {
 			promptText: async () => null,
 			pickOption: async () => null,
 			pickMulti: async () => null,
 			log: () => {},
+			settings: async (form) => {
+				opened++;
+				labels = form.rows().flatMap((r) => (r.kind === "heading" ? [] : [r.label]));
+				if (opened > 1) return null;
+				const reasoning = form.rows().find((r) => r.kind === "toggle" && r.label.startsWith("Show reasoning"));
+				if (reasoning?.kind !== "toggle") throw new Error("no reasoning row");
+				return async () => {
+					reasoning.set(false);
+				};
+			},
 		};
 		const { deps, calls } = createFakeDeps({ pickers });
 		await handleInput("/settings", undefined, deps);
-		expect(calls["agent.toggleReasoning"]).toBeUndefined();
-		expect(calls.showNotice).toBeUndefined();
+		expect(opened).toBe(2);
+		expect(labels).toEqual(expect.arrayContaining(["Model", "Permissions", "Theme", "Status bar"]));
+		expect(calls["agent.toggleReasoning"]).toHaveLength(1);
+	});
+
+	it("/settings on a front end without a settings screen falls back to a plain list", async () => {
+		let title: string | undefined;
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async (_options, opts) => {
+				title = opts?.title;
+				return null;
+			},
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps } = createFakeDeps({ pickers });
+		await handleInput("/settings", undefined, deps);
+		expect(title).toBe("Settings");
+	});
+
+	it("settings rows write the same settings the slash commands do", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		const { deps, calls } = createFakeDeps();
+		const form = buildSettingsForm(deps, async () => {});
+		const row = (label: string) => form.rows().find((r) => r.kind !== "heading" && r.label === label);
+
+		const web = row("Web search and fetch");
+		if (web?.kind !== "toggle") throw new Error("no web row");
+		expect(web.set(true)).toBeUndefined();
+		expect(loadSettings().webTools).toBe(true);
+		expect(calls.setWebToolsEnabled).toHaveLength(1);
+		expect((row("Web search and fetch") as { value: boolean }).value).toBe(true);
+
+		const memory = row("Automatic consolidation");
+		if (memory?.kind !== "toggle") throw new Error("no memory row");
+		memory.set(true);
+		expect(loadSettings().memoryDreamAuto).toBe(true);
+
+		const themeRow = row("Theme");
+		if (themeRow?.kind !== "choice") throw new Error("no theme row");
+		const other = themeRow.options.find((o) => o.value !== themeRow.value);
+		themeRow.set(other?.value as string);
+		expect(loadSettings().theme).toBe(other?.value);
+		expect((row("Theme") as { value: string }).value).toBe(other?.value);
+	});
+
+	it("choosing bypass in settings asks first; going back to default does not", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		let asked = 0;
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async () => {
+				asked++;
+				return true as never;
+			},
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps } = createFakeDeps({ pickers });
+		const form = buildSettingsForm(deps, async () => {});
+		const perms = form.rows().find((r) => r.kind === "choice" && r.label === "Permissions");
+		if (perms?.kind !== "choice") throw new Error("no permissions row");
+		const followUp = perms.set("bypass");
+		expect(asked).toBe(0);
+		await followUp?.();
+		expect(asked).toBe(1);
+		expect(loadSettings().permissionMode).toBe("bypass");
+		expect(perms.set("default")).toBeUndefined();
+		expect(loadSettings().permissionMode).toBe("default");
+	});
+
+	it("the iteration cap row prompts, refuses nonsense, and saves a valid number", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		const answers = ["5", "250"];
+		const pickers: Pickers = {
+			promptText: async () => answers.shift() ?? null,
+			pickOption: async () => null,
+			pickMulti: async () => null,
+			log: () => {},
+		};
+		const { deps } = createFakeDeps({ pickers });
+		const form = buildSettingsForm(deps, async () => {});
+		const cap = form.rows().find((r) => r.kind === "open" && r.label === "Per-turn iteration cap");
+		if (cap?.kind !== "open") throw new Error("no cap row");
+		await cap.open();
+		expect(loadSettings().maxTurnIterations).toBeUndefined();
+		await cap.open();
+		expect(loadSettings().maxTurnIterations).toBe(250);
+		expect(parseTurnCap("reset")).toEqual({ cap: undefined });
+	});
+
+	it("an open row runs its slash command through the runner it was given", async () => {
+		const ran: string[] = [];
+		const { deps } = createFakeDeps();
+		const form = buildSettingsForm(deps, async (command) => {
+			ran.push(command);
+		});
+		const model = form.rows().find((r) => r.kind === "open" && r.label === "Model");
+		if (model?.kind !== "open") throw new Error("no model row");
+		await model.open();
+		expect(ran).toEqual(["/model"]);
 	});
 
 	it("/agents says so when the session has none", async () => {
