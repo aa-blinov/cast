@@ -570,6 +570,7 @@ describe("execTask — child sessions, resume, background", () => {
 
 		expect(cancelTask(waiting[0]!)).toBe(true);
 		await vi.waitFor(() => expect(queuedTaskIds(sessionId)).toHaveLength(0));
+		expect(progress.some((p) => p.taskId === waiting[0] && p.status === "cancelled")).toBe(true);
 		for (const finish of finishers) finish();
 		const results = await Promise.all(runs);
 		expect(results.filter((r) => r.isError)).toHaveLength(1);

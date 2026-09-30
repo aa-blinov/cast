@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **A subagent opened while it worked showed nothing of its work so far.** Its saved copy was updated only at the end of each model turn, so a child opened mid-tool-call (web Open, TUI Watch) showed the assignment and nothing else until it finished. It is now saved on every change to its messages.
+- **A card for a subagent stopped while queued stayed "queued".** The stop worked, but the card was never told. It now shows `cancelled`.
+
 ## 0.50.4
 
 ### Added

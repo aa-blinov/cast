@@ -449,6 +449,8 @@ export async function execTask(
 			release = await acquireSlot(deps.sessionId ?? "", actor.signal);
 		} catch {
 			actor.cancel();
+			// Without this a card for a task stopped in the queue stayed "queued".
+			progress("cancelled");
 			return { content: "Subagent did not complete successfully (aborted).", isError: true, subagentUsage };
 		} finally {
 			queued.delete(taskId);
@@ -467,6 +469,8 @@ export async function execTask(
 						systemPrompt: childSystemPrompt,
 						onMessagesChanged: (messages) => {
 							child.messages = [...messages];
+							// Not only at a turn's end: a child opened while it runs reads this copy.
+							persist();
 						},
 						onEvent: (event) => {
 							deps.onChildEvent?.(taskId, event);
