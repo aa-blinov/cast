@@ -10,7 +10,7 @@ All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash comma
 | `/continue` | Resume the most recent session (like `cast -c`, but mid-session) |
 | `/fork` | Branch into a new session: the whole current context, the conversation before one of your messages, or (web UI, `/fork after <seq>`) through one of the agent's answers |
 | `/worktree <name>` | Switch current session into an isolated git worktree (`list`, `remove <name>`) |
-| `/sessions` | Session picker: the sessions of the directory you are in, with **Show all sessions** one row down (and **Only this directory** to come back). Type-to-filter search (message text, project path, id) stays inside the scope you are in; switch or delete. A session with no messages is not listed |
+| `/sessions` | Session picker: the sessions of the directory you are in, with **Show all sessions** one row down (and **Only this directory** to come back); ←, → or Tab flip between the two views. Type-to-filter search (message text, project path, id) stays inside the scope you are in; switch or delete. A session with no messages is not listed |
 | `/clear` | Clear conversation context (and save the cleared state) |
 | `/compact` | Force context compaction now (auto-triggers near the limit) |
 | `/dream` | Verify the recent project trajectory and consolidate durable project memory |

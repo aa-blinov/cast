@@ -145,6 +145,11 @@ export class OptionModal<T> implements Component {
 			if (picked && !picked.locked) this.done(picked.value);
 		} else if (matchesKey(data, "escape")) {
 			this.done(null);
+		} else if (
+			this.opts?.switchTo !== undefined &&
+			(matchesKey(data, "left") || matchesKey(data, "right") || matchesKey(data, "tab"))
+		) {
+			this.done(this.opts.switchTo);
 		} else if (this.opts?.search) {
 			if (matchesKey(data, "backspace")) {
 				this.query = this.query.slice(0, -1);
@@ -189,7 +194,8 @@ export class OptionModal<T> implements Component {
 			);
 			if (selected && o.description) body.push(`  ${paint(o.description, { color: colors.muted })}`);
 		});
-		const hint = `${this.opts?.search ? "type to filter" : "up/down select"} – Enter confirm – Esc cancel${
+		const switchKeys = this.opts?.switchTo !== undefined ? ` – ←/→ ${this.opts.switchHint ?? "switch"}` : "";
+		const hint = `${this.opts?.search ? "type to filter" : "up/down select"} – Enter confirm${switchKeys} – Esc cancel${
 			this.shown.length > rows ? ` – ${this.idx + 1}/${this.shown.length}` : ""
 		}`;
 		return frame(this.opts?.title, body, hint, width);

@@ -135,6 +135,34 @@ describe("selectSession over summaries", () => {
 			expect(seen[2]).toEqual([mine.id]);
 		});
 
+		it("offers the other view as the picker's switch key, in both directions", async () => {
+			seed();
+			const switches: Array<{ to: unknown; hint?: string }> = [];
+			let call = 0;
+			await selectSession(
+				fakePickers((options, opts) => {
+					switches.push({ to: opts?.switchTo, hint: opts?.switchHint });
+					call++;
+					return call === 1 ? opts?.switchTo : null;
+				}),
+				{ cwd: project },
+			);
+			expect(switches[0]).toEqual({ to: expect.objectContaining({ action: "all" }), hint: "all sessions" });
+			expect(switches[1]).toEqual({ to: expect.objectContaining({ action: "here" }), hint: "this directory" });
+		});
+
+		it("has no switch key when there is nothing to switch between", async () => {
+			seed();
+			let seen: unknown = "unset";
+			await selectSession(
+				fakePickers((_options, opts) => {
+					seen = opts?.switchTo;
+					return null;
+				}),
+			);
+			expect(seen).toBeUndefined();
+		});
+
 		it("searches within the scope it is in", async () => {
 			const { mine, theirs } = seed();
 			let search: ((q: string) => PickOption<unknown>[]) | undefined;
