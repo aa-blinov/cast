@@ -16,6 +16,10 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Modals showed scraps of the transcript beside them.** A picker or the settings screen now covers the full width with its box centred (at most 104 columns), so no half a word shows on either side.
+- **The banner and the hint line were cut in the middle of a word on a narrow terminal.** They now give up whole parts (the folder, then the model; the last hints first) until they fit. The settings screen also trims a long value (a provider URL) rather than the name beside it, and fits its list to a short window so its footer stays visible.
+- **`cast` started in a pipe wrote screen control sequences to stdout and exited 0.** It now says it needs an interactive terminal, points to `cast run`, and exits 1.
+- **`/sessions` with no saved history reported `Cancelled`.** It says `No saved sessions yet`.
 - **Muted text was hard to read.** The grey for hints, the placeholder, reasoning and the status separators was under 4.5:1 on 13 of the 18 themes (Nord 1.7:1), and `dim` lowered it further. Text colours are now lifted to 4.5:1 against the background they sit on, and `dim` is no longer stacked on them.
 - **A mistyped `/command` was sent to the model as a prompt.** `/nonsense` now says `Unknown command /nonsense` and, when it can, `Did you mean /clear`. A path such as `/tmp/shot.png` is still sent as text.
 - **The elapsed time stayed on the status bar without saying what it was.** After a turn it reads `took 4s`.

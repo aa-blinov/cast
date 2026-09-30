@@ -32,7 +32,8 @@ export interface TranscriptState {
  */
 export class Transcript implements Component {
 	/** Rows above the first message: the banner, and what to do in an empty session. */
-	header: string[] = [];
+	/** Drawn above the conversation; a function when it should fit itself to the width. */
+	header: string[] | ((width: number) => string[]) = [];
 	private state: TranscriptState = { messages: [], streaming: null, error: null, retry: null, showReasoning: false };
 	private fences: Array<OpenFence | null> = [];
 	private cache = new WeakMap<ChatMessage, { key: string; lines: string[] }>();
@@ -64,7 +65,8 @@ export class Transcript implements Component {
 	render(width: number): string[] {
 		const { messages, streaming, error, retry, showReasoning } = this.state;
 		const w = Math.max(20, width);
-		const out: string[] = this.header.map((line) => truncateToWidth(line, w, "…"));
+		const header = typeof this.header === "function" ? this.header(w) : this.header;
+		const out: string[] = header.map((line) => truncateToWidth(line, w, "…"));
 		messages.forEach((message, i) => {
 			// A blank row wherever the speaker changes, so a turn reads as a block.
 			if (changesSpeaker(messages[i - 1], message)) out.push("");

@@ -1174,7 +1174,17 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("No other session");
 	});
 
+	it("/sessions with no saved history says so, rather than reporting a cancel", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/sessions", undefined, deps);
+		expect(noticeText(calls)).toContain("No saved sessions yet");
+		expect(noticeText(calls)).not.toContain("Cancelled");
+	});
+
 	it("/sessions cancellation keeps the current session unchanged", async () => {
+		const other = createSession("test-model", "/tmp");
+		other.messages.push({ role: "user", content: "an earlier conversation" });
+		saveSession(other);
 		const { deps, calls } = createFakeDeps();
 		const originalId = deps.session.id;
 		await handleInput("/sessions", undefined, deps);
