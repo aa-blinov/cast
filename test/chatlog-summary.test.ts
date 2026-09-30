@@ -174,6 +174,25 @@ describe("parseToolSummary — edit +added/-removed", () => {
 	});
 });
 
+describe("parseToolSummary — question", () => {
+	it("says how many questions were asked and what the first one is, not the whole form", () => {
+		const form = {
+			questions: [
+				{ question: "Which database?", options: [{ value: "pg", label: "PostgreSQL" }] },
+				{ question: "Which environments?", options: [] },
+			],
+		};
+		expect(parseToolSummary("question", JSON.stringify(form))).toEqual({
+			kind: "generic",
+			text: "2 questions: Which database?",
+		});
+		expect(parseToolSummary("question", JSON.stringify({ questions: [{ question: "Sure?" }] }))).toEqual({
+			kind: "generic",
+			text: "1 question: Sure?",
+		});
+	});
+});
+
 describe("parseToolSummary — lsp", () => {
 	it("shows the operation and where it points", () => {
 		expect(
