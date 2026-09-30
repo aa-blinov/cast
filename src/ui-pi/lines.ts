@@ -39,8 +39,7 @@ export function railLines(lines: RenderedLine[], options: RailOptions): string[]
 	const out: string[] = [];
 	if (options.label) {
 		out.push(
-			paint(`${bar} `, { color: options.gutter }) +
-				paint(options.label, { color: options.gutter, bold: true, dim: options.dimText }),
+			paint(`${bar} `, { color: options.gutter }) + paint(options.label, { color: options.gutter, bold: true }),
 		);
 	}
 	lines.forEach((line, i) => {
@@ -49,12 +48,11 @@ export function railLines(lines: RenderedLine[], options: RailOptions): string[]
 			.map((span) => {
 				const { color, bold, italic, dimColor, underline } = spanProps(span);
 				return paint(span.text, {
-					color,
+					color: options.dimText || dimColor ? theme().muted : color,
 					bold,
 					italic,
 					underline,
 					bg: options.bg,
-					dim: Boolean(options.dimText || dimColor),
 				});
 			})
 			.join("");
@@ -112,7 +110,7 @@ export function toolRowLines(call: ToolCallEntry, width: number): string[] {
 	const rail = paint(`${failed ? "✗" : "│"} `, {
 		color: failed ? colors.error : running ? colors.accent : railMuted(),
 	});
-	const name = paint(`${toolLabel(call.name)} `, { color: colors.muted, dim: true });
+	const name = paint(`${toolLabel(call.name)} `, { color: colors.muted });
 	const progress = running && call.name === "task" ? call.progress : undefined;
 	const step = progress?.tool ? `↳ ${progress.tool.name} ${progress.tool.summary}`.trim() : "";
 	const badge = progress
@@ -121,12 +119,12 @@ export function toolRowLines(call: ToolCallEntry, width: number): string[] {
 				{ color: colors.accent },
 			)
 		: "";
-	const tone = { color: failed ? colors.error : colors.muted, dim: !failed && !running };
+	const tone = { color: failed ? colors.error : colors.muted };
 	const summary = summaryPieces(call, running)
 		.map((piece) => {
 			if (piece.style === "added") return paint(piece.text, { color: colors.success });
 			if (piece.style === "removed") return paint(piece.text, { color: colors.error });
-			if (piece.style === "meta") return paint(piece.text, { color: colors.muted, dim: true });
+			if (piece.style === "meta") return paint(piece.text, { color: colors.muted });
 			return paint(piece.text, tone);
 		})
 		.join("");

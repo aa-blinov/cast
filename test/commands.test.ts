@@ -349,6 +349,24 @@ describe("handleInput", () => {
 
 	// An unrouted slash line is a prompt (or a native skill), so it waits like
 	// any other work rather than slipping past the guard.
+	it("an unknown slash word is refused with a hint, and never sent to the model", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/nonsense", undefined, deps);
+		expect(calls["agent.submit"]).toBeUndefined();
+		expect(String(calls.showNotice?.at(-1)?.[0])).toContain("Unknown command /nonsense");
+
+		await handleInput("/cle", undefined, deps);
+		expect(calls["agent.submit"]).toBeUndefined();
+		expect(String(calls.showNotice?.at(-1)?.[0])).toContain("Did you mean /clear");
+	});
+
+	it("a path that starts with a slash is still a prompt", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/tmp/cast-clipboard-1234.png what is this", undefined, deps);
+		await handleInput("/tmp/shot.png", undefined, deps);
+		expect(calls["agent.submit"]).toHaveLength(2);
+	});
+
 	it("refuses an unknown slash command while running instead of submitting it", async () => {
 		const { deps, calls } = createFakeDeps({ running: true });
 		await handleInput("/tmp/cast-clipboard-1.png", undefined, deps);
@@ -884,12 +902,6 @@ describe("handleInput", () => {
 		await handleInput("/mcp", undefined, deps);
 		expect(displayMessageText(calls)).toContain("disabled 1");
 		expect(calls.setMcpResult).toHaveLength(1);
-	});
-
-	it("unknown /command submits to agent as text (e.g. file paths)", async () => {
-		const { deps, calls } = createFakeDeps();
-		await handleInput("/notreal", undefined, deps);
-		expect(calls["agent.submit"]).toEqual([["/notreal"]]);
 	});
 
 	it("/steer without a message shows usage and does not enqueue", async () => {

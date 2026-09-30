@@ -6,6 +6,7 @@
 
 import { ayu } from "./ayu.ts";
 import { cast } from "./cast.ts";
+import { castLight } from "./cast-light.ts";
 import { catppuccin } from "./catppuccin.ts";
 import { dracula } from "./dracula.ts";
 import { everforest } from "./everforest.ts";
@@ -27,6 +28,7 @@ import type { Theme, ThemeColors } from "./types.ts";
 export const ALL_THEMES: Theme[] = [
 	ayu,
 	cast,
+	castLight,
 	catppuccin,
 	dracula,
 	everforest,
@@ -44,6 +46,9 @@ export const ALL_THEMES: Theme[] = [
 	tokyoNight,
 	tomorrowNight,
 ];
+
+/** What the browser UI can show. */
+export const WEB_THEMES: Theme[] = ALL_THEMES.filter((t) => !t.terminalOnly);
 
 let active: Theme = cast;
 

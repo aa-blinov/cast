@@ -303,6 +303,7 @@ export class PiApp {
 			usage: agent.usage ?? undefined,
 			lastTurnUsage: agent.lastTurnUsage ?? undefined,
 			elapsedMs: agent.getElapsedMs(),
+			running: model.running,
 			messageCount: countTurnMessages(session.messages),
 			contextWindow: config.contextWindow,
 			maxResponseTokens: config.maxResponseTokens,

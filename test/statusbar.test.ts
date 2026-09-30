@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../src/core/llm.ts";
 import {
+	contextUsage,
 	defaultStatusBarConfig,
 	fitSegments,
 	getStatusBarSegments,
@@ -141,6 +142,23 @@ describe("segment renderers", () => {
 	it("elapsed renders a positive elapsedMs as a non-null element", () => {
 		const seg = getStatusBarSegments().find((s) => s.id === "elapsed")!;
 		expect(seg.formatValue(emptyCtx({ elapsedMs: 1500 }))).not.toBeNull();
+	});
+
+	it("elapsed says `took` once the turn is over, and only then", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "elapsed")!;
+		expect(seg.formatValue(emptyCtx({ elapsedMs: 4000, running: true }))).toBe("4s");
+		expect(seg.formatValue(emptyCtx({ elapsedMs: 4000, running: false }))).toBe("took 4s");
+		expect(seg.formatValue(emptyCtx({ elapsedMs: 4000 }))).toBe("4s");
+	});
+
+	it("context is on by default and reports the share of the input budget", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "context")!;
+		expect(seg.defaultOn).toBe(true);
+		expect(contextUsage(emptyCtx())).toBeNull();
+		const messages = [{ role: "user", content: "x".repeat(40_000) }] as Message[];
+		const usage = contextUsage(emptyCtx({ messages }));
+		expect(usage?.pct).toBeGreaterThan(0);
+		expect(seg.formatValue(emptyCtx({ messages }))).toMatch(/^ctx .+\/.+ \(\d+%\)$/);
 	});
 
 	it("session is off by default, left-aligned, and renders the sessionId", () => {

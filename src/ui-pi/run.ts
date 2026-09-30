@@ -64,10 +64,7 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 	const muted = { color: theme().muted };
 	const banner = [
 		`${gradientAnsi(`cast v${options.version}`)}${paint(`  ·  ${options.result.persona.label}  ·  ${options.result.session.model}  ·  ${where}`, muted)}`,
-		paint("/ commands · /settings · Esc Esc stops a turn · PageUp scrolls · Ctrl+C twice quits", {
-			...muted,
-			dim: true,
-		}),
+		paint("/ commands · /settings · Esc Esc stops a turn · PageUp scrolls · Ctrl+C twice quits", muted),
 		"",
 	];
 	const app = new PiApp(tui, quit, options.onPasteImage, banner);

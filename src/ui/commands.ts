@@ -3936,6 +3936,8 @@ export function canSubmitDuringRun(text: string): boolean {
 	return COMMAND_ROUTES.some((route) => route.whileRunning === "submit" && route.match(input));
 }
 
+const COMMAND_WORD_RE = /^\/[a-z][\w:-]*$/i;
+
 /**
  * Route a line of user input. Every slash command is handled
  * here (parity or it's a bug); non-slash input goes to the agent as a prompt.
@@ -3999,7 +4001,17 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		}
 	}
 
-	// Unknown slash command — submit to agent as regular text (could be a
-	// file path starting with /, e.g. /tmp/cast-clipboard-UUID.png).
+	// A lone word that looks like a command but matched nothing is a typo, and
+	// sending it to the model costs a turn: say so instead. Anything else with a
+	// leading slash (a path such as /tmp/cast-clipboard-UUID.png) is still text.
+	const word = input.split(WHITESPACE_RE)[0] ?? "";
+	if (COMMAND_WORD_RE.test(word)) {
+		const typed = word.slice(1).toLowerCase();
+		const close = SLASH_COMMANDS.filter((c) => !c.hidden && c.name.slice(1).startsWith(typed))
+			.slice(0, 3)
+			.map((c) => c.name);
+		showNotice(`[Unknown command ${word}${close.length ? `. Did you mean ${close.join(", ")}?` : ""}]`);
+		return;
+	}
 	await agent.submit(text);
 }

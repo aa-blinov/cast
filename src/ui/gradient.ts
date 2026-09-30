@@ -36,6 +36,7 @@ export function gradientHex(t: number): string {
  * styling layer to hand a color to.
  */
 export function gradientAnsi(text: string): string {
+	if ((process.env.NO_COLOR ?? "") !== "") return `\x1b[1m${text}\x1b[0m`;
 	const chars = [...text];
 	const steps = Math.max(1, chars.length - 1);
 	const painted = chars

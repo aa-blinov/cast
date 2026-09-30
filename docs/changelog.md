@@ -6,6 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
+- **`cast-light`, a theme for light terminals, and `NO_COLOR`.** The new theme keeps the cast hues at 4.5:1 or better on white. With `NO_COLOR` set, cast draws no colour and relies on markers and words.
 - **`/settings` is a settings screen, not a menu of commands.** Toggles, the permission mode and the theme change in place (Space, Enter or ← → ) and are saved at once; each row shows what it is set to. Rows that need a list or a prompt (model, provider, persona, turn cap, status bar, skills, MCP) open it and bring the screen back after. Choosing `bypass` still asks first. `/theme`, `/permissions` and `/web` share the setters, so the screen and the commands cannot disagree.
 
 ### Removed
@@ -13,8 +14,16 @@ All notable user-facing changes to cast, newest first.
 - **The `reduceMotion` setting and `CAST_REDUCE_MOTION`.** It existed because Ink's terminal jumped to the bottom on every write; the pi-tui screen keeps its own scroll position, so there is nothing left for it to fix. The settings screen no longer lists it, and the window title no longer shows `cast · working Ns`.
 - **The old Ink front end and `CAST_TUI=ink`.** The pi-tui screen has been the default since 0.51.0 and does everything the Ink one did, so the variable is ignored now. `ink` and the code only it used (the composer, chat log, Ink pickers, terminal-resync and stdin plumbing) are gone from the package; `react-reconciler` is now a direct dependency because the headless app model runs on it.
 
+### Fixed
+
+- **Muted text was hard to read.** The grey for hints, the placeholder, reasoning and the status separators was under 4.5:1 on 13 of the 18 themes (Nord 1.7:1), and `dim` lowered it further. Text colours are now lifted to 4.5:1 against the background they sit on, and `dim` is no longer stacked on them.
+- **A mistyped `/command` was sent to the model as a prompt.** `/nonsense` now says `Unknown command /nonsense` and, when it can, `Did you mean /clear`. A path such as `/tmp/shot.png` is still sent as text.
+- **The elapsed time stayed on the status bar without saying what it was.** After a turn it reads `took 4s`.
+- **Session rows repeated the folder and wrapped.** This directory's list leaves the folder column out, and a row wider than the screen is cut with `…` instead of wrapping.
+
 ### Changed
 
+- **The context figure is on in the status bar by default**, and turns amber at 70% and red at 90% of the input budget. Speech and embedding models sit below the chat models in `/model`, marked `not for chat`.
 - **`/sessions` (and `cast --resume`) list this directory's sessions first.** The picker opens on the sessions whose folder is the one you are in; **Show all sessions (N)** on the next row lists every project's, and **Only this directory** comes back. ←, → or Tab flip between the two views without moving to that row (the footer says so). Search stays inside the scope you are in. When the directory has no sessions yet it shows all of them and says so. Sessions with no messages, which every launch leaves behind, are no longer listed.
 
 ## 0.51.1

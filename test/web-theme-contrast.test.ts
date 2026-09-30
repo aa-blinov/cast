@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { accentForeground, contrast, readableText, readableTextLevels } from "../src/server/public/theme-contrast.js";
-import { ALL_THEMES } from "../src/ui/themes/registry.ts";
+import { WEB_THEMES } from "../src/ui/themes/registry.ts";
 
 const TEXT = "#fafafa";
 const DIM = "#a1a1aa";
@@ -15,7 +15,7 @@ describe("web theme contrast", () => {
 		expect(readableText("#a1a1aa", TEXT, "#08080a")).toBe("#a1a1aa");
 	});
 
-	for (const theme of ALL_THEMES) {
+	for (const theme of WEB_THEMES) {
 		const c = theme.colors;
 		it(`${theme.id}: accent labels, muted and dim text meet AA`, () => {
 			expect(contrast(accentForeground(c.accent, c.bg), c.accent)).toBeGreaterThanOrEqual(4.5);
