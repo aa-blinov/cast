@@ -42,7 +42,10 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 	applyUserKeybindings();
 	const terminal = new ProcessTerminal();
 	const tui = new TuiAltScreen(terminal, false, undefined, {
-		mouse: true,
+		// The wheel and drag-to-select belong to the app in the alternate screen; a
+		// terminal's own selection then needs Shift held. CAST_NO_MOUSE=1 leaves the
+		// mouse to the terminal, at the price of scrolling by keyboard only.
+		mouse: process.env.CAST_NO_MOUSE !== "1",
 		wheelScrollLines: "auto",
 		scrollToEndIndicator: () => paint(" ↓ newest ", { color: theme().accent, bold: true }),
 	});

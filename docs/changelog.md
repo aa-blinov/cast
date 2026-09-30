@@ -10,6 +10,8 @@ All notable user-facing changes to cast, newest first.
 
 ### Changed
 
+- **The terminal UI runs on pi-tui and keeps its own scroll position.** The conversation is one document in a full-screen viewport the app owns, so output that arrives while you read no longer pulls you to the bottom, a repaint cannot leave a stale copy of a row, and there is no live region to outgrow the window. The wheel, trackpad, PageUp/PageDown, Home/End and Ctrl+Shift+F search move through it; a `↓ newest` label returns you to the end. The behaviour underneath (commands, plan mode, pickers, subagent viewer, confirmations, image attach, external editor, key overrides) is the same code, now running headless with the new screen drawing what it produces. `CAST_TUI=ink` starts the older Ink front end; `CAST_NO_MOUSE=1` leaves the mouse to the terminal.
+
 - **The TUI repaints about four times less while a turn runs.** The spinner and the elapsed counter ticked at 8 frames a second, and a terminal jumps back to the bottom on every write, so scrolling up during a turn was undone within a frame. The clock is now 2 frames a second and the counter shows whole seconds (`41s`).
 - **Open, Stop and Back are 40px tall on touch screens** (and under 768px), up from about 20-27px.
 

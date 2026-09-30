@@ -12,7 +12,7 @@ A role-based terminal agent harness. Seven built-in personas (senior developer, 
 
 **Runs where your code runs.** vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency.
 
-**Ink TUI.** A proper terminal interface with multiline paste, image attachments, smooth animations.
+**Terminal UI.** A full-screen interface on [pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui) that owns its scrolling: the wheel, trackpad, PageUp/PageDown and search move through the transcript, and a repaint never drags it back to the bottom. Multiline paste, image attachments, subagent viewer.
 **Web UI.** `cast web` (also available as `cast server`) launches a browser-based control room: background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
 
 ## Why personas, not just prompts
@@ -266,11 +266,12 @@ src/
     vendors.ts      Reasoning metadata, think-block parsing
     upgrade.ts      Self-update via GitHub releases
     ...
-  ui/             Ink TUI components
-    App.tsx         Top-level layout
-    Composer.tsx    Input with autocomplete, image paste
-    ChatLog.tsx     Message rendering
+  ui/             Behaviour shared by the terminal front ends
+    app-model.ts    Session, modals, plan decisions (headless React hooks)
     commands.ts     Slash command handlers
+    App.tsx ...     The legacy Ink front end (CAST_TUI=ink)
+    ...
+  ui-pi/          The pi-tui front end (default): transcript, editor, modals, status row
     ...
   pickers/        Onboarding pickers (model, persona, reasoning)
   index.ts        CLI entry point

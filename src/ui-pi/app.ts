@@ -76,6 +76,7 @@ export class PiApp {
 	private readonly hint = new Text("", 1, 0);
 	private readonly status = new StatusRow();
 	private readonly editor: Editor;
+	private readonly scrollView: ScrollView;
 	private readonly modals: ModalHost;
 	private lastCtrlC = 0;
 	private lastEsc = 0;
@@ -109,17 +110,18 @@ export class PiApp {
 		);
 		this.modals = new ModalHost(tui);
 		this.editor.onSubmit = (text) => this.submit(text);
+		this.scrollView = new ScrollView(this.transcript, {
+			follow: "end",
+			primary: true,
+			overscroll: "chain",
+			scrollbar: "auto",
+		});
 		const footer = new Container();
 		for (const child of [this.notice, this.pending, this.hint, this.editor, this.status]) footer.addChild(child);
 		tui.setLayoutRoot(
 			new VStack([
 				{
-					component: new ScrollView(this.transcript, {
-						follow: "end",
-						primary: true,
-						overscroll: "chain",
-						scrollbar: "auto",
-					}),
+					component: this.scrollView,
 					basis: 0,
 					grow: 1,
 					minSize: 1,
@@ -176,6 +178,12 @@ export class PiApp {
 		const model = this.model;
 		if (!model) return undefined;
 		const keys = getKeybindings();
+		// PageUp at the very top is asking for what came before: page it in. The key
+		// still goes on to the scroll view, which has nothing left to scroll until
+		// the older turns land.
+		if (keys.matches(data, "history.older") && this.scrollView.scrollTop === 0 && model.agent.hasOlder) {
+			void model.onLoadOlder();
+		}
 		if (keys.matches(data, "input.attachImage")) {
 			this.attachImage();
 			return { consume: true };
