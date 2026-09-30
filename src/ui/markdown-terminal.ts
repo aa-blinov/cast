@@ -129,8 +129,8 @@ function inlineSpans(text: string, base: Omit<Span, "text"> = {}): Span[] {
  *
  * Wrapping works word by word, so a styled run arrives as one span per word
  * and every one of them would carry its own escape sequence into the frame —
- * a heading of four words wrote four bold-on/bold-off pairs. Ink diffs frames
- * as strings, so this is fewer bytes on the wire and less for it to compare.
+ * a heading of four words wrote four bold-on/bold-off pairs. The terminal gets fewer
+ * bytes and the frame differ has less to compare.
  */
 function mergeSpans(spans: Span[]): Span[] {
 	const out: Span[] = [];
@@ -533,30 +533,4 @@ export function trailingOpenFence(text: string, incoming?: OpenFence | null): Op
 		}
 	}
 	return open;
-}
-
-export function renderMarkdownTail(
-	text: string,
-	options: MarkdownRenderOptions & { maxLines: number },
-): {
-	lines: RenderedLine[];
-	truncated: boolean;
-} {
-	const { maxLines } = options;
-	if (maxLines <= 0) return { lines: [], truncated: text.length > 0 };
-	const rawLines = text.split("\n");
-	// A rendered line is at least one raw line, so this many raw lines can
-	// always cover the budget; a couple extra absorb wrapping.
-	const take = Math.min(rawLines.length, maxLines + 4);
-	const head = rawLines.slice(0, rawLines.length - take).join("\n");
-	const tailText = rawLines.slice(rawLines.length - take).join("\n");
-	// Reopen the fence the window starts inside — *with its language tag*.
-	// A bare ``` was enough to keep the block styled as code, but it threw the
-	// tag away, so a long block lost its highlighting the moment the opening
-	// fence scrolled out of the window: the first rows of an answer were
-	// coloured and the rest arrived flat.
-	const open = trailingOpenFence(head, options.openFence);
-	const rendered = renderMarkdownLines(tailText, { ...options, openFence: open });
-	const truncated = rendered.length > maxLines || take < rawLines.length;
-	return { lines: truncated ? rendered.slice(rendered.length - maxLines) : rendered, truncated };
 }

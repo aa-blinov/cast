@@ -2,9 +2,9 @@ import type { Span } from "./markdown-terminal.ts";
 import { theme } from "./themes/index.ts";
 
 // How a rendered markdown span and the transcript rail are coloured, with no
-// drawing in it: shared by the Ink transcript and the pi-tui one.
+// drawing in it: the pi-tui transcript paints it.
 
-/** Ink props for one rendered span, with tones resolved against the theme. */
+/** Style for one rendered span, with tones resolved against the theme. */
 /**
  * highlight.js scope → theme colour, in five buckets rather than a full
  * editor palette: a terminal theme has one hue per role, and a snippet in a

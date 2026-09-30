@@ -13,7 +13,7 @@ import type { StatusBarConfig } from "../core/settings.ts";
 import { score } from "../pickers/match.ts";
 import type { LiveView, PickOption, PickOptions, SettingFollowUp, SettingRow, SettingsForm } from "../pickers/types.ts";
 import type { ModalRequest } from "../ui/pickerBridge.ts";
-import type { StatusBarSegment } from "../ui/statusbar.tsx";
+import type { StatusBarSegment } from "../ui/statusbar.ts";
 import { theme } from "../ui/themes/index.ts";
 import { band, paint } from "./paint.ts";
 import { surfaceHover } from "./surface.ts";

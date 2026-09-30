@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { StatusBarConfig } from "../core/settings.ts";
-import { fitSegments, getStatusBarSegments, type SegmentContext } from "../ui/statusbar.tsx";
+import { fitSegments, getStatusBarSegments, type SegmentContext } from "../ui/statusbar.ts";
 import { theme } from "../ui/themes/index.ts";
 import { type Paint, paint } from "./paint.ts";
 

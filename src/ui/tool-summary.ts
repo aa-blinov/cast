@@ -2,8 +2,8 @@ import { DEFAULT_BASH_TIMEOUT_MS } from "../core/config.ts";
 import { readBashTimeout } from "../core/tools/bash.ts";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
 
-// What a tool row says about its call, with no drawing in it: shared by the Ink
-// transcript and the pi-tui one so the two read the same.
+// What a tool row says about its call, with no drawing in it: used by the
+// transcript.
 
 export type ToolSummaryModel =
 	| { kind: "edit"; path: string; added: number; removed: number }
@@ -137,12 +137,9 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 /**
  * Collapse a summary to one physical line for the live region.
  *
- * Ink's `wrap="truncate"` truncates the string, but it does not remove
- * newlines: a value that already fits the terminal width comes back
- * unchanged, so a multi-line `task` assignment ("Do X\nThen Y\nReport
- * back") rendered three rows while clampStreamingBlocks had charged the tool
- * block exactly one — and a live region taller than the viewport is what
- * makes Ink stack duplicate frames into scrollback. Streaming args arrive as
+ * Truncating to the width does not remove newlines: a value that
+ * already fits comes back unchanged, so a multi-line `task` assignment ("Do
+ * X\nThen Y\nReport back") would take three rows where the row is charged one. Streaming args arrive as
  * raw text too, so a model that emits pretty-printed JSON hits this on every
  * tool call, not just `task`.
  */

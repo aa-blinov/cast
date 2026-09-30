@@ -60,7 +60,7 @@ function isZeroWidth(cp: number): boolean {
  * directions hurt: overcounting made the live region drop text that would have
  * fitted, undercounting let it overrun the viewport — the very failure this
  * module exists to prevent. Measured against `string-width` (the package Ink
- * itself measures with) on 33 strings, the old code disagreed on 8 of them:
+ * measured with) on 33 strings, the old code disagreed on 8 of them:
  * `👨‍👩‍👧‍👦` was 11 cells instead of 2, `👨‍💻` 5 instead of 2, `👍🏽` 4 instead of 2,
  * while `🀄`, `🈁` and `⌚` were 1 instead of 2. This agrees with all 33 —
  * see test/display-width.test.ts, which cross-checks against string-width

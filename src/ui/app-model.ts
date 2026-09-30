@@ -33,7 +33,7 @@ import { displayWidth } from "./display-width.ts";
 import { imageFilePathsInText } from "./paste.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { resolvePlanQuestionWithPicker } from "./plan-question.ts";
-import { defaultStatusBarConfig } from "./statusbar.tsx";
+import { defaultStatusBarConfig } from "./statusbar.ts";
 import { notifyTerminal } from "./terminal-notify.ts";
 import { type ChatMessage, type PendingImage, useAgentSession } from "./useAgentSession.ts";
 
@@ -124,7 +124,7 @@ export interface AppModelProps {
 /**
  * Everything the screen shows and every command acts on, with no drawing in it:
  * the agent session, the modal bridge, plan-mode decisions, the status-bar
- * config. A front end (Ink, pi-tui) calls this and draws what it returns, so
+ * config. A front end calls this and draws what it returns, so
  * the two never diverge on behaviour.
  */
 export function useAppModel(props: AppModelProps) {

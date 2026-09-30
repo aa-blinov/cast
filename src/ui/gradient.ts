@@ -32,8 +32,8 @@ export function gradientHex(t: number): string {
 
 /**
  * Per-character truecolor gradient, bold, as raw ANSI codes — for text
- * printed outside the Ink tree (plain console.log), where there's no <Text>
- * to hand a color prop to.
+ * printed outside the screen (plain console.log), where there's no
+ * styling layer to hand a color to.
  */
 export function gradientAnsi(text: string): string {
 	const chars = [...text];

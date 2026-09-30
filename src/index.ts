@@ -27,7 +27,7 @@ import {
 	releaseStartLock,
 	START_LOCK_WAIT_ATTEMPTS,
 } from "./server/daemon-state.ts";
-import { runTui } from "./ui/tui.tsx";
+import { runTui } from "./ui/tui.ts";
 
 const VERSION: string = JSON.parse(
 	readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"),

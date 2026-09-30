@@ -231,13 +231,13 @@ export async function ensureConnectionAlive(config: AppConfig, pickers: Pickers)
  * Single entry point for everything between arg parsing and the UI taking
  * over: provider connection, model/persona/reasoning resolution, project
  * trust + skills + MCP setup, session resume, runner creation, and the
- * dangerous-bash confirm callback. Both `index.ts` (basic) and `tui.tsx`
+ * dangerous-bash confirm callback. Both `index.ts` (basic) and `ui/tui.ts`
  * call this — neither duplicates onboarding logic anymore.
  *
  * @param onProgress Optional status callback for the silent stretches (fast-
  * path model re-validation, MCP server handshakes) that otherwise leave the
  * TUI showing nothing at all for a few seconds before the first frame — see
- * tui.tsx's startup loader. Pickers already have their own visible UI, so
+ * the start-up screen. Pickers already have their own visible UI, so
  * this only fires around the parts that don't.
  */
 export async function runStartup(

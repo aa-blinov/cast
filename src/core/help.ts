@@ -21,7 +21,7 @@ Usage:
                               only) — no-op if already on that version, unless
                               --force
 
-TUI mode (Ink-based, multiline paste, image attachments, animations) is the
+TUI mode (full-screen, own scrolling, multiline paste, image attachments) is the
 default. Non-TTY contexts (pipes, CI) are not supported — use an interactive
 terminal.
 

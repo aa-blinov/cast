@@ -7,7 +7,7 @@ import {
 	SEGMENT_DROP_ORDER,
 	SEGMENT_MAX_WIDTH,
 	type SegmentContext,
-} from "../src/ui/statusbar.tsx";
+} from "../src/ui/statusbar.ts";
 
 /** Empty-but-valid SegmentContext for the null-on-empty-data tests. */
 function emptyCtx(overrides: Partial<SegmentContext> = {}): SegmentContext {
@@ -92,14 +92,14 @@ describe("fitSegments", () => {
 describe("segment renderers", () => {
 	it("lsp lists the running servers, and shows nothing without any", () => {
 		const seg = getStatusBarSegments().find((s) => s.id === "lsp")!;
-		expect(seg.render(emptyCtx())).toBeNull();
+		expect(seg.formatValue(emptyCtx())).toBeNull();
 		expect(seg.formatValue(emptyCtx({ lspServers: ["pyright", "typescript"] }))).toBe("pyright, typescript");
-		expect(seg.render(emptyCtx({ lspServers: ["typescript"] }))).not.toBeNull();
+		expect(seg.formatValue(emptyCtx({ lspServers: ["typescript"] }))).not.toBeNull();
 	});
 
 	it("usage returns null when there's no usage", () => {
 		const seg = getStatusBarSegments().find((s) => s.id === "usage")!;
-		expect(seg.render(emptyCtx())).toBeNull();
+		expect(seg.formatValue(emptyCtx())).toBeNull();
 	});
 
 	it("usage returns null when totalTokens is zero", () => {
@@ -114,7 +114,7 @@ describe("segment renderers", () => {
 			uncachedTokens: 0,
 			subagentTokens: 0,
 		};
-		expect(seg.render(emptyCtx({ usage }))).toBeNull();
+		expect(seg.formatValue(emptyCtx({ usage }))).toBeNull();
 	});
 
 	it("subagent returns null when subagentTokens is zero", () => {
@@ -129,18 +129,18 @@ describe("segment renderers", () => {
 			uncachedTokens: 100,
 			subagentTokens: 0,
 		};
-		expect(seg.render(emptyCtx({ usage }))).toBeNull();
+		expect(seg.formatValue(emptyCtx({ usage }))).toBeNull();
 	});
 
 	it("elapsed returns null when elapsedMs is zero or negative", () => {
 		const seg = getStatusBarSegments().find((s) => s.id === "elapsed")!;
-		expect(seg.render(emptyCtx({ elapsedMs: 0 }))).toBeNull();
-		expect(seg.render(emptyCtx({ elapsedMs: -1 }))).toBeNull();
+		expect(seg.formatValue(emptyCtx({ elapsedMs: 0 }))).toBeNull();
+		expect(seg.formatValue(emptyCtx({ elapsedMs: -1 }))).toBeNull();
 	});
 
 	it("elapsed renders a positive elapsedMs as a non-null element", () => {
 		const seg = getStatusBarSegments().find((s) => s.id === "elapsed")!;
-		expect(seg.render(emptyCtx({ elapsedMs: 1500 }))).not.toBeNull();
+		expect(seg.formatValue(emptyCtx({ elapsedMs: 1500 }))).not.toBeNull();
 	});
 
 	it("session is off by default, left-aligned, and renders the sessionId", () => {
@@ -148,7 +148,7 @@ describe("segment renderers", () => {
 		expect(seg.defaultOn).toBe(false);
 		expect(seg.side).toBe("left");
 		const ctx = emptyCtx({ sessionId: "abc123" });
-		expect(seg.render(ctx)).not.toBeNull();
+		expect(seg.formatValue(ctx)).not.toBeNull();
 		expect(seg.formatValue(ctx)).toBe("abc123");
 		// Registered after `worktree`, before `context` — keeps default left side segment order.
 		const ids = getStatusBarSegments().map((s) => s.id);

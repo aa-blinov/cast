@@ -987,8 +987,8 @@ ${FONT_LINKS}
 		</div>
 		<div class="feature">
 			<span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 12h12"/><path d="m12 6 6 6-6 6"/></svg></span>
-			<h3>Ink TUI</h3>
-			<p>A proper terminal interface with multiline paste, image attachments, smooth animations, and 16 color themes.</p>
+			<h3>Full-screen TUI</h3>
+			<p>A proper terminal interface with multiline paste, image attachments, its own scrolling, and 16 color themes.</p>
 		</div>
 	</section>
 

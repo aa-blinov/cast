@@ -1,98 +1,30 @@
 /**
- * StdinManager — coordinates stdin ownership between Ink's Composer and
- * child processes that may need interactive input (e.g. git push asking for
- * a password).
+ * Hands the terminal to a callback for a moment (repainting outside the frame,
+ * an external editor): the front end registers a hook that stops drawing and
+ * gives the terminal back around the callback.
  *
- * Problem: Ink sets stdin to raw mode and installs a data handler for
- * keystroke-by-keystroke processing, so anything else that writes to the
- * terminal fights its managed frame and any keystrokes meant for something
- * else are swallowed by the Composer.
- *
- * Solution: suspendAndRun() suspends Ink's renderer (clears its frame,
- * disables raw mode) around a callback and resumes it afterwards, pausing the
- * Composer's stdin handler for the duration.
- *
- * It does *not* hand stdin to a child process — the header used to say it
- * piped `process.stdin` to one, which it never did and nothing asks it to:
- * `bash` runs with stdin at EOF on purpose (see tools/bash.ts), so a command
- * that waits for input exits instead of hanging the session. The callers are
- * the ones that need the terminal to themselves for a moment: repainting the
- * banner, printing outside the frame.
+ * It does not hand stdin to a child process: `bash` runs with stdin at EOF on
+ * purpose (see tools/bash.ts), so a command that waits for input exits instead
+ * of hanging the session.
  */
 
-export interface StdinOwner {
-	/** Unique label for debugging. */
-	id: string;
-	/** Called when this owner should stop reading stdin. */
-	onPause: () => void;
-	/** Called when this owner should resume reading stdin. */
-	onResume: () => void;
-}
-
-let currentOwner: StdinOwner | null = null;
-
-/** True while a child process owns the terminal (suspendAndRun is active). */
-let terminalSuspended = false;
-
-/** Number of concurrent suspendAndRun calls that paused the owner. */
-let pauseDepth = 0;
-
-/** True while the agent is actively streaming tokens (between submit and finally). */
-let streamingActive = false;
-
-/**
- * Full terminal suspend/resume hook registered by the UI layer.
- * The callback runs while the terminal is suspended (Ink's frame cleared,
- * raw mode off). The hook must await the callback before returning.
- */
+/** The hook must await the callback before returning. */
 type SuspendHook = (callback: () => Promise<void>) => Promise<void>;
 let suspendHook: SuspendHook | null = null;
 
-/**
- * Register the primary stdin consumer (the Composer). Only one owner is
- * active at a time; calling register() replaces any previous owner.
- */
-export function registerStdinOwner(owner: StdinOwner): void {
-	currentOwner = owner;
-}
-
-/** Unregister the current owner (e.g. on component unmount). */
-export function unregisterStdinOwner(owner: StdinOwner): void {
-	if (currentOwner === owner) currentOwner = null;
-}
-
-/**
- * Register the full-terminal suspend hook. Called once from tui.tsx after
- * Ink mounts, wiring up Ink's suspendTerminal().
- */
-export function setSuspendHook(hook: SuspendHook): void {
+export function setSuspendHook(hook: SuspendHook | null): void {
 	suspendHook = hook;
 }
 
 /**
- * Suspend the terminal (Ink clears its frame, disables raw mode) and run
- * the callback. While suspended, the child process owns stdin/stdout
- * directly. The callback's resolved value is returned to the caller.
- *
- * If no suspend hook is registered (e.g. non-TUI mode), the callback
- * runs without suspension.
+ * Runs the callback with the terminal suspended and returns its value. With no
+ * hook (non-interactive mode) it just runs the callback.
  */
 export async function suspendAndRun<T>(callback: () => Promise<T>): Promise<T> {
 	if (!suspendHook) return callback();
 	let result: T;
-	// Snapshot before we touch the flag — if another concurrent suspendAndRun
-	// already holds the terminal, we must not clear it when ours fails.
-	const wasSuspended = terminalSuspended;
-	// Pause the Composer's stdin handler before Ink suspends, so keystrokes
-	// meant for whatever runs inside don't leak into the Composer. Only the
-	// outermost concurrent caller actually pauses.
-	if (pauseDepth++ === 0) currentOwner?.onPause();
-	terminalSuspended = true;
-	// Whether the callback got as far as starting. The fallback below exists
-	// for a hook that *refuses* to suspend; without this flag a callback that
-	// threw was indistinguishable from that and got run a second time — with
-	// its own error swallowed, and the retry printing over Ink's frame because
-	// the terminal was no longer suspended.
+	// A hook that refuses to suspend (already suspended by a parallel call) must
+	// not run the callback twice when the callback itself is what failed.
 	let callbackStarted = false;
 	try {
 		await suspendHook(async () => {
@@ -100,118 +32,8 @@ export async function suspendAndRun<T>(callback: () => Promise<T>): Promise<T> {
 			result = await callback();
 		});
 	} catch (error) {
-		if (!wasSuspended) terminalSuspended = false;
 		if (callbackStarted) throw error;
-		// suspendTerminal throws if already suspended (parallel calls). Fall
-		// back to running without terminal suspension — but only clear the flag
-		// if we were the one who set it (not a concurrent caller).
 		result = await callback();
-	} finally {
-		if (!wasSuspended) terminalSuspended = false;
-		// Only the outermost concurrent caller resumes.
-		if (--pauseDepth === 0) currentOwner?.onResume();
 	}
 	return result!;
-}
-
-export function isTerminalSuspended(): boolean {
-	return terminalSuspended;
-}
-
-/** Whether stdin is currently in raw mode (set by Ink's useStdin). */
-let rawModeActive = false;
-
-export function setRawModeActive(active: boolean): void {
-	rawModeActive = active;
-}
-
-export function isRawModeActive(): boolean {
-	return rawModeActive;
-}
-
-/**
- * DECXCPR cursor-position reports flow through the Composer's own stdin
- * pipeline (StdinBuffer → InputParser sees the CSI-R). useTerminalResync used
- * to attach its own temporary `stdin.on("data")` listener per query — which
- * put the stream in flowing mode and swallowed user keystrokes for the whole
- * query window (up to the 400ms timeout on a slow terminal), making the
- * composer feel dead. Instead, the InputParser reports the report here and
- * the resync listens without touching stdin.
- */
-let onDecxpr: ((row: number, col: number) => void) | null = null;
-export function setDecxprListener(cb: ((row: number, col: number) => void) | null): void {
-	onDecxpr = cb;
-}
-export function reportDecxpr(row: number, col: number): void {
-	onDecxpr?.(row, col);
-}
-
-/**
- * In-flight DECXCPR query cancellation. useTerminalResync registers its own
- * cancelActiveQuery here so an exit path that bypasses React cleanup (onQuit's
- * process.exit) can still stop a pending \x1b[6n — otherwise the terminal's
- * \x1b[<row>;<col>R reply arrives after raw mode is off and gets echoed into
- * the shell as visible garbage (^[[15;1R, or the ^[[ prefix eaten → 5;1R).
- */
-let cancelDecxprQuery: (() => void) | null = null;
-export function setDecxprQueryCanceler(cb: (() => void) | null): void {
-	cancelDecxprQuery = cb;
-}
-/** Cancel any in-flight \x1b[6n so its reply can't leak into the shell. */
-export function cancelActiveDecxprQuery(): void {
-	cancelDecxprQuery?.();
-}
-
-/** Mark streaming as active or inactive. Called by useAgentSession. */
-export function setStreamingActive(active: boolean): void {
-	streamingActive = active;
-}
-
-/** Whether the agent is actively streaming tokens. */
-export function isStreamingActive(): boolean {
-	return streamingActive;
-}
-
-/**
- * Rows by which the last Ink frame's CUU distance exceeded the terminal
- * height (0 if it fit). Measured from the real `\x1b[<n>A` Ink emits (see
- * useTerminalResync's scroll guard) — ground truth, not an estimate. ChatLog
- * reads this to shrink its live-region budget reactively, so a turn that
- * once overflowed doesn't keep overflowing (and losing DECXCPR scroll
- * protection) for the rest of the turn.
- */
-let lastFrameOverflow = 0;
-
-export function setLastFrameOverflow(rows: number): void {
-	lastFrameOverflow = rows;
-}
-
-export function getLastFrameOverflow(): number {
-	return lastFrameOverflow;
-}
-
-/**
- * True when the most recently ended turn stopped via /abort (Esc) rather
- * than completing normally. useAgentSession resets this to false at the
- * start of every run and sets it true only from the "aborted" end reason, so
- * it always reflects the run that just finished — never a stale one.
- *
- * Consumed by useTerminalResync's deferred-resync check so an aborted turn
- * doesn't trigger the disruptive full clear + scrollback wipe + <Static>
- * replay at the exact moment the user chose to interrupt it. A turn that
- * overflowed the viewport can still leave stacked garbage in scrollback when
- * aborted — that tradeoff is intentional: the cleanup fires on the next turn
- * that actually completes/overflows instead.
- */
-let lastTurnAborted = false;
-
-export function setLastTurnAborted(v: boolean): void {
-	lastTurnAborted = v;
-}
-
-/** Reads and clears the flag in one step — it must only suppress the one resync check immediately after the abort, never a later, unrelated one. */
-export function consumeLastTurnAborted(): boolean {
-	const v = lastTurnAborted;
-	lastTurnAborted = false;
-	return v;
 }

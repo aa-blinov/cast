@@ -24,7 +24,7 @@ The npm package is `cast`, but source lives directly under `src/` (no wrapping `
 **Source code** — always `src/`:
 - `src/core/` — engine (no UI): loop, tools, LLM, session, config, MCP, skills, personas, **ACP**
 - `src/core/acp/` — JSON-RPC 2.0 bridge on `@agentclientprotocol/sdk` (typed factory + cast adapter); reuses `runAgentLoop` and `AgentRunner` unchanged — the bridge translates `AgentEvent` into SDK `sessionUpdate` notifications. See `docs/acp.md`.
-- `src/ui/` — TUI behaviour shared by both front ends (`app-model.ts`, commands, input handling) and the legacy Ink front end (App, ChatLog, Composer; `CAST_TUI=ink`)
+- `src/ui/` — TUI behaviour the front end shares with the web server (`app-model.ts`, commands, pickers bridge, themes, status bar segments)
 - `src/ui-pi/` — the default TUI front end on `@earendil-works/pi-tui`: alternate screen, app-owned scrolling, overlays. The app model runs in a headless React root (`headless.ts`)
 - `src/server/` — optional server daemon, REST/SSE bridge, and browser client
 - `src/pickers/` — onboarding pickers (model/persona/reasoning selection)
@@ -178,5 +178,5 @@ red CI before.
 - Skills and MCP servers: global paths load unconditionally (`~/.cast/skills/`, agents universal globals); project paths (`.cast/skills/`, `.agents/skills/`, `.cast/mcp.json`) are trust-gated.
 - MCP: stdio and streamable HTTP, with legacy HTTP+SSE fallback; tool names are namespaced
   `mcp_<server>_<tool>`.
-- Two interactive surfaces share the same core loop: pi-tui TUI (with Ink as `CAST_TUI=ink`) and an optional web server with a
+- Two interactive surfaces share the same core loop: pi-tui TUI and an optional web server with a
   REST/SSE bridge. Non-interactive `cast run` remains a readline/JSONL protocol.

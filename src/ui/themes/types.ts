@@ -1,6 +1,6 @@
 /**
  * Semantic color map for the TUI theme. Every color the UI renders comes from
- * here — components never hardcode hex values or Ink named colors directly.
+ * here — components never hardcode hex values or terminal named colors directly.
  */
 export interface ThemeColors {
 	/** Brand gradient endpoints — used for the startup banner, composer border, spinner. */

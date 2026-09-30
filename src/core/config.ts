@@ -459,8 +459,8 @@ export async function validateModel(config: AppConfig, model: string): Promise<V
  * banner.
  * @param log Where progress lines go — defaults to `console.log` (fine for
  * pre-mount onboarding). Callers running inside the live TUI
- * pass `pickers.log` instead, since a raw stdout write here would corrupt
- * Ink's managed frame.
+ * pass `pickers.log` instead, since a raw stdout write here would land in
+ * the middle of the screen being drawn.
  */
 export async function runOnboardingCheck(
 	config: AppConfig,

@@ -1,7 +1,7 @@
 import { useRef, useSyncExternalStore } from "react";
 import type { StatusBarConfig } from "../core/settings.ts";
 import type { LiveView, Pickers, PickOption, PickOptions, SettingFollowUp, SettingsForm } from "../pickers/types.ts";
-import type { StatusBarSegment } from "./statusbar.tsx";
+import type { StatusBarSegment } from "./statusbar.ts";
 
 export type ModalRequest =
 	| {
@@ -55,12 +55,8 @@ interface ModalBridge {
 /**
  * Bridges the imperative Pickers interface (called from deep inside async
  * command handlers, e.g. /model, /permissions, confirmBash) into the single
- * live Ink tree. A naive implementation would call Ink's `render()` again
- * for each prompt, which mounts a second, independent Ink instance fighting
- * the already-running App/Composer for stdin and raw mode — see the history
- * of this file (pickers/ink.tsx) for why that's unsafe post-mount. Instead,
- * `pickOption`/`promptText` here just publish a request; App renders the
- * matching modal inline and resolves it via the `resolve` callback.
+ * running app. `pickOption`/`promptText` here just publish a request; the
+ * front end draws the matching modal and resolves it via the `resolve` callback.
  */
 export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 	let current: ModalRequest | null = null;

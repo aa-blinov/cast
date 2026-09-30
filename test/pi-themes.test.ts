@@ -1,6 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it } from "vitest";
-import { defaultStatusBarConfig, type SegmentContext } from "../src/ui/statusbar.tsx";
+import { defaultStatusBarConfig, type SegmentContext } from "../src/ui/statusbar.ts";
 import { ALL_THEMES, getActiveTheme, setActiveTheme } from "../src/ui/themes/index.ts";
 import { messageLines, toolRowLines } from "../src/ui-pi/lines.ts";
 import { OptionModal } from "../src/ui-pi/modals.ts";
