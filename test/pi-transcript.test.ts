@@ -58,6 +58,25 @@ describe("Transcript", () => {
 		).toBe(false);
 	});
 
+	it("puts a blank row wherever the speaker changes, and none between two turns of the agent", () => {
+		const agent = (text: string): ChatMessage => ({
+			role: "assistant",
+			content: "",
+			blocks: [{ kind: "content", text }],
+		});
+		const transcript = new Transcript();
+		transcript.set({ ...base, messages: [user("q"), agent("a"), agent("b"), user("q2")] });
+		const rows = transcript.render(60).map((row) => plain(row).trimEnd());
+		expect(rows).toEqual(["▌ you", "▌ q", "", "▌ agent", "▌ a", "▌ agent", "▌ b", "", "▌ you", "▌ q2"]);
+	});
+
+	it("sets the person's turn on a band as wide as the screen", () => {
+		const transcript = new Transcript();
+		transcript.set({ ...base, messages: [user("hi")] });
+		const rows = transcript.render(40);
+		expect(visibleWidth(rows[1]!)).toBe(40);
+	});
+
 	it("shows an error and a retry notice ahead of the live answer", () => {
 		const transcript = new Transcript();
 		transcript.set({ ...base, messages: [], error: "provider down", retry: { attempt: 2, reason: "timeout" } });

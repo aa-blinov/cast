@@ -4,7 +4,7 @@ import { railMuted, spanProps } from "../ui/span-style.ts";
 import { theme } from "../ui/themes/index.ts";
 import { formatTimeout, isMcpTool, mcpToolLabel, oneLineSummary, parseToolSummary } from "../ui/tool-summary.ts";
 import type { ChatMessage, StreamBlock, ToolCallEntry } from "../ui/useAgentSession.ts";
-import { paint } from "./paint.ts";
+import { band, paint } from "./paint.ts";
 
 // The transcript as rows of text, with no terminal in it: the same words, rails
 // and colours the Ink transcript draws, so the two front ends read alike. A row
@@ -27,6 +27,9 @@ interface RailOptions {
 	/** The speaker, on a row of its own. */
 	label?: string;
 	dimText?: boolean;
+	/** Sets the text on a band of this colour, as wide as `width`: the person's turns, told apart from the agent's. */
+	bg?: string;
+	width?: number;
 }
 
 /** Rendered markdown lines behind one rail. */
@@ -36,7 +39,7 @@ export function railLines(lines: RenderedLine[], options: RailOptions): string[]
 	if (options.label) {
 		out.push(
 			paint(`${bar} `, { color: options.gutter }) +
-				paint(options.label, { color: options.gutter, dim: options.dimText }),
+				paint(options.label, { color: options.gutter, bold: true, dim: options.dimText }),
 		);
 	}
 	lines.forEach((line, i) => {
@@ -44,10 +47,18 @@ export function railLines(lines: RenderedLine[], options: RailOptions): string[]
 		const text = line.spans
 			.map((span) => {
 				const { color, bold, italic, dimColor, underline } = spanProps(span);
-				return paint(span.text, { color, bold, italic, underline, dim: Boolean(options.dimText || dimColor) });
+				return paint(span.text, {
+					color,
+					bold,
+					italic,
+					underline,
+					bg: options.bg,
+					dim: Boolean(options.dimText || dimColor),
+				});
 			})
 			.join("");
-		out.push(paint(`${rail} `, { color: options.gutter }) + text);
+		const body = options.bg && options.width ? band(text, options.width - 2, options.bg) : text;
+		out.push(paint(`${rail} `, { color: options.gutter }) + body);
 	});
 	return out;
 }
@@ -96,7 +107,10 @@ export function toolRowLines(call: ToolCallEntry, width: number): string[] {
 	const colors = theme();
 	const failed = call.status === "error";
 	const running = call.status === "running";
-	const rail = paint(`${failed ? "✗" : "│"} `, { color: failed ? colors.error : railMuted() });
+	// The rail says where the work is: bright while it runs, quiet once it is done.
+	const rail = paint(`${failed ? "✗" : "│"} `, {
+		color: failed ? colors.error : running ? colors.accent : railMuted(),
+	});
 	const name = paint(`${toolLabel(call.name)} `, { color: colors.muted, dim: true });
 	const progress = running && call.name === "task" ? call.progress : undefined;
 	const step = progress?.tool ? `↳ ${progress.tool.name} ${progress.tool.summary}`.trim() : "";
@@ -166,6 +180,8 @@ export function messageLines(
 		return railLines(renderMarkdownLines(message.content, { width: bodyWidth(width) }), {
 			gutter: colors.user,
 			label: "you",
+			bg: colors.bgSurface,
+			width,
 		});
 	}
 	if (message.role === "assistant") {

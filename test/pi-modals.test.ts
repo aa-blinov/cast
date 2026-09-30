@@ -17,7 +17,7 @@ describe("OptionModal", () => {
 			answer = value;
 		});
 		modal.handleInput("\x1b[B");
-		expect(plain(modal.render(60).join("\n"))).toContain("> Beta");
+		expect(plain(modal.render(60).join("\n"))).toContain("▸ Beta");
 		modal.handleInput("\r");
 		expect(answer).toBe("b");
 	});
@@ -40,6 +40,25 @@ describe("OptionModal", () => {
 		expect(text).toContain("Beta");
 		expect(text).toContain("the second");
 		expect(text).not.toContain("Alpha");
+	});
+});
+
+describe("OptionModal hints", () => {
+	it("sets a row's hint against the right edge, and gives way when the label needs the room", () => {
+		const modal = new OptionModal(
+			[
+				{ value: "m", label: "Model", hint: "mock-model" },
+				{ value: "p", label: "A rather long label that leaves no room at all", hint: "value" },
+			],
+			undefined,
+			() => {},
+		);
+		const rows = modal.render(50).map(plain);
+		const model = rows.find((row) => row.includes("Model"))!;
+		expect(model).toContain("mock-model");
+		expect(model.indexOf("mock-model")).toBeGreaterThan(model.indexOf("Model") + 10);
+		expect(rows.find((row) => row.includes("A rather long"))).not.toContain("value");
+		for (const row of modal.render(50)) expect(visibleWidth(row)).toBe(50);
 	});
 });
 

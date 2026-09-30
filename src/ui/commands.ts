@@ -67,6 +67,7 @@ import {
 	type PermissionMode,
 	type Provider,
 	type StatusBarConfig,
+	turnIterationCap,
 	updateSettings,
 } from "../core/settings.ts";
 import {
@@ -253,6 +254,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
 	{ name: "/sessions", description: "List / switch / delete sessions" },
+	{ name: "/settings", description: "Model, provider, persona, permissions, theme and the rest, in one menu" },
 	{ name: "/skills", description: "Toggle skills on/off" },
 	{ name: "/skills disable", description: "Disable one skill — name", takesArgs: true },
 	{ name: "/skills enable", description: "Enable one skill — name", takesArgs: true },
@@ -3434,6 +3436,34 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				deps.agent.addDisplayMessage({ role: "warning", content: `Rules\n${lines.join("\n")}${issuesBlock}` });
 			}
 			return;
+		},
+	},
+	{
+		// A menu over the commands that configure cast, each showing what it is set to, so the
+		// settings are somewhere to look rather than a list of names to remember.
+		match: (input) => input === "/settings",
+		// Opening the menu changes nothing; the command it picks applies its own rules for a running turn.
+		whileRunning: "submit",
+		run: async ({ deps, session, config }) => {
+			const settings = loadSettings();
+			const entries = [
+				{ value: "/model", label: "Model", hint: session.model },
+				{ value: "/provider", label: "Provider", hint: config.baseURL },
+				{ value: "/persona", label: "Persona", hint: deps.currentPersona.label },
+				{ value: "/permissions", label: "Permissions", hint: deps.permissionMode },
+				{ value: "/reasoning", label: "Reasoning level", hint: config.reasoningLevel },
+				{ value: "/reasoning-display", label: "Show reasoning in the transcript", hint: "toggle" },
+				{ value: "/theme", label: "Theme", hint: settings.theme ?? "default" },
+				{ value: "/statusbar", label: "Status bar", hint: "which segments show, and where" },
+				{ value: "/web", label: "Web search & fetch", hint: settings.webTools === true ? "on" : "off" },
+				{ value: "/skills", label: "Skills", hint: `${deps.skills.length} loaded` },
+				{ value: "/mcp", label: "MCP servers", hint: "toggle" },
+				{ value: "/memory", label: "Project memory", hint: "toggle" },
+				{ value: "/turn-cap", label: "Per-turn iteration cap", hint: String(turnIterationCap(settings)) },
+				{ value: "/keys", label: "Keybindings", hint: "list" },
+			];
+			const choice = await deps.pickers.pickOption(entries, { title: "Settings" });
+			if (choice) await handleInput(choice, undefined, deps);
 		},
 	},
 	{

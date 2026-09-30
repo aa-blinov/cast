@@ -15,7 +15,7 @@ import type { LiveView, PickOption, PickOptions } from "../pickers/types.ts";
 import type { ModalRequest } from "../ui/pickerBridge.ts";
 import type { StatusBarSegment } from "../ui/statusbar.tsx";
 import { theme } from "../ui/themes/index.ts";
-import { paint } from "./paint.ts";
+import { band, paint } from "./paint.ts";
 
 // Every question the app asks the person (a choice, a line of text, a set of
 // toggles, a live view) is a ModalRequest from the picker bridge; here each
@@ -56,6 +56,31 @@ export function frame(title: string | undefined, body: string[], footer: string,
 		row(paint(footer, { color: theme().muted, dim: true })),
 		edge(`╰${"─".repeat(inner + 2)}╯`),
 	];
+}
+
+/** One choice: the highlighted one sits on a band the width of the box, so the eye finds it. */
+function choiceRow(
+	prefix: string,
+	label: string,
+	inner: number,
+	o: { selected: boolean; color?: string; bold?: boolean; hint?: string },
+): string {
+	const colors = theme();
+	const bg = o.selected ? colors.bgHover : undefined;
+	const width = Math.max(10, inner);
+	let text =
+		paint(prefix, { color: o.selected ? colors.accent : colors.muted, bg }) +
+		paint(label, { color: o.color, bold: o.selected && o.bold !== false, bg });
+	if (o.hint) {
+		// The value sits against the right edge, quiet; it gives way when the label needs the room.
+		const room = width - visibleWidth(text) - 2;
+		if (room >= 4) {
+			const hint = truncateToWidth(o.hint, room, "…");
+			const gap = paint(" ".repeat(width - visibleWidth(text) - visibleWidth(hint)), { bg });
+			text += gap + paint(hint, { color: colors.muted, dim: !o.selected, bg });
+		}
+	}
+	return bg ? band(text, width, bg) : text;
 }
 
 function keepVisible(idx: number, scroll: number, rows: number, length: number): number {
@@ -154,11 +179,12 @@ export class OptionModal<T> implements Component {
 			const selected = i === this.idx;
 			const dull = o.muted || o.locked;
 			body.push(
-				paint(selected ? "> " : "  ", { color: selected ? colors.accent : colors.muted }) +
-					paint(o.label, {
-						color: dull ? colors.muted : selected ? colors.accent : undefined,
-						bold: selected && !dull,
-					}),
+				choiceRow(selected ? "▸ " : "  ", o.label, width - 4, {
+					selected,
+					color: dull ? colors.muted : selected ? colors.accent : undefined,
+					bold: !dull,
+					hint: o.hint,
+				}),
 			);
 			if (selected && o.description) body.push(`  ${paint(o.description, { color: colors.muted })}`);
 		});
@@ -251,11 +277,11 @@ export class MultiModal<T> implements Component {
 			const dull = o.muted || o.locked;
 			const box = o.locked ? "[-]" : this.selected.has(i) ? "[x]" : "[ ]";
 			body.push(
-				paint(focused ? "> " : "  ", { color: focused ? colors.accent : colors.muted }) +
-					paint(`${box} ${o.label}`, {
-						color: dull ? colors.muted : focused ? colors.accent : undefined,
-						bold: focused && !dull,
-					}),
+				choiceRow(focused ? "▸ " : "  ", `${box} ${o.label}`, width - 4, {
+					selected: focused,
+					color: dull ? colors.muted : focused ? colors.accent : undefined,
+					bold: !dull,
+				}),
 			);
 			if (focused && o.description) body.push(`  ${paint(o.description, { color: colors.muted })}`);
 		});
@@ -340,12 +366,11 @@ export class StatusBarModal implements Component {
 		const labels = new Map(this.segments.map((s) => [s.id, s.label]));
 		const body = this.items.map((item, i) => {
 			const focused = i === this.cursor;
-			return (
-				paint(focused ? "> " : "  ", { color: focused ? colors.accent : colors.muted }) +
-				paint(`${item.visible ? "[x]" : "[ ]"} ${labels.get(item.id) ?? item.id}`, {
-					color: focused ? colors.accent : undefined,
-				}) +
-				paint(`  ${item.side}`, { color: colors.muted, dim: true })
+			return choiceRow(
+				focused ? "▸ " : "  ",
+				`${item.visible ? "[x]" : "[ ]"} ${labels.get(item.id) ?? item.id}  ${item.side}`,
+				width - 4,
+				{ selected: focused, color: focused ? colors.accent : undefined },
 			);
 		});
 		return frame("Status bar segments", body, "space show – ←/→ side – j/k reorder – Enter save – Esc cancel", width);

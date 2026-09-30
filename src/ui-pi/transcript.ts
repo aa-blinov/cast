@@ -8,6 +8,14 @@ import { paint } from "./paint.ts";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/** The person's messages and everything else are told apart by a blank row; two of the agent's in a row are one turn. */
+function changesSpeaker(previous: ChatMessage | undefined, next: ChatMessage): boolean {
+	if (!previous) return false;
+	return (
+		(previous.role === "user") !== (next.role === "user") || previous.role === "warning" || next.role === "warning"
+	);
+}
+
 export interface TranscriptState {
 	messages: ChatMessage[];
 	streaming: StreamingState | null;
@@ -56,8 +64,10 @@ export class Transcript implements Component {
 	render(width: number): string[] {
 		const { messages, streaming, error, retry, showReasoning } = this.state;
 		const w = Math.max(20, width);
-		const out: string[] = [...this.header];
+		const out: string[] = this.header.map((line) => truncateToWidth(line, w, "…"));
 		messages.forEach((message, i) => {
+			// A blank row wherever the speaker changes, so a turn reads as a block.
+			if (changesSpeaker(messages[i - 1], message)) out.push("");
 			const fence = this.fences[i] ?? null;
 			const key = `${w}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;
 			let entry = this.cache.get(message);
@@ -79,6 +89,7 @@ export class Transcript implements Component {
 			);
 		}
 		if (streaming) {
+			if (changesSpeaker(messages[messages.length - 1], { role: "assistant", content: "" })) out.push("");
 			let fence: OpenFence | null = null;
 			let runningTool = false;
 			for (const block of streaming.blocks) {

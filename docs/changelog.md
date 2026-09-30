@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+
+- **`/settings`.** One menu over the settings that used to be separate commands (model, provider, persona, permissions, reasoning, theme, status bar, web tools, skills, MCP servers, memory, turn cap, keybindings), each row showing its current value on the right. Enter opens that setting's own picker. It also opens while a turn runs.
+
+### Changed
+
+- **A more finished look for the terminal UI.** A blank row between the person's turns and the agent's, the person's turns on a band, a bold speaker label, the brand gradient along the composer's edges, a persona and mode in colour in the status row, the running tool's rail in the accent colour, a themed scrollbar, and a banner with the persona, model and folder. In pickers the highlighted row sits on a band with a `▸` marker, and a row can carry a hint (a setting's value) against its right edge.
+
 ## 0.51.0
 
 ### Added

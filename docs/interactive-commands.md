@@ -194,6 +194,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 
 | Command | Description |
 |---------|-------------|
+| `/settings` | One menu over the settings: model, provider, persona, permissions, reasoning, theme, status bar, web tools, skills, MCP, memory, turn cap, keys. Each row shows what it is set to on the right; Enter opens that setting's own picker. Works while a turn is running |
 | `/permissions` | Open permission mode picker |
 | `/permissions default` | Switch to gated mode (confirm dangerous commands) |
 | `/permissions bypass` | Switch to bypass mode (no confirmation) |
