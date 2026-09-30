@@ -85,6 +85,11 @@ export const SEGMENT_DROP_ORDER = [
 	"elapsed",
 ];
 
+/** Whole seconds: the counter moves on the 500ms animation clock, where tenths would flicker between .0 and .5. */
+export function formatElapsed(ms: number): string {
+	return `${Math.floor(ms / 1000)}s`;
+}
+
 /**
  * The segments that fit `columns`, whole: cutting one mid-text (`Senior
  * Developer │ …ctx`) lost the mode and model while keeping the token count.
@@ -301,9 +306,9 @@ registerStatusBarSegment({
 	side: "right",
 	render: (ctx) => {
 		if (ctx.elapsedMs <= 0) return null;
-		return <Text color={theme().muted}>{(ctx.elapsedMs / 1000).toFixed(1)}s</Text>;
+		return <Text color={theme().muted}>{formatElapsed(ctx.elapsedMs)}</Text>;
 	},
-	formatValue: (ctx) => (ctx.elapsedMs > 0 ? `${(ctx.elapsedMs / 1000).toFixed(1)}s` : null),
+	formatValue: (ctx) => (ctx.elapsedMs > 0 ? formatElapsed(ctx.elapsedMs) : null),
 });
 
 registerStatusBarSegment({

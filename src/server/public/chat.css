@@ -424,3 +424,8 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 	cursor: pointer;
 }
 .subagent-banner-back:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+/* Fingers, not a mouse: the thread's Back button needs a real touch target. */
+@media (pointer: coarse), (max-width: 768px) {
+	.subagent-banner-back { min-height: 40px; padding: 8px 14px; }
+}

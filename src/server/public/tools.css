@@ -127,3 +127,8 @@
 .tool-card-result .md-table-wrap { overflow-x: auto; }
 .tool-card-result table { border-collapse: collapse; margin: 6px 0; }
 .tool-card-result th, .tool-card-result td { border: 1px solid var(--border); padding: 3px 6px; text-align: left; }
+
+/* Open / Stop on a task card: 40px tall where there is no hover. */
+@media (pointer: coarse), (max-width: 768px) {
+	.tool-card-task-btn { min-height: 40px; padding: 6px 14px; }
+}

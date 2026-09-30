@@ -4,8 +4,14 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Changed
+
+- **The TUI repaints about four times less while a turn runs.** The spinner and the elapsed counter ticked at 8 frames a second, and a terminal jumps back to the bottom on every write, so scrolling up during a turn was undone within a frame. The clock is now 2 frames a second and the counter shows whole seconds (`41s`).
+- **Open, Stop and Back are 40px tall on touch screens** (and under 768px), up from about 20-27px.
+
 ### Fixed
 
+- **The subagent viewer said "running" for up to two seconds after the subagent had answered.** It now reads the saved final answer too.
 - **A `/skill` command filled the TUI thread with the whole SKILL.md.** The model has to receive the skill's text, but the thread showed it as if the person had typed it. The TUI now shows what was typed (`/name args`), as the web UI already did.
 - **Skills did not suggest their arguments.** A skill's `argument-hint` was read and never shown. The `/` palette (TUI and web) now lists it after the skill's name, and the TUI shows it under the composer once `/name ` is typed.
 
