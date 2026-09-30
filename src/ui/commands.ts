@@ -3499,11 +3499,10 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				return;
 			}
 			const label = `${chosen.subagent} · ${chosen.title ?? chosen.id}`;
-			const digest = () => formatSubagentTranscript(loadSession(chosen.id)?.messages ?? []);
 			if (!deps.pickers.viewLive) {
 				deps.agent.addDisplayMessage({
 					role: "warning",
-					content: `${label}${chosen.running ? " (running)" : ""}\n${digest()}`,
+					content: `${label}${chosen.running ? " (running)" : ""}\n${formatSubagentTranscript(loadSession(chosen.id)?.messages ?? [])}`,
 				});
 				return;
 			}
@@ -3527,7 +3526,11 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				title: label,
 				read: () => {
 					refreshRunning();
-					return { text: digest() || "(nothing yet)", running };
+					const messages = loadSession(chosen.id)?.messages ?? [];
+					const last = messages.at(-1);
+					// A saved final answer means it is done, without waiting for the daemon to say so.
+					const answered = last?.role === "assistant" && !last.tool_calls?.length && Boolean(last.content);
+					return { text: formatSubagentTranscript(messages) || "(nothing yet)", running: running && !answered };
 				},
 				stop: () => {
 					if (deps.agent.daemonMode) return deps.agent.runCommand(`/agents stop ${chosen.id}`).then(() => {});

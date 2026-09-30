@@ -9,8 +9,10 @@
 
 import { useEffect, useState } from "react";
 
-/** ~8fps: smooth for a braille spinner and a tenths-of-a-second counter. */
-export const ANIMATION_TICK_MS = 125;
+/** 2fps. Every tick writes to the terminal, and a terminal jumps back to the bottom
+ *  on output: at 8fps (125ms) scrolling up during a turn was undone within a frame.
+ *  Slow enough to scroll and read, still visibly alive for a braille spinner. */
+export const ANIMATION_TICK_MS = 500;
 
 const subscribers = new Set<() => void>();
 let timer: NodeJS.Timeout | undefined;
