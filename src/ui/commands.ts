@@ -280,7 +280,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
-	{ name: "/sessions", description: "List / switch / delete sessions" },
+	{ name: "/sessions", description: "This directory's sessions (or all of them): switch / delete" },
 	{ name: "/settings", description: "Model, provider, persona, permissions, theme and the rest, in one menu" },
 	{ name: "/skills", description: "Toggle skills on/off" },
 	{ name: "/skills disable", description: "Disable one skill — name", takesArgs: true },
@@ -3291,7 +3291,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	{
 		match: (input) => input === "/sessions",
 		run: async ({ deps, agent, session, config, showNotice }) => {
-			const chosen = await selectSession(deps.pickers);
+			const chosen = await selectSession(deps.pickers, { cwd: deps.cwd });
 			if (!chosen) {
 				showNotice("[Cancelled — current session unchanged]");
 				return;
