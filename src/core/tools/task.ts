@@ -87,6 +87,7 @@ async function acquireSlot(key: string, signal?: AbortSignal): Promise<() => voi
 /** Subagents still running, by task id (= child session id): a `task_id`
  *  call for one of them steers it instead of starting a second run, and the
  *  hosts cancel them from here. */
+const queued = new Map<string, { actor: AgentActorHandle; parentSessionId?: string }>();
 const running = new Map<
 	string,
 	{ actor: AgentActorHandle; steering: MessageQueue; parentSessionId?: string; agent: string; discard?: boolean }
@@ -99,6 +100,11 @@ export function isTaskRunning(taskId: string): boolean {
 /** `discard`: its thread is being deleted, so the child must not save itself
  *  back on the way out. */
 export function cancelTask(taskId: string, opts: { discard?: boolean } = {}): boolean {
+	const waiting = queued.get(taskId);
+	if (waiting) {
+		waiting.actor.cancel();
+		return true;
+	}
 	const entry = running.get(taskId);
 	if (!entry) return false;
 	if (opts.discard) entry.discard = true;
@@ -110,6 +116,17 @@ export function runningTaskIds(parentSessionId: string): string[] {
 	return [...running].filter(([, e]) => e.parentSessionId === parentSessionId).map(([id]) => id);
 }
 
+/** Subagents waiting for one of the session's MAX_CONCURRENT_TASKS slots: saved
+ *  and listed, but not running yet. */
+export function queuedTaskIds(parentSessionId: string): string[] {
+	return [...queued].filter(([, e]) => e.parentSessionId === parentSessionId).map(([id]) => id);
+}
+
+/** Running or queued: everything a stop or a thread deletion has to reach. */
+export function activeTaskIds(parentSessionId: string): string[] {
+	return [...runningTaskIds(parentSessionId), ...queuedTaskIds(parentSessionId)];
+}
+
 export interface SubagentProgress {
 	toolCallId: string;
 	taskId: string;
@@ -117,7 +134,7 @@ export interface SubagentProgress {
 	subagent: string;
 	description: string;
 	background: boolean;
-	status: "running" | "completed" | "failed" | "cancelled";
+	status: "queued" | "running" | "completed" | "failed" | "cancelled";
 	/** The child's latest tool call. */
 	tool?: { name: string; summary: string };
 	toolCount: number;
@@ -421,18 +438,23 @@ export async function execTask(
 
 	const runChild = async (): Promise<ToolResult & { subagentUsage?: Usage }> => {
 		let release: (() => void) | undefined;
+		// Saved before it waits for a slot or ends its first model turn: a child on
+		// a long first tool call, or in the queue, was invisible to /agents and
+		// could not be opened until then.
+		child.messages = [...childMessages];
+		persist();
+		queued.set(taskId, { actor, parentSessionId: deps.sessionId });
+		progress("queued");
 		try {
 			release = await acquireSlot(deps.sessionId ?? "", actor.signal);
 		} catch {
 			actor.cancel();
 			return { content: "Subagent did not complete successfully (aborted).", isError: true, subagentUsage };
+		} finally {
+			queued.delete(taskId);
 		}
 		running.set(taskId, { actor, steering, parentSessionId: deps.sessionId, agent: agentName });
 		progress("running");
-		// Saved before its first model turn ends: a child on a long first tool call
-		// was invisible to /agents and could not be opened until then.
-		child.messages = [...childMessages];
-		persist();
 		let finalMessages: Message[];
 		try {
 			finalMessages = await actor.run(

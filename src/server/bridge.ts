@@ -116,7 +116,7 @@ import type { StartupResult } from "../core/startup.ts";
 import { loadSubagentPrompts } from "../core/subagents.ts";
 import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall } from "../core/telemetry.ts";
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
-import { cancelTask, runningTaskIds } from "../core/tools/task.ts";
+import { activeTaskIds, cancelTask, queuedTaskIds, runningTaskIds } from "../core/tools/task.ts";
 import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
 import {
 	buildReasoningParams,
@@ -2734,7 +2734,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const sessionCwd = ws?.session.cwd ?? loadSession(sessionId)?.cwd;
 		// Background subagents outlive turns, not their thread: a late save would
 		// write the deleted child back.
-		for (const taskId of runningTaskIds(sessionId)) cancelTask(taskId, { discard: true });
+		for (const taskId of activeTaskIds(sessionId)) cancelTask(taskId, { discard: true });
 		if (ws) {
 			if (ws.status === "running") ws.runner.abort();
 			ws.backgroundBash.registry.killAll();
@@ -3621,6 +3621,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		previewForkFiles: previewForkFilesFor,
 		listAgents: (sessionId) => {
 			const live = new Set(runningTaskIds(sessionId));
+			const waiting = new Set(queuedTaskIds(sessionId));
 			return listSubagentSessions(sessionId).map((child) => ({
 				id: child.id,
 				title: child.title,
@@ -3629,9 +3630,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				createdAt: child.createdAt,
 				updatedAt: child.updatedAt,
 				running: live.has(child.id),
+				queued: waiting.has(child.id),
 			}));
 		},
-		cancelAgent: (sessionId, taskId) => runningTaskIds(sessionId).includes(taskId) && cancelTask(taskId),
+		cancelAgent: (sessionId, taskId) => activeTaskIds(sessionId).includes(taskId) && cancelTask(taskId),
 		getSession,
 		isFullyIdle,
 		lastActivityAt: () => lastActivityAtRef.value,
