@@ -36,6 +36,24 @@ describe("statusLine", () => {
 		expect(narrow).not.toContain("Senior Devel…");
 	});
 
+	it("shows the data-driven segments once they are switched on and there is data", () => {
+		const config = {
+			...defaultStatusBarConfig(),
+			visible: ["persona", "context", "usage", "speed", "elapsed"],
+		};
+		const withData: SegmentContext = {
+			...ctx,
+			messages: [{ role: "user", content: "hello there" }],
+			usage: { promptTokens: 1200, completionTokens: 300, totalTokens: 1500, cost: 0.02 } as SegmentContext["usage"],
+			lastTurnUsage: { tokensPerSecond: 42 },
+		};
+		const line = plain(statusLine(withData, config, 140));
+		expect(line).toMatch(/ctx \S+\/\S+ \(\d+%\)/);
+		expect(line).toContain("42");
+		expect(line).toContain("41s");
+		expect(plain(statusLine(ctx, config, 140))).not.toContain("ctx");
+	});
+
 	it("marks plan mode", () => {
 		expect(plain(statusLine({ ...ctx, planMode: true }, defaultStatusBarConfig(), 100))).toContain("PLAN");
 	});
