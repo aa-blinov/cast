@@ -59,6 +59,12 @@ describe("parseSkillInvocation", () => {
 		});
 	});
 
+	it("reads the arguments off the tag when the body used them and there is no User: line", () => {
+		const tagged =
+			'<skill name="allargs" location="/s/SKILL.md" arguments="fix the &quot;login&quot; bug">\nBODY [fix the login bug]\n</skill>';
+		expect(parseSkillInvocation(tagged)?.args).toBe('fix the "login" bug');
+	});
+
 	it("handles an invocation without arguments", () => {
 		expect(parseSkillInvocation(block())?.args).toBe("");
 	});

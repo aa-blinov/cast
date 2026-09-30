@@ -252,7 +252,7 @@ export class PiApp {
 		this.commandKey = key;
 		const builtin = new Set(SLASH_COMMANDS.map((c) => c.name));
 		const commands: SlashCommand[] = [
-			...SLASH_COMMANDS.map((c) => ({ name: c.name.slice(1), description: c.description })),
+			...SLASH_COMMANDS.filter((c) => !c.hidden).map((c) => ({ name: c.name.slice(1), description: c.description })),
 			...skills
 				.filter((s) => !builtin.has(`/${s.name}`))
 				.map((s) => ({ name: s.name, description: s.description, argumentHint: s.argumentHint })),

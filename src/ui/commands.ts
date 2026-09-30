@@ -180,7 +180,34 @@ const MEMORY_CANCEL_RUN_COMMAND_RE = /^\/memory cancel ([a-f0-9-]+)$/;
  */
 // Rendered verbatim by the composer's command palette — keep alphabetical by
 // name (enforced by a test) so the list is scannable as it grows.
-export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArgs?: boolean }> = [
+/** Commands that only change a setting: /settings reaches every one of them, so the `/` palette does
+ *  not list them. Typed in full they still run, with or without an argument. */
+const SETTING_COMMANDS = new Set([
+	"/model",
+	"/provider",
+	"/persona",
+	"/permissions",
+	"/reasoning",
+	"/reasoning-display",
+	"/reasoning-format",
+	"/theme",
+	"/statusbar",
+	"/web",
+	"/web-search-provider",
+	"/web-fetch-provider",
+	"/skills",
+	"/mcp",
+	"/memory",
+	"/turn-cap",
+	"/keys",
+	"/plan-model",
+	"/plan-model-provider",
+	"/subagent-model",
+	"/subagent-model-provider",
+	"/ssh",
+]);
+
+export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArgs?: boolean; hidden?: boolean }> = [
 	{ name: "/abort", description: "Abort the current run" },
 	{ name: "/agents", description: "This session's subagents: show one, or stop a running one" },
 	{ name: "/build", description: "Exit plan mode, restore full toolset" },
@@ -294,6 +321,11 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 		takesArgs: true,
 	},
 ];
+
+// `/memory budget`, `/skills disable`: the sub-commands of a setting go with it.
+for (const command of SLASH_COMMANDS) {
+	if (SETTING_COMMANDS.has(command.name.split(" ")[0] ?? command.name)) command.hidden = true;
+}
 
 export interface CommandDeps {
 	agent: UseAgentSession;

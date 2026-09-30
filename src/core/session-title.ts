@@ -1,5 +1,16 @@
 // renderSkillInvocation's shape: a /skill command reaches the model as the
 // whole SKILL.md, with any arguments appended after it.
+const TYPED_ARGUMENTS_RE = /\sarguments="([^"]*)"/;
+
+function unescapeXml(text: string): string {
+	return text
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'")
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/&amp;/g, "&");
+}
+
 const SKILL_INVOCATION_RE = /^<skill name="([^"]+)"[^>]*>[\s\S]*<\/skill>(?:\n\nUser: ([\s\S]*))?$/;
 
 /** What a person typed for a /skill command (`/name args`), or undefined when the
@@ -8,7 +19,9 @@ const SKILL_INVOCATION_RE = /^<skill name="([^"]+)"[^>]*>[\s\S]*<\/skill>(?:\n\n
 export function skillInvocationLabel(text: string): string | undefined {
 	const skill = SKILL_INVOCATION_RE.exec(text.trim());
 	if (!skill) return undefined;
-	const args = skill[2]?.trim();
+	// The typed arguments are on the tag (a body that used `$ARGUMENTS` has no `User:` line).
+	const onTag = TYPED_ARGUMENTS_RE.exec(text.slice(0, text.indexOf(">") + 1))?.[1];
+	const args = (onTag === undefined ? skill[2] : unescapeXml(onTag))?.trim();
 	return `/${skill[1]}${args ? ` ${args}` : ""}`;
 }
 

@@ -813,7 +813,10 @@ export function formatSkillInvocation(
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: checking for literal placeholder in content
 		content.includes("${CAST_SESSION_ID}");
 	const allowedTools = skill.allowedTools ? ` allowed-tools="${escapeXml(skill.allowedTools)}"` : "";
-	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}"${allowedTools}>\nReferences are relative to ${skill.baseDir}.\n\n${substituted}\n</skill>`;
+	// What was typed, on the tag: the body may have consumed it ($ARGUMENTS), and the
+	// thread shows `/name args`, not the file.
+	const typed = additionalArgs?.trim() ? ` arguments="${escapeXml(additionalArgs.trim())}"` : "";
+	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}"${typed}${allowedTools}>\nReferences are relative to ${skill.baseDir}.\n\n${substituted}\n</skill>`;
 	// If args were provided but no $ARGUMENTS placeholder consumed them, append as User: line
 	if (additionalArgs && !hadPlaceholders) {
 		return `${block}\n\nUser: ${additionalArgs}`;
