@@ -247,16 +247,6 @@ export function buildSettingsForm(deps: CommandDeps, runCommand: (input: string)
 					},
 				},
 				open("Status bar", "segments and their order", "/statusbar", "Which facts show under the input, and where"),
-				{
-					kind: "toggle",
-					label: "Reduce motion",
-					description: "No spinner or ticking counter; the window title shows the work",
-					value: s.reduceMotion === true,
-					set: (value) => {
-						updateSettings({ reduceMotion: value });
-						return undefined;
-					},
-				},
 				{ kind: "heading", label: "Tools" },
 				open(
 					"Skills",

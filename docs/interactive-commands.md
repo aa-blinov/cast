@@ -196,7 +196,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 
 | Command | Description |
 |---------|-------------|
-| `/settings` | The settings screen. Toggles (web tools, reasoning, memory, notifications, reduce motion), the permission mode and the theme change where they stand: Space or Enter flips a toggle, ← → cycles a choice, and the value is saved at once. Rows that are a flow of their own (model, provider, persona, status bar, skills, MCP, turn cap, keys) open their picker on Enter and return to the screen after it. Esc closes. The `/theme`, `/permissions` and `/web` commands use the same setters. Works while a turn is running. Front ends without the screen show the same rows as a plain list |
+| `/settings` | The settings screen. Toggles (web tools, reasoning, memory, notifications), the permission mode and the theme change where they stand: Space or Enter flips a toggle, ← → cycles a choice, and the value is saved at once. Rows that are a flow of their own (model, provider, persona, status bar, skills, MCP, turn cap, keys) open their picker on Enter and return to the screen after it. Esc closes. The `/theme`, `/permissions` and `/web` commands use the same setters. Works while a turn is running. Front ends without the screen show the same rows as a plain list |
 | `/permissions` | Open permission mode picker |
 | `/permissions default` | Switch to gated mode (confirm dangerous commands) |
 | `/permissions bypass` | Switch to bypass mode (no confirmation) |
@@ -253,7 +253,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 
 **Ctrl+X** opens the draft in `$VISUAL`, or `$EDITOR` when that is unset, like `git commit` does. The TUI steps aside while the editor runs; save and quit to bring the text back into the composer, still unsent. A GUI editor needs its wait flag (`code --wait`). A non-zero exit, such as `:cq` in vim, leaves the draft as it was.
 
-**Scrolling.** The screen keeps its own place in the conversation, so nothing that arrives while you read moves you. The wheel or trackpad, PageUp / PageDown, Home / End (top and bottom of the conversation) and Ctrl+↑ / Ctrl+↓ (previous / next prompt) scroll it; a `↓ newest` label appears while you are away from the end, and clicking it jumps back. PageUp at the very top loads older turns of a resumed session. Ctrl+Shift+F searches the conversation. Dragging with the mouse selects text and copies it on release; where that gets in the way of the terminal's own selection (Shift+drag usually gives it back), start with `CAST_NO_MOUSE=1` and scroll by keyboard. `CAST_TUI=ink` starts the older Ink front end instead.
+**Scrolling.** The screen keeps its own place in the conversation, so nothing that arrives while you read moves you. The wheel or trackpad, PageUp / PageDown, Home / End (top and bottom of the conversation) and Ctrl+↑ / Ctrl+↓ (previous / next prompt) scroll it; a `↓ newest` label appears while you are away from the end, and clicking it jumps back. PageUp at the very top loads older turns of a resumed session. Ctrl+Shift+F searches the conversation. Dragging with the mouse selects text and copies it on release; where that gets in the way of the terminal's own selection (Shift+drag usually gives it back), start with `CAST_NO_MOUSE=1` and scroll by keyboard.
 
 **Rebinding keys:** `keybindings` in `~/.cast/settings.json` maps an action id to one key or a list, replacing that action's defaults; `[]` unbinds it. `/keys` shows the keys in effect.
 
