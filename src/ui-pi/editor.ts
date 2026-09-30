@@ -27,7 +27,7 @@ export class CastEditor extends Editor {
 		const content = (lines[1] ?? "").replace(TRAILING_SPACES_RE, "");
 		const room = width - visibleWidth(content) - 1;
 		if (room < 4) return lines;
-		const hint = paint(truncateToWidth(this.placeholder, room, "…"), { color: theme().muted, dim: true });
+		const hint = paint(truncateToWidth(this.placeholder, room, "…"), { color: theme().muted });
 		lines[1] = `${content} ${hint}`;
 		return lines;
 	}

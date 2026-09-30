@@ -1,6 +1,6 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { StatusBarConfig } from "../core/settings.ts";
-import { fitSegments, getStatusBarSegments, type SegmentContext } from "../ui/statusbar.ts";
+import { contextUsage, fitSegments, getStatusBarSegments, type SegmentContext } from "../ui/statusbar.ts";
 import { theme } from "../ui/themes/index.ts";
 import { type Paint, paint } from "./paint.ts";
 
@@ -13,7 +13,12 @@ function segmentStyle(id: string, ctx: SegmentContext): Paint {
 	if (id === "worktree") return { color: colors.warning };
 	if (id === "mode") return ctx.planMode ? { color: colors.warning, bold: true } : { color: colors.muted };
 	if (id === "model") return { color: colors.muted };
-	return { color: colors.muted, dim: true };
+	if (id === "context") {
+		const pct = contextUsage(ctx)?.pct ?? 0;
+		if (pct >= 90) return { color: colors.error, bold: true };
+		if (pct >= 70) return { color: colors.warning };
+	}
+	return { color: colors.muted };
 }
 
 /**
@@ -38,7 +43,7 @@ export function statusLine(ctx: SegmentContext, config: StatusBarConfig, columns
 		fitted
 			.filter((item) => item.side === side)
 			.map((item) => paint(item.text, segmentStyle(item.id, ctx)))
-			.join(paint(SEPARATOR, { color: theme().muted, dim: true }));
+			.join(paint(SEPARATOR, { color: theme().muted }));
 	const left = group("left");
 	const right = group("right");
 	if (!right) return truncateToWidth(left, columns, "…");

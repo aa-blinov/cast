@@ -98,6 +98,22 @@ describe("selectSession over summaries", () => {
 		const action = (options: PickOption<unknown>[], name: string) =>
 			options.find((o) => (o.value as { action?: string }).action === name);
 
+		it("leaves the folder column out of this directory's list, and puts it back in the full one", async () => {
+			seed();
+			const labels: string[][] = [];
+			let call = 0;
+			const pickers = fakePickers((options) => {
+				labels.push(
+					options.filter((o) => (o.value as { action?: string }).action === "resume").map((o) => o.label),
+				);
+				call++;
+				return call === 1 ? action(options, "all")!.value : null;
+			});
+			await selectSession(pickers, { cwd: project });
+			expect(labels[0]?.[0]).toMatch(/^alpha work in this project/);
+			expect(labels[1]?.some((l) => l.startsWith("~") || l.includes("proj"))).toBe(true);
+		});
+
 		it("lists this directory's sessions first, with a way to show all", async () => {
 			const { mine } = seed();
 			let title: string | undefined;

@@ -51,12 +51,7 @@ export function frame(title: string | undefined, body: string[], footer: string,
 		const cut = truncateToWidth(line, inner, "…");
 		return `${edge("│")} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${edge("│")}`;
 	};
-	return [
-		top,
-		...body.map(row),
-		row(paint(footer, { color: theme().muted, dim: true })),
-		edge(`╰${"─".repeat(inner + 2)}╯`),
-	];
+	return [top, ...body.map(row), row(paint(footer, { color: theme().muted })), edge(`╰${"─".repeat(inner + 2)}╯`)];
 }
 
 /** One choice: the highlighted one sits on a band the width of the box, so the eye finds it. */
@@ -71,14 +66,18 @@ function choiceRow(
 	const width = Math.max(10, inner);
 	let text =
 		paint(prefix, { color: o.selected ? colors.accent : colors.muted, bg }) +
-		paint(label, { color: o.color, bold: o.selected && o.bold !== false, bg });
+		paint(truncateToWidth(label, Math.max(4, width - visibleWidth(prefix)), "…"), {
+			color: o.color,
+			bold: o.selected && o.bold !== false,
+			bg,
+		});
 	if (o.hint) {
 		// The value sits against the right edge, quiet; it gives way when the label needs the room.
 		const room = width - visibleWidth(text) - 2;
 		if (room >= 4) {
 			const hint = truncateToWidth(o.hint, room, "…");
 			const gap = paint(" ".repeat(width - visibleWidth(text) - visibleWidth(hint)), { bg });
-			text += gap + paint(hint, { color: colors.muted, dim: !o.selected, bg });
+			text += gap + paint(hint, { color: colors.muted, bg });
 		}
 	}
 	return bg ? band(text, width, bg) : text;
@@ -504,7 +503,7 @@ function settingRow(row: ItemRow, selected: boolean, inner: number): string {
 	} else if (row.kind === "choice") {
 		value = paint(`‹ ${row.value} ›`, { color: colors.accent, bg });
 	} else {
-		value = paint(`${row.value} ›`, { color: colors.muted, dim: !selected, bg });
+		value = paint(`${row.value} ›`, { color: colors.muted, bg });
 	}
 	const left = paint(selected ? "▸ " : "  ", { color: selected ? colors.accent : colors.muted, bg });
 	const room = inner - visibleWidth(left) - visibleWidth(value) - 2;

@@ -57,4 +57,18 @@ describe("statusLine", () => {
 	it("marks plan mode", () => {
 		expect(plain(statusLine({ ...ctx, planMode: true }, defaultStatusBarConfig(), 100))).toContain("PLAN");
 	});
+
+	it("turns the context figure amber at 70% and red at 90% of the budget", () => {
+		const config = { ...defaultStatusBarConfig(), visible: ["context"] };
+		const big = (chars: number) => ({
+			...ctx,
+			contextWindow: 10_000,
+			messages: [{ role: "user", content: "x".repeat(chars) }] as never,
+		});
+		const calm = statusLine(big(4_000), config, 60);
+		const warm = statusLine(big(26_000), config, 60);
+		const hot = statusLine(big(40_000), config, 60);
+		expect(new Set([calm, warm, hot]).size).toBe(3);
+		expect(plain(hot)).toContain("ctx");
+	});
 });

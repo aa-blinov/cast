@@ -136,3 +136,28 @@ describe("selectModel — custom model entry", () => {
 		expect(errors[1]).toContain("not found"); // retry open: reason in the red error field
 	});
 });
+
+describe("selectModel — list order", () => {
+	it("puts speech and embedding models below the chat ones, marked", async () => {
+		vi.mocked(fetchModels).mockResolvedValue({
+			ok: true,
+			models: [{ id: "vendor-tts-voiceclone" }, { id: "chat-a" }, { id: "vendor-asr" }, { id: "chat-b" }],
+		});
+		let shown: PickOption<unknown>[] = [];
+		const pickers = fakePickers({
+			pickOption: (async (options: PickOption<unknown>[]) => {
+				shown = options;
+				return null;
+			}) as Pickers["pickOption"],
+		});
+		await selectModel(config, pickers);
+		expect(shown.map((o) => o.label.split(" ")[0])).toEqual([
+			"chat-a",
+			"chat-b",
+			"vendor-tts-voiceclone",
+			"vendor-asr",
+			"Enter",
+		]);
+		expect(shown.map((o) => o.hint)).toEqual([undefined, undefined, "not for chat", "not for chat", undefined]);
+	});
+});

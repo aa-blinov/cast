@@ -125,7 +125,7 @@ import {
 	resolveReasoningFormat,
 } from "../core/vendors.ts";
 import type { SessionWorktree } from "../core/worktree.ts";
-import { ALL_THEMES } from "../ui/themes/index.ts";
+import { WEB_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 // Broadcast primitives (noteActivity, broadcast, broadcastSessionUpdate,
 // fireNotificationHook, persistDecisionState) live in ./bridge/broadcaster.ts
@@ -3389,7 +3389,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	}
 
 	function getThemes() {
-		return ALL_THEMES.map((t) => ({ id: t.id, label: t.label, description: t.description, colors: t.colors }));
+		return WEB_THEMES.map((t) => ({ id: t.id, label: t.label, description: t.description, colors: t.colors }));
 	}
 
 	/** Live provider /v1/models call — same one the TUI's /model picker makes

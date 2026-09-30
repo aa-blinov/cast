@@ -7,6 +7,14 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { gradientHex } from "../ui/gradient.ts";
+import { theme } from "../ui/themes/index.ts";
+import { legible } from "./contrast.ts";
+import { surfaceBackground } from "./surface.ts";
+
+/** NO_COLOR set to anything but an empty string. */
+export function noColor(): boolean {
+	return (process.env.NO_COLOR ?? "") !== "";
+}
 
 export interface Paint {
 	/** A theme colour (`#rrggbb`). */
@@ -17,6 +25,8 @@ export interface Paint {
 	italic?: boolean;
 	dim?: boolean;
 	underline?: boolean;
+	/** Decoration (the brand gradient) that is not text: painted as given, without the legibility floor. */
+	exact?: boolean;
 }
 
 const fgCache = new Map<string, string>();
@@ -34,7 +44,17 @@ function ansiFor(cache: Map<string, string>, color: string, make: typeof foregro
 /** Text in a theme colour and attributes, as the escape sequences the terminal's colour depth allows. */
 export function paint(text: string, style: Paint = {}): string {
 	if (text === "") return text;
-	const { color, bg, ...attributes } = style;
+	const { color: wanted, bg: wantedBg, exact, ...attributes } = style;
+	// https://no-color.org: emphasis stays (bold, underline), colour goes; shape and words carry the meaning.
+	const plain = noColor();
+	const bg = plain ? undefined : wantedBg;
+	// A theme's muted grey was under 4.5:1 on most of them, and dim takes away more.
+	const color =
+		wanted === undefined || plain
+			? undefined
+			: exact
+				? wanted
+				: legible(wanted, bg ?? surfaceBackground() ?? theme().bg);
 	if (
 		color === undefined &&
 		bg === undefined &&
@@ -61,5 +81,5 @@ export function band(text: string, width: number, bg: string): string {
 export function gradientLine(text: string, style: Paint = {}): string {
 	const chars = [...text];
 	const last = Math.max(1, chars.length - 1);
-	return chars.map((char, i) => paint(char, { ...style, color: gradientHex(i / last) })).join("");
+	return chars.map((char, i) => paint(char, { ...style, color: gradientHex(i / last), exact: true })).join("");
 }

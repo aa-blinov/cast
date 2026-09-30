@@ -102,7 +102,7 @@ export class Transcript implements Component {
 			if (!runningTool) {
 				const frame = this.spinner % SPINNER_FRAMES.length;
 				out.push(
-					paint("│ ", { color: colors.muted, dim: true }) +
+					paint("│ ", { color: colors.muted }) +
 						paint(SPINNER_FRAMES[frame] ?? "", { color: gradientHex(frame / (SPINNER_FRAMES.length - 1)) }),
 				);
 			}

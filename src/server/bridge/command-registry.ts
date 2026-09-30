@@ -108,7 +108,7 @@ import { activeTaskIds, cancelTask, queuedTaskIds, runningTaskIds } from "../../
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
 import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { createSessionWorktree, listWorktrees, removeSessionWorktree } from "../../core/worktree.ts";
-import { ALL_THEMES } from "../../ui/themes/index.ts";
+import { WEB_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
@@ -646,11 +646,11 @@ const commandHandlers: Record<string, CommandHandler> = {
 			const current = loadSettings().theme ?? "cast";
 			return { ok: true, result: { theme: current } };
 		}
-		const found = ALL_THEMES.find((t) => t.id === arg);
+		const found = WEB_THEMES.find((t) => t.id === arg);
 		if (!found) {
 			return {
 				ok: false,
-				error: `Unknown theme: ${arg}. Available: ${ALL_THEMES.map((t) => t.id).join(", ")}`,
+				error: `Unknown theme: ${arg}. Available: ${WEB_THEMES.map((t) => t.id).join(", ")}`,
 			};
 		}
 		updateSettings({ theme: found.id });

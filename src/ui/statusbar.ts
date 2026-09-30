@@ -23,6 +23,8 @@ export interface SegmentContext {
 	usage: SessionUsage | undefined;
 	lastTurnUsage: { tokensPerSecond?: number } | undefined;
 	elapsedMs: number;
+	/** A turn is in progress: the elapsed time is ticking, not the length of the last one. */
+	running?: boolean;
 	messageCount: number;
 	contextWindow: number;
 	maxResponseTokens: number;
@@ -192,18 +194,25 @@ registerStatusBarSegment({
 	formatValue: (ctx) => ctx.sessionId,
 });
 
+/** How much of the input budget the conversation takes; null before there is one or without a known window. */
+export function contextUsage(ctx: SegmentContext): { used: number; budget: number; pct: number } | null {
+	if (ctx.messages.length === 0 || !(ctx.contextWindow > 0)) return null;
+	const used = estimateTokens(ctx.messages);
+	const budget = inputTokenBudget(ctx);
+	return { used, budget, pct: Math.round((used / budget) * 100) };
+}
+
+// On by default: a long session runs out of room without warning otherwise.
 registerStatusBarSegment({
 	id: "context",
 	label: "Context %",
-	defaultOn: false,
+	defaultOn: true,
 	side: "right",
 	formatValue: (ctx) => {
 		if (ctx.messages.length === 0) return null;
-		const used = estimateTokens(ctx.messages);
-		if (!(ctx.contextWindow > 0)) return "ctx ?";
-		const budget = inputTokenBudget(ctx);
-		const pct = Math.round((used / budget) * 100);
-		return `ctx ${abbreviateTokens(used)}/${abbreviateTokens(budget)} (${pct}%)`;
+		const usage = contextUsage(ctx);
+		if (!usage) return "ctx ?";
+		return `ctx ${abbreviateTokens(usage.used)}/${abbreviateTokens(usage.budget)} (${usage.pct}%)`;
 	},
 });
 
@@ -259,7 +268,9 @@ registerStatusBarSegment({
 	label: "Elapsed",
 	defaultOn: true,
 	side: "right",
-	formatValue: (ctx) => (ctx.elapsedMs > 0 ? formatElapsed(ctx.elapsedMs) : null),
+	// Once the turn is over the number stays as the length of that turn, and says so.
+	formatValue: (ctx) =>
+		ctx.elapsedMs > 0 ? `${ctx.running === false ? "took " : ""}${formatElapsed(ctx.elapsedMs)}` : null,
 });
 
 registerStatusBarSegment({

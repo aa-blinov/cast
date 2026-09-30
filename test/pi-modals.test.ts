@@ -65,6 +65,16 @@ describe("OptionModal switch key", () => {
 	});
 });
 
+describe("OptionModal long labels", () => {
+	it("cuts a label that is wider than the row instead of wrapping it", () => {
+		const modal = new OptionModal([{ value: "a", label: "x".repeat(200) }], undefined, () => {});
+		const rows = modal.render(50);
+		for (const row of rows) expect(visibleWidth(row)).toBe(50);
+		expect(rows.filter((row) => plain(row).includes("x")).length).toBe(1);
+		expect(plain(rows.join("\n"))).toContain("…");
+	});
+});
+
 describe("OptionModal hints", () => {
 	it("sets a row's hint against the right edge, and gives way when the label needs the room", () => {
 		const modal = new OptionModal(

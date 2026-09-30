@@ -8,6 +8,7 @@ import { colorToHex, mixColors, rgbColor, type TerminalColors } from "@earendil-
 
 let band: string | undefined;
 let hover: string | undefined;
+let terminalBackground: string | undefined;
 
 const BAND_MIX = 0.07;
 const HOVER_MIX = 0.16;
@@ -15,6 +16,7 @@ const HOVER_MIX = 0.16;
 /** What the terminal reported for its default foreground and background (OSC 10 / 11). */
 export function setSurfaces(colors: TerminalColors): void {
 	const { foreground, background } = colors;
+	terminalBackground = background ? colorToHex(rgbColor(background.r, background.g, background.b)) : undefined;
 	if (!foreground || !background) {
 		band = undefined;
 		hover = undefined;
@@ -34,4 +36,9 @@ export function surfaceBand(): string | undefined {
 /** The colour behind the chosen row of a list, or undefined when the terminal's is unknown. */
 export function surfaceHover(): string | undefined {
 	return hover;
+}
+
+/** The terminal's own background, or undefined when it did not say. */
+export function surfaceBackground(): string | undefined {
+	return terminalBackground;
 }

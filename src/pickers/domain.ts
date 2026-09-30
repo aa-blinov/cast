@@ -183,7 +183,7 @@ function pad(str: string, width: number): string {
 
 type SessionPickValue = { id: string | null; action: "resume" | "fresh" | "delete" | "all" | "here" };
 
-function sessionRowOptions(sessions: SessionSummary[]): PickOption<SessionPickValue>[] {
+function sessionRowOptions(sessions: SessionSummary[], withCwd: boolean): PickOption<SessionPickValue>[] {
 	return sessions.map((s) => {
 		const firstMsg = s.firstUserMessage;
 		const cwd = shortenCwd(s.cwd || "");
@@ -192,7 +192,8 @@ function sessionRowOptions(sessions: SessionSummary[]): PickOption<SessionPickVa
 		const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
 		return {
 			value: { id: s.id, action: "resume" as const },
-			label: `${pad(cwd, 18)}${pad(msgCol, 43)}${date} ${time}  ${s.msgCount} msgs`,
+			// In this directory's own list the folder is the same on every row.
+			label: `${withCwd ? pad(cwd, 18) : ""}${pad(msgCol, 43)}${date} ${time}  ${s.msgCount} msgs`,
 			description: firstMsg ? firstMsg : undefined,
 		};
 	});
@@ -243,7 +244,7 @@ export async function selectSession(pickers: Pickers, opts: SelectSessionOptions
 			{ value: { id: null, action: "fresh" as const }, label: "Start fresh" },
 			{ value: { id: null, action: "delete" as const }, label: "Delete a session" },
 		];
-		const options = [...sessionRowOptions(shown), ...trailingOptions];
+		const options = [...sessionRowOptions(shown, scope === "all"), ...trailingOptions];
 
 		// dynamicSearch re-queries the SQLite FTS index (core/session.ts's
 		// searchSessionSummaries) on every keystroke instead of fuzzy-scoring a
@@ -264,7 +265,10 @@ export async function selectSession(pickers: Pickers, opts: SelectSessionOptions
 			search: {
 				placeholder: "filter by message, cwd, or id",
 				dynamicSearch: (query) => [
-					...sessionRowOptions(searchSessionSummaries(query).filter((s) => scope === "all" || shownIds.has(s.id))),
+					...sessionRowOptions(
+						searchSessionSummaries(query).filter((s) => scope === "all" || shownIds.has(s.id)),
+						scope === "all",
+					),
 					...trailingOptions,
 				],
 			},
@@ -343,6 +347,9 @@ async function validateModelForSelection(
  * in the picker title — the retry recursion would otherwise bounce the user
  * straight back to the list with no visible sign of what went wrong.
  */
+const NON_CHAT_MODEL =
+	/(^|[-_/.])(tts|asr|stt|embedding|embed|whisper|rerank|reranker|moderation|voiceclone|voicedesign)([-_.]|$)/i;
+
 export async function selectModel(
 	config: AppConfig,
 	pickers: Pickers,
@@ -368,8 +375,14 @@ export async function selectModel(
 
 	if (result.ok && result.models && result.models.length > 0) {
 		setModelsCache(result.models);
-		for (const m of result.models) {
+		// Speech and embedding models are listed by some providers next to the chat ones;
+		// they stay reachable but sit below, marked, so the first rows are the usable ones.
+		const chatFirst = [...result.models].sort(
+			(a, b) => Number(NON_CHAT_MODEL.test(a.id)) - Number(NON_CHAT_MODEL.test(b.id)),
+		);
+		for (const m of chatFirst) {
 			options.push({
+				hint: NON_CHAT_MODEL.test(m.id) ? "not for chat" : undefined,
 				value: {
 					model: m.id,
 					reasoningMeta: m.reasoning,

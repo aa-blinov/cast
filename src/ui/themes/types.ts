@@ -54,4 +54,6 @@ export interface Theme {
 	/** Short description shown in the theme picker. */
 	description: string;
 	colors: ThemeColors;
+	/** Not offered by the browser UI, whose surfaces assume light text on a dark page. */
+	terminalOnly?: boolean;
 }
