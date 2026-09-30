@@ -49,6 +49,14 @@ export interface PickOptions<T = unknown> {
  * (Esc in the TUI, empty Enter in readline) — the domain layer decides what
  * that means (usually exit, since onboarding has no sensible no-op).
  */
+/** A read-only text that keeps changing while it is open, such as a running subagent's session. */
+export interface LiveView {
+	title: string;
+	read(): { text: string; running: boolean };
+	/** Offered as a key while `running`. */
+	stop?(): void | Promise<void>;
+}
+
 export interface Pickers {
 	pickOption<T>(options: PickOption<T>[], opts?: PickOptions<T>): Promise<T | null>;
 	promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null>;
@@ -58,6 +66,8 @@ export interface Pickers {
 	 * against option values); unset means "all unchecked".
 	 */
 	pickMulti<T>(options: PickOption<T>[], opts?: PickOptions<T> & { initialSelected?: T[] }): Promise<T[] | null>;
+	/** Follows a running thing until dismissed. Optional: the readline CLI has no such screen. */
+	viewLive?(view: LiveView): Promise<void>;
 	/** Status bar configurator. Optional — readline CLI doesn't implement it. */
 	pickStatusBar?(
 		segments: readonly StatusBarSegment[],

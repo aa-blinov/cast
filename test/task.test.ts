@@ -7,7 +7,7 @@ import type { AppConfig } from "../src/core/config.ts";
 import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 import { EMPTY_ASSISTANT_PLACEHOLDER, type Message } from "../src/core/llm.ts";
 import { type AgentEvent, MessageQueue } from "../src/core/loop.ts";
-import { createSession, loadSession, saveSession } from "../src/core/session.ts";
+import { createSession, deleteSession, loadSession, saveSession } from "../src/core/session.ts";
 import { BackgroundTaskRegistry } from "../src/core/tools/bash-background.ts";
 import {
 	cancelTask,
@@ -506,9 +506,33 @@ describe("execTask — child sessions, resume, background", () => {
 		const taskId = taskIdOf(res.content);
 		await vi.waitFor(() => expect(isTaskRunning(taskId)).toBe(true));
 
+		// The child is saved as soon as it starts; deleting the thread removes it,
+		// and the cancelled child must not write itself back afterwards.
+		expect(loadSession(taskId)).not.toBeNull();
+		deleteSession(taskId);
 		cancelTask(taskId, { discard: true });
 		await vi.waitFor(() => expect(isTaskRunning(taskId)).toBe(false));
 		expect(loadSession(taskId)).toBeNull();
+	});
+
+	it("saves the child before its first model turn ends, so it can be listed and opened", async () => {
+		const registry = new BackgroundTaskRegistry();
+		let release: () => void = () => {};
+		const res = await execTask({ assignment: "slow first tool", background: true }, "/tmp", testConfig, {
+			model: "test-model",
+			sessionId: parent(),
+			subagentPrompts: [worker],
+			background: { registry, followUpQueue: new MessageQueue(), isRunning: () => true },
+			runAgentLoop: (messages) =>
+				new Promise((resolveRun) => {
+					release = () => resolveRun(messages);
+				}),
+		});
+		const taskId = taskIdOf(res.content);
+		await vi.waitFor(() => expect(isTaskRunning(taskId)).toBe(true));
+		expect(loadSession(taskId)?.messages.at(-1)).toMatchObject({ role: "user", content: "slow first tool" });
+		release();
+		await vi.waitFor(() => expect(isTaskRunning(taskId)).toBe(false));
 	});
 
 	it("steers a still-running task given its task_id, and cancels it on request", async () => {

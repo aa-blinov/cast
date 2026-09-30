@@ -429,6 +429,10 @@ export async function execTask(
 		}
 		running.set(taskId, { actor, steering, parentSessionId: deps.sessionId, agent: agentName });
 		progress("running");
+		// Saved before its first model turn ends: a child on a long first tool call
+		// was invisible to /agents and could not be opened until then.
+		child.messages = [...childMessages];
+		persist();
 		let finalMessages: Message[];
 		try {
 			finalMessages = await actor.run(

@@ -57,7 +57,7 @@ In the TUI, `/rewind` shows a picker of your messages (newest first) and then of
 |---------|-------------|
 | `/model` | Open model picker (shows current model) |
 | `/model <name>` | Switch to a specific model (validated) |
-| `/agents` | This session's sub-agents: see one's session, or stop a running one |
+| `/agents` | This session's sub-agents (also while a turn runs): watch one live, or stop a running one |
 | `/subagent-model` | Open model picker for sub-agents |
 | `/subagent-model <name>` | Switch sub-agent model |
 | `/subagent-model-provider [name\|off]` | Show/change the saved provider used for the sub-agent model |

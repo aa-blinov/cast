@@ -3438,6 +3438,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	},
 	{
 		match: (input) => input === "/agents",
+		// The point is to look in while a subagent is still working.
+		whileRunning: "submit",
 		run: async ({ deps, session, showNotice }) => {
 			// Subagents run where the agent loop runs: the daemon when attached,
 			// so ask it which are live; their saved sessions are shared either way.
@@ -3469,7 +3471,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			const action = chosen.running
 				? await deps.pickers.pickOption(
 						[
-							{ value: "open" as const, label: "Show its session so far" },
+							{ value: "open" as const, label: "Watch it" },
 							{ value: "stop" as const, label: "Stop it" },
 						],
 						{ title: `${chosen.subagent} · ${chosen.title ?? chosen.id}` },
@@ -3486,14 +3488,45 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice(stopped ? `[Stopped ${chosen.subagent}.]` : "[It had already finished.]");
 				return;
 			}
-			const child = loadSession(chosen.id);
-			if (!child) {
+			if (!loadSession(chosen.id)) {
 				showNotice("[That subagent's session is gone.]");
 				return;
 			}
-			deps.agent.addDisplayMessage({
-				role: "warning",
-				content: `${chosen.subagent} · ${chosen.title ?? chosen.id}${chosen.running ? " (running)" : ""}\n${formatSubagentTranscript(child.messages)}`,
+			const label = `${chosen.subagent} · ${chosen.title ?? chosen.id}`;
+			const digest = () => formatSubagentTranscript(loadSession(chosen.id)?.messages ?? []);
+			if (!deps.pickers.viewLive) {
+				deps.agent.addDisplayMessage({
+					role: "warning",
+					content: `${label}${chosen.running ? " (running)" : ""}\n${digest()}`,
+				});
+				return;
+			}
+			// A child saves itself after each model turn, so re-reading it is the
+			// progress; whether it is still running is asked where it runs (the daemon).
+			let running = chosen.running;
+			const refreshRunning = () => {
+				if (!running) return;
+				if (deps.agent.daemonMode) {
+					void deps.agent.runCommand("/agents").then(
+						(rows) => {
+							running = ((rows as Array<{ id: string; running: boolean }> | undefined) ?? []).some(
+								(r) => r.id === chosen.id && r.running,
+							);
+						},
+						() => {},
+					);
+				} else running = runningTaskIds(session.id).includes(chosen.id);
+			};
+			await deps.pickers.viewLive({
+				title: label,
+				read: () => {
+					refreshRunning();
+					return { text: digest() || "(nothing yet)", running };
+				},
+				stop: () => {
+					if (deps.agent.daemonMode) return deps.agent.runCommand(`/agents stop ${chosen.id}`).then(() => {});
+					cancelTask(chosen.id);
+				},
 			});
 		},
 	},
