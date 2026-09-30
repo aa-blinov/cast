@@ -13,6 +13,7 @@ import { inkPickers } from "../pickers/ink.tsx";
 import type { Pickers } from "../pickers/types.ts";
 import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
 import { runPiFrontEnd } from "../ui-pi/run.ts";
+import { createStartupUi } from "../ui-pi/startup.ts";
 import { App } from "./App.tsx";
 import { gradientAnsi } from "./gradient.ts";
 import { type ClipboardPasteResult, saveClipboardImageToTempFile } from "./readClipboardImage.ts";
@@ -74,12 +75,24 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// read its port/host from the same state file the token came from.
 	const daemonState = daemonToken ? readLiveServerState() : undefined;
 	const daemonUrl = daemonState ? daemonBaseUrl(daemonState) : undefined;
+	// The pi-tui front end asks its startup questions on its own screen; the Ink
+	// one keeps using Ink's short-lived instances.
+	const usePi = process.env.CAST_TUI === "pi";
+	const piStartup = usePi ? createStartupUi() : undefined;
 	let loader: ReturnType<typeof render> | null = null;
 	const showLoader = (text: string) => {
+		if (piStartup) {
+			piStartup.progress(text);
+			return;
+		}
 		if (loader) loader.rerender(<StartupLoader text={text} />);
 		else loader = render(<StartupLoader text={text} />);
 	};
 	const hideLoader = () => {
+		if (piStartup) {
+			piStartup.hide();
+			return;
+		}
 		// unmount() alone leaves the last drawn frame sitting on screen — Ink's
 		// own log-update only erases previous output on the *next* render, and
 		// there isn't one once this instance is gone. clear() actively erases
@@ -95,15 +108,16 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// then tears down both — see pickerBridge.ts for the same problem
 	// post-mount). Hide the loader right before any picker shows; the next
 	// onProgress call remounts it once runStartup moves past the prompt.
+	const startupPickers: Pickers = piStartup?.pickers ?? inkPickers;
 	const pickersWithLoaderHandoff: Pickers = {
-		...inkPickers,
+		...startupPickers,
 		pickOption: (options, opts) => {
 			hideLoader();
-			return inkPickers.pickOption(options, opts);
+			return startupPickers.pickOption(options, opts);
 		},
-		promptText: (label, defaultValue, placeholder) => {
+		promptText: (label, defaultValue, placeholder, error) => {
 			hideLoader();
-			return inkPickers.promptText(label, defaultValue, placeholder);
+			return startupPickers.promptText(label, defaultValue, placeholder, error);
 		},
 	};
 
@@ -114,12 +128,13 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	showLoader("Starting cast...");
 	const result = await runStartup(args, pickersWithLoaderHandoff, showLoader);
 	hideLoader();
+	piStartup?.done();
 
 	// One line instead of the seven-row ASCII wordmark: on a 24-row terminal
 	// the art cost a third of the screen before the first message, it had to be
 	// reprinted (and de-duplicated) on every resync, and the web UI keeps the
 	// logo where a logo makes sense.
-	console.log(`${gradientAnsi(`cast v${args.version}`)}\n`);
+	if (!usePi) console.log(`${gradientAnsi(`cast v${args.version}`)}\n`);
 
 	// Background bash tasks are spawned detached (their own process group, see
 	// tools/bash-background.ts) specifically so a running command's own
@@ -186,7 +201,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	const onPasteImage = (): Promise<ClipboardPasteResult> => saveClipboardImageToTempFile();
 
 	// The pi-tui front end, behind CAST_TUI=pi while it reaches parity.
-	if (process.env.CAST_TUI === "pi") {
+	if (usePi) {
 		await runPiFrontEnd({
 			result,
 			version: args.version,
