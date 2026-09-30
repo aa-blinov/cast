@@ -43,6 +43,20 @@ const frameRows = (blocks: StreamBlock[]): { rows: number; widest: number } => {
 };
 
 describe("live region height", () => {
+	// The clamp charges a live tool row one line. A long command wrapped to four
+	// in a real session (a running `bash` with a pipeline in it), the region grew
+	// past the viewport and Ink stacked stale frames, status bar included.
+	it("keeps a running tool row to one line however long its command is", () => {
+		const command = `cd /home/ubuntu/project && ${"grep -E 'pattern' src/**/*.ts | sort; ".repeat(8)}sleep 25`;
+		const { rows } = frameRows([
+			{
+				kind: "tool",
+				call: { id: "t1", name: "bash", args: JSON.stringify({ command, timeout: 180000 }), status: "running" },
+			},
+		]);
+		expect(rows).toBe(1);
+	});
+
 	// Labels sit on their own row now, so every kind of row — a turn, its
 	// reasoning, a notice — starts its text in the same column, and none of
 	// them spends width on the label.

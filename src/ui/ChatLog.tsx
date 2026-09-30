@@ -273,7 +273,10 @@ function ToolCallView({ call, compact }: { call: ToolCallEntry; compact?: boolea
 	const step = progress?.tool ? `↳ ${progress.tool.name} ${progress.tool.summary}`.trim() : "";
 	return (
 		<Box flexDirection="column">
-			<Text>
+			{/* The outer Text decides wrapping (a nested Text's own `wrap` is ignored): a long
+			    command wrapped to three rows in the live region while the clamp charged one,
+			    leaving the region taller than the viewport and stacking stale frames. */}
+			<Text wrap={compact ? "truncate" : "wrap"}>
 				<Text color={failed ? colors.error : railMuted()}>{failed ? "✗" : "│"} </Text>
 				<Text color={colors.muted} dimColor>
 					{isMcpTool(call.name) ? mcpToolLabel(call.name) : call.name}{" "}
