@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { StatusBarConfig } from "../core/settings.ts";
 import { score } from "../pickers/match.ts";
-import type { LiveView, PickOption, PickOptions } from "../pickers/types.ts";
+import type { LiveView, PickOption, PickOptions, SettingFollowUp, SettingRow, SettingsForm } from "../pickers/types.ts";
 import type { ModalRequest } from "../ui/pickerBridge.ts";
 import type { StatusBarSegment } from "../ui/statusbar.tsx";
 import { theme } from "../ui/themes/index.ts";
@@ -384,6 +384,139 @@ export class StatusBarModal implements Component {
 	}
 }
 
+type ItemRow = Exclude<SettingRow, { kind: "heading" }>;
+
+/**
+ * The settings screen. Toggles and choices change where they stand (Space, Enter,
+ * ← →), and each row reads what it now holds; a row that is a flow of its own
+ * (a model list, a prompt) closes the screen with the follow-up it needs, and the
+ * caller runs it and brings the screen back.
+ */
+export class SettingsModal implements Component {
+	private rows: SettingRow[];
+	private cursor = 0;
+	private scroll = 0;
+
+	constructor(
+		private readonly form: SettingsForm,
+		private readonly done: (followUp: SettingFollowUp | null) => void,
+		private readonly requestRender: () => void,
+	) {
+		this.rows = form.rows();
+		this.cursor = this.items().findIndex(Boolean) === -1 ? 0 : 0;
+	}
+
+	invalidate(): void {}
+
+	/** Positions in `rows` that can be selected (everything but headings). */
+	private items(): number[] {
+		return this.rows.flatMap((row, i) => (row.kind === "heading" ? [] : [i]));
+	}
+
+	private current(): ItemRow | undefined {
+		const at = this.items()[this.cursor];
+		const row = at === undefined ? undefined : this.rows[at];
+		return row && row.kind !== "heading" ? row : undefined;
+	}
+
+	private apply(followUp: SettingFollowUp | undefined): void {
+		this.rows = this.form.rows();
+		this.cursor = Math.min(this.cursor, Math.max(0, this.items().length - 1));
+		if (followUp) this.done(followUp);
+		else this.requestRender();
+	}
+
+	private cycle(row: Extract<SettingRow, { kind: "choice" }>, step: 1 | -1): void {
+		const at = Math.max(
+			0,
+			row.options.findIndex((o) => o.value === row.value),
+		);
+		const next = row.options[(at + step + row.options.length) % row.options.length];
+		if (next) this.apply(row.set(next.value));
+	}
+
+	handleInput(data: string): void {
+		const count = this.items().length;
+		const row = this.current();
+		if (matchesKey(data, "up")) this.cursor = (this.cursor - 1 + count) % count;
+		else if (matchesKey(data, "down")) this.cursor = (this.cursor + 1) % count;
+		else if (matchesKey(data, "pageUp")) this.cursor = Math.max(0, this.cursor - pickerRows());
+		else if (matchesKey(data, "pageDown")) this.cursor = Math.min(count - 1, this.cursor + pickerRows());
+		else if (matchesKey(data, "home")) this.cursor = 0;
+		else if (matchesKey(data, "end")) this.cursor = count - 1;
+		else if (matchesKey(data, "escape") || data === "q") this.done(null);
+		else if (
+			row?.kind === "toggle" &&
+			(data === " " || matchesKey(data, "enter") || matchesKey(data, "left") || matchesKey(data, "right"))
+		) {
+			this.apply(row.set(!row.value));
+			return;
+		} else if (row?.kind === "choice") {
+			if (matchesKey(data, "left")) this.cycle(row, -1);
+			else if (matchesKey(data, "right") || data === " ") this.cycle(row, 1);
+			else if (matchesKey(data, "enter")) {
+				if (row.choose) this.done(row.choose);
+				else this.cycle(row, 1);
+			}
+			return;
+		} else if (row?.kind === "open" && (matchesKey(data, "enter") || matchesKey(data, "right") || data === " ")) {
+			this.done(row.open);
+			return;
+		}
+		this.requestRender();
+	}
+
+	render(width: number): string[] {
+		const colors = theme();
+		const inner = Math.max(20, width - 4);
+		const selectable = this.items();
+		const selectedAt = selectable[this.cursor];
+		const lines: Array<{ text: string; at?: number }> = [];
+		this.rows.forEach((row, i) => {
+			if (row.kind === "heading") {
+				if (lines.length > 0) lines.push({ text: "" });
+				lines.push({ text: paint(row.label.toUpperCase(), { color: colors.muted, bold: true }) });
+				return;
+			}
+			const selected = i === selectedAt;
+			lines.push({ text: settingRow(row, selected, inner), at: i });
+		});
+		// Keep the chosen row in view; headings and blanks scroll with it.
+		const rows = Math.max(6, (process.stdout.rows || 24) - 12);
+		const selectedLine = lines.findIndex((l) => l.at === selectedAt);
+		this.scroll = keepVisible(Math.max(0, selectedLine), this.scroll, rows, lines.length);
+		const body = lines.slice(this.scroll, this.scroll + rows).map((l) => l.text);
+		const description = this.current()?.description;
+		body.push("", description ? paint(description, { color: colors.muted }) : " ");
+		return frame(this.form.title, body, "↑↓ move · Space/Enter change · ←/→ cycle · Esc close", width);
+	}
+}
+
+/** One row: the name on the left, what it is set to on the right. */
+function settingRow(row: ItemRow, selected: boolean, inner: number): string {
+	const colors = theme();
+	const bg = selected ? surfaceHover() : undefined;
+	let value: string;
+	if (row.kind === "toggle") {
+		value = row.value
+			? paint("● on", { color: colors.success, bold: true, bg })
+			: paint("○ off", { color: colors.muted, bg });
+	} else if (row.kind === "choice") {
+		value = paint(`‹ ${row.value} ›`, { color: colors.accent, bg });
+	} else {
+		value = paint(`${row.value} ›`, { color: colors.muted, dim: !selected, bg });
+	}
+	const left = paint(selected ? "▸ " : "  ", { color: selected ? colors.accent : colors.muted, bg });
+	const room = inner - visibleWidth(left) - visibleWidth(value) - 2;
+	const label = truncateToWidth(row.label, Math.max(4, room), "…");
+	const name = paint(label, { color: selected ? colors.accent : undefined, bold: selected, bg });
+	const gap = paint(" ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(name) - visibleWidth(value))), {
+		bg,
+	});
+	const text = left + name + gap + value;
+	return bg ? band(text, inner, bg) : text;
+}
+
 /** Text that keeps changing while it is open: a running subagent's session. */
 export class ViewModal implements Component {
 	private snapshot: { text: string; running: boolean };
@@ -525,6 +658,10 @@ export class ModalHost {
 					component: new StatusBarModal(request.segments, request.initialConfig, (config) =>
 						request.resolve(config),
 					),
+				};
+			case "settings":
+				return {
+					component: new SettingsModal(request.form, request.resolve, () => this.tui.requestRender()),
 				};
 			case "view": {
 				const modal = new ViewModal(request.view, request.resolve, () => this.tui.requestRender());

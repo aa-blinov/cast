@@ -64,6 +64,38 @@ export interface LiveView {
 	stop?(): void | Promise<void>;
 }
 
+/** Something a settings row needs a modal for (a list to choose from, a line to type): run after the screen closes. */
+export type SettingFollowUp = () => Promise<void>;
+
+/** One row of the settings screen. */
+export type SettingRow =
+	| { kind: "heading"; label: string }
+	| {
+			kind: "toggle";
+			label: string;
+			description?: string;
+			value: boolean;
+			set(value: boolean): SettingFollowUp | undefined;
+	  }
+	| {
+			kind: "choice";
+			label: string;
+			description?: string;
+			value: string;
+			options: Array<{ value: string; label: string }>;
+			/** Applies at once; a follow-up is for a change that has to ask first. */
+			set(value: string): SettingFollowUp | undefined;
+			/** Enter: the full list, for a setting with too many values to cycle through (else Enter cycles). */
+			choose?: SettingFollowUp;
+	  }
+	| { kind: "open"; label: string; description?: string; value: string; open: SettingFollowUp };
+
+export interface SettingsForm {
+	title: string;
+	/** Read again after every change, so each row shows what is now set. */
+	rows(): SettingRow[];
+}
+
 export interface Pickers {
 	pickOption<T>(options: PickOption<T>[], opts?: PickOptions<T>): Promise<T | null>;
 	promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null>;
@@ -73,6 +105,12 @@ export interface Pickers {
 	 * against option values); unset means "all unchecked".
 	 */
 	pickMulti<T>(options: PickOption<T>[], opts?: PickOptions<T> & { initialSelected?: T[] }): Promise<T[] | null>;
+	/**
+	 * The settings screen: rows that change in place, and rows that open their own picker.
+	 * Resolves with the follow-up a row asked for (the screen is closed by then), or null when dismissed.
+	 * Optional: the readline CLI and the Ink front end have no such screen.
+	 */
+	settings?(form: SettingsForm): Promise<SettingFollowUp | null>;
 	/** Follows a running thing until dismissed. Optional: the readline CLI has no such screen. */
 	viewLive?(view: LiveView): Promise<void>;
 	/** Status bar configurator. Optional — readline CLI doesn't implement it. */

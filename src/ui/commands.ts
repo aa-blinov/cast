@@ -67,7 +67,6 @@ import {
 	type PermissionMode,
 	type Provider,
 	type StatusBarConfig,
-	turnIterationCap,
 	updateSettings,
 } from "../core/settings.ts";
 import {
@@ -108,8 +107,9 @@ import {
 import type { Pickers, PickOption } from "../pickers/types.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
 import { getKeybindings, type Keybinding, TUI_KEYBINDINGS } from "./input/keybindings.ts";
+import { applyPermissionMode, buildSettingsForm, pickSettingFallback, setTheme, setWebTools } from "./settings-form.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.tsx";
-import { ALL_THEMES, getActiveTheme, setActiveTheme } from "./themes/index.ts";
+import { ALL_THEMES, getActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
 const FORCE_HINT_RE = / Re-run with --force to proceed\.$/;
@@ -440,25 +440,6 @@ function rebuildSystemPrompt(
 }
 
 /** Helper: warning + persist for permission mode changes (matches basic). */
-async function applyPermissionMode(deps: CommandDeps, newMode: PermissionMode): Promise<void> {
-	if (newMode === "bypass" && deps.permissionMode !== "bypass") {
-		const picked = await deps.pickers.pickOption(
-			[
-				{ value: true, label: "Yes, enable bypass (no confirmation for any bash command)" },
-				{ value: false, label: "Cancel" },
-			],
-			{ title: "Warning: bypass disables confirmation for rm -rf, sudo, force-push, ... — saved to settings.json" },
-		);
-		if (picked !== true) {
-			deps.showNotice("Cancelled — staying in default mode.");
-			return;
-		}
-	}
-	deps.setPermissionMode(newMode);
-	updateSettings({ permissionMode: newMode });
-	deps.showNotice(`Permission mode: ${newMode}`);
-}
-
 /** Observation-only, fire-and-forget — a skill/rule name expanding into its actual prompt content. */
 function fireUserPromptExpansion(deps: CommandDeps, name: string): void {
 	const hooks = resolveHooksForCwd(deps.cwd, deps.projectTrusted);
@@ -2651,8 +2632,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Cancelled — web tools unchanged]");
 				return;
 			}
-			deps.setWebToolsEnabled(picked);
-			updateSettings({ webTools: picked });
+			setWebTools(deps, picked);
 			showNotice(`[Web tools: ${picked ? "enabled" : "disabled"}]`);
 			return;
 		},
@@ -3217,9 +3197,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					showNotice(`[Unknown theme "${arg}". Use /theme to list available.]`);
 					return;
 				}
-				setActiveTheme(found.id);
-				updateSettings({ theme: found.id });
-				deps.onThemeChange?.();
+				setTheme(deps, found.id);
 				showNotice(`[Theme: ${found.label}]`);
 				return;
 			}
@@ -3236,9 +3214,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Cancelled — theme unchanged]");
 				return;
 			}
-			setActiveTheme(picked);
-			updateSettings({ theme: picked });
-			deps.onThemeChange?.();
+			setTheme(deps, picked);
 			showNotice(`[Theme: ${ALL_THEMES.find((t) => t.id === picked)?.label ?? picked}]`);
 			return;
 		},
@@ -3471,31 +3447,20 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		},
 	},
 	{
-		// A menu over the commands that configure cast, each showing what it is set to, so the
-		// settings are somewhere to look rather than a list of names to remember.
+		// The settings screen: rows that change in place, and rows that are a flow of their own. A
+		// row that needs a modal closes the screen, runs it, and the screen comes back after.
 		match: (input) => input === "/settings",
-		// Opening the menu changes nothing; the command it picks applies its own rules for a running turn.
+		// Opening it changes nothing; each row applies its own rules for a running turn.
 		whileRunning: "submit",
-		run: async ({ deps, session, config }) => {
-			const settings = loadSettings();
-			const entries = [
-				{ value: "/model", label: "Model", hint: session.model },
-				{ value: "/provider", label: "Provider", hint: config.baseURL },
-				{ value: "/persona", label: "Persona", hint: deps.currentPersona.label },
-				{ value: "/permissions", label: "Permissions", hint: deps.permissionMode },
-				{ value: "/reasoning", label: "Reasoning level", hint: config.reasoningLevel },
-				{ value: "/reasoning-display", label: "Show reasoning in the transcript", hint: "toggle" },
-				{ value: "/theme", label: "Theme", hint: settings.theme ?? "default" },
-				{ value: "/statusbar", label: "Status bar", hint: "which segments show, and where" },
-				{ value: "/web", label: "Web search & fetch", hint: settings.webTools === true ? "on" : "off" },
-				{ value: "/skills", label: "Skills", hint: `${deps.skills.length} loaded` },
-				{ value: "/mcp", label: "MCP servers", hint: "toggle" },
-				{ value: "/memory", label: "Project memory", hint: "toggle" },
-				{ value: "/turn-cap", label: "Per-turn iteration cap", hint: String(turnIterationCap(settings)) },
-				{ value: "/keys", label: "Keybindings", hint: "list" },
-			];
-			const choice = await deps.pickers.pickOption(entries, { title: "Settings" });
-			if (choice) await handleInput(choice, undefined, deps);
+		run: async ({ deps }) => {
+			const form = buildSettingsForm(deps, (command) => handleInput(command, undefined, deps));
+			const show = () => (deps.pickers.settings ? deps.pickers.settings(form) : pickSettingFallback(deps, form));
+			for (;;) {
+				// biome-ignore lint/performance/noAwaitInLoops: the screen comes back after each row's own flow
+				const followUp = await show();
+				if (!followUp) return;
+				await followUp();
+			}
 		},
 	},
 	{

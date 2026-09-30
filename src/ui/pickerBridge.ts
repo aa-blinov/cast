@@ -1,6 +1,6 @@
 import { useRef, useSyncExternalStore } from "react";
 import type { StatusBarConfig } from "../core/settings.ts";
-import type { LiveView, Pickers, PickOption, PickOptions } from "../pickers/types.ts";
+import type { LiveView, Pickers, PickOption, PickOptions, SettingFollowUp, SettingsForm } from "../pickers/types.ts";
 import type { StatusBarSegment } from "./statusbar.tsx";
 
 export type ModalRequest =
@@ -28,6 +28,11 @@ export type ModalRequest =
 	| {
 			kind: "status";
 			label: string;
+	  }
+	| {
+			kind: "settings";
+			form: SettingsForm;
+			resolve: (followUp: SettingFollowUp | null) => void;
 	  }
 	| {
 			kind: "view";
@@ -135,6 +140,18 @@ export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 					resolve: (config) => {
 						setRequest(null);
 						resolvePromise(config);
+					},
+				});
+			});
+		},
+		settings(form: SettingsForm): Promise<SettingFollowUp | null> {
+			return new Promise((resolvePromise) => {
+				setRequest({
+					kind: "settings",
+					form,
+					resolve: (followUp) => {
+						setRequest(null);
+						resolvePromise(followUp);
 					},
 				});
 			});

@@ -196,7 +196,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 
 | Command | Description |
 |---------|-------------|
-| `/settings` | One menu over the settings: model, provider, persona, permissions, reasoning, theme, status bar, web tools, skills, MCP, memory, turn cap, keys. Each row shows what it is set to on the right; Enter opens that setting's own picker. Works while a turn is running |
+| `/settings` | The settings screen. Toggles (web tools, reasoning, memory, notifications, reduce motion), the permission mode and the theme change where they stand: Space or Enter flips a toggle, ← → cycles a choice, and the value is saved at once. Rows that are a flow of their own (model, provider, persona, status bar, skills, MCP, turn cap, keys) open their picker on Enter and return to the screen after it. Esc closes. The `/theme`, `/permissions` and `/web` commands use the same setters. Works while a turn is running. Front ends without the screen show the same rows as a plain list |
 | `/permissions` | Open permission mode picker |
 | `/permissions default` | Switch to gated mode (confirm dangerous commands) |
 | `/permissions bypass` | Switch to bypass mode (no confirmation) |

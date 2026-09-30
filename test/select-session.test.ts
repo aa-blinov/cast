@@ -140,7 +140,7 @@ describe("selectSession over summaries", () => {
 			const switches: Array<{ to: unknown; hint?: string }> = [];
 			let call = 0;
 			await selectSession(
-				fakePickers((options, opts) => {
+				fakePickers((_options, opts) => {
 					switches.push({ to: opts?.switchTo, hint: opts?.switchHint });
 					call++;
 					return call === 1 ? opts?.switchTo : null;
