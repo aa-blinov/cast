@@ -28,6 +28,7 @@ import {
 	START_LOCK_WAIT_ATTEMPTS,
 } from "./server/daemon-state.ts";
 import { runTui } from "./ui/tui.tsx";
+import { runPiProto } from "./ui-pi/proto.ts";
 
 const VERSION: string = JSON.parse(
 	readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"),
@@ -187,6 +188,11 @@ async function main(): Promise<void> {
 		version: VERSION,
 	};
 
+	// Prototype of a pi-tui front end (see src/ui-pi/proto.ts).
+	if (process.env.CAST_TUI === "pi") {
+		await runPiProto();
+		return;
+	}
 	await runTui(parsedArgs, await ensureDaemon());
 }
 
