@@ -55,6 +55,7 @@ import { notifyTerminal } from "./terminal-notify.ts";
 import { theme } from "./themes/index.ts";
 import { type ChatMessage, type PendingImage, useAgentSession } from "./useAgentSession.ts";
 import { useTerminalResync } from "./useTerminalResync.ts";
+import { useWorkingTitle } from "./working-title.ts";
 
 const TRAILING_ZERO_RE = /\.0$/;
 
@@ -1029,6 +1030,7 @@ function StatusBar(
 	const { statusBar, turnStartedAt, getElapsedMs, repaintKey, ...ctxRest } = props;
 	// On the spinners' clock: its own 100ms timer made a frame of its own.
 	useAnimationTick(turnStartedAt !== null);
+	useWorkingTitle(turnStartedAt);
 
 	const ctx: SegmentContext = { ...ctxRest, elapsedMs: getElapsedMs() };
 	const { columns } = useWindowSize();

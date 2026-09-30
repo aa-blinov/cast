@@ -6,7 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
-- **`reduceMotion` for a terminal that jumps to the bottom on every repaint.** With `"reduceMotion": true` in `settings.json` (or `CAST_REDUCE_MOTION=1`) the TUI draws no animation: the spinner stays still and the counter does not tick, so during a turn nothing is written to the terminal between real changes (measured: one screen change in six seconds instead of about seven) and scrolling up is left alone.
+- **`reduceMotion` for a terminal that jumps to the bottom on every repaint.** With `"reduceMotion": true` in `settings.json` (or `CAST_REDUCE_MOTION=1`) the TUI draws no animation: the spinner stays still and the counter does not tick, so during a turn nothing is written to the terminal between real changes (measured: one screen change in six seconds instead of about seven) and scrolling up is left alone. The window title carries the sign of life instead (`cast · working 12s`, every second), since a title is not screen content.
 
 ### Changed
 
