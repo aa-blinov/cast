@@ -255,6 +255,8 @@ export async function selectSession(pickers: Pickers, opts: SelectSessionOptions
 		// their fixed position in the unfiltered list above.
 		// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 		const picked = await pickers.pickOption(options, {
+			switchTo: scopeOption[0]?.value,
+			switchHint: scope === "here" ? "all sessions" : "this directory",
 			title:
 				scope === "here"
 					? `Sessions in ${shortenCwd(opts.cwd ?? "")} (most recent first)`

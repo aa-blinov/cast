@@ -22,6 +22,11 @@ export interface PickOptions<T = unknown> {
 	defaultIndex?: number;
 	/** A prior-attempt error shown in red above the title (e.g. failed validation). */
 	error?: string;
+	/** Answered as soon as ←, → or Tab is pressed: a picker with two views (one directory's sessions, all of
+	 *  them) flips between them without moving to a row first. Terminal front end only. */
+	switchTo?: T;
+	/** What that key does, for the footer ("all sessions"). */
+	switchHint?: string;
 	/** Closes the picker as cancelled (null) — for a question someone else
 	 *  answered, like a confirmation settled from another client. */
 	signal?: AbortSignal;

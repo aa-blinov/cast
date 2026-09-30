@@ -43,6 +43,28 @@ describe("OptionModal", () => {
 	});
 });
 
+describe("OptionModal switch key", () => {
+	it("answers with the switch value on ←, → or Tab, and says so in the footer", () => {
+		for (const key of ["\x1b[D", "\x1b[C", "\t"]) {
+			const answers: Array<string | null> = [];
+			const modal = new OptionModal(options, { switchTo: "other view", switchHint: "all sessions" }, (value) =>
+				answers.push(value as string | null),
+			);
+			expect(plain(modal.render(80).join("\n"))).toContain("←/→ all sessions");
+			modal.handleInput(key);
+			expect(answers).toEqual(["other view"]);
+		}
+	});
+
+	it("leaves ←, → and Tab alone when there is nothing to switch to", () => {
+		const answers: unknown[] = [];
+		const modal = new OptionModal(options, undefined, (value) => answers.push(value));
+		for (const key of ["\x1b[D", "\x1b[C", "\t"]) modal.handleInput(key);
+		expect(answers).toEqual([]);
+		expect(plain(modal.render(80).join("\n"))).not.toContain("←/→");
+	});
+});
+
 describe("OptionModal hints", () => {
 	it("sets a row's hint against the right edge, and gives way when the label needs the room", () => {
 		const modal = new OptionModal(
