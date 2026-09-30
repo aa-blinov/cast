@@ -8,11 +8,19 @@
  */
 
 import { useEffect, useState } from "react";
+import { loadSettings } from "../core/settings.ts";
 
 /** 2fps. Every tick writes to the terminal, and a terminal jumps back to the bottom
  *  on output: at 8fps (125ms) scrolling up during a turn was undone within a frame.
  *  Slow enough to scroll and read, still visibly alive for a braille spinner. */
 export const ANIMATION_TICK_MS = 500;
+
+/** Read when a spinner or the status bar starts ticking, so a settings edit applies on the next turn. */
+export function reduceMotion(): boolean {
+	const env = process.env.CAST_REDUCE_MOTION;
+	if (env !== undefined && env !== "") return env !== "0";
+	return loadSettings().reduceMotion === true;
+}
 
 const subscribers = new Set<() => void>();
 let timer: NodeJS.Timeout | undefined;
@@ -21,7 +29,7 @@ let timer: NodeJS.Timeout | undefined;
 export function useAnimationTick(active = true): number {
 	const [tick, setTick] = useState(0);
 	useEffect(() => {
-		if (!active) return;
+		if (!active || reduceMotion()) return;
 		const onTick = () => setTick((n) => n + 1);
 		subscribers.add(onTick);
 		timer ??= setInterval(() => {
