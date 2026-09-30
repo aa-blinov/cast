@@ -10,6 +10,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Removed
 
+- **The `reduceMotion` setting and `CAST_REDUCE_MOTION`.** It existed because Ink's terminal jumped to the bottom on every write; the pi-tui screen keeps its own scroll position, so there is nothing left for it to fix. The settings screen no longer lists it, and the window title no longer shows `cast · working Ns`.
 - **The old Ink front end and `CAST_TUI=ink`.** The pi-tui screen has been the default since 0.51.0 and does everything the Ink one did, so the variable is ignored now. `ink` and the code only it used (the composer, chat log, Ink pickers, terminal-resync and stdin plumbing) are gone from the package; `react-reconciler` is now a direct dependency because the headless app model runs on it.
 
 ### Changed

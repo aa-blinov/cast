@@ -12,7 +12,6 @@ import {
 import { countTurnMessages } from "../core/session.ts";
 import { skillInvocationLabel } from "../core/session-title.ts";
 import type { StatusBarConfig } from "../core/settings.ts";
-import { reduceMotion } from "../ui/animation-clock.ts";
 import type { AppModel } from "../ui/app-model.ts";
 import { SLASH_COMMANDS } from "../ui/commands.ts";
 import { editInExternalEditor } from "../ui/external-editor.ts";
@@ -21,7 +20,6 @@ import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import type { SegmentContext } from "../ui/statusbar.ts";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON, setTerminalFocused } from "../ui/terminal-notify.ts";
 import { theme } from "../ui/themes/index.ts";
-import { workingTitle } from "../ui/working-title.ts";
 import { CastAutocompleteProvider, CastEditor } from "./editor.ts";
 import { ModalHost } from "./modals.ts";
 import { gradientLine, paint } from "./paint.ts";
@@ -347,13 +345,10 @@ export class PiApp {
 			if (!this.model) return;
 			this.paintFooter(this.model);
 			this.tui.requestRender();
-			if (reduceMotion()) process.stdout.write(workingTitle(this.model.agent.getElapsedMs()));
 		}, 1000);
-		if (!reduceMotion()) {
-			this.spinner = setInterval(() => {
-				if (this.transcript.tick()) this.tui.requestRender();
-			}, SPINNER_MS);
-		}
+		this.spinner = setInterval(() => {
+			if (this.transcript.tick()) this.tui.requestRender();
+		}, SPINNER_MS);
 	}
 
 	private stopClocks(): void {
@@ -361,7 +356,6 @@ export class PiApp {
 		if (this.spinner) clearInterval(this.spinner);
 		this.clock = undefined;
 		this.spinner = undefined;
-		if (reduceMotion()) process.stdout.write("\x1b]0;cast\x07");
 	}
 
 	/** The transcript's colours or contents changed under what is drawn. */
