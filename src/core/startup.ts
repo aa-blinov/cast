@@ -505,7 +505,7 @@ export async function runStartup(
 		if (args.resumeId) {
 			found = loadSession(args.resumeId);
 		} else if (args.resumePicker && process.stdin.isTTY) {
-			found = await selectSession(pickers);
+			found = await selectSession(pickers, { cwd });
 		} else {
 			// `cast -c` — continue the most recent session in *this* cwd.
 			// Scoping the lookup to cwd matches Claude Code's `claude -c`

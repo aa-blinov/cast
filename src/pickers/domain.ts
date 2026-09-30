@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { type AppConfig, fetchModels, runOnboardingCheck } from "../core/config.ts";
 import { DEFAULT_PERSONA, type LoadPersonasOptions, listPersonas, type Persona } from "../core/personas.ts";
 import { setModelsCache } from "../core/readline.ts";
@@ -180,7 +181,7 @@ function pad(str: string, width: number): string {
 	return str.length >= width ? `${str.slice(0, width - 1)}\u200b ` : str.padEnd(width);
 }
 
-type SessionPickValue = { id: string | null; action: "resume" | "fresh" | "delete" };
+type SessionPickValue = { id: string | null; action: "resume" | "fresh" | "delete" | "all" | "here" };
 
 function sessionRowOptions(sessions: SessionSummary[]): PickOption<SessionPickValue>[] {
 	return sessions.map((s) => {
@@ -197,23 +198,52 @@ function sessionRowOptions(sessions: SessionSummary[]): PickOption<SessionPickVa
 	});
 }
 
-export async function selectSession(pickers: Pickers): Promise<SessionState | null> {
+export interface SelectSessionOptions {
+	/** The directory whose sessions are listed first; "Show all sessions" lifts the limit and back. */
+	cwd?: string;
+}
+
+/** The same directory, however it was spelled (trailing slash, `..`). */
+function sameDirectory(a: string | undefined, b: string): boolean {
+	return a !== undefined && a !== "" && resolve(a) === resolve(b);
+}
+
+export async function selectSession(pickers: Pickers, opts: SelectSessionOptions = {}): Promise<SessionState | null> {
+	// Sessions of the directory you are in come first; the rest are one choice away.
+	let scope: "here" | "all" = opts.cwd ? "here" : "all";
 	while (true) {
 		// Summaries, not full sessions: the list needs a few hundred bytes per
 		// row, so the picker runs off the DB-backed index. The full session is
 		// parsed only for the one actually chosen, via loadSession below.
-		const sessions = listSessionSummaries().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+		// A session with no messages has nothing to go back to (every launch leaves one).
+		const sessions = listSessionSummaries()
+			.filter((s) => s.msgCount > 0)
+			.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
 
 		if (sessions.length === 0) {
 			pickers.log("No saved sessions to resume — starting fresh.");
 			return null;
 		}
 
+		const here = opts.cwd ? sessions.filter((s) => sameDirectory(s.cwd, opts.cwd as string)) : sessions;
+		if (scope === "here" && here.length === 0) {
+			pickers.log("No sessions in this directory yet — showing all of them.");
+			scope = "all";
+		}
+		const shown = scope === "here" ? here : sessions;
+		const shownIds = new Set(shown.map((s) => s.id));
+		const scopeOption: PickOption<SessionPickValue>[] =
+			scope === "here"
+				? [{ value: { id: null, action: "all" as const }, label: `Show all sessions (${sessions.length})` }]
+				: opts.cwd && here.length > 0
+					? [{ value: { id: null, action: "here" as const }, label: `Only this directory (${here.length})` }]
+					: [];
 		const trailingOptions: PickOption<SessionPickValue>[] = [
+			...scopeOption,
 			{ value: { id: null, action: "fresh" as const }, label: "Start fresh" },
 			{ value: { id: null, action: "delete" as const }, label: "Delete a session" },
 		];
-		const options = [...sessionRowOptions(sessions), ...trailingOptions];
+		const options = [...sessionRowOptions(shown), ...trailingOptions];
 
 		// dynamicSearch re-queries the SQLite FTS index (core/session.ts's
 		// searchSessionSummaries) on every keystroke instead of fuzzy-scoring a
@@ -225,14 +255,24 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
 		// their fixed position in the unfiltered list above.
 		// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 		const picked = await pickers.pickOption(options, {
-			title: "Sessions (most recent first)",
+			title:
+				scope === "here"
+					? `Sessions in ${shortenCwd(opts.cwd ?? "")} (most recent first)`
+					: "All sessions (most recent first)",
 			search: {
 				placeholder: "filter by message, cwd, or id",
-				dynamicSearch: (query) => [...sessionRowOptions(searchSessionSummaries(query)), ...trailingOptions],
+				dynamicSearch: (query) => [
+					...sessionRowOptions(searchSessionSummaries(query).filter((s) => scope === "all" || shownIds.has(s.id))),
+					...trailingOptions,
+				],
 			},
 		});
 		if (!picked) return null;
 		if (picked.action === "fresh") return null;
+		if (picked.action === "all" || picked.action === "here") {
+			scope = picked.action;
+			continue;
+		}
 		if (picked.action === "resume" && picked.id) {
 			const session = loadSession(picked.id);
 			if (session) return session;
@@ -241,7 +281,7 @@ export async function selectSession(pickers: Pickers): Promise<SessionState | nu
 			continue;
 		}
 
-		const delOptions = sessions.map((s) => {
+		const delOptions = shown.map((s) => {
 			const firstMsg = s.firstUserMessage;
 			const cwd = shortenCwd(s.cwd || "");
 			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";

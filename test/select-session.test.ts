@@ -74,4 +74,120 @@ describe("selectSession over summaries", () => {
 			),
 		).toBeNull();
 	});
+
+	describe("scoped to a directory", () => {
+		let other: string;
+		beforeEach(() => {
+			other = join(fakeHome, "elsewhere");
+			mkdirSync(other, { recursive: true });
+		});
+
+		const seed = () => {
+			const mine = createSession("gpt-4o", project);
+			mine.messages.push({ role: "user", content: "alpha work in this project" });
+			saveSession(mine);
+			const theirs = createSession("gpt-4o", other);
+			theirs.messages.push({ role: "user", content: "alpha work somewhere else" });
+			saveSession(theirs);
+			return { mine, theirs };
+		};
+		const resumeRows = (options: PickOption<unknown>[]) =>
+			options
+				.filter((o) => (o.value as { action?: string }).action === "resume")
+				.map((o) => (o.value as { id: string }).id);
+		const action = (options: PickOption<unknown>[], name: string) =>
+			options.find((o) => (o.value as { action?: string }).action === name);
+
+		it("lists this directory's sessions first, with a way to show all", async () => {
+			const { mine } = seed();
+			let title: string | undefined;
+			const pickers = fakePickers((options, opts) => {
+				title = opts?.title;
+				expect(resumeRows(options)).toEqual([mine.id]);
+				expect(action(options, "all")?.label).toContain("Show all sessions (2)");
+				expect(action(options, "here")).toBeUndefined();
+				return options.find((o) => (o.value as { id?: string }).id === mine.id)!.value;
+			});
+			const resumed = await selectSession(pickers, { cwd: project });
+			expect(resumed?.id).toBe(mine.id);
+			expect(title).toContain("Sessions in");
+		});
+
+		it("'Show all sessions' lists every directory's, and can go back to this one", async () => {
+			const { mine, theirs } = seed();
+			const seen: string[][] = [];
+			let call = 0;
+			const pickers = fakePickers((options, opts) => {
+				seen.push(resumeRows(options));
+				call++;
+				if (call === 1) return action(options, "all")!.value;
+				if (call === 2) {
+					expect(opts?.title).toContain("All sessions");
+					expect(action(options, "here")?.label).toContain("Only this directory (1)");
+					return action(options, "here")!.value;
+				}
+				return options.find((o) => (o.value as { id?: string }).id === mine.id)!.value;
+			});
+			const resumed = await selectSession(pickers, { cwd: project });
+			expect(resumed?.id).toBe(mine.id);
+			expect(seen[0]).toEqual([mine.id]);
+			expect(new Set(seen[1])).toEqual(new Set([mine.id, theirs.id]));
+			expect(seen[2]).toEqual([mine.id]);
+		});
+
+		it("searches within the scope it is in", async () => {
+			const { mine, theirs } = seed();
+			let search: ((q: string) => PickOption<unknown>[]) | undefined;
+			await selectSession(
+				fakePickers((_options, opts) => {
+					search = opts?.search?.dynamicSearch as typeof search;
+					return null;
+				}),
+				{ cwd: project },
+			);
+			const ids = (search?.("alpha") ?? []).map((o) => (o.value as { id?: string }).id);
+			expect(ids).toContain(mine.id);
+			expect(ids).not.toContain(theirs.id);
+		});
+
+		it("shows everything, and says so, when this directory has none yet", async () => {
+			const { theirs } = seed();
+			const logged: string[] = [];
+			const pickers: Pickers = {
+				...fakePickers((options) => {
+					expect(resumeRows(options)).toContain(theirs.id);
+					expect(action(options, "here")).toBeUndefined();
+					return null;
+				}),
+				log: (text) => logged.push(text),
+			};
+			const empty = join(fakeHome, "empty");
+			mkdirSync(empty);
+			await selectSession(pickers, { cwd: empty });
+			expect(logged.join("\n")).toContain("No sessions in this directory yet");
+		});
+
+		it("leaves out sessions with no messages, which have nothing to go back to", async () => {
+			const { mine } = seed();
+			saveSession(createSession("gpt-4o", project));
+			await selectSession(
+				fakePickers((options) => {
+					expect(resumeRows(options)).toEqual([mine.id]);
+					return null;
+				}),
+				{ cwd: project },
+			);
+		});
+
+		it("is the old list of everything when no directory is given", async () => {
+			const { mine, theirs } = seed();
+			await selectSession(
+				fakePickers((options) => {
+					expect(new Set(resumeRows(options))).toEqual(new Set([mine.id, theirs.id]));
+					expect(action(options, "all")).toBeUndefined();
+					return null;
+				}),
+			);
+		});
+	});
 });

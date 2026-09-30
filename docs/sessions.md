@@ -64,7 +64,7 @@ Each session tracks:
 
 ```bash
 cast -c                    # Resume most recent session
-cast --resume              # Pick from a numbered list
+cast --resume              # Pick from a list: this directory's sessions first, all of them one row away
 cast --resume=nd4k8f2x     # Resume by session id
 cast -s nd4k8f2x           # Same (alias)
 ```

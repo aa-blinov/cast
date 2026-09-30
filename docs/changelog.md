@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Changed
+
+- **`/sessions` (and `cast --resume`) list this directory's sessions first.** The picker opens on the sessions whose folder is the one you are in; **Show all sessions (N)** on the next row lists every project's, and **Only this directory** comes back. Search stays inside the scope you are in. When the directory has no sessions yet it shows all of them and says so. Sessions with no messages, which every launch leaves behind, are no longer listed.
+
 ## 0.51.1
 
 ### Added
