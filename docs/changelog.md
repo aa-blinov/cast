@@ -6,6 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **`glob` and `grep` found nothing in dot-directories.** With `fd` and `rg` installed, `.github/*`, `.githooks/*` and `**/*.yaml` returned "No files found" for files that were right there, because both tools skip hidden paths by default (the built-in fallback, used without them, did list them). This is what sent a subagent into a loop of empty globs. Both now search hidden paths and still skip `.git`.
 - **A subagent could keep repeating the same empty result until cancelled.** An `explore` subagent ran 335 model calls of parallel `glob`s that all found nothing, and the "same output again" reminder, shown about 490 times, changed nothing; the iteration cap counts model calls, not tool calls, so it never came near. A tool that returns the same output 100 times in a turn now ends the turn (`bash_output` polling is exempt), and a subagent has its own budget of 150 model calls instead of the parent's 500.
 
 - **`/quit` did not print the command to resume the session.** Ink redraws its last frame on exit and erased the line, so only Ctrl+C left `cast --resume=<id>` on screen. The frame is now unmounted first, and the line prints once on every way out.

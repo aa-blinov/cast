@@ -357,7 +357,10 @@ export async function execGlob(
 		// .gitignore files in subdirectories are not auto-discovered by fd
 		// (ponytail: would need a pre-walk to collect them); the walkFiles
 		// fallback handles them when fd is absent.
-		const fdArgs = ["--glob", "--type", "f", "--max-results", String(limit)];
+		// --hidden: fd skips dot-directories by default, so `.github/*` and
+		// `**/*.yaml` found nothing there and a model looped on it for hours. The
+		// walkFiles fallback always listed them; both now agree. .git stays out.
+		const fdArgs = ["--glob", "--type", "f", "--hidden", "--exclude", ".git", "--max-results", String(limit)];
 		if (hasGitignore) fdArgs.push("--ignore-file", gitignorePath);
 		// Without -p, fd matches the pattern against the basename only — a
 		// pattern with a directory component (`src/**/*.ts`, `**/tools/*.ts`)
@@ -510,7 +513,9 @@ export async function execGrep(
 	const limit = typeof args.limit === "number" ? args.limit : 100;
 
 	// Build rg command
-	const flags: string[] = ["--line-number", "--no-heading"];
+	// --hidden for the same reason as in execGlob; .git is excluded first so a
+	// user `glob` (later, so higher precedence) cannot pull it back in by accident.
+	const flags: string[] = ["--line-number", "--no-heading", "--hidden", "--glob=!.git"];
 	if (ignoreCase) flags.push("--ignore-case");
 	if (literal) flags.push("--fixed-strings");
 	if (context > 0) flags.push(`--context=${context}`);

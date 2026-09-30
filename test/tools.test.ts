@@ -1319,6 +1319,34 @@ describe("glob: ** and directory-component patterns (fd path)", () => {
 	});
 });
 
+describe("glob and grep: dot-directories", () => {
+	const buildDotTree = () => {
+		mkdirSync(join(TEST_DIR, ".github", "workflows"), { recursive: true });
+		mkdirSync(join(TEST_DIR, ".git", "objects"), { recursive: true });
+		writeFileSync(join(TEST_DIR, ".github", "workflows", "ci.yaml"), "name: needle-ci\n");
+		writeFileSync(join(TEST_DIR, ".git", "objects", "packed.yaml"), "name: needle-git\n");
+		writeFileSync(join(TEST_DIR, "top.yaml"), "name: top\n");
+	};
+
+	it("glob finds files inside .github but never inside .git", async () => {
+		buildDotTree();
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		for (const pattern of ["**/*.yaml", ".github/**/*", ".github/workflows/*"]) {
+			const result = await exec("glob", { pattern, path: TEST_DIR });
+			expect(result.content, pattern).toContain(".github/workflows/ci.yaml");
+			expect(result.content, pattern).not.toContain(".git/objects");
+		}
+	});
+
+	it("grep searches .github but not .git", async () => {
+		buildDotTree();
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("grep", { pattern: "needle", path: TEST_DIR });
+		expect(result.content).toContain("needle-ci");
+		expect(result.content).not.toContain("needle-git");
+	});
+});
+
 describe("glob: no-fd fallback parity", () => {
 	it("falls back to the JS tree walk when fd is not on PATH", async () => {
 		mkdirSync(NESTED_ROOT, { recursive: true });
