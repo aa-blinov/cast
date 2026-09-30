@@ -248,11 +248,16 @@ export class MultiModal<T> implements Component {
 		this.options.slice(this.scroll, this.scroll + rows).forEach((o, vi) => {
 			const i = this.scroll + vi;
 			const focused = i === this.idx;
-			const box = this.selected.has(i) ? "[x]" : "[ ]";
+			const dull = o.muted || o.locked;
+			const box = o.locked ? "[-]" : this.selected.has(i) ? "[x]" : "[ ]";
 			body.push(
 				paint(focused ? "> " : "  ", { color: focused ? colors.accent : colors.muted }) +
-					paint(`${box} ${o.label}`, { color: o.locked ? colors.muted : focused ? colors.accent : undefined }),
+					paint(`${box} ${o.label}`, {
+						color: dull ? colors.muted : focused ? colors.accent : undefined,
+						bold: focused && !dull,
+					}),
 			);
+			if (focused && o.description) body.push(`  ${paint(o.description, { color: colors.muted })}`);
 		});
 		return frame(this.opts?.title, body, "space toggle – Enter confirm – Esc cancel", width);
 	}

@@ -1,9 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
-	CombinedAutocompleteProvider,
 	type Component,
 	Container,
-	Editor,
 	ScrollView,
 	type SlashCommand,
 	Text,
@@ -12,6 +10,7 @@ import {
 	VStack,
 } from "@earendil-works/pi-tui";
 import { countTurnMessages } from "../core/session.ts";
+import { skillInvocationLabel } from "../core/session-title.ts";
 import type { StatusBarConfig } from "../core/settings.ts";
 import { reduceMotion } from "../ui/animation-clock.ts";
 import type { AppModel } from "../ui/app-model.ts";
@@ -23,6 +22,7 @@ import type { SegmentContext } from "../ui/statusbar.tsx";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON, setTerminalFocused } from "../ui/terminal-notify.ts";
 import { theme } from "../ui/themes/index.ts";
 import { workingTitle } from "../ui/working-title.ts";
+import { CastAutocompleteProvider, CastEditor } from "./editor.ts";
 import { ModalHost } from "./modals.ts";
 import { paint } from "./paint.ts";
 import { statusLine } from "./status.ts";
@@ -59,6 +59,8 @@ function findFd(): string | null {
 	return null;
 }
 
+const IDLE_PLACEHOLDER = "ask cast to do anything";
+const RUNNING_PLACEHOLDER = "type to steer the running turn – esc esc to stop";
 const HINT_MS = 2000;
 const SPINNER_MS = 200;
 const MAX_PENDING_ROWS = 3;
@@ -75,7 +77,7 @@ export class PiApp {
 	private readonly pending = new Text("", 1, 0);
 	private readonly hint = new Text("", 1, 0);
 	private readonly status = new StatusRow();
-	private readonly editor: Editor;
+	private readonly editor: CastEditor;
 	private readonly scrollView: ScrollView;
 	private readonly modals: ModalHost;
 	private lastCtrlC = 0;
@@ -84,6 +86,7 @@ export class PiApp {
 	private clock: NodeJS.Timeout | undefined;
 	private spinner: NodeJS.Timeout | undefined;
 	private historySeen = 0;
+	private historySession: string | undefined;
 	private commandKey = "";
 	private readonly fdPath = findFd();
 
@@ -94,7 +97,7 @@ export class PiApp {
 		banner: string[] = [],
 	) {
 		this.transcript.header = banner;
-		this.editor = new Editor(
+		this.editor = new CastEditor(
 			tui,
 			{
 				borderColor: (line) => paint(line, { color: theme().muted, dim: true }),
@@ -251,20 +254,29 @@ export class PiApp {
 				.filter((s) => !builtin.has(`/${s.name}`))
 				.map((s) => ({ name: s.name, description: s.description, argumentHint: s.argumentHint })),
 		];
-		this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(commands, model.cwd, this.fdPath));
+		this.editor.setAutocompleteProvider(new CastAutocompleteProvider(commands, model.cwd, this.fdPath));
 	}
 
-	private syncHistory(prompts: readonly string[]): void {
+	private syncHistory(sessionId: string, prompts: readonly string[]): void {
+		// /new and /resume switch to another conversation: its prompts, not the last one's.
+		if (this.historySession !== undefined && this.historySession !== sessionId) {
+			this.editor.resetHistory();
+			this.historySeen = 0;
+		}
+		this.historySession = sessionId;
 		// Oldest first, only what the editor has not been given: a prompt sent here
 		// was added on submit, the rest came from history loaded with the session.
 		if (this.historySeen === 0) {
-			for (const prompt of [...prompts].reverse()) this.editor.addToHistory(prompt);
+			// Oldest first, as they were sent: the editor puts each in front of the last. A
+			// /skill command comes back as the command, not the SKILL.md it expanded to.
+			for (const prompt of prompts) this.editor.addToHistory(skillInvocationLabel(prompt) ?? prompt);
 			this.historySeen = prompts.length;
 		}
 	}
 
 	private paintFooter(model: AppModel): void {
 		const colors = theme();
+		this.editor.placeholder = model.running ? RUNNING_PLACEHOLDER : IDLE_PLACEHOLDER;
 		this.notice.setText(model.notice ? paint(model.notice, { color: colors.warning }) : "");
 		const rows: string[] = [];
 		for (const [label, items] of [
@@ -316,7 +328,7 @@ export class PiApp {
 			showReasoning: agent.showReasoning,
 		});
 		this.syncCommands(model);
-		this.syncHistory(model.promptHistory);
+		this.syncHistory(model.session.id, model.promptHistory);
 		this.paintFooter(model);
 		this.modals.sync(model.modalRequest);
 		const wasRunning = previous?.running ?? false;
