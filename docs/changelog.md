@@ -11,6 +11,7 @@ All notable user-facing changes to cast, newest first.
 ### Fixed
 
 - **A `question` tool call showed its whole form as JSON in the transcript.** The row now says how many questions were asked and what the first one is (`2 questions: Which database?`).
+- **The bands and highlights in the terminal UI follow the terminal, not the theme.** The band behind the person's turns and the highlight on a list row were the theme's own surface colours, which put a dark stripe under dark text on a light terminal. They are now the terminal's background nudged toward its foreground (asked of the terminal at start), and are left out where the terminal does not answer.
 
 ### Changed
 

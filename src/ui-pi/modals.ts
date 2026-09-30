@@ -16,6 +16,7 @@ import type { ModalRequest } from "../ui/pickerBridge.ts";
 import type { StatusBarSegment } from "../ui/statusbar.tsx";
 import { theme } from "../ui/themes/index.ts";
 import { band, paint } from "./paint.ts";
+import { surfaceHover } from "./surface.ts";
 
 // Every question the app asks the person (a choice, a line of text, a set of
 // toggles, a live view) is a ModalRequest from the picker bridge; here each
@@ -66,7 +67,7 @@ function choiceRow(
 	o: { selected: boolean; color?: string; bold?: boolean; hint?: string },
 ): string {
 	const colors = theme();
-	const bg = o.selected ? colors.bgHover : undefined;
+	const bg = o.selected ? surfaceHover() : undefined;
 	const width = Math.max(10, inner);
 	let text =
 		paint(prefix, { color: o.selected ? colors.accent : colors.muted, bg }) +
