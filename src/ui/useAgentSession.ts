@@ -41,6 +41,7 @@ import {
 	seqOfMessage,
 	updateLastCheckpoint,
 } from "../core/session.ts";
+import { skillInvocationLabel } from "../core/session-title.ts";
 import { loadSettings, type PermissionMode, turnIterationCap, updateSettings } from "../core/settings.ts";
 import { setLastTurnAborted, setStreamingActive } from "../core/stdin-manager.ts";
 import { extractSystemReminders } from "../core/system-reminder.ts";
@@ -490,6 +491,9 @@ export function messageContentToText(content: unknown): string {
  * saying the reminder's body followed by a bare `</system-reminder>`.
  */
 export function userMessageRows(text: string, clientMessageId?: string): ChatMessage[] {
+	// A /skill command reaches the model as the whole SKILL.md; the thread shows what was typed.
+	const typed = skillInvocationLabel(text);
+	if (typed) return [{ role: "user", content: typed, ...(clientMessageId ? { clientMessageId } : {}) }];
 	const { cleaned, reminders } = extractSystemReminders(text);
 	const rows: ChatMessage[] = [];
 	for (const body of reminders) {

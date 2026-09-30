@@ -65,6 +65,8 @@ export const SLASH_COMMANDS: Array<{
 	name: string;
 	description: string;
 	takesArgs?: boolean;
+	/** What a skill expects after its name (its `argument-hint`), shown in the palette. */
+	argumentHint?: string;
 	blocking: boolean;
 	/** Still a fully working command (bridge.ts's executeCommand handles it,
 	 * the Settings modal calls it directly) — just not shown in the composer's

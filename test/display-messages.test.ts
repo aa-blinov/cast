@@ -184,6 +184,16 @@ describe("buildDisplayMessages", () => {
  * closing tag visible).
  */
 describe("userMessageRows", () => {
+	it("shows a /skill command as typed, not the SKILL.md the model was handed", () => {
+		const block =
+			'<skill name="demo" location="/s/SKILL.md">\nReferences are relative to /s.\n\n# Demo\nLong steps.\n</skill>';
+		expect(userMessageRows(`${block}\n\nUser: fix login`, "c1")).toEqual([
+			{ role: "user", content: "/demo fix login", clientMessageId: "c1" },
+		]);
+		expect(userMessageRows(block)).toEqual([{ role: "user", content: "/demo" }]);
+		expect(build([{ role: "user", content: block }])).toEqual([{ role: "user", content: "/demo" }]);
+	});
+
 	const reminder =
 		"<system-reminder>\nBackground task bg-1 (`sleep 2; echo done`) exited with code 0 after 2s.\n\ndone\n</system-reminder>";
 

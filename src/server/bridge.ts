@@ -3609,6 +3609,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				name: `/${s.name}`,
 				description: s.description,
 				takesArgs: true,
+				...(s.argumentHint ? { argumentHint: s.argumentHint } : {}),
 				blocking: false,
 			}));
 		return [...SLASH_COMMANDS, ...skillCommands];

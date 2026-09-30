@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **A `/skill` command filled the TUI thread with the whole SKILL.md.** The model has to receive the skill's text, but the thread showed it as if the person had typed it. The TUI now shows what was typed (`/name args`), as the web UI already did.
+- **Skills did not suggest their arguments.** A skill's `argument-hint` was read and never shown. The `/` palette (TUI and web) now lists it after the skill's name, and the TUI shows it under the composer once `/name ` is typed.
+
 ## 0.50.5
 
 ### Fixed

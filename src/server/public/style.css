@@ -923,6 +923,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .cmd-item:hover, .cmd-item.selected { background: var(--bg-hover); }
 .cmd-item.disabled { opacity: .4; cursor: default; }
 .cmd-name { font-family: var(--font-mono); font-size: var(--fs-ui); color: var(--text); flex-shrink: 0; }
+.cmd-hint { font-family: var(--font-mono); font-size: var(--fs-ui); color: var(--text-muted); opacity: .75; flex-shrink: 0; }
 .cmd-desc {
 	font-size: var(--fs-ui);
 	color: var(--text-muted);

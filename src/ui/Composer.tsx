@@ -50,6 +50,8 @@ interface ComposerProps {
 	skills?: Skill[];
 }
 
+const SKILL_NAME_TYPED_RE = /^\/(\S+) $/;
+
 // Multi-line pastes are collapsed to a single PUA character ("chip") in the
 // TextBuffer instead of the literal `[Pasted N lines]` string. A chip is one
 // buffer character, so a pasted block costs one row however long it is, the
@@ -222,14 +224,30 @@ export function Composer({
 	// treatment as the web composer's palette. Skips any id that collides with
 	// a built-in command name (the built-in always wins; see commands.ts's
 	// dispatch order for the matching rule on the execution side).
-	const allCommands = useMemo(() => {
+	const allCommands = useMemo((): Array<{
+		name: string;
+		description: string;
+		takesArgs?: boolean;
+		argumentHint?: string;
+	}> => {
 		if (!skills || skills.length === 0) return SLASH_COMMANDS;
 		const builtinNames = new Set(SLASH_COMMANDS.map((c) => c.name));
 		const skillCmds = skills
 			.filter((s) => !builtinNames.has(`/${s.name}`))
-			.map((s) => ({ name: `/${s.name}`, description: s.description, takesArgs: true }));
+			.map((s) => ({
+				name: `/${s.name}`,
+				description: s.description,
+				takesArgs: true,
+				argumentHint: s.argumentHint,
+			}));
 		return [...SLASH_COMMANDS, ...skillCmds];
 	}, [skills]);
+	// `/skill ` with nothing after it yet: say what the skill expects (its
+	// `argument-hint`), the way other agents do once the name is typed.
+	const argHint = useMemo(() => {
+		const typed = SKILL_NAME_TYPED_RE.exec(val);
+		return typed ? skills?.find((s) => s.name === typed[1])?.argumentHint : undefined;
+	}, [val, skills]);
 	const filteredCmds = useMemo(
 		() => (paletteOpen ? allCommands.filter((c) => c.name.startsWith(val)) : []),
 		[paletteOpen, val, allCommands],
@@ -265,8 +283,12 @@ export function Composer({
 		if (atToken === undefined && atDismissedAt !== null) setAtDismissedAt(null);
 	}, [atToken, atDismissedAt]);
 	const listItems = paletteOpen
-		? filteredCmds.map((c) => ({ name: c.name, description: c.description }))
-		: atMatches.map((path) => ({ name: path, description: "" }));
+		? filteredCmds.map((c) => ({
+				name: c.name,
+				description: c.description,
+				argumentHint: c.argumentHint,
+			}))
+		: atMatches.map((path) => ({ name: path, description: "", argumentHint: undefined as string | undefined }));
 	const listOpen = listItems.length > 0 && (paletteOpen || atOpen);
 	const safeIdx = listOpen ? Math.min(paletteIdx, Math.max(0, listItems.length - 1)) : 0;
 
@@ -824,6 +846,12 @@ export function Composer({
 	return (
 		<Box flexDirection="column">
 			{imageNotice && <Text color={theme().success}>{imageNotice}</Text>}
+			{argHint && (
+				<Text color={theme().muted} dimColor>
+					{"  "}
+					{argHint}
+				</Text>
+			)}
 			{listOpen && (
 				<Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
 					{/* Always paletteRows slots, padded with blank lines, and each row
@@ -839,6 +867,12 @@ export function Composer({
 							<Text key={c.name} color={selected ? theme().success : theme().muted} wrap="truncate">
 								{selected ? "> " : "  "}
 								<Text bold={selected}>{c.name}</Text>
+								{c.argumentHint && (
+									<Text color={theme().muted} dimColor>
+										{" "}
+										{c.argumentHint}
+									</Text>
+								)}
 								{c.description && <Text color={theme().muted}> {c.description}</Text>}
 							</Text>
 						);
