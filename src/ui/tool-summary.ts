@@ -71,6 +71,13 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 		return { kind: "generic", text: `${parsed.operation} ${target}` };
 	}
 
+	// `question` carries the whole form as JSON; a row says how many and what the first asks.
+	if (parsed && name === "question" && Array.isArray(parsed.questions)) {
+		const asked = parsed.questions as Array<{ question?: unknown }>;
+		const first = typeof asked[0]?.question === "string" ? `: ${asked[0].question}` : "";
+		return { kind: "generic", text: `${asked.length} question${asked.length === 1 ? "" : "s"}${first}` };
+	}
+
 	if (name === "task") {
 		const taskText = formatTaskToolSummary(args);
 		if (taskText) return { kind: "task", text: taskText };
