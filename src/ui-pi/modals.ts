@@ -723,10 +723,11 @@ export class ModalHost {
 		if (!build) return;
 		const transient = request.kind === "status";
 		this.handle = this.tui.showOverlay(transient ? build.component : new Sheet(build.component), {
-			anchor: "bottom-center",
+			// In the middle of the screen, like the start-up boxes: a box that grows or shrinks as a
+			// list is filtered then stays put, instead of its top edge jumping about.
+			anchor: "center",
 			width: transient && request.kind === "status" ? StatusModal.widthFor(request.label) : "100%",
 			maxHeight: "85%",
-			margin: { bottom: 3 },
 			nonCapturing: transient,
 		});
 		if (build.every) {
