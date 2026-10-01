@@ -257,16 +257,19 @@ export class PiApp {
 		if (key === this.commandKey) return;
 		this.commandKey = key;
 		const builtin = new Set(SLASH_COMMANDS.map((c) => c.name));
+		const skillCommands: SlashCommand[] = skills
+			.filter((s) => !builtin.has(`/${s.name}`))
+			.map((s) => ({ name: s.name, description: s.description, argumentHint: s.argumentHint }));
 		const commands: SlashCommand[] = [
 			...SLASH_COMMANDS.filter((c) => !c.hidden).map((c) => ({ name: c.name.slice(1), description: c.description })),
-			...skills
-				.filter((s) => !builtin.has(`/${s.name}`))
-				.map((s) => ({ name: s.name, description: s.description, argumentHint: s.argumentHint })),
+			...skillCommands,
 		];
 		const hidden = new Set(
 			SLASH_COMMANDS.filter((c) => c.hidden && !c.name.includes(" ")).map((c) => c.name.slice(1)),
 		);
-		this.editor.setAutocompleteProvider(new CastAutocompleteProvider(commands, model.cwd, this.fdPath, hidden));
+		this.editor.setAutocompleteProvider(
+			new CastAutocompleteProvider(commands, model.cwd, this.fdPath, hidden, skillCommands),
+		);
 	}
 
 	private syncHistory(sessionId: string, prompts: readonly string[]): void {
