@@ -699,7 +699,7 @@ describe("handleInput", () => {
 			pickOption: async () => null,
 			pickMulti: async () => null,
 			log: () => {},
-			pickStatusBar: async (segments, initial, opts) => {
+			pickStatusBar: async (segments, _initial, opts) => {
 				seen = { ids: segments.map((s) => s.id), opts };
 				return { visible: ["persona", "model"], order: ["model", "persona", "version", "folder"], sides: {} };
 			},
