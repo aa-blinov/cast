@@ -703,17 +703,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const [showReasoning, setShowReasoning] = useState(() => loadSettings().showReasoning ?? false);
 	const showReasoningRef = useRef(loadSettings().showReasoning ?? false);
 	const toggleReasoning = useCallback((): boolean => {
-		setShowReasoning((prev) => {
-			const next = !prev;
-			// Stash on a ref so the synchronous caller can read it back
-			// without waiting for React's batch — the same value we just
-			// committed to the next render.
-			showReasoningRef.current = next;
-			// Persist across restarts.
-			updateSettings({ showReasoning: next });
-			return next;
-		});
-		return showReasoningRef.current;
+		// The ref is the value of record, flipped here and now: a state updater runs later, in a render, so
+		// reading the ref after queueing one returned the value from before the flip.
+		const next = !showReasoningRef.current;
+		showReasoningRef.current = next;
+		setShowReasoning(next);
+		// Persist across restarts.
+		updateSettings({ showReasoning: next });
+		return next;
 	}, []);
 	const acRef = useRef<AbortController | null>(null);
 	// Set when a retry event arrives; cleared on the first streaming event

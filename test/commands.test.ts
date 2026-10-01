@@ -648,6 +648,26 @@ describe("handleInput", () => {
 		expect(title).toBe("Settings");
 	});
 
+	it("the reasoning row follows the real state across repeated flips, though the agent's own flag is a snapshot", () => {
+		const { deps } = createFakeDeps();
+		// Like the real hook: the flag on `deps.agent` is what it was when the screen opened, only the call knows the new value.
+		let live = false;
+		deps.agent.showReasoning = false;
+		deps.agent.toggleReasoning = () => {
+			live = !live;
+			return live;
+		};
+		const form = buildSettingsForm(deps, async () => {});
+		const row = () => form.rows().find((r) => r.kind === "toggle" && r.label === "Show reasoning in the transcript");
+		for (const wanted of [true, false, true]) {
+			const current = row();
+			if (current?.kind !== "toggle") throw new Error("no reasoning row");
+			current.set(wanted);
+			expect(live).toBe(wanted);
+			expect((row() as { value: boolean }).value).toBe(wanted);
+		}
+	});
+
 	it("settings rows write the same settings the slash commands do", async () => {
 		const { loadSettings } = await import("../src/core/settings.ts");
 		const { deps, calls } = createFakeDeps();
