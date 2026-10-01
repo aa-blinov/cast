@@ -8,8 +8,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { API_V1_PREFIX } from "../server/api-v1.ts";
 import {
 	clearServerState,
+	daemonBaseUrl,
 	isCurrentDaemonInstance,
 	isProcessAlive,
 	readServerState,
@@ -156,7 +158,7 @@ export async function runUpgrade(currentVersion: string, pinnedVersion?: string,
  * start one that wasn't there.
  */
 /** @internal exported for unit tests */
-export async function restartDaemon(): Promise<boolean> {
+export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?: number } = {}): Promise<boolean> {
 	const state = readServerState();
 	if (!state || !isProcessAlive(state.pid)) return true;
 	if (!(await isCurrentDaemonInstance(state))) {
@@ -192,6 +194,27 @@ export async function restartDaemon(): Promise<boolean> {
 		);
 		return true;
 	}
+	// The daemon ends every turn it is running when it stops, and the terminal screen shows that as an
+	// interrupted request that is not resumed. Give turns time to finish before stopping it.
+	const pollMs = options.turnPollMs ?? 1000;
+	const deadline = Date.now() + (options.turnWaitMs ?? TURN_WAIT_MS);
+	let busy = await runningTurns(state);
+	if (busy > 0) {
+		console.log(
+			`\n[cast server] ${busy === 1 ? "a turn is" : `${busy} turns are`} running; waiting for ${busy === 1 ? "it" : "them"} to finish before restarting the daemon...`,
+		);
+	}
+	while (busy > 0 && Date.now() < deadline) {
+		// biome-ignore lint/performance/noAwaitInLoops: polls until the running turns are over
+		await new Promise((resolve) => setTimeout(resolve, pollMs));
+		busy = await runningTurns(state);
+	}
+	if (busy > 0) {
+		console.log(
+			"[cast server] still busy: the daemon stays on the old build so that nothing is interrupted. Restart it when the turn is over: 'cast server stop && cast server start'.",
+		);
+		return true;
+	}
 	console.log(`\n[cast server] daemon was running (pid ${state.pid}) — restarting it on the new build...`);
 	try {
 		process.kill(state.pid, "SIGTERM");
@@ -224,6 +247,26 @@ export async function restartDaemon(): Promise<boolean> {
 	}
 	console.log(`[cast server] running (pid ${restarted.pid}) — http://${restarted.host}:${restarted.port}`);
 	return true;
+}
+
+/** How long an upgrade waits for running turns before it leaves the daemon on the old build. */
+const TURN_WAIT_MS = 120_000;
+
+/** How many sessions the daemon is running a turn in right now; 0 when it cannot be asked. */
+async function runningTurns(state: ServerDaemonState): Promise<number> {
+	if (!state.token) return 0;
+	try {
+		const response = await fetch(`${daemonBaseUrl(state)}${API_V1_PREFIX}/sessions`, {
+			headers: { Authorization: `Bearer ${state.token}` },
+			signal: AbortSignal.timeout(4_000),
+		});
+		if (!response.ok) return 0;
+		const body = (await response.json()) as Array<{ status?: string }> | { sessions?: Array<{ status?: string }> };
+		const sessions = Array.isArray(body) ? body : (body.sessions ?? []);
+		return sessions.filter((session) => session.status === "running").length;
+	} catch {
+		return 0;
+	}
 }
 
 async function waitForDaemonExit(state: ServerDaemonState): Promise<boolean> {

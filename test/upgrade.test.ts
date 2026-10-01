@@ -17,6 +17,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 	};
 });
 vi.mock("../src/server/daemon-state.ts", () => ({
+	daemonBaseUrl: (state: { host: string; port: number }) => `http://${state.host}:${state.port}`,
 	readServerState: vi.fn(),
 	isProcessAlive: vi.fn(),
 	isCurrentDaemonInstance: vi.fn(),
@@ -209,5 +210,65 @@ describe("restartDaemon", () => {
 		expect(await restartDaemon()).toBe(true);
 		expect(kill).not.toHaveBeenCalled();
 		expect(spawnSync).not.toHaveBeenCalled();
+	});
+
+	describe("a turn is running when the upgrade restarts the daemon", () => {
+		const daemon = {
+			pid: 424242,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+			token: "tok",
+		};
+		const sessions = (...statuses: string[]) =>
+			new Response(JSON.stringify(statuses.map((status, i) => ({ id: `s${i}`, status }))), { status: 200 });
+
+		beforeEach(() => {
+			vi.mocked(readServerState).mockReturnValueOnce(daemon);
+			vi.mocked(readServerState).mockReturnValue({ ...daemon, pid: 424243, startedAt: "new" });
+			vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+		});
+
+		afterEach(() => {
+			vi.unstubAllGlobals();
+		});
+
+		it("waits until it is over, and only then stops the daemon", async () => {
+			vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true);
+			const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
+			const fetchMock = vi
+				.fn()
+				.mockResolvedValueOnce(sessions("idle", "running"))
+				.mockResolvedValueOnce(sessions("idle", "running"))
+				.mockResolvedValue(sessions("idle", "idle"));
+			vi.stubGlobal("fetch", fetchMock);
+			expect(await restartDaemon({ turnPollMs: 5, turnWaitMs: 5_000 })).toBe(true);
+			expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+			expect(kill).toHaveBeenCalledWith(424242, "SIGTERM");
+			expect(spawnSync).toHaveBeenCalled();
+		});
+
+		it("leaves the daemon on the old build when the turn does not finish in time", async () => {
+			vi.mocked(isProcessAlive).mockReturnValue(true);
+			const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockImplementation(async () => sessions("running")),
+			);
+			expect(await restartDaemon({ turnPollMs: 5, turnWaitMs: 40 })).toBe(true);
+			expect(kill).not.toHaveBeenCalledWith(424242, "SIGTERM");
+			expect(spawnSync).not.toHaveBeenCalled();
+		});
+
+		it("restarts at once when nothing is running", async () => {
+			vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true);
+			const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
+			const fetchMock = vi.fn().mockImplementation(async () => sessions("idle"));
+			vi.stubGlobal("fetch", fetchMock);
+			expect(await restartDaemon({ turnPollMs: 5, turnWaitMs: 5_000 })).toBe(true);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(kill).toHaveBeenCalledWith(424242, "SIGTERM");
+		});
 	});
 });

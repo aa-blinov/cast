@@ -31,6 +31,9 @@ import {
 import { detectShell, SHELLS, shellInit } from "./ui/resume-hint.ts";
 import { runTui } from "./ui/tui.ts";
 
+/** How long the terminal screen waits for the port it remembers to come free before starting a private daemon. */
+const REMEMBERED_BIND_WAIT_MS = 6000;
+
 const VERSION: string = JSON.parse(
 	readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"),
 ).version;
@@ -259,8 +262,23 @@ async function ensureDaemon(): Promise<string | undefined> {
 					if (token) return token;
 				}
 				// The address the person chose for their daemon (`--public`), when it is free; else private and random.
+				// The port is often still held by the daemon that has just been stopped (an upgrade), and `cast upgrade`
+				// starts the replacement itself a moment later: wait for either rather than calling it taken.
 				const saved = rememberedBind();
-				const bind = saved && (await canBind(saved)) ? saved : undefined;
+				let bind: typeof saved;
+				for (let waited = 0; saved && waited < REMEMBERED_BIND_WAIT_MS; waited += 150) {
+					const registered = readLiveServerState();
+					if (registered) {
+						// biome-ignore lint/performance/noAwaitInLoops: polls until the stopped daemon lets go of its port
+						const token = await tokenFor(registered);
+						if (token) return token;
+					}
+					if (await canBind(saved)) {
+						bind = saved;
+						break;
+					}
+					await new Promise((resolve) => setTimeout(resolve, 150));
+				}
 				await handleServerCommand(
 					["start", "--port", String(bind?.port ?? 0), ...(bind ? ["--host", bind.host] : [])],
 					{
