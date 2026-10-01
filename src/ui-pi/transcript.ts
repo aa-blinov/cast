@@ -2,13 +2,12 @@ import { type Component, truncateToWidth, wrapTextWithAnsi } from "@earendil-wor
 import { type OpenFence, trailingOpenFence } from "../ui/markdown-terminal.ts";
 import { theme } from "../ui/themes/index.ts";
 import type { ChatMessage, RetryInfo, StreamingState } from "../ui/useAgentSession.ts";
+import { dots } from "./dots.ts";
 import { blockLines, fenceAfter, messageLines } from "./lines.ts";
 import { paint } from "./paint.ts";
 
 /** A line of prose stops being readable far short of a wide terminal: past this the text keeps its measure and the rest stays empty. */
 export const MAX_MEASURE = 100;
-
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 export interface TranscriptState {
 	messages: ChatMessage[];
@@ -31,7 +30,6 @@ export class Transcript implements Component {
 	private state: TranscriptState = { messages: [], streaming: null, error: null, retry: null, showReasoning: false };
 	private fences: Array<OpenFence | null> = [];
 	private cache = new WeakMap<ChatMessage, { key: string; lines: string[] }>();
-	private spinner = 0;
 
 	set(state: TranscriptState): void {
 		if (state.messages !== this.state.messages) {
@@ -46,9 +44,8 @@ export class Transcript implements Component {
 		this.state = state;
 	}
 
-	/** Advances the activity indicator; true when a row on screen changed. */
+	/** Whether the activity indicator (dots that follow the clock) is on screen and wants a redraw. */
 	tick(): boolean {
-		this.spinner = (this.spinner + 1) % SPINNER_FRAMES.length;
 		return this.state.streaming !== null;
 	}
 
@@ -94,8 +91,7 @@ export class Transcript implements Component {
 			// Between a finished text block and the next tool call the model may still
 			// be deciding; one activity row until something running can speak for itself.
 			if (!runningTool) {
-				const frame = this.spinner % SPINNER_FRAMES.length;
-				out.push(`  ${paint(SPINNER_FRAMES[frame] ?? "", { color: colors.accent })}`);
+				out.push(`  ${paint(dots().trimEnd(), { color: colors.accent })}`);
 			}
 		}
 		return out;

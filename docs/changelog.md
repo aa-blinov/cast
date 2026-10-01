@@ -7,6 +7,7 @@ All notable user-facing changes to cast, newest first.
 ### Changed
 
 - **The start-up and loading box is compact and centred.** "Connecting to model…" sat in a box 80–90% of the screen wide with the text at its top-left and an empty row below it. The box now fits its label and is centred on the screen, with the line in the middle of it, one row of air above and below; it never asks for more columns than the screen has.
+- **The loader is three running dots instead of a braille spinner.** `Connecting to model` and the other waiting boxes show `.`, `..`, `...` in turn after the label, and so does the row that waits for the model during a turn. The text does not move as the dots change, and it needs no glyph a non-UTF-8 terminal cannot show.
 
 ## 0.52.2
 
