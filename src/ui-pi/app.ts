@@ -15,12 +15,14 @@ import type { StatusBarConfig } from "../core/settings.ts";
 import type { AppModel } from "../ui/app-model.ts";
 import { SLASH_COMMANDS } from "../ui/commands.ts";
 import { editInExternalEditor } from "../ui/external-editor.ts";
+import { headerTexts } from "../ui/header.ts";
 import { getKeybindings } from "../ui/input/keybindings.ts";
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import { railMuted } from "../ui/span-style.ts";
 import type { SegmentContext } from "../ui/statusbar.ts";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON, setTerminalFocused } from "../ui/terminal-notify.ts";
 import { theme } from "../ui/themes/index.ts";
+import { bannerRows } from "./banner.ts";
 import { CastAutocompleteProvider, CastEditor } from "./editor.ts";
 import { ModalHost } from "./modals.ts";
 import { paint } from "./paint.ts";
@@ -92,10 +94,9 @@ export class PiApp {
 	constructor(
 		private readonly tui: ViewportTUI,
 		private readonly onQuit: () => void,
+		private readonly version: string,
 		private readonly onPasteImage?: () => Promise<ClipboardPasteResult>,
-		banner: string[] | ((width: number) => string[]) = [],
 	) {
-		this.transcript.header = banner;
 		this.editor = new CastEditor(
 			tui,
 			{
@@ -330,6 +331,15 @@ export class PiApp {
 			retry: agent.retry,
 			showReasoning: agent.showReasoning,
 		});
+		const home = process.env.HOME ?? "";
+		const folder = home && model.cwd.startsWith(home) ? `~${model.cwd.slice(home.length)}` : model.cwd;
+		const parts = headerTexts(model.header, {
+			persona: model.currentPersona.label,
+			model: model.activeModel,
+			version: this.version,
+			folder,
+		});
+		this.transcript.header = (width) => bannerRows(parts, width);
 		this.syncCommands(model);
 		this.syncHistory(model.session.id, model.promptHistory);
 		this.paintFooter(model);

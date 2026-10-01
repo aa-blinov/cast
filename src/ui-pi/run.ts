@@ -1,4 +1,4 @@
-import { ProcessTerminal, type TerminalColors, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
+import { ProcessTerminal, type TerminalColors, TuiAltScreen } from "@earendil-works/pi-tui";
 import { createElement, useEffect } from "react";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
@@ -8,35 +8,8 @@ import { theme } from "../ui/themes/index.ts";
 import { PiApp } from "./app.ts";
 import { createStore, mountHeadless } from "./headless.ts";
 import { applyUserKeybindings } from "./keys.ts";
-import { type Paint, paint } from "./paint.ts";
+import { paint } from "./paint.ts";
 import { setSurfaces } from "./surface.ts";
-
-const HINTS = ["/ commands", "/settings", "Esc Esc stops a turn", "PageUp scrolls", "Ctrl+C twice quits"];
-
-/** The parts joined by `separator`, the last ones dropped whole until the line fits `width`. */
-export function fitParts(parts: string[], separator: string, width: number): string {
-	const kept = [...parts];
-	while (kept.length > 1 && visibleWidth(kept.join(separator)) > width) kept.pop();
-	return kept.join(separator);
-}
-
-/** A man page's header row: `CAST(1)` left, persona and model centred, the version right; the centre gives up parts whole before anything is cut. */
-export function bannerLine(version: string, parts: string[], width: number, style: Paint): string {
-	const left = "CAST(1)";
-	const right = `v${version}`;
-	const room = width - visibleWidth(left) - visibleWidth(right) - 4;
-	const middle = room > 0 ? fitParts(parts, " * ", room) : "";
-	const fits = middle !== "" && visibleWidth(middle) <= room;
-	const lead = paint(left, { bold: true });
-	const tail = paint(right, { bold: true });
-	if (!fits)
-		return width >= visibleWidth(left) + visibleWidth(right) + 2
-			? lead + " ".repeat(width - visibleWidth(left) - visibleWidth(right)) + tail
-			: lead;
-	const free = width - visibleWidth(left) - visibleWidth(right) - visibleWidth(middle);
-	const before = Math.floor(free / 2);
-	return lead + " ".repeat(before) + paint(middle, style) + " ".repeat(free - before) + tail;
-}
 
 export interface PiFrontEndOptions {
 	result: StartupResult;
@@ -84,15 +57,7 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 		tui.stop();
 	};
 	const quit = () => options.quit(stopScreen);
-	const home = process.env.HOME ?? "";
-	const where =
-		options.result.cwd.startsWith(home) && home ? `~${options.result.cwd.slice(home.length)}` : options.result.cwd;
-	const muted = { color: theme().muted };
-	const banner = (width: number) => [
-		bannerLine(options.version, [options.result.persona.label, options.result.session.model, where], width, muted),
-		paint(fitParts(HINTS, " * ", width), muted),
-	];
-	const app = new PiApp(tui, quit, options.onPasteImage, banner);
+	const app = new PiApp(tui, quit, options.version, options.onPasteImage);
 	store.subscribe((model) => app.update(model));
 
 	setSuspendHook(async (run) => {

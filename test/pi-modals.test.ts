@@ -1,6 +1,14 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { frame, MultiModal, OptionModal, printable, SettingsModal, Sheet } from "../src/ui-pi/modals.ts";
+import {
+	frame,
+	MultiModal,
+	OptionModal,
+	printable,
+	SettingsModal,
+	Sheet,
+	StatusBarModal,
+} from "../src/ui-pi/modals.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
 const plain = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, "");
@@ -234,5 +242,37 @@ describe("modal chrome on small screens", () => {
 	it("cuts a title that is wider than the box instead of running past its corner", () => {
 		const rows = frame("T".repeat(80), ["body"], "hint", 40).map(plain);
 		expect(rows.every((row) => visibleWidth(row) === 40)).toBe(true);
+	});
+});
+
+describe("StatusBarModal without sides (the header's list)", () => {
+	const segments = [
+		{ id: "a", label: "Alpha", defaultOn: true, side: "left" as const, formatValue: () => null },
+		{ id: "b", label: "Beta", defaultOn: true, side: "left" as const, formatValue: () => null },
+	];
+	const initial = { visible: ["a", "b"], order: ["a", "b"], sides: {} };
+
+	it("leaves out the side column and its hint, and ignores ← and →", () => {
+		let saved: unknown;
+		const modal = new StatusBarModal(segments, initial, (config) => (saved = config), {
+			title: "Header parts",
+			sides: false,
+		});
+		const text = plain(modal.render(80).join("\n"));
+		expect(text).toContain("Header parts");
+		expect(text).not.toContain("left");
+		expect(text).not.toContain("side");
+		modal.handleInput("\x1b[C");
+		modal.handleInput("\r");
+		expect(saved).toMatchObject({ sides: { a: "left", b: "left" } });
+	});
+
+	it("still reorders and hides with j/k and space", () => {
+		let saved: { visible: string[]; order: string[] } | null = null;
+		const modal = new StatusBarModal(segments, initial, (config) => (saved = config), { sides: false });
+		modal.handleInput(" ");
+		modal.handleInput("j");
+		modal.handleInput("\r");
+		expect(saved).toMatchObject({ visible: ["b"], order: ["b", "a"] });
 	});
 });

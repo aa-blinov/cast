@@ -60,10 +60,23 @@ describe("sectionLines", () => {
 	});
 
 	it("sets code four columns further in, and carries no coloured edge", () => {
-		const lines = sectionLines(renderMarkdownLines("```ts\nconst x = 1;\n```", { width: 40 }), { heading: "AGENT" });
-		const code = lines.map(plain).find((line) => line.includes("const x"));
-		expect(code?.startsWith("        const")).toBe(true);
-		for (const mark of ["▌", "┆", "│"]) expect(lines.map(plain).join("")).not.toContain(mark);
+		const lines = blockLines(
+			{ kind: "content" as const, text: "```ts\nconst x = 1;\n```" },
+			{ width: 60, showReasoning: false },
+		).map(plain);
+		expect(lines.find((line) => line.includes("const x"))?.startsWith("        const")).toBe(true);
+		for (const mark of ["▌", "┆", "│"]) expect(lines.join("")).not.toContain(mark);
+	});
+
+	it("wraps code that is too long for a phone screen, instead of cutting it off", () => {
+		const code = "const greeting = (name: string): string => `hello, ${name} from the transcript`;";
+		const rows = blockLines(
+			{ kind: "content" as const, text: `\`\`\`ts\n${code}\n\`\`\`` },
+			{ width: 32, showReasoning: false },
+		);
+		for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(32);
+		const rejoined = rows.map(plain).join("").replace(/\s+/g, "");
+		expect(rejoined).toContain(code.replace(/\s+/g, ""));
 	});
 
 	it("puts no heading on a continued block, and a blank row on a notice", () => {

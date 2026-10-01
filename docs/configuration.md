@@ -63,6 +63,7 @@ User settings are persisted to `~/.cast/settings.json`. This file is loaded on s
 | `disabledSkillSources` | string[] | Whole skill sources switched off: `builtin`, `cast`, `agents`, `claude` (see [Skills](skills.md#turning-sources-off)) |
 | `disabledHooks` | string[] | Content-derived hook group ids disabled via `/hooks` |
 | `statusBar` | object | Status bar segment config (`visible`, `order`, `sides`); use `/statusbar` to configure |
+| `header` | object | Parts of the top row of the TUI (`visible`, `order`; ids `persona`, `model`, `version`, `folder`); use `/header` to configure |
 | `serverToken` | string | Password generated for the server daemon on first start |
 | `webPassword` | string | Deprecated predecessor of `serverToken`; read and migrated for compatibility |
 | `quickSessionPersona` | string | Persona selected by the web UI's Quick session action |

@@ -247,6 +247,12 @@ export function buildSettingsForm(deps: CommandDeps, runCommand: (input: string)
 					},
 				},
 				open("Status bar", "segments and their order", "/statusbar", "Which facts show under the input, and where"),
+				open(
+					"Header",
+					"parts and their order",
+					"/header",
+					"What the top row says: persona, model, version, folder",
+				),
 				{ kind: "heading", label: "Tools" },
 				open(
 					"Skills",

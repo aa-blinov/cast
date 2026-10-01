@@ -343,6 +343,8 @@ export interface MarkdownRenderOptions {
 	width: number;
 	/** Indent applied to every line — two spaces for the chat's body text. */
 	indent?: string;
+	/** Extra indent for fenced code only, counted in the wrap width (the transcript sets code deeper than prose). */
+	codeIndent?: string;
 	/** The text starts inside this already-open fence (see trailingOpenFence). */
 	openFence?: OpenFence | null;
 }
@@ -391,7 +393,8 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 					: // A blank line still needs a cell, or the wrapper drops the row.
 						[{ text: raw === "" ? " " : raw, tone: "code" as const, ...(highlighted ? { scope: "text" } : {}) }];
 			// Code keeps its own spacing; only hard-wrap what does not fit.
-			out.push(...wrapSpans(spans, width, indent, `${indent}  `).map((line) => ({ ...line, code: true })));
+			const codeIndent = `${indent}${options.codeIndent ?? ""}`;
+			out.push(...wrapSpans(spans, width, codeIndent, `${codeIndent}  `).map((line) => ({ ...line, code: true })));
 		});
 		fenceLines = [];
 	};

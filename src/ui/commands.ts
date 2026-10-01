@@ -62,6 +62,7 @@ import {
 	updateSessionIdentity,
 } from "../core/session.ts";
 import {
+	type HeaderConfig,
 	isMemoryWriteEnabled,
 	loadSettings,
 	type PermissionMode,
@@ -105,6 +106,7 @@ import {
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
+import { headerSegments } from "./header.ts";
 import { getKeybindings, type Keybinding, TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import { applyPermissionMode, buildSettingsForm, pickSettingFallback, setTheme, setWebTools } from "./settings-form.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.ts";
@@ -191,6 +193,7 @@ const SETTING_COMMANDS = new Set([
 	"/reasoning-format",
 	"/theme",
 	"/statusbar",
+	"/header",
 	"/web",
 	"/web-search-provider",
 	"/web-fetch-provider",
@@ -227,6 +230,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
 	{ name: "/fork", description: "Fork the conversation, whole or from before one of your messages" },
 	{ name: "/goal", description: "Work toward a goal autonomously until done — goal text", takesArgs: true },
+	{ name: "/header", description: "Choose and order the parts of the top row" },
 	{ name: "/help", description: "Show this command list" },
 	{ name: "/hooks", description: "List configured hooks" },
 	{ name: "/hooks disable", description: "Disable a hook — id", takesArgs: true },
@@ -385,6 +389,8 @@ export interface CommandDeps {
 	onRepaintHistory?: () => void | Promise<void>;
 	statusBar: StatusBarConfig;
 	setStatusBar: (s: StatusBarConfig) => void;
+	header: HeaderConfig;
+	setHeader: (h: HeaderConfig) => void;
 }
 
 /**
@@ -2960,6 +2966,28 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			deps.setStatusBar(picked);
 			showNotice(`[Status bar: ${picked.visible.length} segment${picked.visible.length === 1 ? "" : "s"}]`);
 			return;
+		},
+	},
+	{
+		match: (input) => input === "/header",
+		run: async ({ deps, showNotice }) => {
+			if (!deps.pickers.pickStatusBar) {
+				showNotice("[Header picker not available in this mode]");
+				return;
+			}
+			const picked = await deps.pickers.pickStatusBar(
+				headerSegments(),
+				{ ...deps.header, sides: {} },
+				{ title: "Header parts", sides: false },
+			);
+			if (picked === null) {
+				showNotice("[Cancelled — header unchanged]");
+				return;
+			}
+			const header = { visible: picked.visible, order: picked.order };
+			updateSettings({ header });
+			deps.setHeader(header);
+			showNotice(`[Header: ${header.visible.length} part${header.visible.length === 1 ? "" : "s"}]`);
 		},
 	},
 	{

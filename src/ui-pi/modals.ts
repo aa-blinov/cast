@@ -339,6 +339,7 @@ export class StatusBarModal implements Component {
 		private readonly segments: readonly StatusBarSegment[],
 		initial: StatusBarConfig,
 		private readonly done: (config: StatusBarConfig | null) => void,
+		private readonly opts: { title?: string; sides?: boolean } = {},
 	) {
 		const visible = new Set(initial.visible);
 		const order = initial.order.length > 0 ? initial.order : segments.map((s) => s.id);
@@ -389,8 +390,8 @@ export class StatusBarModal implements Component {
 		else if (data === " ") {
 			const item = this.items[this.cursor];
 			if (item) item.visible = !item.visible;
-		} else if (matchesKey(data, "left")) this.sideTo("left");
-		else if (matchesKey(data, "right")) this.sideTo("right");
+		} else if (this.opts.sides !== false && matchesKey(data, "left")) this.sideTo("left");
+		else if (this.opts.sides !== false && matchesKey(data, "right")) this.sideTo("right");
 		else if (data === "j" || data === "J") this.move(1);
 		else if (data === "k" || data === "K") this.move(-1);
 		else if (matchesKey(data, "enter")) {
@@ -409,12 +410,16 @@ export class StatusBarModal implements Component {
 			const focused = i === this.cursor;
 			return choiceRow(
 				focused ? "▸ " : "  ",
-				`${item.visible ? "[x]" : "[ ]"} ${labels.get(item.id) ?? item.id}  ${item.side}`,
+				`${item.visible ? "[x]" : "[ ]"} ${labels.get(item.id) ?? item.id}${this.opts.sides === false ? "" : `  ${item.side}`}`,
 				width - 4,
 				{ selected: focused, color: focused ? colors.accent : undefined },
 			);
 		});
-		return frame("Status bar segments", body, "space show – ←/→ side – j/k reorder – Enter save – Esc cancel", width);
+		const hint =
+			this.opts.sides === false
+				? "space show – j/k reorder – Enter save – Esc cancel"
+				: "space show – ←/→ side – j/k reorder – Enter save – Esc cancel";
+		return frame(this.opts.title ?? "Status bar segments", body, hint, width);
 	}
 }
 
@@ -695,8 +700,11 @@ export class ModalHost {
 				};
 			case "statusbar":
 				return {
-					component: new StatusBarModal(request.segments, request.initialConfig, (config) =>
-						request.resolve(config),
+					component: new StatusBarModal(
+						request.segments,
+						request.initialConfig,
+						(config) => request.resolve(config),
+						request.opts,
 					),
 				};
 			case "settings":

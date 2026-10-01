@@ -6,6 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
+- **`/header` chooses and orders the parts of the top row.** The row is now `CAST(1) * persona * model * v0.51.1 * folder`, joined by one ` * ` instead of padding to the edges, which a phone has no room for. Each part can be switched off or moved (also under Appearance in `/settings`); on a narrow screen the parts at the end drop first, whole. The model shown is the live one, so a `/model` change shows up.
 - **`cast-light`, a theme for light terminals, and `NO_COLOR`.** The new theme keeps the cast hues at 4.5:1 or better on white. With `NO_COLOR` set, cast draws no colour and relies on markers and words.
 - **`/settings` is a settings screen, not a menu of commands.** Toggles, the permission mode and the theme change in place (Space, Enter or ← → ) and are saved at once; each row shows what it is set to. Rows that need a list or a prompt (model, provider, persona, turn cap, status bar, skills, MCP) open it and bring the screen back after. Choosing `bypass` still asks first. `/theme`, `/permissions` and `/web` share the setters, so the screen and the commands cannot disagree.
 
@@ -16,6 +17,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Code was cut off mid-token on a narrow screen.** The extra indent of a code block was added after the lines had been wrapped, so a long line ran past the edge and was truncated. The indent is now counted when the line wraps (checked at 32 and 40 columns).
 - **The banner's gradient ignored the terminal's colour depth.** On a terminal without truecolor (macOS Terminal, many SSH clients) the screen used 256 colours but the `cast v…` wordmark still sent 24-bit codes. It now goes through the same colour path as everything else, and `NO_COLOR` applies to it.
 - **Modals showed scraps of the transcript beside them.** A picker or the settings screen now covers the full width with its box centred (at most 104 columns), so no half a word shows on either side.
 - **The banner and the hint line were cut in the middle of a word on a narrow terminal.** They now give up whole parts (the folder, then the model; the last hints first) until they fit. The settings screen also trims a long value (a provider URL) rather than the name beside it, and fits its list to a short window so its footer stays visible.
