@@ -730,6 +730,33 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("Cancelled");
 	});
 
+	it("/turn-cap shows the cap, sets it, resets it, and refuses nonsense without touching the model", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		const { deps, calls } = createFakeDeps();
+		const lastNotice = () => String(calls.showNotice?.at(-1)?.[0] ?? "");
+		await handleInput("/turn-cap", undefined, deps);
+		expect(lastNotice()).toContain("Per-turn cap: 500");
+		await handleInput("/turn-cap 800", undefined, deps);
+		expect(loadSettings().maxTurnIterations).toBe(800);
+		expect(lastNotice()).toContain("Per-turn cap: 800");
+		await handleInput("/turn-cap 5", undefined, deps);
+		expect(loadSettings().maxTurnIterations).toBe(800);
+		expect(lastNotice()).toContain("10 to 10000");
+		await handleInput("/turn-cap reset", undefined, deps);
+		expect(loadSettings().maxTurnIterations).toBeUndefined();
+		expect(calls["agent.submit"]).toBeUndefined();
+	});
+
+	it("/current lists the session once, not once as a heading and again as a segment", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/current", undefined, deps);
+		const shown = String(
+			(calls["agent.addDisplayMessage"]?.at(-1)?.[0] as { content?: string } | undefined)?.content ?? "",
+		);
+		expect(shown.split("\n").filter((line) => line.trim().startsWith("Session "))).toHaveLength(1);
+		expect(shown).toContain(deps.session.id);
+	});
+
 	it("/agents says so when the session has none", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/agents", undefined, deps);

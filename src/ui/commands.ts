@@ -68,6 +68,7 @@ import {
 	type PermissionMode,
 	type Provider,
 	type StatusBarConfig,
+	turnIterationCap,
 	updateSettings,
 } from "../core/settings.ts";
 import {
@@ -108,7 +109,14 @@ import type { Pickers, PickOption } from "../pickers/types.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
 import { headerSegments } from "./header.ts";
 import { getKeybindings, type Keybinding, TUI_KEYBINDINGS } from "./input/keybindings.ts";
-import { applyPermissionMode, buildSettingsForm, pickSettingFallback, setTheme, setWebTools } from "./settings-form.ts";
+import {
+	applyPermissionMode,
+	applyTurnCap,
+	buildSettingsForm,
+	pickSettingFallback,
+	setTheme,
+	setWebTools,
+} from "./settings-form.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.ts";
 import { ALL_THEMES, getActiveTheme } from "./themes/index.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
@@ -2969,6 +2977,17 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		},
 	},
 	{
+		match: (input) => input === "/turn-cap" || input.startsWith("/turn-cap "),
+		run: async ({ input, deps, showNotice }) => {
+			const arg = input.slice("/turn-cap".length).trim();
+			if (!arg) {
+				showNotice(`[Per-turn cap: ${turnIterationCap(loadSettings())} (applies on the next turn)]`);
+				return;
+			}
+			applyTurnCap(deps, arg);
+		},
+	},
+	{
 		match: (input) => input === "/header",
 		run: async ({ deps, showNotice }) => {
 			if (!deps.pickers.pickStatusBar) {
@@ -3264,7 +3283,6 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				if (!ordered.some((s) => s.id === seg.id)) ordered.push(seg);
 			}
 			const lines: string[] = [];
-			lines.push(`  ${"Session".padEnd(16)} ${session.id}`);
 			for (const seg of ordered) {
 				const value = seg.formatValue(ctxForCurrent) ?? "—";
 				lines.push(`  ${seg.label.padEnd(16)} ${value}`);
