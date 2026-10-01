@@ -144,13 +144,24 @@ describe("web bridge", () => {
 		mkdirSync(cwd, { recursive: true });
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
 		vi.useRealTimers();
 		process.env.HOME = realHome;
 		// A turn started in this non-git folder takes its undo snapshot with git in the
-		// background, which can still be writing under HOME when the test ends: retry
-		// the removal instead of failing it with ENOTEMPTY.
-		rmSync(fakeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+		// background, which can still be writing under HOME when the test ends (for longer
+		// than a second when the machine is loaded): keep retrying the removal, up to ten
+		// seconds, instead of failing the test with ENOTEMPTY.
+		for (let attempt = 0; ; attempt++) {
+			try {
+				rmSync(fakeHome, { recursive: true, force: true });
+				return;
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				if ((code !== "ENOTEMPTY" && code !== "EBUSY") || attempt >= 100) throw error;
+				// biome-ignore lint/performance/noAwaitInLoops: waits for the background snapshot to finish writing
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			}
+		}
 	});
 
 	it("sees a persona saved on disk at once: in the list and for /persona, no /reload", async () => {
