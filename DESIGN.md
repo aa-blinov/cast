@@ -113,7 +113,7 @@ Restrained: neutrals plus one accent. Every theme can supply these roles; the st
 
 ## Layout
 
-**Terminal.** Header row `CAST(1) * persona * model * v<version> * folder`, joined by one ` * ` and dropping parts from the end, whole, when narrow (the parts and their order are the user's, `/header`); a muted hint row; the conversation; the composer between two hairlines; a one-row status line `persona * mode * model * ctx … * took Ns` (also the user's, `/statusbar`). Conversation text is held to 100 columns however wide the terminal is; the header, composer and status row use the full width. Notices sit in the transcript at the indent or in one unbracketed line above the composer; errors use `  ✗ ` and red.
+**Terminal.** Header row `CAST(1) * v<version>`, joined by one ` * ` (the persona, model and folder are in the status row; `/header` can bring them back, and the parts and their order are the user's); a muted hint row; the conversation; the composer between two hairlines; a one-row status line `persona * mode * model * folder * ctx … * took Ns` (also the user's, `/statusbar`). Conversation text is held to 100 columns however wide the terminal is; the header, composer and status row use the full width. Notices sit in the transcript at the indent or in one unbracketed line above the composer; errors use `  ✗ ` and red.
 
 **Browser.** A sidebar of sessions (272px) beside the chat, a header with the connection dot, and the composer at the foot. On a phone (coarse pointer, under 768px) the sidebar is a drawer, the composer tightens, and every control has a 44px target; the page never scrolls sideways at 320px.
 

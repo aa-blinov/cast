@@ -31,6 +31,8 @@ export interface SegmentContext {
 	messages: import("../core/llm.ts").Message[];
 	sessionId: string;
 	worktree?: string;
+	/** The working folder, as the full path. */
+	cwd?: string;
 	/** Language servers running for this cast (ids), for the `lsp` segment. */
 	lspServers?: string[];
 }
@@ -74,6 +76,7 @@ export const SEGMENT_DROP_ORDER = [
 	"cost",
 	"lsp",
 	"usage",
+	"folder",
 	"context",
 	"worktree",
 	"persona",
@@ -125,6 +128,7 @@ export const SEGMENT_MAX_WIDTH: Record<string, number> = {
 	mode: 8,
 	model: 30,
 	worktree: 16,
+	folder: 28,
 	session: 16,
 	context: 22,
 	usage: 35,
@@ -169,6 +173,20 @@ registerStatusBarSegment({
 		}
 		return ctx.activeModel;
 	},
+});
+
+/** The folder with the home directory as `~`. */
+export function tildePath(path: string): string {
+	const home = process.env.HOME ?? "";
+	return home && path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+}
+
+registerStatusBarSegment({
+	id: "folder",
+	label: "Folder",
+	defaultOn: true,
+	side: "left",
+	formatValue: (ctx) => (ctx.cwd ? tildePath(ctx.cwd) : null),
 });
 
 registerStatusBarSegment({

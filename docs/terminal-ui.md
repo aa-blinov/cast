@@ -12,7 +12,7 @@ cast --resume             # pick a session: this folder's first, all of them one
 ## What you see
 
 ```
-CAST(1) * Senior Developer * mimo-v2.6-flash * v0.52.2 * ~/pet/cast
+CAST(1) * v0.52.3
 / commands * /settings * Esc Esc stops a turn * PageUp scrolls * Ctrl+C twice quits
 
 YOU
@@ -25,15 +25,15 @@ AGENT
 ────────────────────────────────────────────────────────────────
    ask cast to do anything
 ────────────────────────────────────────────────────────────────
-Senior Developer * BUILD * mimo-v2.6-flash * ctx 9.1k/168k (5%) * took 3s
+Senior Developer * BUILD * mimo-v2.6-flash * ~/pet/cast * ctx 9.1k/168k (5%) * took 3s
 ```
 
-- **Header.** `CAST(1)`, then the persona, the model, the version and the folder, joined by ` * `. On a narrow screen the parts at the end drop first, whole. Choose and order them with `/header`.
+- **Header.** `CAST(1)` and the version, joined by ` * `. The persona and the model are in the status row below, so the header keeps only the name; `/header` can bring back the persona, the model or the folder, and sets their order. On a narrow screen the parts at the end drop first, whole.
 - **Hint row.** The keys worth remembering; it drops hints from the end when the screen is narrow.
 - **The conversation** reads like a man page. Whoever speaks is a bold heading (`YOU`, `AGENT`, and `REASONING` when you have turned reasoning on), and the text sits four columns in; code sits four columns further. There are no coloured stripes: weight and indent do the work.
 - **Tool rows** sit at the same margin: `* bash ls src` is a finished call, `… bash …` one that is running, `✗ bash … failed` one that failed. The tool name is bold, the arguments quiet. A bash timeout appears only when the model chose one: `(timeout 10m)`.
 - **The composer** is the text between the two lines. While a turn runs, whatever you type steers it.
-- **The status row** is one row joined by ` * `: persona, mode (`BUILD` or `PLAN`), model, the share of the context used (`ctx 9.1k/168k (5%)`, amber from 70%, red from 90%), and `took 3s` once a turn ends. Choose and order the segments with `/statusbar`.
+- **The status row** is one row joined by ` * `: persona, mode (`BUILD` or `PLAN`), model, the working folder (`~/pet/cast`), the share of the context used (`ctx 9.1k/168k (5%)`, amber from 70%, red from 90%), and `took 3s` once a turn ends. Choose and order the segments with `/statusbar`.
 - **Notices** (`Cancelled — …`, `New session: …`) appear in one line above the composer.
 
 ## Typing

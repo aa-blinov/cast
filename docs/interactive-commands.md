@@ -206,7 +206,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 | `/web-search-provider` | Switch the `web_search` backend between DuckDuckGo (free, rate-limited), Tavily (API key, 1000 free/month), and Brave Search (API key) |
 | `/web-fetch-provider` | Switch `web_fetch` between Jina Reader and direct local fetch |
 | `/statusbar` | Toggle and reorder status bar segments (multi-select picker) |
-| `/header` | Choose and order the parts of the top row (`CAST(1) * persona * model * version * folder`): space shows or hides a part, j/k reorders. On a narrow screen parts drop from the end, whole, so the folder goes first. Also under Appearance in `/settings` |
+| `/header` | Choose and order the parts of the top row (`CAST(1) * version` by default; the persona, model and folder can be added): space shows or hides a part, j/k reorders. On a narrow screen parts drop from the end, whole, so the folder goes first. Also under Appearance in `/settings` |
 | `/theme` | Open theme picker |
 | `/theme <id>` | Switch to a specific theme |
 | `/turn-cap [N\|reset]` | Show/set the per-turn iteration safety cap (default 500, 10–10000); applies on the next agent call. Also configurable via `maxTurnIterations` in `settings.json` and Settings → Bash |

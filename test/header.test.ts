@@ -4,8 +4,16 @@ import { defaultHeaderConfig, headerSegments, headerTexts } from "../src/ui/head
 const ctx = { persona: "Senior Developer", model: "m1", version: "1.2.3", folder: "~/proj" };
 
 describe("header", () => {
-	it("shows persona, model, version and folder by default, the folder last so it goes first on a short row", () => {
-		expect(headerTexts(defaultHeaderConfig(), ctx)).toEqual(["Senior Developer", "m1", "v1.2.3", "~/proj"]);
+	it("shows only the version by default: persona, model and folder are in the status row", () => {
+		expect(headerTexts(defaultHeaderConfig(), ctx)).toEqual(["v1.2.3"]);
+	});
+
+	it("still lets persona, model and folder be switched back on, the folder last", () => {
+		const config = {
+			visible: ["persona", "model", "version", "folder"],
+			order: ["persona", "model", "version", "folder"],
+		};
+		expect(headerTexts(config, ctx)).toEqual(["Senior Developer", "m1", "v1.2.3", "~/proj"]);
 	});
 
 	it("follows the configured order and leaves out what is switched off", () => {

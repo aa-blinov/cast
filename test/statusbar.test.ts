@@ -245,3 +245,14 @@ describe("segment formatValue (/current)", () => {
 		expect(seg.formatValue(emptyCtx({ usage }))).toBe("$0.25");
 	});
 });
+
+describe("folder segment", () => {
+	it("shows the working folder with the home directory as ~, and nothing without one", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "folder")!;
+		const home = process.env.HOME ?? "";
+		expect(seg.defaultOn).toBe(true);
+		expect(seg.formatValue(emptyCtx({ cwd: `${home}/pet/cast` }))).toBe("~/pet/cast");
+		expect(seg.formatValue(emptyCtx({ cwd: "/srv/app" }))).toBe("/srv/app");
+		expect(seg.formatValue(emptyCtx())).toBeNull();
+	});
+});
