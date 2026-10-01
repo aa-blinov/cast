@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { lspStatus } from "../core/lsp/index.ts";
-import { formatMcpForPrompt } from "../core/mcp.ts";
+import { closeMcpConnections, formatMcpForPrompt } from "../core/mcp.ts";
 import { findPersona, listPersonas, type Persona } from "../core/personas.ts";
 import {
 	createPlanState,
@@ -15,7 +15,13 @@ import {
 	resolvePlanQuestion,
 	resolvePlanTransition,
 } from "../core/plan.ts";
-import { buildSystemPrompt, makeConfirmBash, personaOptionsForCwd, resolveSkillsForCwd } from "../core/project.ts";
+import {
+	buildSystemPrompt,
+	makeConfirmBash,
+	personaOptionsForCwd,
+	resolveMcpForCwd,
+	resolveSkillsForCwd,
+} from "../core/project.ts";
 import {
 	formatRulesForTurn,
 	matchAutoRules,
@@ -391,6 +397,17 @@ export function useAppModel(props: AppModelProps) {
 	const agent = useAgentSession({
 		onPersonaActivated: (name, mode) => {
 			pendingPersonaRef.current = { name, mode };
+		},
+		onMcpChanged: () => {
+			// The agent wrote an MCP config: connect what it added, so the list and the next turn have it now.
+			void (async () => {
+				const disabled = loadSettings().disabledMcpServers ?? [];
+				const namesOf = (r: { allServerNames: string[] }) => r.allServerNames.slice().sort().join(",");
+				const fresh = await resolveMcpForCwd(projectDeps, cwd, projectTrusted, disabled, /*skipConnect=*/ true);
+				if (namesOf(fresh) === namesOf(mcpResult)) return;
+				await closeMcpConnections(mcpResult.connections);
+				setMcpResult(await resolveMcpForCwd(projectDeps, cwd, projectTrusted, disabled));
+			})();
 		},
 		onSkillsChanged: () => {
 			void resolveSkillsForCwd(projectDeps, cwd, projectTrusted).then((next) => {

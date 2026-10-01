@@ -67,6 +67,7 @@ import {
 	streamAndCollect,
 } from "./llm.ts";
 import { closeMcpConnections, type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
+import { isMcpConfigPath } from "./mcp-config.ts";
 import {
 	type CheckpointWriterHandle,
 	type CheckpointWriterToolRuntime,
@@ -853,6 +854,8 @@ export type AgentEvent =
 	| { type: "interrupt_reminder" }
 	/** skill_install changed the installed set; hosts refresh slash commands. */
 	| { type: "skills_changed" }
+	/** write/edit changed an MCP config file; hosts reconnect the servers and refresh what they list. */
+	| { type: "mcp_changed" }
 	/** persona_create saved a persona; hosts refresh their persona lists. */
 	| { type: "personas_changed"; persona: string; activate?: PersonaActivation }
 	/** Build-mode todo_write call landed — carries the full replacement list. */
@@ -3896,9 +3899,14 @@ async function executeToolCalls(
 		cursor += group.length;
 	}
 
+	let mcpConfigChanged = false;
 	for (const { id, name, result } of results) {
 		onEvent({ type: "tool_end", id, name, result, status: completedToolCallStatus(result.isError) });
+		if ((name === "write" || name === "edit") && !result.isError) {
+			if (isMcpConfigPath(prepared.find((tc) => tc.id === id)?.args?.path)) mcpConfigChanged = true;
+		}
 	}
+	if (mcpConfigChanged) onEvent({ type: "mcp_changed" });
 
 	return results;
 }

@@ -399,6 +399,8 @@ interface UseAgentSessionParams {
 	onPersonaActivated?: (name: string, mode: PersonaActivation) => void;
 	/** The agent installed a skill (skill_install): the host re-reads the skills so the new one is a slash command now. */
 	onSkillsChanged?: () => void;
+	/** The agent changed an MCP config file: the host reconnects the servers it lists. */
+	onMcpChanged?: () => void;
 	/** Re-read persona overrides before a new turn so chat-created changes apply immediately. */
 	refreshPersonasForTurn?: () => Promise<{ persona: Persona; personas: Persona[]; systemPrompt: string }>;
 	/** Available personas for the task tool. */
@@ -570,6 +572,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	onPersonaActivatedRef.current = params.onPersonaActivated;
 	const onSkillsChangedRef = useRef(params.onSkillsChanged);
 	onSkillsChangedRef.current = params.onSkillsChanged;
+	const onMcpChangedRef = useRef(params.onMcpChanged);
+	onMcpChangedRef.current = params.onMcpChanged;
 	const {
 		session,
 		config,
@@ -1357,6 +1361,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							case "skills_changed":
 								onSkillsChangedRef.current?.();
 								break;
+							case "mcp_changed":
+								onMcpChangedRef.current?.();
+								break;
 							case "doom_loop":
 								pendingDoomWarningsRef.current.push(
 									`[doom loop] ${event.tool} blocked after ${event.attempts} identical calls`,
@@ -1711,6 +1718,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					break;
 				case "skills_changed":
 					onSkillsChangedRef.current?.();
+					break;
+				case "mcp_changed":
+					onMcpChangedRef.current?.();
 					break;
 				case "user_message":
 					setMessages((msgs) => {

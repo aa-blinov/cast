@@ -119,7 +119,7 @@ Extra paths (`--mcp`) work even with `--no-mcp`.
 
 `/mcp` toggle / `enable` / `disable` / `uninstall` reconnect servers **in the current session** (no `/reload`, no restart).
 
-Use `/reload` after editing `~/.cast/mcp.json` or `.cast/mcp.json` by hand (or adding a new server entry outside `/mcp`). See [Interactive commands](interactive-commands.md#hot-reload-vs-reload).
+When the agent itself writes or edits `~/.cast/mcp.json` or `.cast/mcp.json` (the `write` and `edit` tools), cast connects the new servers at once: they appear in `/mcp` and the agent has their tools on the next turn, no `/reload` and no restart. Use `/reload` after editing those files by hand or by any other program. Attached to the daemon, `/reload` reloads the daemon too, so the list and the agent's tools agree. See [Interactive commands](interactive-commands.md#hot-reload-vs-reload).
 
 ### Toggling Servers
 
