@@ -9,7 +9,6 @@ import {
 	type ViewportTUI,
 	VStack,
 } from "@earendil-works/pi-tui";
-import { countTurnMessages } from "../core/session.ts";
 import { skillInvocationLabel } from "../core/session-title.ts";
 import type { StatusBarConfig } from "../core/settings.ts";
 import type { AppModel } from "../ui/app-model.ts";
@@ -316,7 +315,8 @@ export class PiApp {
 			lastTurnUsage: agent.lastTurnUsage ?? undefined,
 			elapsedMs: agent.getElapsedMs(),
 			running: model.running,
-			messageCount: countTurnMessages(session.messages),
+			// What the screen shows, not `session.messages`: attached to the daemon that list is never filled in here.
+			messageCount: agent.messages.filter((m) => m.role === "user").length,
 			contextWindow: config.contextWindow,
 			maxResponseTokens: config.maxResponseTokens,
 			messages: session.messages,
