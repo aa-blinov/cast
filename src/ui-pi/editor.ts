@@ -42,6 +42,9 @@ export class CastEditor extends Editor {
 	}
 }
 
+/** A line that is just a slash and one word: a command typed so far. */
+const SLASH_WORD_RE = /^\/(\S+)$/;
+
 /**
  * Commands and paths as pi-tui completes them, with `@` files taken from the
  * project's own file listing (git-aware, no `fd` needed) rather than from `fd`.
@@ -68,7 +71,7 @@ export class CastAutocompleteProvider implements AutocompleteProvider {
 		const before = (lines[cursorLine] ?? "").slice(0, cursorCol);
 		// A hidden command typed in full is not in the list, so the fuzzy matches for it ("/ssh" gives
 		// "skills-sh") would be what Enter takes instead of what was typed.
-		const typed = /^\/(\S+)$/.exec(before);
+		const typed = SLASH_WORD_RE.exec(before);
 		if (cursorLine === 0 && lines.length === 1 && typed?.[1] && this.hiddenCommands.has(typed[1])) return null;
 		const mention = atTokenAt(before, before.length);
 		if (!mention) return this.inner.getSuggestions(lines, cursorLine, cursorCol, options);

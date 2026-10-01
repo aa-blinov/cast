@@ -33,6 +33,7 @@ import {
 	forkSession,
 	getHistoryPage,
 	type HistoryPage,
+	loadSession,
 	recordCompaction,
 	resetSessionContext,
 	type SessionState,
@@ -1852,15 +1853,24 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				}
 				case "turn_meta":
 					break;
-				case "session_end":
+				case "session_end": {
 					promoteStreamingToHistory();
 					updateStreaming(() => null, true);
+					// The daemon ran the turn, so its totals and messages are what the status row's token and
+					// context figures need; nothing else brings them over to this side.
+					if (event.usage) {
+						Object.assign(session.usage, event.usage);
+						setUsage({ ...session.usage });
+					}
+					const saved = loadSession(session.id)?.messages;
+					if (saved) session.messages = saved;
 					setStatus("idle");
 					// Daemon path never clears the live error on its own — a normal
 					// completion must drop any stale one (compaction-failed, etc.).
 					errorRef.current = null;
 					setError(null);
 					break;
+				}
 				case "end":
 					if (event.reason !== "aborted") notifyTerminal(turnEndNotice(event.reason));
 					if (event.reason === "aborted") {
@@ -1896,7 +1906,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		effectiveDaemonUrl,
 		effectiveDaemonToken,
 		daemonOverride,
-		session.id,
+		session,
 		promoteStreamingToHistory,
 		updateStreaming,
 		refresh,
