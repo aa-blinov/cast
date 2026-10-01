@@ -1578,6 +1578,9 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	}
 	/* Palette rows are tapped, not arrowed, on a phone. */
 	.cmd-item, .turn-retry .modal-btn { min-height: 44px; }
+	/* The session row is the thing tapped most; the search field and "Load more" sit in the same list. */
+	.sidebar-item, .sidebar-load-more, .sidebar-search { min-height: 44px; }
+	.sidebar-search { margin-bottom: 12px; }
 	.verify-btn { flex-basis: 44px; }
 
 	/* Controls packed into a row or onto a thumbnail keep their look; only the
