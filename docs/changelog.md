@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **`cast upgrade` no longer cuts off a turn that is running.** It stopped the daemon first and waited afterwards, so a request in progress ended as "Request interrupted — server restarted" with no response. It now asks the daemon whether any session is running a turn and waits for them to finish (up to two minutes) before restarting; if one is still running after that, the daemon stays on the old build and the message says how to restart it later.
+- **A remembered public address survives the restart in an upgrade.** The terminal screen checked whether the remembered port was free in the instant the old daemon was still letting go of it, called it taken, and started a private daemon. It now waits up to six seconds for the port to come free (or for the daemon `cast upgrade` starts to appear) before it falls back.
+
 ## 0.52.9
 
 ### Fixed
