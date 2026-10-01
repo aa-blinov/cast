@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.9
 
 ### Fixed
 - **A skill the agent installs is a slash command at once.** Asking cast to install a skill (from skills.sh, say) put it on disk, but `/<skill>` appeared in the list only after restarting the terminal screen: the agent reports the install with a `skills_changed` event, which the web UI handled and the terminal ignored. The terminal now re-reads the skills when it arrives, in both the local and the daemon mode, so the next turn's catalog has it as well.
