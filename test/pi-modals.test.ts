@@ -84,7 +84,7 @@ describe("OptionModal long labels", () => {
 });
 
 describe("OptionModal hints", () => {
-	it("sets a row's hint against the right edge, and gives way when the label needs the room", () => {
+	it("sets a row's hint against the right edge, and cuts the label before it rather than the hint", () => {
 		const modal = new OptionModal(
 			[
 				{ value: "m", label: "Model", hint: "mock-model" },
@@ -97,8 +97,47 @@ describe("OptionModal hints", () => {
 		const model = rows.find((row) => row.includes("Model"))!;
 		expect(model).toContain("mock-model");
 		expect(model.indexOf("mock-model")).toBeGreaterThan(model.indexOf("Model") + 10);
-		expect(rows.find((row) => row.includes("A rather long"))).not.toContain("value");
+		const long = rows.find((row) => row.includes("A rather long"))!;
+		expect(long).toContain("value");
+		expect(long).toContain("…");
 		for (const row of modal.render(50)) expect(visibleWidth(row)).toBe(50);
+	});
+
+	it("drops the hint only when there is no room for a readable label beside it", () => {
+		const modal = new OptionModal(
+			[{ value: "x", label: "Label", hint: "a hint that is far too wide" }],
+			undefined,
+			() => {},
+		);
+		for (const row of modal.render(24)) expect(visibleWidth(row)).toBe(24);
+	});
+});
+
+describe("OptionModal detail and keys", () => {
+	const rows = [
+		{ value: "once", label: "Allow once (y)", key: "y" },
+		{ value: "always", label: "Always allow (a)", key: "a" },
+		{ value: "block", label: "Block (n)", key: "n" },
+	];
+
+	it("shows what is being decided above the list, wrapped, with the rest of a long one marked", () => {
+		const detail = `needs confirmation\n${"rm -rf ".repeat(40)}`;
+		const modal = new OptionModal(rows, { title: "Allow this?", detail }, () => {});
+		const text = plain(modal.render(40).join("\n"));
+		expect(text).toContain("needs confirmation");
+		expect(text).toMatch(/… \d+ more rows/);
+		expect(text.indexOf("rm -rf")).toBeLessThan(text.indexOf("Allow once"));
+		for (const row of modal.render(40)) expect(visibleWidth(row)).toBe(40);
+	});
+
+	it("chooses a row at once by its own key, in either case, and not while the list is being filtered", () => {
+		const answers: unknown[] = [];
+		new OptionModal(rows, undefined, (v) => answers.push(v)).handleInput("n");
+		new OptionModal(rows, undefined, (v) => answers.push(v)).handleInput("A");
+		expect(answers).toEqual(["block", "always"]);
+		const filtered: unknown[] = [];
+		new OptionModal(rows, { search: {} }, (v) => filtered.push(v)).handleInput("y");
+		expect(filtered).toEqual([]);
 	});
 });
 

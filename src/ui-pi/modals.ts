@@ -8,6 +8,7 @@ import {
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
+	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { StatusBarConfig } from "../core/settings.ts";
 import { score } from "../pickers/match.ts";
@@ -99,21 +100,21 @@ function choiceRow(
 	const colors = theme();
 	const bg = o.selected ? surfaceHover() : undefined;
 	const width = Math.max(10, inner);
+	// The value (a date, a setting) is what the eye is looking for in a long row, so it keeps
+	// its room, up to half the width, and the label is cut before it.
+	const hint = o.hint ? truncateToWidth(o.hint, Math.max(0, Math.floor(width / 2)), "…") : "";
+	const labelRoom = width - visibleWidth(prefix) - (hint ? visibleWidth(hint) + 2 : 0);
+	const showHint = hint !== "" && labelRoom >= 8;
 	let text =
 		paint(prefix, { color: o.selected ? colors.accent : colors.muted, bg }) +
-		paint(truncateToWidth(label, Math.max(4, width - visibleWidth(prefix)), "…"), {
+		paint(truncateToWidth(label, Math.max(4, showHint ? labelRoom : width - visibleWidth(prefix)), "…"), {
 			color: o.color,
 			bold: o.selected && o.bold !== false,
 			bg,
 		});
-	if (o.hint) {
-		// The value sits against the right edge, quiet; it gives way when the label needs the room.
-		const room = width - visibleWidth(text) - 2;
-		if (room >= 4) {
-			const hint = truncateToWidth(o.hint, room, "…");
-			const gap = paint(" ".repeat(width - visibleWidth(text) - visibleWidth(hint)), { bg });
-			text += gap + paint(hint, { color: colors.muted, bg });
-		}
+	if (showHint) {
+		const gap = paint(" ".repeat(Math.max(1, width - visibleWidth(text) - visibleWidth(hint))), { bg });
+		text += gap + paint(hint, { color: colors.muted, bg });
 	}
 	return bg ? band(text, width, bg) : text;
 }
@@ -124,6 +125,18 @@ function keepVisible(idx: number, scroll: number, rows: number, length: number):
 	if (idx < next) next = idx;
 	else if (idx >= next + rows) next = idx - rows + 1;
 	return next;
+}
+
+const DETAIL_ROWS = 6;
+
+/** What is being decided, wrapped to the box and held to a few rows with the rest marked, so the choices stay in view. */
+function detailRows(detail: string, width: number): string[] {
+	const wrapped = detail.split("\n").flatMap((line) => wrapTextWithAnsi(line, Math.max(10, width)));
+	if (wrapped.length <= DETAIL_ROWS) return wrapped;
+	return [
+		...wrapped.slice(0, DETAIL_ROWS - 1),
+		paint(`… ${wrapped.length - DETAIL_ROWS + 1} more rows`, { color: theme().muted }),
+	];
 }
 
 /** A list to choose from, optionally filtered as you type. */
@@ -166,6 +179,11 @@ export class OptionModal<T> implements Component {
 
 	handleInput(data: string): void {
 		const count = this.shown.length;
+		const byKey = this.chosenByKey(data);
+		if (byKey) {
+			this.done(byKey.value);
+			return;
+		}
 		if (matchesKey(data, "up")) {
 			if (count > 0) this.idx = (this.idx - 1 + count) % count;
 		} else if (matchesKey(data, "down")) {
@@ -200,12 +218,19 @@ export class OptionModal<T> implements Component {
 		}
 	}
 
+	/** A row's own key chooses it at once, in a list that is not being filtered. */
+	private chosenByKey(data: string): PickOption<T> | undefined {
+		if (this.opts?.search || data.length !== 1) return undefined;
+		return this.shown.find((o) => o.key !== undefined && o.key.toLowerCase() === data.toLowerCase() && !o.locked);
+	}
+
 	render(width: number): string[] {
 		const colors = theme();
 		const rows = pickerRows();
 		this.scroll = keepVisible(this.idx, this.scroll, rows, this.shown.length);
 		const body: string[] = [];
 		if (this.opts?.error) body.push(paint(this.opts.error, { color: colors.error }), "");
+		if (this.opts?.detail) body.push(...detailRows(this.opts.detail, width - 4), "");
 		if (this.opts?.search) {
 			body.push(
 				paint("> ", { color: colors.muted }) + this.query + paint(" ", { color: colors.accent, bold: true }),
@@ -228,9 +253,11 @@ export class OptionModal<T> implements Component {
 			);
 			if (selected && o.description) body.push(`  ${paint(o.description, { color: colors.muted })}`);
 		});
-		const switchKeys = this.opts?.switchTo !== undefined ? ` – ←/→ ${this.opts.switchHint ?? "switch"}` : "";
-		const hint = `${this.opts?.search ? "type to filter" : "up/down select"} – Enter confirm${switchKeys} – Esc cancel${
-			this.shown.length > rows ? ` – ${this.idx + 1}/${this.shown.length}` : ""
+		const switchKeys = this.opts?.switchTo !== undefined ? ` * ←/→ ${this.opts.switchHint ?? "switch"}` : "";
+		const keys = this.options.flatMap((o) => (o.key ? [o.key] : []));
+		const choose = keys.length > 0 && !this.opts?.search ? `${keys.join("/")} choose * ` : "";
+		const hint = `${choose}${this.opts?.search ? "type to filter" : "up/down select"} * Enter confirm${switchKeys} * Esc cancel${
+			this.shown.length > rows ? ` * ${this.idx + 1}/${this.shown.length}` : ""
 		}`;
 		return frame(this.opts?.title, body, hint, width);
 	}
@@ -273,7 +300,7 @@ export class TextModal implements Component, Focusable {
 		if (this.request.error) body.unshift(paint(this.request.error, { color: colors.error }), "");
 		if (this.request.placeholder && this.input.getValue() === "")
 			body.push(paint(this.request.placeholder, { color: colors.muted }));
-		return frame(this.request.label, body, "Enter confirm – Esc cancel", width);
+		return frame(this.request.label, body, "Enter confirm * Esc cancel", width);
 	}
 }
 
@@ -326,7 +353,7 @@ export class MultiModal<T> implements Component {
 			);
 			if (focused && o.description) body.push(`  ${paint(o.description, { color: colors.muted })}`);
 		});
-		return frame(this.opts?.title, body, "space toggle – Enter confirm – Esc cancel", width);
+		return frame(this.opts?.title, body, "space toggle * Enter confirm * Esc cancel", width);
 	}
 }
 
@@ -417,8 +444,8 @@ export class StatusBarModal implements Component {
 		});
 		const hint =
 			this.opts.sides === false
-				? "space show – j/k reorder – Enter save – Esc cancel"
-				: "space show – ←/→ side – j/k reorder – Enter save – Esc cancel";
+				? "space show * j/k reorder * Enter save * Esc cancel"
+				: "space show * ←/→ side * j/k reorder * Enter save * Esc cancel";
 		return frame(this.opts.title ?? "Status bar segments", body, hint, width);
 	}
 }

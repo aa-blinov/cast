@@ -554,13 +554,14 @@ export function makeConfirmBash(pickers: Pickers, permissionMode: PermissionMode
 		}
 		const saves = rule ?? exactRule("bash", { command }, "");
 		pickers.log(`Needs confirmation: ${reason}\n  ${command}`);
+		// The question carries what it asks about: a transcript behind a full-width modal is out of sight on a phone.
 		const picked = await pickers.pickOption(
 			[
-				{ value: "once", label: "Allow once" },
-				{ value: "always", label: `Always allow: saves ${saves}` },
-				{ value: "block", label: "Block" },
+				{ value: "once", label: "Allow once (y)", key: "y" },
+				{ value: "always", label: `Always allow (a): saves ${saves}`, key: "a" },
+				{ value: "block", label: "Block (n)", key: "n" },
 			],
-			{ title: "Allow this?", signal },
+			{ title: "Allow this?", detail: `${reason}\n${command}`, signal },
 		);
 		if (picked === "always") addAllowRule(saves);
 		return picked === "once" || picked === "always";

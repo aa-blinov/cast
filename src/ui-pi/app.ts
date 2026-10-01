@@ -61,7 +61,7 @@ function findFd(): string | null {
 }
 
 const IDLE_PLACEHOLDER = "ask cast to do anything";
-const RUNNING_PLACEHOLDER = "type to steer the running turn – esc esc to stop";
+const RUNNING_PLACEHOLDER = "type to steer * esc esc to stop";
 const HINT_MS = 2000;
 const SPINNER_MS = 200;
 const MAX_PENDING_ROWS = 3;

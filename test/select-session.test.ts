@@ -114,6 +114,17 @@ describe("selectSession over summaries", () => {
 			expect(labels[1]?.some((l) => l.startsWith("~") || l.includes("proj"))).toBe(true);
 		});
 
+		it("puts the date and message count in the hint, so a narrow row keeps them", async () => {
+			seed();
+			let hints: Array<string | undefined> = [];
+			const pickers = fakePickers((options) => {
+				hints = options.filter((o) => (o.value as { action?: string }).action === "resume").map((o) => o.hint);
+				return null;
+			});
+			await selectSession(pickers, { cwd: project });
+			expect(hints[0]).toMatch(/^\d\d-\d\d \d\d:\d\d {2}\d+ msgs$/);
+		});
+
 		it("lists this directory's sessions first, with a way to show all", async () => {
 			const { mine } = seed();
 			let title: string | undefined;

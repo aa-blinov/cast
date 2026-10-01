@@ -190,10 +190,14 @@ function sessionRowOptions(sessions: SessionSummary[], withCwd: boolean): PickOp
 		const date = s.updatedAt.slice(0, 10);
 		const time = s.updatedAt.slice(11, 16);
 		const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
+		const when = `${date.slice(5)} ${time}  ${s.msgCount} msgs`;
 		return {
 			value: { id: s.id, action: "resume" as const },
 			// In this directory's own list the folder is the same on every row.
-			label: `${withCwd ? pad(cwd, 18) : ""}${pad(msgCol, 43)}${date} ${time}  ${s.msgCount} msgs`,
+			label: `${withCwd ? pad(cwd, 18) : ""}${msgCol}`,
+			// The date and count are what tell two sessions with the same first line apart, so
+			// they sit against the right edge and keep their room on a narrow screen.
+			hint: when,
 			description: firstMsg ? firstMsg : undefined,
 		};
 	});
