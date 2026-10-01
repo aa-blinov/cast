@@ -642,6 +642,14 @@ async function handleServerCommand(args: string[]): Promise<void> {
 
 	const started = await waitForStartup(child.pid!);
 	if (!started) {
+		// Not a failure when another daemon took the record first: the child saw it and left.
+		const registered = readLiveServerState();
+		if (registered && registered.pid !== child.pid) {
+			console.log(
+				`[cast server] already running (pid ${registered.pid}) — http://${registered.host}:${registered.port}`,
+			);
+			return;
+		}
 		console.error(`[cast server] failed to start — see ${LOG_FILE} for details`);
 		process.exit(1);
 	}
