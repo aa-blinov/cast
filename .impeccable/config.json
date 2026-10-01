@@ -1,0 +1,28 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-font",
+        "value": "ibm plex mono",
+        "createdAt": "2026-10-01T11:52:21.728Z"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "inter",
+        "createdAt": "2026-10-01T11:52:21.744Z"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "ibm plex sans",
+        "createdAt": "2026-10-01T11:52:21.767Z"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "work sans",
+        "createdAt": "2026-10-01T11:52:21.789Z"
+      }
+    ]
+  }
+}
