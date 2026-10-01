@@ -66,13 +66,11 @@ export function spanProps(span: Span): {
 			? syntaxColor(span.scope)
 			: span.tone === "code"
 				? colors.accent
-				: span.tone === "heading"
-					? colors.agent
-					: span.tone === "link"
-						? colors.accent
-						: span.tone === "quote" || span.tone === "marker" || span.tone === "rule"
-							? colors.muted
-							: undefined;
+				: span.tone === "link"
+					? colors.accent
+					: span.tone === "quote" || span.tone === "marker" || span.tone === "rule"
+						? colors.muted
+						: undefined;
 	return {
 		...(color ? { color } : {}),
 		...(span.bold ? { bold: true } : {}),

@@ -8,7 +8,7 @@ import { theme } from "../ui/themes/index.ts";
 import { PiApp } from "./app.ts";
 import { createStore, mountHeadless } from "./headless.ts";
 import { applyUserKeybindings } from "./keys.ts";
-import { gradientLine, type Paint, paint } from "./paint.ts";
+import { type Paint, paint } from "./paint.ts";
 import { setSurfaces } from "./surface.ts";
 
 const HINTS = ["/ commands", "/settings", "Esc Esc stops a turn", "PageUp scrolls", "Ctrl+C twice quits"];
@@ -20,12 +20,22 @@ export function fitParts(parts: string[], separator: string, width: number): str
 	return kept.join(separator);
 }
 
-/** `cast vX  ·  persona  ·  model  ·  folder`, dropping the folder, then the model, before anything is cut. */
+/** A man page's header row: `CAST(1)` left, persona and model centred, the version right; the centre gives up parts whole before anything is cut. */
 export function bannerLine(version: string, parts: string[], width: number, style: Paint): string {
-	const name = `cast v${version}`;
-	const kept = fitParts(parts, "  ·  ", Math.max(0, width - visibleWidth(name) - 5));
-	const fits = kept !== "" && visibleWidth(kept) + visibleWidth(name) + 5 <= width;
-	return gradientLine(name, { bold: true }) + (fits ? paint(`  ·  ${kept}`, style) : "");
+	const left = "CAST(1)";
+	const right = `v${version}`;
+	const room = width - visibleWidth(left) - visibleWidth(right) - 4;
+	const middle = room > 0 ? fitParts(parts, " * ", room) : "";
+	const fits = middle !== "" && visibleWidth(middle) <= room;
+	const lead = paint(left, { bold: true });
+	const tail = paint(right, { bold: true });
+	if (!fits)
+		return width >= visibleWidth(left) + visibleWidth(right) + 2
+			? lead + " ".repeat(width - visibleWidth(left) - visibleWidth(right)) + tail
+			: lead;
+	const free = width - visibleWidth(left) - visibleWidth(right) - visibleWidth(middle);
+	const before = Math.floor(free / 2);
+	return lead + " ".repeat(before) + paint(middle, style) + " ".repeat(free - before) + tail;
 }
 
 export interface PiFrontEndOptions {
@@ -80,8 +90,7 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 	const muted = { color: theme().muted };
 	const banner = (width: number) => [
 		bannerLine(options.version, [options.result.persona.label, options.result.session.model, where], width, muted),
-		paint(fitParts(HINTS, " · ", width), muted),
-		"",
+		paint(fitParts(HINTS, " * ", width), muted),
 	];
 	const app = new PiApp(tui, quit, options.onPasteImage, banner);
 	store.subscribe((model) => app.update(model));

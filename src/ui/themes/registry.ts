@@ -13,6 +13,7 @@ import { everforest } from "./everforest.ts";
 import { github } from "./github.ts";
 import { gruvbox } from "./gruvbox.ts";
 import { kanagawa } from "./kanagawa.ts";
+import { man } from "./man.ts";
 import { molokai } from "./molokai.ts";
 import { monokai } from "./monokai.ts";
 import { nightOwl } from "./night-owl.ts";
@@ -35,6 +36,7 @@ export const ALL_THEMES: Theme[] = [
 	github,
 	gruvbox,
 	kanagawa,
+	man,
 	molokai,
 	monokai,
 	nightOwl,
@@ -50,7 +52,7 @@ export const ALL_THEMES: Theme[] = [
 /** What the browser UI can show. */
 export const WEB_THEMES: Theme[] = ALL_THEMES.filter((t) => !t.terminalOnly);
 
-let active: Theme = cast;
+let active: Theme = man;
 
 /** Get the full active theme object. */
 export function getActiveTheme(): Theme {

@@ -3482,7 +3482,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			const chosen = await deps.pickers.pickOption(
 				rows.map((row) => ({
 					value: row,
-					label: `${row.queued ? "◌ " : row.running ? "● " : "  "}${row.subagent} · ${row.title ?? row.id}`,
+					label: `${row.queued ? "◌ " : row.running ? "● " : "  "}${row.subagent} * ${row.title ?? row.id}`,
 				})),
 				{ title: "Subagents of this session" },
 			);
@@ -3493,7 +3493,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 							{ value: "open" as const, label: "Watch it" },
 							{ value: "stop" as const, label: "Stop it" },
 						],
-						{ title: `${chosen.subagent} · ${chosen.title ?? chosen.id}` },
+						{ title: `${chosen.subagent} * ${chosen.title ?? chosen.id}` },
 					)
 				: "open";
 			if (!action) return;
@@ -3511,7 +3511,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[That subagent's session is gone.]");
 				return;
 			}
-			const label = `${chosen.subagent} · ${chosen.title ?? chosen.id}`;
+			const label = `${chosen.subagent} * ${chosen.title ?? chosen.id}`;
 			if (!deps.pickers.viewLive) {
 				deps.agent.addDisplayMessage({
 					role: "warning",
