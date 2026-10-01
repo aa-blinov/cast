@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.3
 
 ### Changed
 - **The start-up and loading box is compact and centred.** "Connecting to model…" sat in a box 80–90% of the screen wide with the text at its top-left and an empty row below it. The box now fits its label and is centred on the screen, with the line in the middle of it, one row of air above and below; it never asks for more columns than the screen has.
