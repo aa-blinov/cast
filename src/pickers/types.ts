@@ -63,6 +63,8 @@ export interface PickOptions<T = unknown> {
 /** A read-only text that keeps changing while it is open, such as a running subagent's session. */
 export interface LiveView {
 	title: string;
+	/** A fixed text to read from the top (a reference), not a log that is followed from the bottom. */
+	text?: boolean;
 	read(): { text: string; running: boolean };
 	/** Offered as a key while `running`. */
 	stop?(): void | Promise<void>;

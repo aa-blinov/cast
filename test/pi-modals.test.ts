@@ -9,6 +9,7 @@ import {
 	Sheet,
 	StatusBarModal,
 	StatusModal,
+	ViewModal,
 } from "../src/ui-pi/modals.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
@@ -423,5 +424,43 @@ describe("StatusModal", () => {
 	it("never asks for more columns than the screen has, nor fewer than a short label needs", () => {
 		expect(StatusModal.widthFor("x".repeat(200), 60)).toBe(60);
 		expect(StatusModal.widthFor("ok", 120)).toBe(32);
+	});
+});
+
+describe("ViewModal as a reference", () => {
+	const text = Array.from({ length: 80 }, (_, i) => `line ${i + 1}`).join("\n");
+
+	it("starts at the top of a fixed text, where a log would start at its end", () => {
+		const reference = new ViewModal(
+			{ title: "Keys", text: true, read: () => ({ text, running: false }) },
+			() => {},
+			() => {},
+		);
+		const shown = plain(reference.render(60).join("\n"));
+		expect(shown).toMatch(/line 1\b/);
+		expect(shown).not.toContain("line 80");
+		expect(shown).not.toContain("finished");
+		const log = new ViewModal(
+			{ title: "Run", read: () => ({ text, running: false }) },
+			() => {},
+			() => {},
+		);
+		expect(plain(log.render(60).join("\n"))).toContain("line 80");
+	});
+
+	it("scrolls down from the top and closes on Esc", () => {
+		let closed = false;
+		const reference = new ViewModal(
+			{ title: "Keys", text: true, read: () => ({ text, running: false }) },
+			() => {
+				closed = true;
+			},
+			() => {},
+		);
+		reference.render(60);
+		reference.handleInput("\x1b[6~");
+		expect(plain(reference.render(60).join("\n"))).not.toMatch(/line 1\b/);
+		reference.handleInput("\x1b");
+		expect(closed).toBe(true);
 	});
 });

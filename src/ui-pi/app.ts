@@ -264,7 +264,10 @@ export class PiApp {
 				.filter((s) => !builtin.has(`/${s.name}`))
 				.map((s) => ({ name: s.name, description: s.description, argumentHint: s.argumentHint })),
 		];
-		this.editor.setAutocompleteProvider(new CastAutocompleteProvider(commands, model.cwd, this.fdPath));
+		const hidden = new Set(
+			SLASH_COMMANDS.filter((c) => c.hidden && !c.name.includes(" ")).map((c) => c.name.slice(1)),
+		);
+		this.editor.setAutocompleteProvider(new CastAutocompleteProvider(commands, model.cwd, this.fdPath, hidden));
 	}
 
 	private syncHistory(sessionId: string, prompts: readonly string[]): void {
