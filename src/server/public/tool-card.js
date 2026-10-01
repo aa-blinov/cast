@@ -81,6 +81,24 @@ function formatToolResult(name, result) {
 	return value;
 }
 
+/** The one argument worth reading on a collapsed row: what the call acts on, not its settings. */
+const SUMMARY_KEYS = ["command", "file_path", "path", "pattern", "url", "query", "description", "prompt", "name"];
+
+export function toolSummary(args) {
+	let parsed;
+	try {
+		parsed = JSON.parse(args);
+	} catch {
+		return "";
+	}
+	if (!parsed || typeof parsed !== "object") return "";
+	const key = SUMMARY_KEYS.find((k) => typeof parsed[k] === "string" && parsed[k].trim()) ?? Object.keys(parsed).find((k) => typeof parsed[k] === "string" && parsed[k].trim());
+	return key ? parsed[key].trim().split("\n")[0] : "";
+}
+
+/** A word and a mark as well as a colour, so the state survives colour blindness and no-colour modes. */
+const STATUS_MARKS = { ok: "*", running: "\u2026", error: "\u2717" };
+
 function parseArgs(args) {
 	try {
 		return JSON.parse(args) ?? {};
@@ -157,24 +175,28 @@ export function ToolCard({ call, renderMarkdown }) {
 	const args = formatArgsFull(call.args);
 	const mcp = isMcpTool(call.name);
 	const hasResult = Boolean(call.result) || Boolean(call.images?.length);
+	const summary = toolSummary(call.args);
+	const expandable = Boolean(args) || hasResult;
 	return html`
 		<div class="tool-card">
 			<div
-				class="tool-card-header${hasResult ? " clickable" : ""}"
+				class="tool-card-header${expandable ? " clickable" : ""}"
 				data-tool=${call.name}
-				role=${hasResult ? "button" : undefined}
-				tabIndex=${hasResult ? 0 : undefined}
-				aria-expanded=${hasResult ? open : undefined}
-				onClick=${hasResult ? () => setOpen((openState) => !openState) : undefined}
-				onKeyDown=${hasResult ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((s) => !s); } } : undefined}
+				role=${expandable ? "button" : undefined}
+				tabIndex=${expandable ? 0 : undefined}
+				aria-expanded=${expandable ? open : undefined}
+				onClick=${expandable ? () => setOpen((openState) => !openState) : undefined}
+				onKeyDown=${expandable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((s) => !s); } } : undefined}
 			>
+				<span class="tool-card-status ${statusClass}" role="img" aria-label=${statusClass}>${STATUS_MARKS[statusClass] ?? "*"}</span>
 				${mcp && html`<span class="tool-card-mcp-badge">MCP</span>`}
 				<span class="tool-card-name">${mcp ? mcpToolLabel(call.name) : call.name}</span>
-				<span class="tool-card-status ${statusClass}" role="img" aria-label=${statusClass} />
-				${hasResult && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
+				${summary && html`<span class="tool-card-summary">${summary}</span>`}
+				${statusClass === "error" && html`<span class="tool-card-failed">failed</span>`}
+				${expandable && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
 			</div>
 			${call.name === "task" && html`<${TaskLine} call=${call} />`}
-			${args && html`<div class="tool-card-body">${args}</div>`}
+			${open && args && html`<div class="tool-card-body">${args}</div>`}
 			${
 				open &&
 				call.images?.length &&

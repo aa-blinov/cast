@@ -11,6 +11,8 @@ All notable user-facing changes to cast, newest first.
 - **The browser now shares the terminal's look.** The `man` theme (one ochre accent, quiet greys) is available in the browser and is the fallback before a theme loads, instead of the violet one; the group labels in the sessions list are muted rather than accent-coloured. `DESIGN.md` now describes both screens.
 - **Bigger touch targets in the browser sidebar.** On a phone the session rows, the search field and "Load more" are 44px tall, and the search field has room above the first date.
 - **Calmer web chrome.** The header's gradient text and the coloured glow around the connection dot are gone; the state is still carried by the dot's colour and its tooltip.
+- **Tool calls in the browser are one-line rows**, like in the terminal: `* bash git status`, with the name in bold, the main argument muted, `…` while running and `✗ … failed` when it failed. The card, the name chip and the colour-only dot are gone; click a row for the full arguments and the result.
+- **Browser clean-ups from a design critique.** The persona line above the composer is plain bold text instead of accent capitals; the side panel opens on Files instead of an empty Changes tab; the panel tabs, settings controls, modal buttons and login form are 44px tall on a phone; the turn footer uses ` * ` between provider, model and time; three off-scale radii and one font size are back on the scale.
 
 ## 0.52.2
 

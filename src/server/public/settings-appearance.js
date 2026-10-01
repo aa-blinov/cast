@@ -36,7 +36,7 @@ function SettingsFont({ options, scales, currentFontId, currentFontScale, onPick
 function SettingsCustomCss({ customCss, onSave }) {
 	return html`<div class="settings-rows"><div class="settings-section-title">Custom CSS</div>
 		<p class="settings-hint">Injected as <code>${"<style id=\"cast-custom-css\">"}</code> — survives reload, syncs across tabs via storage event.</p>
-		<textarea class="settings-textarea" rows="4" aria-label="Custom CSS" placeholder="/* e.g. .message { border-left: 2px solid var(--cyan) } */" value=${customCss} onInput=${(e) => onSave(e.target.value)} style="font-family:var(--font-mono);font-size:var(--fs-ui)"></textarea>
+		<textarea class="settings-textarea" rows="4" aria-label="Custom CSS" placeholder="/* e.g. .message-content { max-width: 80ch } */" value=${customCss} onInput=${(e) => onSave(e.target.value)} style="font-family:var(--font-mono);font-size:var(--fs-ui)"></textarea>
 	</div>`;
 }
 

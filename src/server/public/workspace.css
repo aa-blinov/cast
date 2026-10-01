@@ -671,7 +671,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .fs-row.drop, .fs-tree.drop { outline: 1px dashed var(--cyan); outline-offset: -2px; }
 .fs-row.current .fs-name { color: var(--cyan); }
 .fs-row-main.ignored { opacity: .5; }
-.fs-tag { flex-shrink: 0; margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); font-size: 11px; }
+.fs-tag { flex-shrink: 0; margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); font-size: var(--fs-micro); }
 .fs-empty-dir { color: var(--text-muted); font-size: var(--fs-ui); padding: 3px 0; }
 .fs-more, .fs-more-note { color: var(--text-muted); font-size: var(--fs-ui); }
 .fs-more { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px 8px; margin: 4px 0; cursor: pointer; font-family: var(--font); }

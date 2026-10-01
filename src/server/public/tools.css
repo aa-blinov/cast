@@ -2,51 +2,52 @@
 .tool-card {
 	font-family: var(--font-mono);
 	font-size: var(--fs-ui);
-	border-radius: var(--radius-sm);
-	margin: 4px 0;
-	overflow: hidden;
-	background: var(--bg-surface);
-	border: 1px solid var(--border);
+	margin: 2px 0;
 }
+/* One row, as in the terminal: mark, bold name, muted argument, and the word "failed" when it did. */
 .tool-card-header {
-	display: flex; align-items: center; gap: 8px;
-	padding: 7px 10px;
+	display: flex; align-items: baseline; gap: 8px;
+	padding: 3px 0;
+	min-width: 0;
 }
 .tool-card-header.clickable { cursor: pointer; }
-.tool-card-header.clickable:hover { background: var(--bg-raised); }
+.tool-card-header.clickable:hover .tool-card-name { text-decoration: underline; }
 .tool-card-toggle {
 	color: var(--text-muted);
 	flex-shrink: 0;
+	align-self: center;
 }
 .tool-card-name {
-	color: var(--blue);
-	font-weight: 400;
-	background: var(--bg-raised);
-	border: 1px solid var(--border);
-	border-radius: 4px;
-	padding: 1px 6px;
-	font-size: var(--fs-ui);
+	color: var(--text);
+	font-weight: 600;
+	flex-shrink: 0;
+}
+.tool-card-summary {
+	color: var(--text-muted);
+	min-width: 0; flex: 1 1 auto;
+	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tool-card-mcp-badge {
 	color: var(--text-muted);
 	font-size: var(--fs-micro);
 	font-weight: 600;
 	letter-spacing: .04em;
-	border: 1px solid var(--border);
-	border-radius: 4px;
-	padding: 1px 5px;
+	flex-shrink: 0;
 }
 .tool-card-status {
-	width: 6px; height: 6px;
-	border-radius: 50%; flex-shrink: 0;
-	margin-left: auto;
+	width: 1.5ch; flex-shrink: 0;
+	text-align: center;
+	color: var(--text-muted);
 }
-.tool-card-status.running { background: var(--amber); }
-.tool-card-status.ok { background: var(--green); }
-.tool-card-status.error { background: var(--rose); }
+.tool-card-status.running { color: var(--cyan); }
+.tool-card-status.error { color: var(--status-error-fg); }
+.tool-card-failed { color: var(--status-error-fg); flex-shrink: 0; }
 .tool-card-body {
-	padding: 8px 10px;
-	border-top: 1px solid var(--border);
+	margin: 2px 0 4px calc(1.5ch + 8px);
+	padding: 6px 10px;
+	border: 1px solid var(--border-subtle);
+	border-radius: 4px;
+	background: var(--bg-surface);
 	color: var(--text-dim);
 	font-size: var(--fs-ui);
 	white-space: pre-wrap;
@@ -56,11 +57,10 @@
 }
 .tool-card-task {
 	display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
-	padding: 6px 10px;
-	border-top: 1px solid var(--border);
+	padding: 2px 0 2px calc(1.5ch + 8px);
 	color: var(--text-dim);
 }
-.tool-card-task-agent { color: var(--blue); }
+.tool-card-task-agent { color: var(--text); font-weight: 600; }
 .tool-card-task-title { color: var(--text); }
 .tool-card-task-detail {
 	color: var(--text-muted);
@@ -78,14 +78,15 @@
 	cursor: pointer;
 }
 .tool-card-task-btn:hover { color: var(--text); }
-.tool-card-task-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.tool-card-task-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
 .tool-card-images {
-	padding: 8px 10px;
-	border-top: 1px solid var(--border);
+	padding: 4px 0 4px calc(1.5ch + 8px);
 }
 .tool-card-result {
-	padding: 8px 10px;
-	border-top: 1px dashed var(--border);
+	margin: 2px 0 4px calc(1.5ch + 8px);
+	padding: 6px 10px;
+	border: 1px solid var(--border-subtle);
+	border-radius: 4px;
 	background: var(--bg);
 	color: var(--text-dim);
 	font-size: var(--fs-ui);
@@ -131,4 +132,8 @@
 /* Open / Stop on a task card: 40px tall where there is no hover. */
 @media (pointer: coarse), (max-width: 768px) {
 	.tool-card-task-btn { min-height: 40px; padding: 6px 14px; }
+}
+/* The row is the tap target on a phone. */
+@media (pointer: coarse) {
+	.tool-card-header.clickable { min-height: 44px; align-items: center; }
 }
