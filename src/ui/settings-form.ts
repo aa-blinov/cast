@@ -49,11 +49,22 @@ export function setWebTools(deps: CommandDeps, enabled: boolean): void {
 /** "10-10000", or "reset" for the default. Returns the new cap, or a reason it was refused. */
 export function parseTurnCap(raw: string): { cap: number | undefined } | { error: string } {
 	const text = raw.trim().toLowerCase();
-	if (text === "reset" || text === "") return { cap: undefined };
+	if (text === "reset" || text === "off" || text === "") return { cap: undefined };
 	const n = Number(text);
 	if (!Number.isInteger(n) || n < 10 || n > 10_000)
 		return { error: "Usage: a whole number from 10 to 10000, or reset" };
 	return { cap: n };
+}
+
+/** Sets the per-turn cap from what was typed (`/turn-cap 800`, or the settings prompt); says what happened. */
+export function applyTurnCap(deps: CommandDeps, raw: string): void {
+	const parsed = parseTurnCap(raw);
+	if ("error" in parsed) {
+		deps.showNotice(`[${parsed.error}]`);
+		return;
+	}
+	updateSettings({ maxTurnIterations: parsed.cap });
+	deps.showNotice(`[Per-turn cap: ${parsed.cap ?? DEFAULT_TURN_CAP}${parsed.cap === undefined ? " (default)" : ""}]`);
 }
 
 /**
@@ -179,14 +190,7 @@ export function buildSettingsForm(deps: CommandDeps, runCommand: (input: string)
 							String(cap),
 							String(DEFAULT_TURN_CAP),
 						);
-						if (raw === null) return;
-						const parsed = parseTurnCap(raw);
-						if ("error" in parsed) {
-							deps.showNotice(`[${parsed.error}]`);
-							return;
-						}
-						updateSettings({ maxTurnIterations: parsed.cap });
-						deps.showNotice(`[Per-turn cap: ${parsed.cap ?? DEFAULT_TURN_CAP}]`);
+						if (raw !== null) applyTurnCap(deps, raw);
 					},
 				},
 				{

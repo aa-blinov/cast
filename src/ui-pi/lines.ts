@@ -55,7 +55,8 @@ export function sectionLines(lines: RenderedLine[], options: SectionOptions = {}
 				});
 			})
 			.join("");
-		out.push(pad + text);
+		// A blank line stays empty: indent-only rows copy out as trailing spaces.
+		out.push(text === "" ? "" : pad + text);
 	}
 	return out;
 }

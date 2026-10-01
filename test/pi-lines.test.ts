@@ -79,6 +79,11 @@ describe("sectionLines", () => {
 		expect(rejoined).toContain(code.replace(/\s+/g, ""));
 	});
 
+	it("leaves a blank line in the text empty, not padded with the indent", () => {
+		const lines = sectionLines(renderMarkdownLines("one\n\ntwo", { width: 40 }), { heading: "AGENT" });
+		expect(lines.map(plain)).toEqual(["", "AGENT", "    one", "", "    two"]);
+	});
+
 	it("puts no heading on a continued block, and a blank row on a notice", () => {
 		expect(sectionLines(renderMarkdownLines("more", { width: 40 })).map(plain)).toEqual(["    more"]);
 		expect(sectionLines(renderMarkdownLines("note", { width: 40 }), { gap: true, quiet: true }).map(plain)).toEqual([
