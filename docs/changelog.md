@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.7
 
 ### Fixed
 - **Context and token figures in the status row work when attached to the daemon.** `ctx 10.5k/168k (6%)` and `41.5k in / 27 out` never appeared in the default (daemon) mode, because the client ignored the totals and messages the daemon sends when a turn ends. It now takes them over, so both follow each turn as they do without the daemon.
