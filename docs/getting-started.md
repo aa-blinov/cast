@@ -49,6 +49,8 @@ cast -m qwen/qwen3-235b-a22b -r high "refactor this function"
 cast -c
 ```
 
+The screen, its keys and how to read it are in [The Terminal Screen](terminal-ui.md). When you quit, cast prints the command to continue the session; `cast shell-init >> ~/.zshrc` (once) also puts it in your shell history, so Up brings it back.
+
 ## Provider Setup
 
 On first run, cast asks for your provider URL and API key, then saves both to `~/.cast/settings.json`. No `.env` file needed.
@@ -98,5 +100,6 @@ Subsequent launches remember choices and enter the TUI directly. A launch checks
 ## Next Steps
 
 - [CLI Reference](cli-reference.md) for flags and subcommands
+- [The Terminal Screen](terminal-ui.md) for how to read, type, scroll and choose in the TUI
 - [Interactive Commands](interactive-commands.md) for TUI commands
 - [Configuration](configuration.md) for settings and layout options
