@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.6
 
 ### Fixed
 - **The `ssh` tool answers on its timeout and on Esc.** With the connection reuse cast sets up, a `sleep 30` with a 2 s timeout reported "TIMED OUT after 2000ms" only after 30 s, because the persistent master held the pipes until the remote command ended. The call now returns half a second after the client is stopped.
