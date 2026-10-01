@@ -254,10 +254,17 @@ describe("StatusBarModal without sides (the header's list)", () => {
 
 	it("leaves out the side column and its hint, and ignores ← and →", () => {
 		let saved: unknown;
-		const modal = new StatusBarModal(segments, initial, (config) => (saved = config), {
-			title: "Header parts",
-			sides: false,
-		});
+		const modal = new StatusBarModal(
+			segments,
+			initial,
+			(config) => {
+				saved = config;
+			},
+			{
+				title: "Header parts",
+				sides: false,
+			},
+		);
 		const text = plain(modal.render(80).join("\n"));
 		expect(text).toContain("Header parts");
 		expect(text).not.toContain("left");
@@ -269,7 +276,14 @@ describe("StatusBarModal without sides (the header's list)", () => {
 
 	it("still reorders and hides with j/k and space", () => {
 		let saved: { visible: string[]; order: string[] } | null = null;
-		const modal = new StatusBarModal(segments, initial, (config) => (saved = config), { sides: false });
+		const modal = new StatusBarModal(
+			segments,
+			initial,
+			(config) => {
+				saved = config;
+			},
+			{ sides: false },
+		);
 		modal.handleInput(" ");
 		modal.handleInput("j");
 		modal.handleInput("\r");

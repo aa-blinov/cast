@@ -69,7 +69,7 @@ describe("sectionLines", () => {
 	});
 
 	it("wraps code that is too long for a phone screen, instead of cutting it off", () => {
-		const code = "const greeting = (name: string): string => `hello, ${name} from the transcript`;";
+		const code = 'const greeting = (name: string): string => hello + name + " from the transcript";';
 		const rows = blockLines(
 			{ kind: "content" as const, text: `\`\`\`ts\n${code}\n\`\`\`` },
 			{ width: 32, showReasoning: false },
