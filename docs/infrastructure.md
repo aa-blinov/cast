@@ -63,7 +63,7 @@ For development, `npm run dev:web` starts the browser surface in the foreground;
 ## Auth
 
 - **Loopback bind** (`127.0.0.1` / `localhost`): the daemon writes a local-only `token` into `~/.cast/server.json`. The TUI reads it from there and skips the browser's interactive login (trust-localhost). The token is never sent over the network by the daemon.
-- **Non-loopback bind** (`--host 0.0.0.0` / `--public`): the daemon still records the local token, and a TUI on the same machine connects through `127.0.0.1`. The server accepts that token only from a loopback socket; remote browsers always use password login. Plain HTTP over a non-loopback bind is unencrypted. Use it only on a trusted LAN, or keep loopback and tunnel with `ssh -L`.
+- **Non-loopback bind** (`--host 0.0.0.0` / `--public`; the address is remembered in `settings.json` as `serverBind`, so daemons started later by the terminal screen or `cast upgrade` bind it too): the daemon still records the local token, and a TUI on the same machine connects through `127.0.0.1`. The server accepts that token only from a loopback socket; remote browsers always use password login. Plain HTTP over a non-loopback bind is unencrypted. Use it only on a trusted LAN, or keep loopback and tunnel with `ssh -L`.
 
 ## Why single-writer
 

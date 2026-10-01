@@ -105,6 +105,8 @@ First run generates a password, printed to the terminal and saved in `~/.cast/se
 
 Binding to a non-loopback address (`--host 0.0.0.0` or `--public`) exposes plain HTTP. Use it only on a trusted LAN: without HTTPS, a network observer can read the password and session. For remote access without a domain, keep the default loopback binding and use `ssh -L 1337:127.0.0.1:1337 user@host`.
 
+**The address is remembered.** An address you choose with `--public`, `--host` or `--port` is saved in `~/.cast/settings.json` (`serverBind`). A daemon started later without those flags binds the same address: `cast server start`, the terminal screen when it has to start the daemon itself, and `cast upgrade` restarting it. Before this, an open `cast` window answered every `cast server stop` by starting a private daemon on a random port faster than you could start the public one, and `cast upgrade` could lose the public address the same way. If the remembered port is taken by something else, the terminal screen falls back to a private daemon instead of failing. To forget it: `cast server stop`, then `cast server start --port 0`.
+
 Starting when another instance is already running prints an error and exits. `stop` gracefully shuts down open sessions (SIGTERM), escalating to SIGKILL after 3 seconds if the process doesn't exit. If the recorded process is already gone (crash, OOM, `kill -9`), `status` and `stop` detect the stale state, clean up, and report honestly.
 
 Features:
