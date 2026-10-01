@@ -164,8 +164,8 @@ export function buildSettingsForm(deps: CommandDeps, runCommand: (input: string)
 					description: "The model's thinking, when it sends it",
 					value: showReasoning,
 					set: (value) => {
-						if (deps.agent.showReasoning !== value) showReasoning = deps.agent.toggleReasoning();
-						else showReasoning = value;
+						// Against the form's own value: `deps.agent.showReasoning` is the snapshot from when the screen opened.
+						if (showReasoning !== value) showReasoning = deps.agent.toggleReasoning();
 						return undefined;
 					},
 				},
