@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { ensureControlDir, loadSshConfig, resolveSshHosts, validateKeyPermissions } from "../src/core/ssh.ts";
+import { execSsh } from "../src/core/tools/ssh.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__test_tmp__", "ssh");
@@ -343,5 +344,39 @@ describe("ensureControlDir", () => {
 
 		expect(ensureControlDir()).toBe(join(dir, "%C.sock"));
 		expect(statSync(dir).mode & 0o777).toBe(0o700);
+	});
+});
+
+// ============================================================================
+// execSsh: a killed client must not wait for the remote command
+// ============================================================================
+
+describe("execSsh timeout", () => {
+	it("answers soon after the timeout even when something outside the process group keeps the pipes open", async () => {
+		// Stands in for ControlMaster, whose persistent master holds the client's pipes until the remote command ends.
+		const bin = join(TEST_DIR, "bin");
+		mkdirSync(bin, { recursive: true });
+		const fake = join(bin, "ssh");
+		writeFileSync(fake, "#!/bin/sh\nsetsid sleep 6 &\nexec sleep 30\n", "utf-8");
+		chmodSync(fake, 0o755);
+		const oldPath = process.env.PATH;
+		const oldCtl = process.env.CAST_SSH_CONTROL_DIR;
+		process.env.PATH = `${bin}:${oldPath}`;
+		process.env.CAST_SSH_CONTROL_DIR = join(TEST_DIR, "ctl");
+		try {
+			const started = Date.now();
+			const result = await execSsh(
+				{ host: "box", command: "sleep 30", timeout: 1000 },
+				[{ name: "box", host: "127.0.0.1" }],
+				mockConfig,
+			);
+			expect(result.isError).toBe(true);
+			expect(String(result.content)).toContain("TIMED OUT");
+			expect(Date.now() - started).toBeLessThan(3500);
+		} finally {
+			process.env.PATH = oldPath;
+			if (oldCtl === undefined) delete process.env.CAST_SSH_CONTROL_DIR;
+			else process.env.CAST_SSH_CONTROL_DIR = oldCtl;
+		}
 	});
 });

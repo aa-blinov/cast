@@ -5,6 +5,7 @@ All notable user-facing changes to cast, newest first.
 ## Unreleased
 
 ### Fixed
+- **The `ssh` tool answers on its timeout and on Esc.** With the connection reuse cast sets up, a `sleep 30` with a 2 s timeout reported "TIMED OUT after 2000ms" only after 30 s, because the persistent master held the pipes until the remote command ended. The call now returns half a second after the client is stopped.
 - **"Show reasoning in the transcript" in `/settings` showed the wrong value and every second flip did nothing.** `toggleReasoning` handed back the value from before the flip, so the row and the real setting drifted apart. It now returns the new value, and `/rd` reports the right state too.
 - **`/ssh` (and any command hidden from the `/` list, such as `/skills`) runs what you typed.** Typing `/ssh` and pressing Enter ran `/skills-sh`: the list offered fuzzy neighbours of the hidden command and Enter took the first one. A hidden command typed in full now shows no suggestions, so Enter sends it as it is.
 - `/current` shows the working folder row it has had no value for since the folder moved to the status row.
