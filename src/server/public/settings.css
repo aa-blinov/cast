@@ -356,6 +356,10 @@
 	letter-spacing: .04em;
 	margin-bottom: 6px;
 }
+/* More air above a sub-heading than below it, so it reads as the head of the row that follows. */
+.settings-row-label:not(:first-child) { margin-top: 10px; }
+/* A section nested in the form is its own first child, which drops the title's top margin. */
+.settings-rows > .settings-rows { margin-top: 16px; }
 .settings-font-settings {
 	display: flex;
 	flex-direction: column;

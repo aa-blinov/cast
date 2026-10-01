@@ -1004,7 +1004,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 /* ── Scrollbar ────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-active); }
 
 /* ── Modal / directory browser ───────────────────────────────────────── */
@@ -1307,7 +1307,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	background: var(--bg);
 	border: 1px solid var(--border);
 	border-bottom-width: 2px;
-	border-radius: 5px;
+	border-radius: 4px;
 	color: var(--text-muted);
 	line-height: 1;
 }
@@ -1476,7 +1476,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	font-size: var(--fs-ui);
 	background: var(--bg-inset);
 	padding: 1px 4px;
-	border-radius: 3px;
+	border-radius: 4px;
 }
 /* Section title inside the modal — sits above a control block. Kept local to
  * the new-session modal so it doesn't drag in the settings-panel typography
@@ -1506,7 +1506,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	font-size: var(--fs-ui);
 	background: var(--bg-inset);
 	padding: 1px 4px;
-	border-radius: 3px;
+	border-radius: 4px;
 	color: var(--text);
 }
 /* Containerised cwd preview shown under the Select dir / Sandbox pair.

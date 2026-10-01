@@ -32,6 +32,7 @@ typography:
     fontWeight: 600
     letterSpacing: "0.06em"
 rounded:
+  xs: "4px"
   sm: "6px"
   md: "8px"
 spacing:
@@ -127,7 +128,7 @@ Flat. Depth is tonal layering (ink, surface, raised, hover) and hairline rules; 
 
 ## Shapes
 
-Hairline boxes. Terminal modals are a muted box with a bold title, centred on the screen and at most 104 columns wide. Browser fields and rows use a 6px radius, panels 8px; no pill shapes, no nested cards.
+Hairline boxes. Terminal modals are a muted box with a bold title, centred on the screen and at most 104 columns wide. Small inline things (code chips, scrollbar thumbs, tags) use a 4px radius, browser fields and rows 6px, panels 8px; the one pill is the warning badge. No nested cards. Modal backdrops are a translucent black scrim, the only non-palette colour.
 
 ## Components
 
