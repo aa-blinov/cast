@@ -1,16 +1,15 @@
 import type { Theme } from "./types.ts";
 
 /**
- * The default for the terminal: the page is the terminal's own, and colour is held back
- * for what needs it. One ochre accent marks the chosen row, a command or a path; red is
- * failure and nothing else. Text colours are lifted to 4.5:1 on whatever the terminal's
- * background turns out to be, so the same palette serves a light terminal.
+ * The default on both screens: colour is held back for what needs it. One ochre accent
+ * marks the chosen row, a command or a path; red is failure and nothing else. In the
+ * terminal the page is the terminal's own and text colours are lifted to 4.5:1 on
+ * whatever its background turns out to be; the browser draws `bg` itself.
  */
 export const man: Theme = {
 	id: "man",
 	label: "Man page",
 	description: "Terminal-native: bold headings, one ochre accent, no stripes or gradients",
-	terminalOnly: true,
 	colors: {
 		gradient: { from: "#d8a657", to: "#d8a657" },
 		user: "#7daea3",
