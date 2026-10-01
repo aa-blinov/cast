@@ -9,6 +9,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_V1_PREFIX } from "../server/api-v1.ts";
+import { rememberedBind } from "../server/daemon-bind.ts";
 import {
 	clearServerState,
 	daemonBaseUrl,
@@ -181,7 +182,7 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 			"sh",
 			[
 				"-c",
-				`while kill -0 ${state.pid} 2>/dev/null; do sleep 0.2; done; exec cast server start --port ${state.port} --host ${state.host}`,
+				`while kill -0 ${state.pid} 2>/dev/null; do sleep 0.2; done; exec cast server start ${startArgs(state).join(" ")}`,
 			],
 			{ detached: true, stdio: "ignore" },
 		).unref();
@@ -228,9 +229,7 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 		return false;
 	}
 	clearServerState();
-	const started = spawnSync("cast", ["server", "start", "--port", String(state.port), "--host", state.host], {
-		stdio: "inherit",
-	});
+	const started = spawnSync("cast", ["server", "start", ...startArgs(state)], { stdio: "inherit" });
 	if (started.status !== 0) {
 		console.log("[cast server] note: the new daemon failed to start — run 'cast server start' manually.");
 		return false;
@@ -247,6 +246,16 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 	}
 	console.log(`[cast server] running (pid ${restarted.pid}) — http://${restarted.host}:${restarted.port}`);
 	return true;
+}
+
+/**
+ * Where the daemon comes back: the address the person last chose, else where it was. An upgrade is not a
+ * choice, so it does not remember anything (a daemon that had fallen back to a private port must not
+ * replace the public address that is remembered).
+ */
+function startArgs(state: ServerDaemonState): string[] {
+	const bind = rememberedBind() ?? { host: state.host, port: state.port };
+	return ["--port", String(bind.port), "--host", bind.host, "--no-remember"];
 }
 
 /** How long an upgrade waits for running turns before it leaves the daemon on the old build. */
