@@ -6,6 +6,7 @@ import { theme } from "../ui/themes/index.ts";
 import { formatTimeout, isMcpTool, mcpToolLabel, oneLineSummary, parseToolSummary } from "../ui/tool-summary.ts";
 import type { ChatMessage, StreamBlock, ToolCallEntry } from "../ui/useAgentSession.ts";
 import { paint } from "./paint.ts";
+import { sanitize } from "./sanitize.ts";
 
 // The transcript as rows of text, with no terminal in it, set like a man page:
 // the speaker is a section heading in bold capitals, what they said hangs at a
@@ -68,16 +69,14 @@ function toolLabel(name: string): string {
 }
 
 /** What the summary says, as plain text plus the paint each piece takes. */
-function summaryPieces(
-	call: ToolCallEntry,
-	live: boolean,
-): Array<{ text: string; style: "summary" | "added" | "removed" | "meta" }> {
-	const model = parseToolSummary(call.name, call.args);
-	const flat = (text: string) => (live ? oneLineSummary(text) : text);
+function summaryPieces(call: ToolCallEntry): Array<{ text: string; style: "summary" | "added" | "removed" | "meta" }> {
+	const model = parseToolSummary(call.name, call.args ?? "");
+	// One row either way: a command or a path with line breaks would otherwise leave its continuation under the margin.
+	const flat = (text: string) => sanitize(oneLineSummary(text));
 	switch (model.kind) {
 		case "edit":
 			return [
-				{ text: `${model.path} `, style: "summary" },
+				{ text: `${flat(model.path)} `, style: "summary" },
 				{ text: `+${model.added}`, style: "added" },
 				{ text: " ", style: "summary" },
 				{ text: `−${model.removed}`, style: "removed" },
@@ -90,9 +89,11 @@ function summaryPieces(
 					: []),
 			];
 		case "read":
-			return [{ text: `${model.path} – lines ${model.range}`, style: "summary" }];
+			return [{ text: `${flat(model.path)} – lines ${model.range}`, style: "summary" }];
 		case "write":
-			return [{ text: `${model.path} – ${model.lines} ${model.lines === 1 ? "line" : "lines"}`, style: "summary" }];
+			return [
+				{ text: `${flat(model.path)} – ${model.lines} ${model.lines === 1 ? "line" : "lines"}`, style: "summary" },
+			];
 		default:
 			return [{ text: flat(model.text), style: "summary" }];
 	}
@@ -123,7 +124,7 @@ export function toolRowLines(call: ToolCallEntry, width: number): string[] {
 			)
 		: "";
 	const tone = { color: failed ? colors.error : colors.muted };
-	const summary = summaryPieces(call, running)
+	const summary = summaryPieces(call)
 		.map((piece) => {
 			if (piece.style === "added") return paint(piece.text, { color: colors.success });
 			if (piece.style === "removed") return paint(piece.text, { color: colors.error });
@@ -144,14 +145,17 @@ export function blockLines(
 ): string[] {
 	const { width, showReasoning, openFence } = options;
 	if (block.kind === "tool") return toolRowLines(block.call, width);
+	// A block of a kind this build does not know (an old or foreign session) has nothing to show.
+	if (block.kind !== "thinking" && block.kind !== "content") return [];
+	const text = sanitize(String(block.text ?? "")).replace(THINK_TAG_RE, "");
 	if (block.kind === "thinking") {
 		if (!showReasoning) return [];
-		return sectionLines(markdown(block.text.replace(THINK_TAG_RE, ""), { width: bodyWidth(width), openFence }), {
+		return sectionLines(markdown(text, { width: bodyWidth(width), openFence }), {
 			heading: block.continued ? undefined : "REASONING",
 			quiet: true,
 		});
 	}
-	return sectionLines(markdown(block.text.replace(THINK_TAG_RE, ""), { width: bodyWidth(width), openFence }), {
+	return sectionLines(markdown(text, { width: bodyWidth(width), openFence }), {
 		heading: block.continued ? undefined : "AGENT",
 	});
 }
@@ -160,8 +164,14 @@ export function blockLines(
 export function fenceAfter(message: ChatMessage, incoming: OpenFence | null): OpenFence | null {
 	let fence = incoming;
 	if (message.role !== "assistant") return fence;
-	for (const block of message.blocks ?? []) {
-		if (block.kind !== "tool") fence = trailingOpenFence(block.text, fence);
+	try {
+		for (const block of message.blocks ?? []) {
+			if (block.kind === "thinking" || block.kind === "content")
+				fence = trailingOpenFence(String(block.text ?? ""), fence);
+		}
+	} catch {
+		// A message that cannot be read opens no fence; it is reported where it is laid out.
+		return incoming;
 	}
 	return fence;
 }
@@ -172,25 +182,25 @@ export function messageLines(
 	options: { width: number; showReasoning: boolean; openFence?: OpenFence | null },
 ): string[] {
 	const { width, showReasoning } = options;
+	const content = sanitize(String(message.content ?? ""));
 	if (message.role === "user") {
-		return sectionLines(markdown(message.content, { width: bodyWidth(width) }), { heading: "YOU" });
+		return sectionLines(markdown(content, { width: bodyWidth(width) }), { heading: "YOU" });
 	}
 	if (message.role === "assistant") {
 		let fence = options.openFence ?? null;
 		const out: string[] = [];
 		for (const block of message.blocks ?? []) {
-			out.push(...blockLines(block, { width, showReasoning, openFence: fence }));
-			if (block.kind !== "tool") fence = trailingOpenFence(block.text, fence);
+			for (const line of blockLines(block, { width, showReasoning, openFence: fence })) out.push(line);
+			if (block.kind === "thinking" || block.kind === "content")
+				fence = trailingOpenFence(String(block.text ?? ""), fence);
 		}
 		return out;
 	}
 	if (message.role === "warning") {
-		const text = message.content.startsWith(SYSTEM_PREFIX)
-			? message.content.slice(SYSTEM_PREFIX.length)
-			: message.content;
+		const text = content.startsWith(SYSTEM_PREFIX) ? content.slice(SYSTEM_PREFIX.length) : content;
 		return sectionLines(markdown(text, { width: bodyWidth(width) }), { quiet: true, gap: true });
 	}
-	return sectionLines(markdown(`[${message.role}] ${message.content}`, { width: bodyWidth(width) }), {
+	return sectionLines(markdown(`[${message.role}] ${content}`, { width: bodyWidth(width) }), {
 		quiet: true,
 		gap: true,
 	});

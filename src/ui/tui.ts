@@ -1,6 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { runHooksForEvent } from "../core/hooks.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { drainProjectCheckpointWriters } from "../core/memory.ts";
@@ -13,16 +11,7 @@ import { createStartupUi } from "../ui-pi/startup.ts";
 import { type ClipboardPasteResult, saveClipboardImageToTempFile } from "./readClipboardImage.ts";
 import { resumeCommand, resumeHint, writeLastResume } from "./resume-hint.ts";
 import { loadTheme } from "./themes/index.ts";
-
-/** A trail in ~/.cast/tui-errors.log for what the screen cannot show. */
-function logTuiError(what: string, text: string): void {
-	try {
-		mkdirSync(join(homedir(), ".cast"), { recursive: true });
-		appendFileSync(join(homedir(), ".cast", "tui-errors.log"), `${new Date().toISOString()} ${what}: ${text}\n`);
-	} catch {
-		// Nowhere to write: still better than dying.
-	}
-}
+import { logTuiError, reportFatal } from "./tui-errors.ts";
 
 /**
  * TUI entry point: runStartup on the start-up screen, then the pi-tui front end.
@@ -39,6 +28,13 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	// A rejection nobody handled ends the process by default, mid-turn, with a
 	// stack dumped into the alternate screen. Keep the session alive and leave a
 	// trail in ~/.cast/tui-errors.log instead.
+	// An exception nobody caught outside a turn (a turn has its own handler, which decides whether a dropped
+	// stream is survivable): end with the reason on the normal screen, not a stack lost in the alternate one.
+	process.on("uncaughtException", (error) => {
+		if (process.listenerCount("uncaughtException") > 1) return;
+		reportFatal("uncaught exception", error);
+		process.exit(1);
+	});
 	process.on("unhandledRejection", (reason) => {
 		logTuiError("unhandled rejection", reason instanceof Error ? (reason.stack ?? reason.message) : String(reason));
 	});
@@ -136,6 +132,11 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		daemonToken,
 		quit: endSession,
 		onPasteImage,
-		onError: (error) => logTuiError("render error", error.stack ?? error.message),
+		// React unmounts the tree on a render error, and the app would go on taking keys against a model that no
+		// longer updates: a frozen screen is worse than ending, and the session is saved as it goes.
+		onError: (error) => {
+			reportFatal("render error", error, `Your session is saved: cast --resume=${result.session.id}`);
+			process.exit(1);
+		},
 	});
 }

@@ -5,9 +5,23 @@ import type { ChatMessage, RetryInfo, StreamingState } from "../ui/useAgentSessi
 import { dots } from "./dots.ts";
 import { blockLines, fenceAfter, INDENT, messageLines } from "./lines.ts";
 import { paint } from "./paint.ts";
+import { sanitize } from "./sanitize.ts";
 
 /** The text follows the terminal's width and stops here: a line of prose is hard to read much past it, so on a wider terminal the rest stays empty. */
 export const MAX_MEASURE = 120;
+
+/** A message that cannot be laid out shows as one quiet row; it must not take every frame down with it. */
+function safeMessageLines(message: ChatMessage, options: Parameters<typeof messageLines>[1]): string[] {
+	try {
+		return messageLines(message, options);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		return [
+			"",
+			paint(`    [a ${message.role} message could not be shown: ${sanitize(reason)}]`, { color: theme().muted }),
+		];
+	}
+}
 
 export interface TranscriptState {
 	messages: ChatMessage[];
@@ -64,17 +78,18 @@ export class Transcript implements Component {
 			const key = `${content}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;
 			let entry = this.cache.get(message);
 			if (!entry || entry.key !== key) {
-				entry = { key, lines: messageLines(message, { width: content, showReasoning, openFence: fence }) };
+				entry = { key, lines: safeMessageLines(message, { width: content, showReasoning, openFence: fence }) };
 				this.cache.set(message, entry);
 			}
-			out.push(...entry.lines);
+			// Not push(...lines): a message of a few hundred thousand rows would overflow the stack.
+			for (const line of entry.lines) out.push(line);
 		});
 		const colors = theme();
-		if (error) out.push("", ...wrapTextWithAnsi(paint(`  ✗ ${error}`, { color: colors.error }), content));
+		if (error) out.push("", ...wrapTextWithAnsi(paint(`  ✗ ${sanitize(error)}`, { color: colors.error }), content));
 		if (retry) {
 			out.push(
 				truncateToWidth(
-					paint(`    Retrying (attempt ${retry.attempt}): ${retry.reason}`, { color: colors.warning }),
+					paint(`    Retrying (attempt ${retry.attempt}): ${sanitize(retry.reason)}`, { color: colors.warning }),
 					content,
 					"…",
 				),
@@ -84,9 +99,10 @@ export class Transcript implements Component {
 			let fence: OpenFence | null = null;
 			let runningTool = false;
 			for (const block of streaming.blocks) {
-				out.push(...blockLines(block, { width: content, showReasoning, openFence: fence }));
-				if (block.kind !== "tool") fence = trailingOpenFence(block.text, fence);
-				else if (block.call.status === "running") runningTool = true;
+				for (const line of blockLines(block, { width: content, showReasoning, openFence: fence })) out.push(line);
+				if (block.kind === "tool") {
+					if (block.call.status === "running") runningTool = true;
+				} else fence = trailingOpenFence(String(block.text ?? ""), fence);
 			}
 			// Between a finished text block and the next tool call the model may still
 			// be deciding; one activity row until something running can speak for itself.

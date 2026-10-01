@@ -25,6 +25,7 @@ import { bannerRows } from "./banner.ts";
 import { CastAutocompleteProvider, CastEditor } from "./editor.ts";
 import { ModalHost } from "./modals.ts";
 import { paint } from "./paint.ts";
+import { sanitize } from "./sanitize.ts";
 import { statusLine } from "./status.ts";
 import { Transcript } from "./transcript.ts";
 
@@ -263,7 +264,7 @@ export class PiApp {
 		const commands: SlashCommand[] = [
 			...SLASH_COMMANDS.filter((c) => !c.hidden).map((c) => ({ name: c.name.slice(1), description: c.description })),
 			...skillCommands,
-		];
+		].map((c) => ({ ...c, description: c.description === undefined ? undefined : sanitize(c.description) }));
 		const hidden = new Set(
 			SLASH_COMMANDS.filter((c) => c.hidden && !c.name.includes(" ")).map((c) => c.name.slice(1)),
 		);
@@ -292,7 +293,9 @@ export class PiApp {
 	private paintFooter(model: AppModel): void {
 		const colors = theme();
 		this.editor.placeholder = model.running ? RUNNING_PLACEHOLDER : IDLE_PLACEHOLDER;
-		this.notice.setText(model.notice ? paint(`  ${unbracket(model.notice)}`, { color: colors.warning }) : "");
+		this.notice.setText(
+			model.notice ? paint(`  ${sanitize(unbracket(model.notice))}`, { color: colors.warning }) : "",
+		);
 		const rows: string[] = [];
 		for (const [label, items] of [
 			["Steer queued", model.agent.pendingSteers],
@@ -300,7 +303,7 @@ export class PiApp {
 		] as const) {
 			items.slice(0, MAX_PENDING_ROWS).forEach((text, i) => {
 				const count = items.length > 1 ? ` (${i + 1}/${items.length})` : "";
-				rows.push(paint(`[${label}${count}: ${text.replace(/\s+/g, " ")}]`, { color: colors.warning }));
+				rows.push(paint(`[${label}${count}: ${sanitize(text).replace(/\s+/g, " ")}]`, { color: colors.warning }));
 			});
 			if (items.length > MAX_PENDING_ROWS) {
 				rows.push(paint(`[+${items.length - MAX_PENDING_ROWS} more queued]`, { color: colors.warning }));

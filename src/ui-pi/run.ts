@@ -80,10 +80,13 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 		}
 	};
 	process.once("exit", restore);
-	for (const signal of ["SIGTERM", "SIGHUP"] as const) {
+	// Raw input means Ctrl+C is a key, not a signal: these come from outside (kill, a supervisor, a closed
+	// terminal), and the default action for each would end the process with the screen still taken over.
+	const signalNumbers = { SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGTERM: 15 } as const;
+	for (const [signal, number] of Object.entries(signalNumbers)) {
 		process.once(signal, () => {
 			restore();
-			process.exit(128 + (signal === "SIGTERM" ? 15 : 1));
+			process.exit(128 + number);
 		});
 	}
 
