@@ -1,16 +1,17 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { runHooksForEvent } from "../core/hooks.ts";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { drainProjectCheckpointWriters } from "../core/memory.ts";
-import { saveSession, sessionHasMessages } from "../core/session.ts";
+import { listSessionSummaries, saveSession, sessionHasMessages } from "../core/session.ts";
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
 import { runPiFrontEnd } from "../ui-pi/run.ts";
 import { createStartupUi } from "../ui-pi/startup.ts";
 import { type ClipboardPasteResult, saveClipboardImageToTempFile } from "./readClipboardImage.ts";
+import { resumeHint } from "./resume-hint.ts";
 import { loadTheme } from "./themes/index.ts";
 
 /** A trail in ~/.cast/tui-errors.log for what the screen cannot show. */
@@ -86,13 +87,19 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 
 	// Leaving the session behind is only useful if you can get back into it,
 	// and the id is nowhere on screen — the exit clears it along with the rest
-	// of the frame. Print the exact command instead of the bare id. Skipped
-	// for a session with no turns: there is nothing to resume.
+	// of the frame. Print the exact command instead of the bare id; for a session
+	// with no turns, point to the folder's earlier ones (see resumeHint).
 	let resumeHintPrinted = false;
 	const printResumeHint = () => {
-		if (resumeHintPrinted || !sessionHasMessages(result.session.id)) return;
+		if (resumeHintPrinted) return;
+		const here = resolve(result.cwd);
+		const earlier = listSessionSummaries().some(
+			(s) => s.msgCount > 0 && s.id !== result.session.id && s.cwd && resolve(s.cwd) === here,
+		);
+		const line = resumeHint({ id: result.session.id, hasMessages: sessionHasMessages(result.session.id) }, earlier);
+		if (!line) return;
 		resumeHintPrinted = true;
-		process.stdout.write(`\x1b[2mResume this session:\x1b[22m cast --resume=${result.session.id}\n`);
+		process.stdout.write(`${line}\n`);
 	};
 
 	// Ends the session: save it, close what was opened,

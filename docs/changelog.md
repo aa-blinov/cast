@@ -6,6 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Quitting an empty session printed nothing about how to get back.** A session that had a turn still names itself (`cast --resume=<id>`). One that did not (nothing was said, or the conversation was cleared with `/clear` or `/new`, or the daemon under it was restarted by an upgrade) now points to the folder's earlier sessions: `cast --continue`, or `cast --resume` to pick. A folder with no history still prints nothing.
 - **`cast upgrade` could leave a second daemon running and report "failed to start".** If a running `cast` started its own daemon while the upgrade was restarting the old one, the daemon the upgrade started lost the registration but kept serving on another port, out of reach of `cast server status` and `stop`, and the upgrade called that a failure. A daemon started by `cast server start` that finds another one registered now exits, and the launcher says `already running` instead of failing.
 
 ## 0.52.1
