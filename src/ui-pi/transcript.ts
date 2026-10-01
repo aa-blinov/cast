@@ -3,7 +3,7 @@ import { type OpenFence, trailingOpenFence } from "../ui/markdown-terminal.ts";
 import { theme } from "../ui/themes/index.ts";
 import type { ChatMessage, RetryInfo, StreamingState } from "../ui/useAgentSession.ts";
 import { dots } from "./dots.ts";
-import { blockLines, fenceAfter, messageLines } from "./lines.ts";
+import { blockLines, fenceAfter, INDENT, messageLines } from "./lines.ts";
 import { paint } from "./paint.ts";
 
 /** A line of prose stops being readable far short of a wide terminal: past this the text keeps its measure and the rest stays empty. */
@@ -91,7 +91,7 @@ export class Transcript implements Component {
 			// Between a finished text block and the next tool call the model may still
 			// be deciding; one activity row until something running can speak for itself.
 			if (!runningTool) {
-				out.push(`  ${paint(dots().trimEnd(), { color: colors.accent })}`);
+				out.push(`${" ".repeat(INDENT)}${paint(dots().trimEnd(), { color: colors.accent })}`);
 			}
 		}
 		return out;

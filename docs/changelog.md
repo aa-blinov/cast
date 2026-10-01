@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- The waiting dots after your message line up with the reply text (four columns in) instead of sitting at the two-column tool margin.
+
 ## 0.52.4
 
 ### Fixed
