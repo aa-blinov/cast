@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Changed
+- **A public web server stays public.** The address you choose with `cast server start --public` (or `--host` / `--port`) is remembered in `settings.json`, and a daemon started later binds it too: `cast server start` with no flags, the terminal screen when it has to start the daemon itself, and the restart after `cast upgrade`. Before, an open `cast` window answered each stop by starting a private daemon on a random port, so the public one could not be brought back until the window was closed. If the remembered port is taken by something else the terminal screen falls back to a private daemon; `cast server stop` then `cast server start --port 0` forgets the address.
+
 ## 0.52.7
 
 ### Fixed

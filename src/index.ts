@@ -14,6 +14,7 @@ import type { ParsedArgs } from "./core/startup.ts";
 import { execLsp, LSP_OPERATIONS } from "./core/tools/lsp.ts";
 import { runUpgrade } from "./core/upgrade.ts";
 import { WorktreeBlockedError } from "./core/worktree.ts";
+import { canBind, rememberBind, rememberedBind } from "./server/daemon-bind.ts";
 import {
 	acquireStartLock,
 	clearServerState,
@@ -257,7 +258,15 @@ async function ensureDaemon(): Promise<string | undefined> {
 					const token = await tokenFor(now);
 					if (token) return token;
 				}
-				await handleServerCommand(["start", "--port", "0"]);
+				// The address the person chose for their daemon (`--public`), when it is free; else private and random.
+				const saved = rememberedBind();
+				const bind = saved && (await canBind(saved)) ? saved : undefined;
+				await handleServerCommand(
+					["start", "--port", String(bind?.port ?? 0), ...(bind ? ["--host", bind.host] : [])],
+					{
+						remember: false,
+					},
+				);
 				return tokenFor(readLiveServerState());
 			} finally {
 				releaseStartLock();
@@ -535,7 +544,7 @@ function handleRequestsCommand(args: string[]): void {
 	}
 }
 
-async function handleServerCommand(args: string[]): Promise<void> {
+async function handleServerCommand(args: string[], options: { remember?: boolean } = {}): Promise<void> {
 	const LOG_FILE = join(homedir(), ".cast", "server.log");
 
 	if (args[0] === "stop") {
@@ -561,8 +570,12 @@ async function handleServerCommand(args: string[]): Promise<void> {
 	}
 
 	const foreground = args.includes("--foreground");
-	const port = getPort(args);
-	const host = getHost(args);
+	// An address typed on the command line (or set in the environment) wins; with neither, the one chosen last time.
+	const explicit = args.some((a) => a === "--port" || a === "--host" || a === "--public");
+	const saved =
+		explicit || process.env.CAST_SERVER_PORT || process.env.CAST_SERVER_HOST ? undefined : rememberedBind();
+	const port = saved?.port ?? getPort(args);
+	const host = saved?.host ?? getHost(args);
 
 	// Everything except lifecycle flags (subcommand, port/host/public,
 	// foreground) forwards to the server process as-is — model/persona/
@@ -667,6 +680,14 @@ async function handleServerCommand(args: string[]): Promise<void> {
 		process.exit(1);
 	}
 	console.log(`[cast server] started (pid ${child.pid}) — http://${host}:${port}`);
+	if (explicit && options.remember !== false) {
+		rememberBind({ host, port });
+		if (rememberedBind()) {
+			console.log(
+				"[cast server] this address is remembered: the terminal screen and 'cast upgrade' start the daemon here too. 'cast server start --port 0' (private) forgets it.",
+			);
+		}
+	}
 	const settingsForMessage = loadSettings();
 	const activeProvider = settingsForMessage.providers?.find(
 		(provider) => provider.name === settingsForMessage.modelProvider,

@@ -221,6 +221,9 @@ export interface Settings {
 	 * session state, and storing it globally leaked plan mode across projects.
 	 * Kept only so old settings.json files still parse. */
 	mode?: "plan" | "build";
+	/** Where `cast server start --public` (or --host / --port) put the daemon, so a daemon started later
+	 * by the terminal screen or after an upgrade listens there too. Absent: private, random port. */
+	serverBind?: { host: string; port: number };
 	/** Web UI password — auto-generated on first `cast server` run. */
 	serverToken?: string;
 	/** @deprecated Server password, renamed to serverToken. Read as a fallback
