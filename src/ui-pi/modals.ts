@@ -20,6 +20,7 @@ import { theme } from "../ui/themes/index.ts";
 import { fitParts } from "./banner.ts";
 import { dots, withoutDots } from "./dots.ts";
 import { band, paint } from "./paint.ts";
+import { sanitize } from "./sanitize.ts";
 import { surfaceHover } from "./surface.ts";
 
 // Every question the app asks the person (a choice, a line of text, a set of
@@ -722,6 +723,30 @@ export class StatusModal implements Component {
 	}
 }
 
+const cleanText = (text: string | undefined) => (text === undefined ? undefined : sanitize(text));
+
+/** What a list shows comes from files, providers and the model (a skill's description, a session's title, a command): none of it may carry escapes. */
+function cleanOptions<T>(options: PickOption<T>[]): PickOption<T>[] {
+	return options.map((o) => ({
+		...o,
+		label: sanitize(o.label),
+		description: cleanText(o.description),
+		hint: cleanText(o.hint),
+		searchText: cleanText(o.searchText),
+	}));
+}
+
+function cleanOpts<O extends PickOptions<unknown>>(opts: O | undefined): O | undefined {
+	if (!opts) return opts;
+	return {
+		...opts,
+		title: cleanText(opts.title),
+		error: cleanText(opts.error),
+		detail: cleanText(opts.detail),
+		switchHint: cleanText(opts.switchHint),
+	};
+}
+
 /** Shows the bridge's current request as an overlay, and takes it down when it is answered. */
 export class ModalHost {
 	private current: ModalRequest | null = null;
@@ -770,13 +795,30 @@ export class ModalHost {
 	private build(request: ModalRequest): { component: Component; every?: () => void; everyMs?: number } | undefined {
 		switch (request.kind) {
 			case "option":
-				return { component: new OptionModal(request.options, request.opts, (value) => request.resolve(value)) };
+				return {
+					component: new OptionModal(cleanOptions(request.options), cleanOpts(request.opts), (value) =>
+						request.resolve(value),
+					),
+				};
 			case "text":
-				return { component: new TextModal(request, (value) => request.resolve(value)) };
+				return {
+					component: new TextModal(
+						{
+							label: sanitize(request.label),
+							defaultValue: cleanText(request.defaultValue),
+							placeholder: cleanText(request.placeholder),
+							error: cleanText(request.error),
+						},
+						(value) => request.resolve(value),
+					),
+				};
 			case "multi":
 				return {
-					component: new MultiModal(request.options, request.opts, request.initialSelected, (indices) =>
-						request.resolve(indices),
+					component: new MultiModal(
+						cleanOptions(request.options),
+						cleanOpts(request.opts),
+						request.initialSelected,
+						(indices) => request.resolve(indices),
 					),
 				};
 			case "statusbar":

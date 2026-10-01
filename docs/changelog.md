@@ -7,6 +7,14 @@ All notable user-facing changes to cast, newest first.
 ### Fixed
 - **`cast upgrade` brings the daemon back on the address you chose.** It restarted the daemon where it happened to be running, and, since the address of a started daemon is now remembered, would have remembered a private fallback port in place of your public one. It now starts the daemon on the remembered address (the one it was on if there is none) and does not remember anything itself.
 
+## Unreleased
+
+### Fixed
+- **Text from a model, a tool or a file can no longer drive your terminal.** An escape sequence in a reply, a tool's output or a skill's description could clear the screen, move the cursor, retitle the window or write your clipboard (OSC 52), and in a permission prompt hide part of the command being asked about. Everything shown from outside is now stripped of escape and control characters, and tabs become spaces so rows are the width the layout thinks they are.
+- **A huge message or table no longer crashes the screen.** A message of a few hundred thousand lines, or a very large table, overflowed the stack; a message of an unexpected shape (an unknown block, no text) took every frame down. Such a message now shows as one quiet row, and the rest of the conversation is drawn.
+- **Tables with many columns, long words under a heading and multi-line commands fit.** A table with more columns than the width can hold is set as rows instead of overflowing; a long word under a heading is split to the narrower line; a finished multi-line bash command is one row under its margin; the minus sign of an edit row has an ASCII form.
+- **The terminal is handed back on every exit.** `SIGINT` and `SIGQUIT` left the alternate screen and mouse tracking on; so did an exit during start-up (a failed start, Esc on a first-run question), and its message was lost with the screen. An uncaught exception now ends with the reason printed on the normal screen, and a render error ends the session instead of leaving a frozen screen (the session is saved as it goes).
+
 ## 0.52.10
 
 ### Fixed

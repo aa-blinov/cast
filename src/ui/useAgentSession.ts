@@ -75,6 +75,7 @@ import {
 import { displayWidthCacheFlush } from "./display-width.ts";
 import { isTableLine } from "./markdown-terminal.ts";
 import { notifyTerminal, turnEndNotice } from "./terminal-notify.ts";
+import { reportFatal } from "./tui-errors.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
 
@@ -1118,7 +1119,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					// Non-retryable errors (programming bugs, corrupted state) are fatal.
 					return;
 				}
-				console.error(err);
+				reportFatal("uncaught exception during a turn", err, `Your session is saved: cast --resume=${session.id}`);
 				process.exit(1);
 			};
 			process.on("uncaughtException", onUncaught);

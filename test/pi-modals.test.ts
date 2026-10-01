@@ -2,6 +2,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import {
 	frame,
+	ModalHost,
 	MultiModal,
 	OptionModal,
 	printable,
@@ -462,5 +463,36 @@ describe("ViewModal as a reference", () => {
 		expect(plain(reference.render(60).join("\n"))).not.toMatch(/line 1\b/);
 		reference.handleInput("\x1b");
 		expect(closed).toBe(true);
+	});
+});
+
+describe("ModalHost", () => {
+	it("shows a list's text without the escape sequences it was given, so a command cannot hide behind them", () => {
+		const ESC = String.fromCharCode(27);
+		const BEL = String.fromCharCode(7);
+		let shown: { render(width: number): string[] } | undefined;
+		const tui = {
+			showOverlay: (component: { render(width: number): string[] }) => {
+				shown = component;
+				return { hide() {} };
+			},
+			requestRender() {},
+		};
+		const host = new ModalHost(tui as never);
+		host.sync({
+			kind: "option",
+			options: [
+				{ value: "a", label: `rm -rf /${ESC}[2K safe`, description: `${ESC}]52;c;AAAA${BEL}harmless` },
+				{ value: "b", label: "Cancel" },
+			],
+			opts: { title: `Allow?${ESC}[2J`, detail: `${ESC}[1Ahidden part\tof the command` },
+			resolve: () => {},
+		} as never);
+		const text = shown?.render(80).join("\n") ?? "";
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: looking for any escape that is not a colour
+		expect(text).not.toMatch(/\x1b(?!\[[0-9;]*m)/);
+		expect(text).not.toContain(BEL);
+		expect(text).toContain("rm -rf / safe");
+		expect(text).toContain("hidden part");
 	});
 });

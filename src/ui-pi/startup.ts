@@ -1,3 +1,4 @@
+import { format } from "node:util";
 import { type Component, type OverlayHandle, TuiAltScreen } from "@earendil-works/pi-tui";
 import type { Pickers, PickOption, PickOptions } from "../pickers/types.ts";
 import { makeTerminal } from "./ascii.ts";
@@ -19,11 +20,50 @@ export function createStartupUi(): {
 	let overlay: OverlayHandle | undefined;
 	let ticker: NodeJS.Timeout | undefined;
 	const logged: string[] = [];
+	// What the program prints while the screen is up would be thrown away with it (an error before an exit,
+	// say): hold it, and print it on the normal screen once the terminal is handed back.
+	const deferred: Array<{ stream: "log" | "warn" | "error"; text: string }> = [];
+	const original = { log: console.log, warn: console.warn, error: console.error };
+	const signalNumbers = { SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGTERM: 15 } as const;
+	const onSignals: Array<[string, () => void]> = [];
+
+	const leave = () => {
+		if (!screen) return;
+		hide();
+		try {
+			screen.stop();
+		} catch {
+			// already stopped
+		}
+		screen = undefined;
+		console.log = original.log;
+		console.warn = original.warn;
+		console.error = original.error;
+		process.off("exit", leave);
+		for (const [signal, handler] of onSignals.splice(0)) process.off(signal, handler);
+		for (const { stream, text } of deferred.splice(0)) original[stream](text);
+	};
 
 	const ensure = (): TuiAltScreen => {
 		if (!screen) {
 			screen = new TuiAltScreen(makeTerminal(), false, undefined, { mouse: false });
 			screen.start();
+			for (const stream of ["log", "warn", "error"] as const) {
+				console[stream] = (...args: unknown[]) => {
+					deferred.push({ stream, text: format(...args) });
+				};
+			}
+			// Whatever ends the process while the screen is up (`process.exit` in a failed start, Esc on a
+			// first-run question, a signal) must hand the terminal back first.
+			process.once("exit", leave);
+			for (const [signal, number] of Object.entries(signalNumbers)) {
+				const handler = () => {
+					leave();
+					process.exit(128 + number);
+				};
+				onSignals.push([signal, handler]);
+				process.once(signal, handler);
+			}
 		}
 		return screen;
 	};
@@ -93,9 +133,7 @@ export function createStartupUi(): {
 		},
 		hide,
 		done() {
-			hide();
-			screen?.stop();
-			screen = undefined;
+			leave();
 			for (const line of logged) console.log(line);
 		},
 	};

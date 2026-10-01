@@ -105,7 +105,7 @@ const INLINE_PATTERNS: InlinePattern[] = [
 function inlineSpans(text: string, base: Omit<Span, "text"> = {}): Span[] {
 	const spans: Span[] = [];
 	let rest = text;
-	for (let guard = 0; guard < 500; guard++) {
+	for (let guard = 0; guard < 5000; guard++) {
 		let best: { index: number; length: number; spans: Span[] } | undefined;
 		for (const { re, make } of INLINE_PATTERNS) {
 			const m = re.exec(rest);
@@ -155,7 +155,6 @@ function mergeSpans(spans: Span[]): Span[] {
 
 /** Break spans into lines no wider than `width` cells, indenting continuations. */
 function wrapSpans(spans: Span[], width: number, indent: string, hangingIndent: string): RenderedLine[] {
-	const usable = Math.max(8, width - displayWidth(indent));
 	const lines: RenderedLine[] = [];
 	let current: Span[] = [];
 	let used = 0;
@@ -178,7 +177,8 @@ function wrapSpans(spans: Span[], width: number, indent: string, hangingIndent: 
 				if (ONLY_SPACE_RE.test(word)) continue; // never start a line with the space that broke it
 				flush();
 			}
-			if (w > usable && !ONLY_SPACE_RE.test(word)) {
+			// The room of the line being filled: a hanging indent (a heading, a list item) makes it narrower than the first.
+			if (w > Math.max(8, width - displayWidth(prefix)) && !ONLY_SPACE_RE.test(word)) {
 				// A single word wider than the line (a URL, a long identifier):
 				// hard-split it rather than overflowing the viewport.
 				let remainder = word;
@@ -249,21 +249,37 @@ const BOX = {
 } as const;
 
 function renderTable(rows: string[][], width: number, indent: string, headerless = false): RenderedLine[] {
-	const columns = Math.max(...rows.map((r) => r.length));
+	let columns = 0;
+	for (const row of rows) columns = Math.max(columns, row.length);
+	// Each column needs a `│`, a space either side and one cell of text, plus the closing `│`: past that a
+	// table cannot be drawn in this width, so it is set as rows of cells separated by bars instead.
+	if (4 * columns + 1 > width - displayWidth(indent)) {
+		const plain: RenderedLine[] = [];
+		for (const row of rows) {
+			for (const line of wrapSpans(inlineSpans(row.join(" | ")), width, indent, indent)) plain.push(line);
+		}
+		return plain;
+	}
 	const cells = rows.map((row) => {
 		const padded = [...row];
 		while (padded.length < columns) padded.push("");
 		return padded.map((cell) => inlineSpans(cell));
 	});
-	const widths = Array.from({ length: columns }, (_, c) => Math.max(1, ...cells.map((row) => spansWidth(row[c]!))));
+	const widths = Array.from({ length: columns }, (_, c) => {
+		let widest = 1;
+		for (const row of cells) widest = Math.max(widest, spansWidth(row[c]!));
+		return widest;
+	});
 	// Per column: a `│`, a space either side of the text; plus the closing `│`.
 	const frame = 3 * columns + 1;
-	const available = Math.max(columns * 3, width - displayWidth(indent) - frame);
+	const available = Math.max(columns, width - displayWidth(indent) - frame);
+	// A column keeps three cells of text when the room allows, fewer when it must.
+	const floor = Math.max(1, Math.min(3, Math.floor(available / columns)));
 	const total = widths.reduce((a, b) => a + b, 0);
 	if (total > available) {
 		// Shrink the widest columns first so short ones stay readable.
 		const scale = available / total;
-		for (let c = 0; c < columns; c++) widths[c] = Math.max(3, Math.floor(widths[c]! * scale));
+		for (let c = 0; c < columns; c++) widths[c] = Math.max(floor, Math.floor(widths[c]! * scale));
 	}
 
 	const lines: RenderedLine[] = [];
@@ -371,7 +387,7 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 
 	const flushTable = (): void => {
 		if (!table) return;
-		out.push(...renderTable(table, width, indent, headerless));
+		for (const line of renderTable(table, width, indent, headerless)) out.push(line);
 		table = null;
 		headerless = false;
 	};
@@ -394,7 +410,7 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 						[{ text: raw === "" ? " " : raw, tone: "code" as const, ...(highlighted ? { scope: "text" } : {}) }];
 			// Code keeps its own spacing; only hard-wrap what does not fit.
 			const codeIndent = `${indent}${options.codeIndent ?? ""}`;
-			out.push(...wrapSpans(spans, width, codeIndent, `${codeIndent}  `).map((line) => ({ ...line, code: true })));
+			for (const line of wrapSpans(spans, width, codeIndent, `${codeIndent}  `)) out.push({ ...line, code: true });
 		});
 		fenceLines = [];
 	};
@@ -485,7 +501,8 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 			const text = task ? task[2]! : bullet[3]!;
 			const lead = `${indent}${" ".repeat(pad)}${marker} `;
 			const hang = task ? displayWidth(`${marker} `) : LIST_MARKER_WIDTH;
-			out.push(...wrapSpans(inlineSpans(text), width, lead, `${indent}${" ".repeat(pad + hang)}`));
+			for (const line of wrapSpans(inlineSpans(text), width, lead, `${indent}${" ".repeat(pad + hang)}`))
+				out.push(line);
 			continue;
 		}
 		const ordered = ORDERED_RE.exec(raw);
@@ -502,7 +519,7 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 			);
 			continue;
 		}
-		out.push(...wrapSpans(inlineSpans(raw), width, indent, indent));
+		for (const line of wrapSpans(inlineSpans(raw), width, indent, indent)) out.push(line);
 	}
 	// An unclosed fence is the normal case while an answer streams: render what
 	// arrived rather than holding the whole block back until the closing fence.
