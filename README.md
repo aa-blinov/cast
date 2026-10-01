@@ -12,7 +12,7 @@ A role-based terminal agent harness. Seven built-in personas (senior developer, 
 
 **Runs where your code runs.** vLLM, Ollama, your own inference server, or any OpenAI-compatible API. No account, no telemetry, no cloud dependency.
 
-**Terminal UI.** A full-screen interface on [pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui) that owns its scrolling: the wheel, trackpad, PageUp/PageDown and search move through the transcript, and a repaint never drags it back to the bottom. Multiline paste, image attachments, subagent viewer.
+**Terminal UI.** A full-screen interface on [pi-tui](https://www.npmjs.com/package/@earendil-works/pi-tui) that owns its scrolling: the wheel, trackpad, PageUp/PageDown and search move through the transcript, and a repaint never drags it back to the bottom. Multiline paste, image attachments, subagent viewer. Set like a man page, it fits a phone and a wide monitor alike; see [The Terminal Screen](docs/terminal-ui.md) for the tour.
 **Web UI.** `cast web` (also available as `cast server`) launches a browser-based control room: background agents, token-by-token streaming, diff viewer, and chat commands with account/project controls in Settings. Same sessions as the TUI.
 
 ## Why personas, not just prompts

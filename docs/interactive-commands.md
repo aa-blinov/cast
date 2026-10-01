@@ -1,6 +1,8 @@
 # Interactive Commands
 
-All commands are typed at the TUI prompt, prefixed with `/`. Unknown slash commands are submitted to the agent as regular text (useful for paths starting with `/`).
+All commands are typed at the TUI prompt, prefixed with `/`. A slash word that matches nothing (`/nonsense`) is not sent to the model: cast says `Unknown command /nonsense` and suggests the nearest commands. Text that only starts with a slash, such as a path (`/tmp/shot.png what is this?`), is still a normal message.
+
+New to the screen? [The Terminal Screen](terminal-ui.md) is the tour: what is on it, how to type, scroll and choose, and how to fit it to a phone.
 
 ## Session Management
 

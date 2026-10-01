@@ -69,6 +69,8 @@ cast --resume=nd4k8f2x     # Resume by session id
 cast -s nd4k8f2x           # Same (alias)
 ```
 
+When you quit, cast prints the command to continue (`Resume this session: cast --resume=<id>`). To have it waiting in your **shell history** too, add the function from `cast shell-init` to your rc file once (`cast shell-init >> ~/.zshrc`); after that, Up brings back `cast --resume=<id>` (or `cast --continue` for a session that had no turn). See [The Terminal Screen](terminal-ui.md#leaving-and-coming-back).
+
 When resuming a session from a different project directory, cast automatically switches to that project's `cwd` and reloads its skills, rules, and MCP servers.
 
 Sessions remember which provider their model belongs to. If you've switched providers since, resume falls back to your currently configured model (with a notice) instead of sending requests to a model the new provider doesn't have.

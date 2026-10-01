@@ -17,6 +17,7 @@ const NAV_GROUPS = [
 		title: "Start and use",
 		items: [
 			{ file: "getting-started.md", label: "Getting Started" },
+			{ file: "terminal-ui.md", label: "The Terminal Screen" },
 			{ file: "cli-reference.md", label: "CLI Reference" },
 			{ file: "interactive-commands.md", label: "Interactive Commands" },
 			{ file: "configuration.md", label: "Configuration" },
