@@ -6,8 +6,8 @@ import { dots } from "./dots.ts";
 import { blockLines, fenceAfter, INDENT, messageLines } from "./lines.ts";
 import { paint } from "./paint.ts";
 
-/** A line of prose stops being readable far short of a wide terminal: past this the text keeps its measure and the rest stays empty. */
-export const MAX_MEASURE = 100;
+/** The text follows the terminal's width and stops here: a line of prose is hard to read much past it, so on a wider terminal the rest stays empty. */
+export const MAX_MEASURE = 120;
 
 export interface TranscriptState {
 	messages: ChatMessage[];

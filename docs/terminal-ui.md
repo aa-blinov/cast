@@ -78,7 +78,7 @@ Pickers (`/model`, `/persona`, `/sessions`, …) are boxes with a bold title. Th
 
 ## Making it fit
 
-The conversation keeps a readable measure: text, headings, code and tool rows stay within 100 columns however wide the terminal is, while the header, composer and status row use the full width. On a phone or a narrow window:
+The conversation follows the width of the terminal up to 120 columns: text, headings, code and tool rows use all of it on a laptop or a phone, and stop at 120 on a wider screen, while the header, composer and status row use the full width. On a phone or a narrow window:
 
 - the header and hints drop their trailing parts instead of being cut in the middle of a word;
 - a long line of code wraps under its own indent;

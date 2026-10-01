@@ -72,7 +72,7 @@ The two surfaces differ in medium, not in voice. They share one theme (`man`, th
 **Key Characteristics:**
 - One ochre accent on at most a tenth of any screen: the chosen row, commands, paths, the running marker, the send button.
 - Hierarchy from bold, capitals and indent. No coloured stripes, no gradient text, no glow.
-- Monospace everywhere; text is held to a readable measure (100 columns in the terminal).
+- Monospace everywhere; text follows the terminal's width up to a readable measure (120 columns).
 - Meaning is never carried by colour alone: a mark or a word goes with it.
 - Degrades gracefully: 40 to 200+ columns, 320 to 1280+ px, `NO_COLOR`, non-UTF-8 terminals.
 
@@ -113,7 +113,7 @@ Restrained: neutrals plus one accent. Every theme can supply these roles; the st
 
 ## Layout
 
-**Terminal.** Header row `CAST(1) * v<version>`, joined by one ` * ` (the persona, model and folder are in the status row; `/header` can bring them back, and the parts and their order are the user's); a muted hint row; the conversation; the composer between two hairlines; a one-row status line `persona * mode * model * folder * ctx … * took Ns` (also the user's, `/statusbar`). Conversation text is held to 100 columns however wide the terminal is; the header, composer and status row use the full width. Notices sit in the transcript at the indent or in one unbracketed line above the composer; errors use `  ✗ ` and red.
+**Terminal.** Header row `CAST(1) * v<version>`, joined by one ` * ` (the persona, model and folder are in the status row; `/header` can bring them back, and the parts and their order are the user's); a muted hint row; the conversation; the composer between two hairlines; a one-row status line `persona * mode * model * folder * ctx … * took Ns` (also the user's, `/statusbar`). Conversation text follows the terminal's width and stops at 120 columns; the header, composer and status row use the full width. Notices sit in the transcript at the indent or in one unbracketed line above the composer; errors use `  ✗ ` and red.
 
 **Browser.** A sidebar of sessions (272px) beside the chat, a header with the connection dot, and the composer at the foot. On a phone (coarse pointer, under 768px) the sidebar is a drawer, the composer tightens, and every control has a 44px target; the page never scrolls sideways at 320px.
 
@@ -154,7 +154,7 @@ Hairline boxes. Terminal modals are a muted box with a bold title, centred on th
 
 ### Do:
 - **Do** use the one accent for state and choice and let weight, case and indent do the rest.
-- **Do** keep every terminal row within the width (`visibleWidth`, not `.length`) and check at 46 and 100 columns, and the browser at 320 and 390 px.
+- **Do** keep every terminal row within the width (`visibleWidth`, not `.length`) and check at 46, 100 and 160 columns, and the browser at 320 and 390 px.
 - **Do** route text colour through `paint()` in the terminal; never write raw SGR codes or hard-code truecolor.
 - **Do** keep touch targets at 44px under a coarse pointer, using a larger invisible hit area where the look must stay small.
 

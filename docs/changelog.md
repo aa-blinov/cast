@@ -7,6 +7,9 @@ All notable user-facing changes to cast, newest first.
 ### Fixed
 - **The length of the last turn stays in the status row.** Attached to the daemon (the default), `took 5s` appeared while the turn ran and vanished the moment it ended, because the status row counted turns from a list that is not filled in on the client. It now counts what the screen shows.
 
+### Changed
+- **The conversation uses more of a wide terminal.** Text, code and tool rows follow the terminal's width up to 120 columns (it stopped at 100). The header, composer and status row still use the full width.
+
 ## 0.52.6
 
 ### Fixed
