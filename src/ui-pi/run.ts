@@ -3,13 +3,12 @@ import { createElement, useEffect } from "react";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { type AppModel, type AppModelProps, useAppModel } from "../ui/app-model.ts";
-import { gradientAnsi } from "../ui/gradient.ts";
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import { theme } from "../ui/themes/index.ts";
 import { PiApp } from "./app.ts";
 import { createStore, mountHeadless } from "./headless.ts";
 import { applyUserKeybindings } from "./keys.ts";
-import { type Paint, paint } from "./paint.ts";
+import { gradientLine, type Paint, paint } from "./paint.ts";
 import { setSurfaces } from "./surface.ts";
 
 const HINTS = ["/ commands", "/settings", "Esc Esc stops a turn", "PageUp scrolls", "Ctrl+C twice quits"];
@@ -26,7 +25,7 @@ export function bannerLine(version: string, parts: string[], width: number, styl
 	const name = `cast v${version}`;
 	const kept = fitParts(parts, "  ·  ", Math.max(0, width - visibleWidth(name) - 5));
 	const fits = kept !== "" && visibleWidth(kept) + visibleWidth(name) + 5 <= width;
-	return gradientAnsi(name) + (fits ? paint(`  ·  ${kept}`, style) : "");
+	return gradientLine(name, { bold: true }) + (fits ? paint(`  ·  ${kept}`, style) : "");
 }
 
 export interface PiFrontEndOptions {
