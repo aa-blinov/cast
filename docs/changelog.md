@@ -4,6 +4,9 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Fixed
+- **A skill the agent installs is a slash command at once.** Asking cast to install a skill (from skills.sh, say) put it on disk, but `/<skill>` appeared in the list only after restarting the terminal screen: the agent reports the install with a `skills_changed` event, which the web UI handled and the terminal ignored. The terminal now re-reads the skills when it arrives, in both the local and the daemon mode, so the next turn's catalog has it as well.
+
 ### Added
 - **Skills complete in the middle of a message.** Type `/` after other text (`review it with /fo`) and the skills that match open as a list, as they do at the start; Tab inserts one. Only skills are offered there (the commands work only at the start), and Enter sends exactly what you typed unless you moved the highlight with the arrows, so a word or a path that happens to contain a slash is never replaced. A skill named in the middle is plain text the agent reads; it is expanded only when the message starts with it.
 

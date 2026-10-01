@@ -397,6 +397,8 @@ interface UseAgentSessionParams {
 	/** The agent saved a persona and asked to switch to it (persona_create with
 	 *  activate); the host applies it like /persona once the turn is over. */
 	onPersonaActivated?: (name: string, mode: PersonaActivation) => void;
+	/** The agent installed a skill (skill_install): the host re-reads the skills so the new one is a slash command now. */
+	onSkillsChanged?: () => void;
 	/** Re-read persona overrides before a new turn so chat-created changes apply immediately. */
 	refreshPersonasForTurn?: () => Promise<{ persona: Persona; personas: Persona[]; systemPrompt: string }>;
 	/** Available personas for the task tool. */
@@ -566,6 +568,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// Read at event time, so a re-created host callback isn't one render stale.
 	const onPersonaActivatedRef = useRef(params.onPersonaActivated);
 	onPersonaActivatedRef.current = params.onPersonaActivated;
+	const onSkillsChangedRef = useRef(params.onSkillsChanged);
+	onSkillsChangedRef.current = params.onSkillsChanged;
 	const {
 		session,
 		config,
@@ -1350,6 +1354,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 							case "personas_changed":
 								if (event.activate) onPersonaActivatedRef.current?.(event.persona, event.activate);
 								break;
+							case "skills_changed":
+								onSkillsChangedRef.current?.();
+								break;
 							case "doom_loop":
 								pendingDoomWarningsRef.current.push(
 									`[doom loop] ${event.tool} blocked after ${event.attempts} identical calls`,
@@ -1701,6 +1708,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			switch (event.type) {
 				case "personas_changed":
 					if (event.activate) onPersonaActivatedRef.current?.(event.persona, event.activate);
+					break;
+				case "skills_changed":
+					onSkillsChangedRef.current?.();
 					break;
 				case "user_message":
 					setMessages((msgs) => {
