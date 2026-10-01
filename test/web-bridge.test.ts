@@ -147,7 +147,10 @@ describe("web bridge", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		process.env.HOME = realHome;
-		rmSync(fakeHome, { recursive: true, force: true });
+		// A turn started in this non-git folder takes its undo snapshot with git in the
+		// background, which can still be writing under HOME when the test ends: retry
+		// the removal instead of failing it with ENOTEMPTY.
+		rmSync(fakeHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 	});
 
 	it("sees a persona saved on disk at once: in the list and for /persona, no /reload", async () => {
