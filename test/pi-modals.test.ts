@@ -8,6 +8,7 @@ import {
 	SettingsModal,
 	Sheet,
 	StatusBarModal,
+	StatusModal,
 } from "../src/ui-pi/modals.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
@@ -360,5 +361,29 @@ describe("modal footers", () => {
 			() => {},
 		);
 		expect(plain(modal.render(60).join("\n"))).toMatch(/1\/40/);
+	});
+});
+
+describe("StatusModal", () => {
+	it("hugs its label, and centres the line in the box both ways", () => {
+		const label = "Connecting to model...";
+		const width = StatusModal.widthFor(label, 120);
+		expect(width).toBeLessThan(50);
+		const rows = new StatusModal(label).render(width).map(plain);
+		expect(rows).toHaveLength(5);
+		for (const row of rows) expect(visibleWidth(row)).toBe(width);
+		// Borders, a blank row, the line, and the empty footer row: the line has one row of air above and below.
+		expect(rows[1]!.replace(/[│ ]/g, "")).toBe("");
+		expect(rows[2]).toContain(label);
+		expect(rows[3]!.replace(/[│ ]/g, "")).toBe("");
+		const inner = rows[2]!.slice(2, -2);
+		const left = inner.length - inner.trimStart().length;
+		const right = inner.length - inner.trimEnd().length;
+		expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+	});
+
+	it("never asks for more columns than the screen has, nor fewer than a short label needs", () => {
+		expect(StatusModal.widthFor("x".repeat(200), 60)).toBe(60);
+		expect(StatusModal.widthFor("ok", 120)).toBe(32);
 	});
 });

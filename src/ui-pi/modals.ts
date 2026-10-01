@@ -675,11 +675,16 @@ export class ViewModal implements Component {
 	}
 }
 
-/** A one-line activity overlay (connection checks and the like). */
+/** A one-line activity overlay (connection checks and the like): a small box round the line, centred in it. */
 export class StatusModal implements Component {
 	private frameIndex = 0;
 
 	constructor(private readonly label: string) {}
+
+	/** Columns the box needs for `label`: the spinner and a space, the borders, and room to breathe, never past the screen. */
+	static widthFor(label: string, columns = process.stdout.columns || 80): number {
+		return Math.min(columns, Math.max(32, visibleWidth(label) + 2 + 12));
+	}
 
 	tick(): void {
 		this.frameIndex++;
@@ -692,7 +697,11 @@ export class StatusModal implements Component {
 	render(width: number): string[] {
 		const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 		const spin = frames[this.frameIndex % frames.length] ?? "";
-		return frame(undefined, [`${paint(spin, { color: theme().accent })} ${this.label}`], "", width);
+		const line = `${paint(spin, { color: theme().accent })} ${this.label}`;
+		const inner = Math.max(10, width - 4);
+		const left = Math.max(0, Math.floor((inner - visibleWidth(line)) / 2));
+		// A blank row above and the (empty) footer row below the line: it sits in the middle of the box.
+		return frame(undefined, ["", `${" ".repeat(left)}${line}`], "", width);
 	}
 }
 
@@ -714,7 +723,7 @@ export class ModalHost {
 		const transient = request.kind === "status";
 		this.handle = this.tui.showOverlay(transient ? build.component : new Sheet(build.component), {
 			anchor: "bottom-center",
-			width: transient ? "90%" : "100%",
+			width: transient && request.kind === "status" ? StatusModal.widthFor(request.label) : "100%",
 			maxHeight: "85%",
 			margin: { bottom: 3 },
 			nonCapturing: transient,

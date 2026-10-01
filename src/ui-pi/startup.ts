@@ -35,12 +35,12 @@ export function createStartupUi(): {
 		overlay = undefined;
 	};
 
-	const show = (component: Component, nonCapturing = false) => {
+	const show = (component: Component, nonCapturing = false, columns?: number) => {
 		const tui = ensure();
 		hide();
 		overlay = tui.showOverlay(nonCapturing ? component : new Sheet(component), {
 			anchor: "center",
-			width: nonCapturing ? "80%" : "100%",
+			width: columns ?? (nonCapturing ? "80%" : "100%"),
 			maxHeight: "80%",
 			nonCapturing,
 		});
@@ -85,7 +85,7 @@ export function createStartupUi(): {
 		pickers,
 		progress(text) {
 			const modal = new StatusModal(text);
-			show(modal, true);
+			show(modal, true, StatusModal.widthFor(text));
 			ticker = setInterval(() => {
 				modal.tick();
 				screen?.requestRender();
