@@ -19,7 +19,7 @@ import { headerTexts } from "../ui/header.ts";
 import { getKeybindings } from "../ui/input/keybindings.ts";
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import { railMuted } from "../ui/span-style.ts";
-import type { SegmentContext } from "../ui/statusbar.ts";
+import { type SegmentContext, tildePath } from "../ui/statusbar.ts";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON, setTerminalFocused } from "../ui/terminal-notify.ts";
 import { theme } from "../ui/themes/index.ts";
 import { bannerRows } from "./banner.ts";
@@ -318,6 +318,7 @@ export class PiApp {
 			maxResponseTokens: config.maxResponseTokens,
 			messages: session.messages,
 			sessionId: session.id,
+			cwd: model.cwd,
 			worktree: model.cwd.includes("/.cast/worktrees/")
 				? model.cwd.split("/.cast/worktrees/")[1]?.split("/")[0]
 				: undefined,
@@ -338,13 +339,11 @@ export class PiApp {
 			retry: agent.retry,
 			showReasoning: agent.showReasoning,
 		});
-		const home = process.env.HOME ?? "";
-		const folder = home && model.cwd.startsWith(home) ? `~${model.cwd.slice(home.length)}` : model.cwd;
 		const parts = headerTexts(model.header, {
 			persona: model.currentPersona.label,
 			model: model.activeModel,
 			version: this.version,
-			folder,
+			folder: tildePath(model.cwd),
 		});
 		this.transcript.header = (width) => bannerRows(parts, width);
 		this.syncCommands(model);

@@ -17,12 +17,13 @@ interface HeaderPart extends Pick<StatusBarSegment, "id" | "label" | "defaultOn"
 }
 
 // Order is the default order: what goes first is kept longest when the row is short,
-// so the folder, the longest and least needed part, is last.
+// so the folder, the longest and least needed part, is last. Only the version is on by
+// default: the persona and model are in the status row below, and so is the folder.
 const PARTS: HeaderPart[] = [
-	{ id: "persona", label: "Persona", defaultOn: true, text: (ctx) => ctx.persona },
-	{ id: "model", label: "Model", defaultOn: true, text: (ctx) => ctx.model },
+	{ id: "persona", label: "Persona", defaultOn: false, text: (ctx) => ctx.persona },
+	{ id: "model", label: "Model", defaultOn: false, text: (ctx) => ctx.model },
 	{ id: "version", label: "Version", defaultOn: true, text: (ctx) => `v${ctx.version}` },
-	{ id: "folder", label: "Folder", defaultOn: true, text: (ctx) => ctx.folder },
+	{ id: "folder", label: "Folder", defaultOn: false, text: (ctx) => ctx.folder },
 ];
 
 export function defaultHeaderConfig(): HeaderConfig {

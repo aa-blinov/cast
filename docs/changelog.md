@@ -7,6 +7,9 @@ All notable user-facing changes to cast, newest first.
 ### Fixed
 - `/settings` keeps your place: coming back from a row that opens its own list (model, provider, reasoning, skills and the like) no longer jumps the cursor to the first row.
 
+### Changed
+- **The top row is just `CAST(1) * v<version>`.** The persona and the model were repeated in the status row at the bottom, which now also shows the working folder (`~/pet/cast`, dropped first on a narrow screen). `/header` still brings back the persona, the model and the folder, and a header you have already set up is kept.
+
 ## 0.52.3
 
 ### Changed
