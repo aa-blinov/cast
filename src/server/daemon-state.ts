@@ -215,6 +215,19 @@ export function isRecordedDaemon(pid: number, instanceId?: string): boolean {
 	return state.instanceId === instanceId;
 }
 
+/**
+ * Whether a daemon that has just bound its port should give way instead of serving on a port nobody
+ * knows. Only one started by `cast server start` (CAST_SERVER_FOREGROUND=0) does: nothing is
+ * connected to it yet, while a dev-mode or test instance keeps serving by design.
+ */
+export function yieldsToRegisteredDaemon(
+	other: ServerDaemonState | undefined,
+	ownPid: number,
+	env: NodeJS.ProcessEnv = process.env,
+): boolean {
+	return other !== undefined && other.pid !== ownPid && env.CAST_SERVER_FOREGROUND === "0";
+}
+
 function startLockPath(): string {
 	return join(homedir(), ".cast", "server-start.lock");
 }

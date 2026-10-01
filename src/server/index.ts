@@ -21,6 +21,7 @@ import {
 	isRecordedDaemon,
 	readLiveServerState,
 	writeServerState,
+	yieldsToRegisteredDaemon,
 } from "./daemon-state.ts";
 import { startServer } from "./server.ts";
 
@@ -187,7 +188,16 @@ export async function runServerMain(args: string[], options: { foreground: boole
 			// becomes a live-but-untracked orphan. Bind already succeeded, so
 			// still serve on this port — just don't claim to be *the* daemon.
 			const other = readLiveServerState();
-			if (other && other.pid !== process.pid) {
+			if (other && yieldsToRegisteredDaemon(other, process.pid)) {
+				// Spawned by `cast server start` and beaten to the record (the TUI starting its own
+				// daemon while an upgrade restarted this one): nothing is connected to it yet, and an
+				// unrecorded daemon cannot be found by `status` or `stop`, so it ends here rather than
+				// lingering until the orphan sweep finds it.
+				console.log(
+					`[cast server] another cast daemon is already registered (pid ${other.pid}, http://${other.host}:${other.port}) — this duplicate is exiting.`,
+				);
+				process.kill(process.pid, "SIGTERM");
+			} else if (other && other.pid !== process.pid) {
 				console.log(
 					`[cast server] another cast daemon is already registered (pid ${other.pid}, http://${other.host}:${other.port}) — this instance will keep serving on port ${boundPort} but won't replace it in 'cast server status'/'stop'.`,
 				);
