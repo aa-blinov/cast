@@ -9,8 +9,10 @@ export interface PickOption<T> {
 	/** Optional haystack for fuzzy search; concatenated into the match query
 	 *  alongside label + description. Not rendered. */
 	searchText?: string;
-	/** Short text set against the right edge of the row (a setting's current value); the terminal front end draws it. */
+	/** Short text set against the right edge of the row (a setting's current value, a session's date); the terminal front end draws it, and cuts the label before it. */
 	hint?: string;
+	/** One key that chooses this row at once, in a list that is not being filtered (y / a / n for a permission). */
+	key?: string;
 	/** Dimmed label for a row that is shown but not selectable. */
 	muted?: boolean;
 	/** Space cannot toggle this row (still navigable). */
@@ -22,6 +24,8 @@ export interface PickOptions<T = unknown> {
 	defaultIndex?: number;
 	/** A prior-attempt error shown in red above the title (e.g. failed validation). */
 	error?: string;
+	/** What is being decided, as text above the list (the command a permission asks about); wrapped, never cut to one line. */
+	detail?: string;
 	/** Answered as soon as ←, → or Tab is pressed: a picker with two views (one directory's sessions, all of
 	 *  them) flips between them without moving to a row first. Terminal front end only. */
 	switchTo?: T;

@@ -17,6 +17,9 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **The permission question did not show what it was asking about.** On a phone the box covered the transcript, and the command was only visible cut off inside the `Always allow` row. The box now carries the reason and the full command (wrapped, the rest marked), and `y`, `a` and `n` choose Allow once, Always allow and Block at once.
+- **A session row lost its date on a narrow screen.** The first line of the message took the whole row and the date and message count were cut off. They now sit against the right edge and keep their room; the message gives way.
+- **Footers and the placeholder mixed separators and ran past the edge.** Every picker footer now uses ` * ` like the header, and the placeholder while a turn runs reads `type to steer * esc esc to stop`.
 - **Code was cut off mid-token on a narrow screen.** The extra indent of a code block was added after the lines had been wrapped, so a long line ran past the edge and was truncated. The indent is now counted when the line wraps (checked at 32 and 40 columns).
 - **The banner's gradient ignored the terminal's colour depth.** On a terminal without truecolor (macOS Terminal, many SSH clients) the screen used 256 colours but the `cast v…` wordmark still sent 24-bit codes. It now goes through the same colour path as everything else, and `NO_COLOR` applies to it.
 - **Modals showed scraps of the transcript beside them.** A picker or the settings screen now covers the full width with its box centred (at most 104 columns), so no half a word shows on either side.
