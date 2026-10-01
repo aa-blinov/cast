@@ -17,12 +17,13 @@ import { SLASH_COMMANDS } from "../ui/commands.ts";
 import { editInExternalEditor } from "../ui/external-editor.ts";
 import { getKeybindings } from "../ui/input/keybindings.ts";
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
+import { railMuted } from "../ui/span-style.ts";
 import type { SegmentContext } from "../ui/statusbar.ts";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON, setTerminalFocused } from "../ui/terminal-notify.ts";
 import { theme } from "../ui/themes/index.ts";
 import { CastAutocompleteProvider, CastEditor } from "./editor.ts";
 import { ModalHost } from "./modals.ts";
-import { gradientLine, paint } from "./paint.ts";
+import { paint } from "./paint.ts";
 import { statusLine } from "./status.ts";
 import { Transcript } from "./transcript.ts";
 
@@ -98,8 +99,8 @@ export class PiApp {
 		this.editor = new CastEditor(
 			tui,
 			{
-				// The brand gradient runs along the composer's edges.
-				borderColor: (line) => gradientLine(line, { dim: true }),
+				// Hairlines, as quiet as the rest of the page's rules.
+				borderColor: (line) => paint(line, { color: railMuted(), exact: true }),
 				selectList: {
 					selectedPrefix: (text) => paint(text, { color: theme().accent }),
 					selectedText: (text) => paint(text, { color: theme().accent, bold: true }),
@@ -118,7 +119,7 @@ export class PiApp {
 			overscroll: "chain",
 			scrollbar: "auto",
 			scrollbarTrackStyle: (text) => paint(text, { color: theme().border }),
-			scrollbarThumbStyle: (text) => paint(text, { color: theme().accent, dim: true }),
+			scrollbarThumbStyle: (text) => paint(text, { color: railMuted(), exact: true }),
 		});
 		const footer = new Container();
 		for (const child of [this.notice, this.pending, this.hint, this.editor, this.status]) footer.addChild(child);

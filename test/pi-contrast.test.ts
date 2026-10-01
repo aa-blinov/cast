@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { ALL_THEMES, WEB_THEMES } from "../src/ui/themes/index.ts";
 import { contrastRatio, legible } from "../src/ui-pi/contrast.ts";
-import { gradientLine, paint } from "../src/ui-pi/paint.ts";
+import { paint } from "../src/ui-pi/paint.ts";
 
 describe("legible", () => {
 	it("leaves a colour that already clears the floor alone", () => {
@@ -52,7 +52,7 @@ describe("cast-light", () => {
 	it("is a terminal theme, and the browser UI does not list it", () => {
 		expect(light?.terminalOnly).toBe(true);
 		expect(WEB_THEMES.some((t) => t.id === "cast-light")).toBe(false);
-		expect(WEB_THEMES.length).toBe(ALL_THEMES.length - 1);
+		expect(WEB_THEMES.every((t) => !t.terminalOnly)).toBe(true);
 	});
 
 	it("needs no lifting: its text colours clear 4.5:1 on white and on a highlighted row", () => {
@@ -80,7 +80,7 @@ describe("NO_COLOR", () => {
 		const out = paint("hi", { color: "#ff0000", bg: "#00ff00", bold: true });
 		expect(out).not.toMatch(colourCodes);
 		expect(out).toContain("\x1b[1m");
-		expect(gradientLine("cast", { bold: true })).not.toMatch(colourCodes);
+		expect(paint("cast", { color: "#38e0ff", exact: true, bold: true })).not.toMatch(colourCodes);
 	});
 
 	it("an empty NO_COLOR does not switch colour off", () => {

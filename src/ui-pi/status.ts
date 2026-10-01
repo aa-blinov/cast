@@ -9,7 +9,7 @@ const SEPARATOR = " │ ";
 /** Who and what mode you are in stand out; the numbers behind them stay quiet. */
 function segmentStyle(id: string, ctx: SegmentContext): Paint {
 	const colors = theme();
-	if (id === "persona") return { color: colors.persona, bold: true };
+	if (id === "persona") return { bold: true };
 	if (id === "worktree") return { color: colors.warning };
 	if (id === "mode") return ctx.planMode ? { color: colors.warning, bold: true } : { color: colors.muted };
 	if (id === "model") return { color: colors.muted };

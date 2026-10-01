@@ -1,7 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "../src/ui/useAgentSession.ts";
-import { setSurfaces } from "../src/ui-pi/surface.ts";
 import { Transcript } from "../src/ui-pi/transcript.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
@@ -20,8 +19,8 @@ describe("Transcript", () => {
 			],
 		});
 		const rows = transcript.render(50);
-		expect(plain(rows[0]!)).toBe("▌ you");
-		expect(rows.map(plain)).toContain("▌ agent");
+		expect(rows.map(plain).slice(0, 3)).toEqual(["", "YOU", "    hello"]);
+		expect(rows.map(plain)).toContain("AGENT");
 		for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(50);
 	});
 
@@ -43,7 +42,7 @@ describe("Transcript", () => {
 			streaming: { blocks: [{ kind: "content", text: "thinking out loud" }] },
 		});
 		const waiting = transcript.render(60).map(plain);
-		expect(waiting.at(-1)).toMatch(/^│ [⠋-⠿]$/);
+		expect(waiting.at(-1)).toMatch(/^ {2}[⠋-⠿]$/);
 		transcript.set({
 			...base,
 			messages: [],
@@ -55,38 +54,36 @@ describe("Transcript", () => {
 			transcript
 				.render(60)
 				.map(plain)
-				.some((row) => /^│ [⠋-⠿]$/.test(row)),
+				.some((row) => /^ {2}[⠋-⠿]$/.test(row)),
 		).toBe(false);
 	});
 
-	it("puts a blank row wherever the speaker changes, and none between two turns of the agent", () => {
+	it("opens every section with a blank row and its own heading, and puts no stripe down the side", () => {
 		const agent = (text: string): ChatMessage => ({
 			role: "assistant",
 			content: "",
 			blocks: [{ kind: "content", text }],
 		});
 		const transcript = new Transcript();
-		transcript.set({ ...base, messages: [user("q"), agent("a"), agent("b"), user("q2")] });
+		transcript.set({ ...base, messages: [user("q"), agent("a"), user("q2")] });
 		const rows = transcript.render(60).map((row) => plain(row).trimEnd());
-		expect(rows).toEqual(["▌ you", "▌ q", "", "▌ agent", "▌ a", "▌ agent", "▌ b", "", "▌ you", "▌ q2"]);
+		expect(rows).toEqual(["", "YOU", "    q", "", "AGENT", "    a", "", "YOU", "    q2"]);
+		expect(rows.join("")).not.toMatch(/[▌┆│]/);
 	});
 
-	it("sets the person's turn on a band as wide as the screen once the terminal has said its colours, and plain before", () => {
+	it("does not paint a band behind the person's turn, whatever the terminal says about its colours", () => {
 		const transcript = new Transcript();
 		transcript.set({ ...base, messages: [user("hi")] });
-		setSurfaces({});
-		expect(visibleWidth(transcript.render(40)[1]!)).toBeLessThan(40);
-		setSurfaces({ foreground: { r: 230, g: 230, b: 230 }, background: { r: 10, g: 10, b: 12 } });
-		transcript.invalidate();
-		expect(visibleWidth(transcript.render(40)[1]!)).toBe(40);
-		setSurfaces({});
+		const rows = transcript.render(40);
+		expect(rows.some((row) => row.includes("\x1b[48"))).toBe(false);
+		for (const row of rows) expect(visibleWidth(row)).toBeLessThan(40);
 	});
 
 	it("shows an error and a retry notice ahead of the live answer", () => {
 		const transcript = new Transcript();
 		transcript.set({ ...base, messages: [], error: "provider down", retry: { attempt: 2, reason: "timeout" } });
 		const rows = transcript.render(80).map(plain);
-		expect(rows).toContain("│ provider down");
-		expect(rows).toContain("│ Retrying (attempt 2): timeout");
+		expect(rows).toContain("  ✗ provider down");
+		expect(rows).toContain("    Retrying (attempt 2): timeout");
 	});
 });

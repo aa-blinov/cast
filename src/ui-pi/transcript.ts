@@ -1,5 +1,4 @@
 import { type Component, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { gradientHex } from "../ui/gradient.ts";
 import { type OpenFence, trailingOpenFence } from "../ui/markdown-terminal.ts";
 import { theme } from "../ui/themes/index.ts";
 import type { ChatMessage, RetryInfo, StreamingState } from "../ui/useAgentSession.ts";
@@ -7,14 +6,6 @@ import { blockLines, fenceAfter, messageLines } from "./lines.ts";
 import { paint } from "./paint.ts";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-/** The person's messages and everything else are told apart by a blank row; two of the agent's in a row are one turn. */
-function changesSpeaker(previous: ChatMessage | undefined, next: ChatMessage): boolean {
-	if (!previous) return false;
-	return (
-		(previous.role === "user") !== (next.role === "user") || previous.role === "warning" || next.role === "warning"
-	);
-}
 
 export interface TranscriptState {
 	messages: ChatMessage[];
@@ -68,8 +59,6 @@ export class Transcript implements Component {
 		const header = typeof this.header === "function" ? this.header(w) : this.header;
 		const out: string[] = header.map((line) => truncateToWidth(line, w, "…"));
 		messages.forEach((message, i) => {
-			// A blank row wherever the speaker changes, so a turn reads as a block.
-			if (changesSpeaker(messages[i - 1], message)) out.push("");
 			const fence = this.fences[i] ?? null;
 			const key = `${w}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;
 			let entry = this.cache.get(message);
@@ -80,18 +69,17 @@ export class Transcript implements Component {
 			out.push(...entry.lines);
 		});
 		const colors = theme();
-		if (error) out.push(...wrapTextWithAnsi(paint(`│ ${error}`, { color: colors.error }), w));
+		if (error) out.push("", ...wrapTextWithAnsi(paint(`  ✗ ${error}`, { color: colors.error }), w));
 		if (retry) {
 			out.push(
 				truncateToWidth(
-					paint(`│ Retrying (attempt ${retry.attempt}): ${retry.reason}`, { color: colors.warning }),
+					paint(`    Retrying (attempt ${retry.attempt}): ${retry.reason}`, { color: colors.warning }),
 					w,
 					"…",
 				),
 			);
 		}
 		if (streaming) {
-			if (changesSpeaker(messages[messages.length - 1], { role: "assistant", content: "" })) out.push("");
 			let fence: OpenFence | null = null;
 			let runningTool = false;
 			for (const block of streaming.blocks) {
@@ -103,10 +91,7 @@ export class Transcript implements Component {
 			// be deciding; one activity row until something running can speak for itself.
 			if (!runningTool) {
 				const frame = this.spinner % SPINNER_FRAMES.length;
-				out.push(
-					paint("│ ", { color: colors.muted }) +
-						paint(SPINNER_FRAMES[frame] ?? "", { color: gradientHex(frame / (SPINNER_FRAMES.length - 1)) }),
-				);
+				out.push(`  ${paint(SPINNER_FRAMES[frame] ?? "", { color: colors.accent })}`);
 			}
 		}
 		return out;

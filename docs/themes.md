@@ -1,13 +1,14 @@
 # Themes
 
-cast ships with 19 color themes for the TUI (the browser UI lists the 18 dark ones). The active theme is persisted to `~/.cast/settings.json`.
+cast ships with 20 color themes for the TUI. The browser UI lists the 18 dark ones; `man` and `cast-light` are terminal-only. The active theme is persisted to `~/.cast/settings.json`.
 
 ## Built-in Themes
 
 | Theme | ID |
 |-------|----|
 | Ayu | `ayu` |
-| Cast | `cast` (default) |
+| Man page | `man` (default in the terminal) |
+| Cast | `cast` |
 | Cast light | `cast-light`, for light terminals (TUI only) |
 | Everforest | `everforest` |
 | Synthwave '84 | `synthwave-84` |
@@ -25,6 +26,12 @@ cast ships with 19 color themes for the TUI (the browser UI lists the 18 dark on
 | Solarized | `solarized` |
 | Tokyo Night | `tokyo-night` |
 | Tomorrow Night | `tomorrow-night` |
+
+## The look
+
+The terminal screen is set like a man page. The speaker is a bold heading in capitals (`YOU`, `AGENT`, `REASONING`), what they said hangs at a four-column indent, and code sits four columns further in. There is no coloured stripe down the side, no gradient and no band behind your turns: weight and case rank things, and state is a mark and a word (`*` while a tool is done, `…` while it runs, `✗ … failed` when it did not). The header row reads `CAST(1)`, then persona and model, then the version. Colour is held back for the chosen row, commands and paths (one accent, ochre in `man`), muted secondary text, and red for failure.
+
+Any theme can be used with this look; the theme only supplies the accent, muted, success, warning and error colours.
 
 ## Readability
 

@@ -13,6 +13,7 @@ import type { StatusBarConfig } from "../core/settings.ts";
 import { score } from "../pickers/match.ts";
 import type { LiveView, PickOption, PickOptions, SettingFollowUp, SettingRow, SettingsForm } from "../pickers/types.ts";
 import type { ModalRequest } from "../ui/pickerBridge.ts";
+import { railMuted } from "../ui/span-style.ts";
 import type { StatusBarSegment } from "../ui/statusbar.ts";
 import { theme } from "../ui/themes/index.ts";
 import { band, paint } from "./paint.ts";
@@ -76,14 +77,11 @@ export class Sheet implements Component, Focusable {
 
 /** A titled box round `body`, every row padded so it covers what lies under the overlay. */
 export function frame(title: string | undefined, body: string[], footer: string, width: number): string[] {
-	const accent = theme().accent;
 	const inner = Math.max(10, width - 4);
-	const edge = (text: string) => paint(text, { color: accent });
+	const edge = (text: string) => paint(text, { color: railMuted(), exact: true });
 	const head = title ? ` ${truncateToWidth(title, Math.max(4, inner - 4), "…")} ` : "";
 	const top =
-		edge("╭─") +
-		paint(head, { color: accent, bold: true }) +
-		edge(`${"─".repeat(Math.max(0, inner + 1 - visibleWidth(head)))}╮`);
+		edge("╭─") + paint(head, { bold: true }) + edge(`${"─".repeat(Math.max(0, inner + 1 - visibleWidth(head)))}╮`);
 	const row = (line: string) => {
 		const cut = truncateToWidth(line, inner, "…");
 		return `${edge("│")} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${edge("│")}`;
@@ -511,7 +509,7 @@ export class SettingsModal implements Component {
 		this.rows.forEach((row, i) => {
 			if (row.kind === "heading") {
 				if (lines.length > 0) lines.push({ text: "" });
-				lines.push({ text: paint(row.label.toUpperCase(), { color: colors.muted, bold: true }) });
+				lines.push({ text: paint(row.label.toUpperCase(), { bold: true }) });
 				return;
 			}
 			const selected = i === selectedAt;
@@ -525,7 +523,7 @@ export class SettingsModal implements Component {
 		const body = lines.slice(this.scroll, this.scroll + rows).map((l) => l.text);
 		const description = this.current()?.description;
 		body.push("", description ? paint(description, { color: colors.muted }) : " ");
-		return frame(this.form.title, body, "↑↓ move · Space/Enter change · ←/→ cycle · Esc close", width);
+		return frame(this.form.title, body, "↑↓ move * Space/Enter change * ←/→ cycle * Esc close", width);
 	}
 }
 
@@ -606,9 +604,9 @@ export class ViewModal implements Component {
 		const back = Math.min(this.fromBottom, Math.max(0, lines.length - rows));
 		const end = Math.max(rows, lines.length - back);
 		const window = lines.slice(Math.max(0, end - rows), end);
-		const state = this.snapshot.running ? (this.stopped ? "· stopping…" : "· running") : "· finished";
+		const state = this.snapshot.running ? (this.stopped ? "* stopping…" : "* running") : "* finished";
 		const canStop = this.snapshot.running && this.view.stop !== undefined && !this.stopped;
-		const footer = `${back > 0 ? `${back} lines below · ` : ""}esc back · ↑↓ PgUp/PgDn scroll${canStop ? " · s stop it" : ""}`;
+		const footer = `${back > 0 ? `${back} lines below * ` : ""}esc back * ↑↓ PgUp/PgDn scroll${canStop ? " * s stop it" : ""}`;
 		return frame(
 			`${this.view.title} ${state}`,
 			window.map((l) => l || " "),

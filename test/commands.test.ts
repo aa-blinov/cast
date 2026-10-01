@@ -527,7 +527,7 @@ describe("handleInput", () => {
 		await handleInput("/agents", undefined, deps);
 
 		const shown = String(calls["agent.addDisplayMessage"]?.at(-1)?.[0]?.content ?? "");
-		expect(shown).toContain("explore · Map auth");
+		expect(shown).toContain("explore * Map auth");
 		expect(shown).toContain("› map the auth flow");
 		expect(shown).toContain("→ read src/auth.ts");
 		expect(shown).toContain("Auth starts in src/auth.ts:12.");
@@ -558,7 +558,7 @@ describe("handleInput", () => {
 
 		await handleInput("/agents", undefined, deps);
 
-		expect(seen?.title).toBe("explore · Map auth");
+		expect(seen?.title).toBe("explore * Map auth");
 		expect(seen?.read()).toEqual({ text: "› map the auth flow", running: false });
 		expect(seen?.stop).toBeTypeOf("function");
 	});

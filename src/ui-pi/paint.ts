@@ -6,7 +6,6 @@ import {
 	styleTextWithAnsi,
 	visibleWidth,
 } from "@earendil-works/pi-tui";
-import { gradientHex } from "../ui/gradient.ts";
 import { theme } from "../ui/themes/index.ts";
 import { legible } from "./contrast.ts";
 import { surfaceBackground } from "./surface.ts";
@@ -75,11 +74,4 @@ export function paint(text: string, style: Paint = {}): string {
 /** `text` followed by enough spaces (in `bg`) to fill `width`; a row that has to look like a band. */
 export function band(text: string, width: number, bg: string): string {
 	return text + paint(" ".repeat(Math.max(0, width - visibleWidth(text))), { bg });
-}
-
-/** One character at a time along the brand gradient: the composer's edge. */
-export function gradientLine(text: string, style: Paint = {}): string {
-	const chars = [...text];
-	const last = Math.max(1, chars.length - 1);
-	return chars.map((char, i) => paint(char, { ...style, color: gradientHex(i / last), exact: true })).join("");
 }

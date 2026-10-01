@@ -2,7 +2,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import { renderMarkdownLines } from "../src/ui/markdown-terminal.ts";
 import type { ToolCallEntry } from "../src/ui/useAgentSession.ts";
-import { blockLines, messageLines, railLines, toolRowLines } from "../src/ui-pi/lines.ts";
+import { blockLines, messageLines, sectionLines, toolRowLines } from "../src/ui-pi/lines.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
 const plain = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, "");
@@ -25,7 +25,7 @@ describe("toolRowLines", () => {
 		const done = toolRowLines(bash("ok"), 60);
 		expect(done.length).toBeGreaterThan(1);
 		for (const row of done) expect(visibleWidth(row)).toBeLessThanOrEqual(60);
-		expect(plain(toolRowLines(bash("error", "false"), 60)[0]!)).toMatch(/^✗ bash false/);
+		expect(plain(toolRowLines(bash("error", "false"), 60)[0]!)).toMatch(/^ {2}✗ bash false.* failed$/);
 	});
 
 	it("says what a queued subagent is waiting for, and what a running one is doing", () => {
@@ -45,32 +45,54 @@ describe("toolRowLines", () => {
 				toolCount: 2,
 			},
 		});
-		expect(plain(toolRowLines(task("queued"), 100)[0]!)).toContain("[explore queued · 2]");
+		expect(plain(toolRowLines(task("queued"), 100)[0]!)).toContain("[explore queued * 2]");
 		expect(plain(toolRowLines(task("running", { name: "read", summary: "a.ts" }), 100)[0]!)).toContain(
-			"[explore ↳ read a.ts · 2]",
+			"[explore ↳ read a.ts * 2]",
 		);
 	});
 });
 
-describe("railLines", () => {
-	it("puts the speaker on a row of its own and a rail on every line under it", () => {
-		const lines = railLines(renderMarkdownLines("first\nsecond", { width: 40 }), { gutter: "#00ff00", label: "you" });
-		expect(plain(lines[0]!)).toBe("▌ you");
-		expect(lines.slice(1).map(plain)).toEqual(["▌ first", "▌ second"]);
+describe("sectionLines", () => {
+	it("sets the speaker as a bold heading under a blank row, and hangs what was said at the indent", () => {
+		const lines = sectionLines(renderMarkdownLines("first\nsecond", { width: 40 }), { heading: "YOU" });
+		expect(lines.map(plain)).toEqual(["", "YOU", "    first", "    second"]);
+		expect(lines[1]).toContain("\x1b[1m");
+	});
+
+	it("sets code four columns further in, and carries no coloured edge", () => {
+		const lines = sectionLines(renderMarkdownLines("```ts\nconst x = 1;\n```", { width: 40 }), { heading: "AGENT" });
+		const code = lines.map(plain).find((line) => line.includes("const x"));
+		expect(code?.startsWith("        const")).toBe(true);
+		for (const mark of ["▌", "┆", "│"]) expect(lines.map(plain).join("")).not.toContain(mark);
+	});
+
+	it("puts no heading on a continued block, and a blank row on a notice", () => {
+		expect(sectionLines(renderMarkdownLines("more", { width: 40 })).map(plain)).toEqual(["    more"]);
+		expect(sectionLines(renderMarkdownLines("note", { width: 40 }), { gap: true, quiet: true }).map(plain)).toEqual([
+			"",
+			"    note",
+		]);
 	});
 });
 
 describe("messageLines and blockLines", () => {
-	it("shows a notice on the ⓘ rail without its [system] prefix", () => {
+	it("shows a notice indented, without its [system] prefix", () => {
 		const rows = messageLines({ role: "warning", content: "[system] careful" }, { width: 80, showReasoning: false });
-		expect(plain(rows[0]!)).toBe("ⓘ careful");
+		expect(rows.map(plain)).toEqual(["", "    careful"]);
+	});
+
+	it("names the speaker YOU and AGENT", () => {
+		const you = messageLines({ role: "user", content: "hi" }, { width: 80, showReasoning: false });
+		expect(you.map(plain)).toEqual(["", "YOU", "    hi"]);
+		const agent = blockLines({ kind: "content" as const, text: "ok" }, { width: 80, showReasoning: false });
+		expect(agent.map(plain)).toEqual(["", "AGENT", "    ok"]);
 	});
 
 	it("hides reasoning unless asked, and never wraps past the width", () => {
 		const thinking = { kind: "thinking" as const, text: "hmm ".repeat(60) };
 		expect(blockLines(thinking, { width: 50, showReasoning: false })).toEqual([]);
 		const shown = blockLines(thinking, { width: 50, showReasoning: true });
-		expect(plain(shown[0]!)).toBe("┆ reasoning");
+		expect(plain(shown[1]!)).toBe("REASONING");
 		for (const row of shown) expect(visibleWidth(row)).toBeLessThanOrEqual(50);
 	});
 });
