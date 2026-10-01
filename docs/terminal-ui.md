@@ -43,6 +43,7 @@ Senior Developer * BUILD * mimo-v2.6-flash * ~/pet/cast * ctx 9.1k/168k (5%) * t
 | Send | Enter |
 | A line break | Shift+Enter or Alt+Enter; on any terminal, end the line with `\` and press Enter |
 | A command | Type `/`: a list opens; keep typing to filter, ↑↓ to move, Tab or Enter to take it |
+| A skill in the middle of a message | Type `/` after other text (`review it with /fo`): the skills that match open as a list; Tab takes one. Enter sends what you typed unless you moved the highlight with the arrows, so a word or a path with a slash is never turned into a skill |
 | A file | Type `@` and part of a name; ↑↓ choose, Tab or Enter insert `@path` |
 | Complete a path | Tab, in a word that looks like one (has a `/`, or starts with `~`) |
 | An image | Ctrl+G attaches the one on your clipboard |

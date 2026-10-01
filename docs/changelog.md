@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+- **Skills complete in the middle of a message.** Type `/` after other text (`review it with /fo`) and the skills that match open as a list, as they do at the start; Tab inserts one. Only skills are offered there (the commands work only at the start), and Enter sends exactly what you typed unless you moved the highlight with the arrows, so a word or a path that happens to contain a slash is never replaced. A skill named in the middle is plain text the agent reads; it is expanded only when the message starts with it.
+
 ## 0.52.8
 
 ### Changed
