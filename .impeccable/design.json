@@ -1,0 +1,277 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-01T11:49:04+00:00",
+  "title": "Design System: cast",
+  "extensions": {
+    "colorMeta": {
+      "ochre": {
+        "role": "primary",
+        "displayName": "Ochre",
+        "canonical": "#d8a657",
+        "tonalRamp": [
+          "#3e2c0e",
+          "#6d4d19",
+          "#9d6e24",
+          "#cc8f2f",
+          "#d9a95c",
+          "#e4c28c",
+          "#efdbbb",
+          "#faf4ea"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#0a0a0b",
+        "tonalRamp": [
+          "#242428",
+          "#404047",
+          "#5c5c65",
+          "#787884",
+          "#9696a0",
+          "#b5b5bb",
+          "#d3d3d7",
+          "#f2f2f3"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface",
+        "canonical": "#141416",
+        "tonalRamp": [
+          "#242428",
+          "#404047",
+          "#5c5c65",
+          "#787884",
+          "#9696a0",
+          "#b5b5bb",
+          "#d3d3d7",
+          "#f2f2f3"
+        ]
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised",
+        "canonical": "#1d1d20",
+        "tonalRamp": [
+          "#242428",
+          "#404047",
+          "#5c5c65",
+          "#777784",
+          "#9696a0",
+          "#b4b4bb",
+          "#d3d3d7",
+          "#f2f2f3"
+        ]
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover",
+        "canonical": "#26262a",
+        "tonalRamp": [
+          "#242428",
+          "#404047",
+          "#5c5c65",
+          "#777784",
+          "#9696a0",
+          "#b4b4bc",
+          "#d3d3d7",
+          "#f2f2f3"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#2a2a2e",
+        "tonalRamp": [
+          "#252528",
+          "#404046",
+          "#5c5c65",
+          "#787883",
+          "#96969f",
+          "#b5b5bb",
+          "#d3d3d7",
+          "#f2f2f3"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "canonical": "#fafafa",
+        "tonalRamp": [
+          "#262626",
+          "#434343",
+          "#616161",
+          "#7e7e7e",
+          "#9b9b9b",
+          "#b8b8b8",
+          "#d5d5d5",
+          "#f2f2f2"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "canonical": "#8a8f98",
+        "tonalRamp": [
+          "#242629",
+          "#3f4248",
+          "#5a5f67",
+          "#767b86",
+          "#9499a1",
+          "#b3b7bc",
+          "#d2d4d8",
+          "#f1f2f3"
+        ]
+      },
+      "success": {
+        "role": "status",
+        "displayName": "Success",
+        "canonical": "#a9b665",
+        "tonalRamp": [
+          "#303419",
+          "#545b2b",
+          "#78833e",
+          "#9cab51",
+          "#b3bf77",
+          "#c9d19f",
+          "#dfe4c6",
+          "#f5f7ee"
+        ]
+      },
+      "warning": {
+        "role": "status",
+        "displayName": "Warning",
+        "canonical": "#e78a4e",
+        "tonalRamp": [
+          "#432009",
+          "#773810",
+          "#aa5117",
+          "#dd691e",
+          "#e78a4f",
+          "#eeac82",
+          "#f5ceb5",
+          "#fcf0e9"
+        ]
+      },
+      "error": {
+        "role": "status",
+        "displayName": "Error",
+        "canonical": "#ea6962",
+        "tonalRamp": [
+          "#430c09",
+          "#771510",
+          "#aa1e17",
+          "#de281e",
+          "#e7564e",
+          "#ee8782",
+          "#f5b8b5",
+          "#fceae9"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "body": {
+        "displayName": "Body",
+        "purpose": "Chat prose and inputs."
+      },
+      "ui": {
+        "displayName": "UI",
+        "purpose": "Controls, rows, metadata."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Muted uppercase group labels."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Arrivals decelerate into place."
+      },
+      {
+        "name": "transition-fast",
+        "value": ".15s ease",
+        "purpose": "Routine hovers."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "768px"
+      },
+      {
+        "name": "narrow",
+        "value": "360px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Session row",
+      "kind": "nav",
+      "refersTo": "session-row",
+      "description": "A session in the sidebar; 44px under a coarse pointer.",
+      "html": "<div class=\"ds-row\">senior</div><div class=\"ds-row ds-row-active\">кто ты?</div>",
+      "css": ".ds-row{display:flex;align-items:center;min-height:44px;padding:7px 8px;border:1px solid transparent;border-radius:6px;color:#a1a1aa;font:.9rem 'JetBrains Mono',monospace}.ds-row:hover{background:#26262a;color:#fafafa}.ds-row-active{background:#1d1d20;color:#fafafa;border-color:#2a2a2e}"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Search and text fields; accent border on focus.",
+      "html": "<input class=\"ds-field\" placeholder=\"Search sessions...\">",
+      "css": ".ds-field{width:100%;min-height:44px;padding:6px 10px;background:#0a0a0b;color:#fafafa;border:1px solid #2a2a2e;border-radius:6px;font:.8rem 'JetBrains Mono',monospace;outline:none}.ds-field:focus,.ds-field:focus-visible{border-color:#d8a657}"
+    },
+    {
+      "name": "Send button",
+      "kind": "button",
+      "refersTo": "send-button",
+      "description": "The one filled accent control in the composer.",
+      "html": "<button class=\"ds-send\" aria-label=\"Send\">&gt;</button>",
+      "css": ".ds-send{width:36px;height:36px;background:#d8a657;color:#0a0a0b;border:0;border-radius:8px;font:600 .9rem 'JetBrains Mono',monospace;cursor:pointer}.ds-send:hover{background:#e0b46a}.ds-send:focus-visible{outline:2px solid #d8a657;outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Man Page",
+    "overview": "The conversation is set like a manual page. Rank comes from weight and case, state from a mark and a word, and colour is held back for what needs it.",
+    "keyCharacteristics": [
+      "One ochre accent on at most a tenth of any screen",
+      "Hierarchy from bold, capitals and indent",
+      "Monospace everywhere",
+      "Meaning is never carried by colour alone"
+    ],
+    "rules": [
+      {
+        "name": "The One Voice Rule",
+        "body": "The accent marks state and choice, never decoration.",
+        "section": "colors"
+      },
+      {
+        "name": "The Contrast Floor Rule",
+        "body": "Every text colour is held to 4.5:1 against the background it sits on.",
+        "section": "colors"
+      },
+      {
+        "name": "The Plain Separator Rule",
+        "body": "Separators are ASCII: ` * ` between parts, `*`, `-`, `+` markers, `[x]` boxes.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Surfaces are flat at rest; state is shown by tone and a mark, not by shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use the one accent for state and choice and let weight, case and indent do the rest.",
+      "Do keep touch targets at 44px under a coarse pointer."
+    ],
+    "donts": [
+      "Don't use gradient text, coloured stripes, glow shadows or accent-coloured borders.",
+      "Don't carry meaning by colour alone."
+    ]
+  }
+}

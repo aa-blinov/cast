@@ -416,7 +416,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	font-size: var(--fs-micro); font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: .06em;
-	color: var(--cyan);
+	color: var(--text-muted);
 	padding: 2px 4px 6px;
 }
 .sidebar-session-group + .sidebar-session-group {

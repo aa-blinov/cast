@@ -1,13 +1,13 @@
 # Themes
 
-cast ships with 20 color themes for the TUI. The browser UI lists the 18 dark ones; `man` and `cast-light` are terminal-only. The active theme is persisted to `~/.cast/settings.json`.
+cast ships with 20 color themes for the TUI. The browser UI lists the 19 dark ones; `cast-light` is terminal-only. The active theme is persisted to `~/.cast/settings.json`.
 
 ## Built-in Themes
 
 | Theme | ID |
 |-------|----|
 | Ayu | `ayu` |
-| Man page | `man` (default in the terminal) |
+| Man page | `man` (the default, in the terminal and the browser) |
 | Cast | `cast` |
 | Cast light | `cast-light`, for light terminals (TUI only) |
 | Everforest | `everforest` |
