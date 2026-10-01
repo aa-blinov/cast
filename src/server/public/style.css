@@ -138,7 +138,7 @@ body.resizing-sidebar * { user-select: none; }
 	color: var(--amber);
 	background: var(--warning-subtle);
 	border: 1px solid var(--warning-border);
-	border-radius: 20px;
+	border-radius: 999px;
 	padding: 2px 8px;
 	flex-shrink: 0;
 	white-space: nowrap;
@@ -652,12 +652,11 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	padding: 0 max(16px, env(safe-area-inset-left)) 6px;
 	font-size: var(--fs-micro);
 	color: var(--text-muted);
-	text-transform: uppercase;
-	letter-spacing: .04em;
 }
 .composer-role-left {
 	display: flex; align-items: center; gap: 6px;
-	color: var(--persona);
+	color: var(--text-dim);
+	font-weight: 600;
 	/* The path is the one part allowed to shrink; the persona keeps its own
 	   width and stays on one line (it wrapped mid-label on a phone). */
 	min-width: 0;
@@ -1576,6 +1575,9 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	.scroll-bottom-btn, .dash-pager-btn, .fs-collapse-btn, .fs-action, .dir-toggle-btn {
 		min-width: 44px; min-height: 44px;
 	}
+	/* Panel tabs, settings controls and modal buttons grow to the same target. */
+	.diff-tab, .settings-tab, .settings-theme-swatch, .settings-font-swatch, .settings-scale-btn,
+	.settings-toggle, .modal-btn, .modal select, .login-form input, .login-form button { min-height: 44px; }
 	/* Palette rows are tapped, not arrowed, on a phone. */
 	.cmd-item, .turn-retry .modal-btn { min-height: 44px; }
 	/* The session row is the thing tapped most; the search field and "Load more" sit in the same list. */

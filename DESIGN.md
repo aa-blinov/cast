@@ -138,6 +138,9 @@ Hairline boxes. Terminal modals are a muted box with a bold title, centred on th
 - The footer is an ordered hint list in muted text with the exit key early (`Esc close`); later hints drop whole when narrow. One vocabulary everywhere (`Enter confirm`, `Esc close`, `↑↓ move`) and one ellipsis, `…`. A list's filter placeholder sits on the prompt row.
 - The start-up and loading box is compact: it fits its label, is centred, and shows three running dots (`.`, `..`, `...`) padded to three cells.
 
+### Tool row (browser)
+- One line, as in the terminal: a mark (`*` done, `…` running in the accent, `✗` failed in the error colour), the tool name in bold, the one argument it acts on in muted text, truncated with an ellipsis, and the word `failed` at the right edge when it did. No box, no chip, no dot. A click opens the full arguments and the result in inset panels; under a coarse pointer the row is 44px tall.
+
 ### Session row (browser)
 - 44px tall under a coarse pointer, 6px radius, dim text; the active row is raised with a hairline. Pin and "more" are always visible on touch, shown on hover with a mouse.
 

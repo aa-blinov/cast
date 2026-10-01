@@ -14,9 +14,9 @@ export function useWorkspaceState() {
 	const [diffFile, setDiffFile] = useState(null);
 	const [diffTab, setDiffTab] = useState(() => {
 		try {
-			return localStorage.getItem("cast:diffTab") || "changes";
+			return localStorage.getItem("cast:diffTab") || "fs";
 		} catch {
-			return "changes";
+			return "fs";
 		}
 	});
 	// Bumped on every tool_end — the Files tab's tree is fetched once per
