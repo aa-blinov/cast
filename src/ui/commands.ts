@@ -365,7 +365,17 @@ export function helpMarkdown(): string {
 	].join("\n");
 }
 
+/**
+ * A command that prints a listing shows what was typed above it. When it was started from the
+ * settings screen nobody typed it, so `echoCommand: false` there leaves `YOU /skills` out.
+ */
+function echoCommand(deps: CommandDeps, input: string): void {
+	if (deps.echoCommand !== false) deps.agent.addDisplayMessage({ role: "user", content: input });
+}
+
 export interface CommandDeps {
+	/** False when the command is run by a screen on the person's behalf rather than typed (default true). */
+	echoCommand?: boolean;
 	agent: UseAgentSession;
 	session: SessionState;
 	config: AppConfig;
@@ -641,7 +651,7 @@ function formatSkillsList(deps: CommandDeps): string {
 
 async function handleSkillsCommand(input: string, deps: CommandDeps): Promise<void> {
 	const { showNotice } = deps;
-	deps.agent.addDisplayMessage({ role: "user", content: input });
+	echoCommand(deps, input);
 	const args = input === "/skills" ? "" : input.slice("/skills ".length).trim();
 	if (args === "help") {
 		deps.agent.addDisplayMessage({ role: "warning", content: SKILLS_HELP });
@@ -871,7 +881,7 @@ without a reload and every other agent on this machine shares.`;
 
 async function handleSkillsShCommand(input: string, deps: CommandDeps): Promise<void> {
 	const { showNotice } = deps;
-	deps.agent.addDisplayMessage({ role: "user", content: input });
+	echoCommand(deps, input);
 	const args = input === "/skills-sh" ? "" : input.slice("/skills-sh ".length).trim();
 	const [sub, ...restParts] = args ? args.split(WHITESPACE_SPLIT_RE) : [""];
 	const rest = restParts.join(" ");
@@ -913,7 +923,7 @@ async function handleSkillsShCommand(input: string, deps: CommandDeps): Promise<
 
 async function handleMcpCommand(input: string, deps: CommandDeps): Promise<void> {
 	const { showNotice } = deps;
-	deps.agent.addDisplayMessage({ role: "user", content: input });
+	echoCommand(deps, input);
 	const args = input === "/mcp" ? "" : input.slice("/mcp ".length).trim();
 	if (args === "help") {
 		deps.agent.addDisplayMessage({ role: "warning", content: MCP_HELP });
@@ -3221,7 +3231,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			}
 
 			// /ssh (no subcommand) — list hosts
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			if (deps.sshHosts.length === 0) {
 				deps.agent.addDisplayMessage({
 					role: "warning",
@@ -3419,7 +3429,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		// the composer as though Enter had been swallowed.
 		whileRunning: "submit",
 		run: async ({ input, deps }) => {
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			// There was no way to see which context files are in play — the
 			// question behind "why is the agent doing that?" — and an unreadable
 			// one was skipped in silence, so instructions the user had written
@@ -3454,7 +3464,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		// the composer as though Enter had been swallowed.
 		whileRunning: "submit",
 		run: async ({ input, deps }) => {
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			// Recomputed here rather than threaded through every setter: a rule
 			// file cast could not read used to vanish from this listing with no
 			// explanation, which reads as "cast never saw my file". Cheap — rule
@@ -3515,7 +3525,9 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		// Opening it changes nothing; each row applies its own rules for a running turn.
 		whileRunning: "submit",
 		run: async ({ deps }) => {
-			const form = buildSettingsForm(deps, (command) => handleInput(command, undefined, deps));
+			const form = buildSettingsForm(deps, (command) =>
+				handleInput(command, undefined, { ...deps, echoCommand: false }),
+			);
 			const show = () => (deps.pickers.settings ? deps.pickers.settings(form) : pickSettingFallback(deps, form));
 			for (;;) {
 				// biome-ignore lint/performance/noAwaitInLoops: the screen comes back after each row's own flow
@@ -3693,7 +3705,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			} catch {
 				// not a git repo
 			}
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			deps.agent.addDisplayMessage({
 				role: "warning",
 				content: `cwd: ${deps.cwd}\ngit: ${isGit}\ngit branch: ${branch}\ndirty: ${dirty}\nremote: ${remote}\nhead: ${head}`,
@@ -3708,7 +3720,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Agent is running — wait for it to finish before /evolve]");
 				return;
 			}
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			try {
 				const result = await deps.agent.runCommand("/evolve");
 				if (typeof result === "string" && result) showNotice(`[${result}]`);
@@ -3744,7 +3756,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				);
 				return;
 			}
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			showNotice(
 				`[Reviewing ${scope.files.length} file(s) in ${scope.groups.length} group(s); rules: ${scope.rules.map((r) => r.name).join(", ")}]${
 					scope.files.length > LARGE_REVIEW_FILES
@@ -3767,7 +3779,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Agent is running — wait for it to finish, or use /steer, before /review]");
 				return;
 			}
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			await agent.submit(REVIEW_PROMPT, images);
 			return;
 		},
@@ -3816,7 +3828,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Agent is running — wait for it to finish, or use /steer, before /goal]");
 				return;
 			}
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			// The goal outlives this turn: it lands in .cast/goals/<session>.json
 			// and rides along with every later turn until the agent closes it or
 			// the user clears it. maxIterations still caps *this* turn so the
@@ -3835,7 +3847,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		// the composer as though Enter had been swallowed.
 		whileRunning: "submit",
 		run: ({ input, deps }) => {
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			deps.agent.addDisplayMessage({ role: "warning", content: helpMarkdown() });
 			return;
 		},
@@ -3870,7 +3882,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		// the composer as though Enter had been swallowed.
 		whileRunning: "submit",
 		run: ({ input, deps }) => {
-			deps.agent.addDisplayMessage({ role: "user", content: input });
+			echoCommand(deps, input);
 			const ACTION_LABELS: Record<string, string> = {
 				"editor.cursorUp": "Previous prompt (palette: up)",
 				"editor.cursorDown": "Next prompt (palette: down)",

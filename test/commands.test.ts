@@ -783,6 +783,33 @@ describe("handleInput", () => {
 		expect(shown).toContain(deps.session.id);
 	});
 
+	it("a command run from the settings screen does not print `YOU /command`, one typed does", async () => {
+		const userEchoes = (calls: Calls) =>
+			(calls["agent.addDisplayMessage"] ?? []).filter((c) => (c[0] as { role?: string })?.role === "user");
+
+		const typed = createFakeDeps();
+		await handleInput("/help", undefined, typed.deps);
+		expect(userEchoes(typed.calls)).toHaveLength(1);
+
+		let opened = 0;
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async () => null,
+			pickMulti: async () => null,
+			log: () => {},
+			settings: async (form) => {
+				if (++opened > 1) return null;
+				const row = form.rows().find((r) => r.kind === "open" && r.label === "Keybindings");
+				return row?.kind === "open" ? row.open : null;
+			},
+		};
+		const fromSettings = createFakeDeps({ pickers });
+		await handleInput("/settings", undefined, fromSettings.deps);
+		expect(opened).toBe(2);
+		expect(fromSettings.calls["agent.addDisplayMessage"]?.length ?? 0).toBeGreaterThan(0);
+		expect(userEchoes(fromSettings.calls)).toHaveLength(0);
+	});
+
 	it("/agents says so when the session has none", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/agents", undefined, deps);

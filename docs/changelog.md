@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+
+- **Opening Skills, MCP or Keybindings from `/settings` printed `YOU /skills`** in the conversation, although nobody typed it. A command started from the settings screen no longer echoes itself; one typed in the composer still does.
+
 ## 0.52.0
 
 ### Added
