@@ -11,7 +11,7 @@ import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
 import { runPiFrontEnd } from "../ui-pi/run.ts";
 import { createStartupUi } from "../ui-pi/startup.ts";
 import { type ClipboardPasteResult, saveClipboardImageToTempFile } from "./readClipboardImage.ts";
-import { resumeHint } from "./resume-hint.ts";
+import { resumeCommand, resumeHint, writeLastResume } from "./resume-hint.ts";
 import { loadTheme } from "./themes/index.ts";
 
 /** A trail in ~/.cast/tui-errors.log for what the screen cannot show. */
@@ -96,7 +96,9 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		const earlier = listSessionSummaries().some(
 			(s) => s.msgCount > 0 && s.id !== result.session.id && s.cwd && resolve(s.cwd) === here,
 		);
-		const line = resumeHint({ id: result.session.id, hasMessages: sessionHasMessages(result.session.id) }, earlier);
+		const session = { id: result.session.id, hasMessages: sessionHasMessages(result.session.id) };
+		writeLastResume(resumeCommand(session, earlier));
+		const line = resumeHint(session, earlier);
 		if (!line) return;
 		resumeHintPrinted = true;
 		process.stdout.write(`${line}\n`);

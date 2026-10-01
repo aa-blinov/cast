@@ -27,6 +27,7 @@ import {
 	releaseStartLock,
 	START_LOCK_WAIT_ATTEMPTS,
 } from "./server/daemon-state.ts";
+import { detectShell, SHELLS, shellInit } from "./ui/resume-hint.ts";
 import { runTui } from "./ui/tui.ts";
 
 const VERSION: string = JSON.parse(
@@ -56,6 +57,18 @@ async function main(): Promise<void> {
 
 	if (args[0] === "run") {
 		await handleRunCommand(args.slice(1), VERSION);
+		return;
+	}
+
+	if (args[0] === "shell-init") {
+		const shell = detectShell(args[1]);
+		if (!shell) {
+			console.error(
+				`Usage: cast shell-init [${SHELLS.join("|")}]  (add: eval "$(cast shell-init)" to your shell's rc file)`,
+			);
+			process.exit(1);
+		}
+		process.stdout.write(shellInit(shell));
 		return;
 	}
 

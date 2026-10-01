@@ -9,6 +9,7 @@ cast run --interactive [options]      Persistent JSONL session
 cast web [start|stop|status]          Browser-based control room
 cast server [start|stop|status]       Alias for cast web
 cast upgrade [version] [--force]      Self-update
+cast shell-init [zsh|bash|fish]       A shell function that puts the resume command in your history
 cast requests <session> [n]           What the model was sent
 cast lsp <operation> <file> [...]     Ask a language server, as the lsp tool does
 ```
@@ -51,6 +52,17 @@ cast upgrade              # Upgrade to latest
 cast upgrade 0.3.0        # Upgrade to specific version
 cast upgrade --force      # Reinstall even if same version
 ```
+
+### `cast shell-init`
+
+Prints a `cast` shell function (zsh, bash or fish; by default the one in `$SHELL`). When a `cast` session ends, the function adds `cast --resume=<id>` to the shell's history, so Up brings it back. A session with no turn adds `cast --continue` instead (the folder's latest session), and a folder with no history adds nothing. A child process cannot write its parent shell's history, which is why this is a function in the shell, not something `cast` does itself. `cast run`, `cast upgrade` and the other subcommands add nothing.
+
+```bash
+cast shell-init >> ~/.zshrc            # once; use ~/.bashrc for bash
+eval "$(cast shell-init)"              # or on every start (slower: it starts cast each time)
+```
+
+At exit `cast` leaves the command in `~/.cast/last-resume` (`$CAST_HOME/last-resume` if set); the function reads it and removes it. The line `Resume this session: …` is still printed for terminals without the function.
 
 ### `cast requests`
 
