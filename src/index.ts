@@ -603,7 +603,7 @@ async function handleServerCommand(args: string[], options: { remember?: boolean
 	const restArgs: string[] = [];
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i]!;
-		if (a === "start" || a === "--foreground" || a === "--public") continue;
+		if (a === "start" || a === "--foreground" || a === "--public" || a === "--no-remember") continue;
 		if (a === "--port" || a === "--host") {
 			i++; // also skip this flag's value
 			continue;
@@ -698,7 +698,7 @@ async function handleServerCommand(args: string[], options: { remember?: boolean
 		process.exit(1);
 	}
 	console.log(`[cast server] started (pid ${child.pid}) — http://${host}:${port}`);
-	if (explicit && options.remember !== false) {
+	if (explicit && options.remember !== false && !args.includes("--no-remember")) {
 		rememberBind({ host, port });
 		if (rememberedBind()) {
 			console.log(

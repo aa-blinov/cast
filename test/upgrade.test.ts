@@ -16,6 +16,8 @@ vi.mock("node:child_process", async (importOriginal) => {
 		spawn: vi.fn(() => ({ unref: vi.fn() })),
 	};
 });
+const remembered = vi.hoisted(() => ({ bind: undefined as { host: string; port: number } | undefined }));
+vi.mock("../src/server/daemon-bind.ts", () => ({ rememberedBind: () => remembered.bind }));
 vi.mock("../src/server/daemon-state.ts", () => ({
 	daemonBaseUrl: (state: { host: string; port: number }) => `http://${state.host}:${state.port}`,
 	readServerState: vi.fn(),
@@ -147,9 +149,13 @@ describe("restartDaemon", () => {
 		vi.spyOn(process, "kill").mockImplementation(() => {});
 		expect(await restartDaemon()).toBe(true);
 		expect(clearServerState).toHaveBeenCalled();
-		expect(spawnSync).toHaveBeenCalledWith("cast", ["server", "start", "--port", "1337", "--host", "127.0.0.1"], {
-			stdio: "inherit",
-		});
+		expect(spawnSync).toHaveBeenCalledWith(
+			"cast",
+			["server", "start", "--port", "1337", "--host", "127.0.0.1", "--no-remember"],
+			{
+				stdio: "inherit",
+			},
+		);
 	});
 
 	it("hands its own restart to a detached waiter instead of SIGTERMing itself", async () => {
@@ -174,7 +180,7 @@ describe("restartDaemon", () => {
 		const [command, args, options] = vi.mocked(spawn).mock.calls[0];
 		expect(command).toBe("sh");
 		expect(String(args?.[1])).toContain(`kill -0 ${process.pid}`);
-		expect(String(args?.[1])).toContain("cast server start --port 1337 --host 127.0.0.1");
+		expect(String(args?.[1])).toContain("cast server start --port 1337 --host 127.0.0.1 --no-remember");
 		expect(options).toMatchObject({ detached: true });
 		// Still shuts down, so sessions drain — just after the waiter exists.
 		expect(kill).toHaveBeenCalledWith(process.pid, "SIGTERM");
@@ -210,6 +216,38 @@ describe("restartDaemon", () => {
 		expect(await restartDaemon()).toBe(true);
 		expect(kill).not.toHaveBeenCalled();
 		expect(spawnSync).not.toHaveBeenCalled();
+	});
+
+	it("brings the daemon back on the address the person chose, even if it had fallen back to a private one", async () => {
+		remembered.bind = { host: "0.0.0.0", port: 1337 };
+		try {
+			vi.mocked(readServerState).mockReturnValueOnce({
+				pid: 424242,
+				host: "127.0.0.1",
+				port: 44453,
+				startedAt: "t",
+				foreground: false,
+			});
+			vi.mocked(readServerState).mockReturnValue({
+				pid: 424243,
+				host: "0.0.0.0",
+				port: 1337,
+				startedAt: "new",
+				foreground: false,
+			});
+			vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true);
+			vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+			vi.spyOn(process, "kill").mockImplementation(() => {});
+			expect(await restartDaemon()).toBe(true);
+			// And an upgrade is not a choice: it must not remember the address it restarts on.
+			expect(spawnSync).toHaveBeenCalledWith(
+				"cast",
+				["server", "start", "--port", "1337", "--host", "0.0.0.0", "--no-remember"],
+				{ stdio: "inherit" },
+			);
+		} finally {
+			remembered.bind = undefined;
+		}
 	});
 
 	describe("a turn is running when the upgrade restarts the daemon", () => {

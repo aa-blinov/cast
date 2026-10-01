@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **`cast upgrade` brings the daemon back on the address you chose.** It restarted the daemon where it happened to be running, and, since the address of a started daemon is now remembered, would have remembered a private fallback port in place of your public one. It now starts the daemon on the remembered address (the one it was on if there is none) and does not remember anything itself.
+
 ## 0.52.10
 
 ### Fixed
