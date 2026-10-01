@@ -30,6 +30,11 @@ interface SectionOptions {
 	gap?: boolean;
 }
 
+/** Markdown with code set deeper than prose, the extra indent counted when long lines wrap. */
+function markdown(text: string, options: { width: number; openFence?: OpenFence | null }): RenderedLine[] {
+	return renderMarkdownLines(text, { ...options, codeIndent: " ".repeat(CODE_INDENT) });
+}
+
 /** Rendered markdown lines under one heading, hung at the indent. */
 export function sectionLines(lines: RenderedLine[], options: SectionOptions = {}): string[] {
 	const colors = theme();
@@ -38,7 +43,7 @@ export function sectionLines(lines: RenderedLine[], options: SectionOptions = {}
 		out.push("", paint(options.heading, { color: options.quiet ? colors.muted : undefined, bold: true }));
 	} else if (options.gap) out.push("");
 	for (const line of lines) {
-		const pad = " ".repeat(INDENT + (line.code ? CODE_INDENT : 0));
+		const pad = " ".repeat(INDENT);
 		const text = line.spans
 			.map((span) => {
 				const { color, bold, italic, dimColor, underline } = spanProps(span);
@@ -139,17 +144,14 @@ export function blockLines(
 	if (block.kind === "tool") return toolRowLines(block.call, width);
 	if (block.kind === "thinking") {
 		if (!showReasoning) return [];
-		return sectionLines(
-			renderMarkdownLines(block.text.replace(THINK_TAG_RE, ""), { width: bodyWidth(width), openFence }),
-			{ heading: block.continued ? undefined : "REASONING", quiet: true },
-		);
+		return sectionLines(markdown(block.text.replace(THINK_TAG_RE, ""), { width: bodyWidth(width), openFence }), {
+			heading: block.continued ? undefined : "REASONING",
+			quiet: true,
+		});
 	}
-	return sectionLines(
-		renderMarkdownLines(block.text.replace(THINK_TAG_RE, ""), { width: bodyWidth(width), openFence }),
-		{
-			heading: block.continued ? undefined : "AGENT",
-		},
-	);
+	return sectionLines(markdown(block.text.replace(THINK_TAG_RE, ""), { width: bodyWidth(width), openFence }), {
+		heading: block.continued ? undefined : "AGENT",
+	});
 }
 
 /** The fence still open after this message, to carry into the next one. */
@@ -169,7 +171,7 @@ export function messageLines(
 ): string[] {
 	const { width, showReasoning } = options;
 	if (message.role === "user") {
-		return sectionLines(renderMarkdownLines(message.content, { width: bodyWidth(width) }), { heading: "YOU" });
+		return sectionLines(markdown(message.content, { width: bodyWidth(width) }), { heading: "YOU" });
 	}
 	if (message.role === "assistant") {
 		let fence = options.openFence ?? null;
@@ -184,9 +186,9 @@ export function messageLines(
 		const text = message.content.startsWith(SYSTEM_PREFIX)
 			? message.content.slice(SYSTEM_PREFIX.length)
 			: message.content;
-		return sectionLines(renderMarkdownLines(text, { width: bodyWidth(width) }), { quiet: true, gap: true });
+		return sectionLines(markdown(text, { width: bodyWidth(width) }), { quiet: true, gap: true });
 	}
-	return sectionLines(renderMarkdownLines(`[${message.role}] ${message.content}`, { width: bodyWidth(width) }), {
+	return sectionLines(markdown(`[${message.role}] ${message.content}`, { width: bodyWidth(width) }), {
 		quiet: true,
 		gap: true,
 	});

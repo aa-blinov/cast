@@ -19,6 +19,7 @@ import {
 import { type PermissionMode, updateSettings } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
 import type { CommandDeps } from "../src/ui/commands.ts";
+import { defaultHeaderConfig } from "../src/ui/header.ts";
 import { buildSettingsForm, parseTurnCap } from "../src/ui/settings-form.ts";
 import { defaultStatusBarConfig } from "../src/ui/statusbar.ts";
 import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
@@ -151,6 +152,8 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 		onQuit: track("onQuit"),
 		showNotice: track("showNotice"),
 		statusBar: defaultStatusBarConfig(),
+		header: defaultHeaderConfig(),
+		setHeader: track("setHeader"),
 		cwd: "/tmp",
 		setCwd: track("setCwd"),
 		currentPersona: {
@@ -686,6 +689,45 @@ describe("handleInput", () => {
 		if (model?.kind !== "open") throw new Error("no model row");
 		await model.open();
 		expect(ran).toEqual(["/model"]);
+	});
+
+	it("/header edits the parts of the top row through the shared list, saves them and applies them", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		let seen: { ids: string[]; opts?: { title?: string; sides?: boolean } } | undefined;
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async () => null,
+			pickMulti: async () => null,
+			log: () => {},
+			pickStatusBar: async (segments, initial, opts) => {
+				seen = { ids: segments.map((s) => s.id), opts };
+				return { visible: ["persona", "model"], order: ["model", "persona", "version", "folder"], sides: {} };
+			},
+		};
+		const { deps, calls } = createFakeDeps({ pickers });
+		await handleInput("/header", undefined, deps);
+		expect(seen?.ids).toEqual(["persona", "model", "version", "folder"]);
+		expect(seen?.opts).toEqual({ title: "Header parts", sides: false });
+		expect(loadSettings().header).toEqual({
+			visible: ["persona", "model"],
+			order: ["model", "persona", "version", "folder"],
+		});
+		expect(calls.setHeader).toHaveLength(1);
+		expect(noticeText(calls)).toContain("Header: 2 parts");
+	});
+
+	it("/header cancelled leaves the row as it was", async () => {
+		const pickers: Pickers = {
+			promptText: async () => null,
+			pickOption: async () => null,
+			pickMulti: async () => null,
+			log: () => {},
+			pickStatusBar: async () => null,
+		};
+		const { deps, calls } = createFakeDeps({ pickers });
+		await handleInput("/header", undefined, deps);
+		expect(calls.setHeader).toBeUndefined();
+		expect(noticeText(calls)).toContain("Cancelled");
 	});
 
 	it("/agents says so when the session has none", async () => {

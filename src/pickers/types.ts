@@ -117,6 +117,7 @@ export interface Pickers {
 	pickStatusBar?(
 		segments: readonly StatusBarSegment[],
 		initialConfig: StatusBarConfig,
+		opts?: { title?: string; sides?: boolean },
 	): Promise<StatusBarConfig | null>;
 	/**
 	 * Show a spinner with a label while an async step runs (model validation,

@@ -43,6 +43,8 @@ export type ModalRequest =
 			kind: "statusbar";
 			segments: readonly StatusBarSegment[];
 			initialConfig: StatusBarConfig;
+			/** Heading of the list, and whether each row can sit on the left or the right (the header has one side). */
+			opts?: { title?: string; sides?: boolean };
 			resolve: (config: StatusBarConfig | null) => void;
 	  };
 
@@ -127,12 +129,14 @@ export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 		pickStatusBar(
 			segments: readonly StatusBarSegment[],
 			initialConfig: StatusBarConfig,
+			opts?: { title?: string; sides?: boolean },
 		): Promise<StatusBarConfig | null> {
 			return new Promise((resolvePromise) => {
 				setRequest({
 					kind: "statusbar",
 					segments,
 					initialConfig,
+					opts,
 					resolve: (config) => {
 						setRequest(null);
 						resolvePromise(config);

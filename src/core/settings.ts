@@ -39,6 +39,12 @@ export interface StatusBarConfig {
 	sides: Record<string, "left" | "right">;
 }
 
+/** The parts of the row at the top of the screen, and their order. */
+export interface HeaderConfig {
+	visible: string[];
+	order: string[];
+}
+
 export interface Provider {
 	name: string;
 	url: string;
@@ -209,6 +215,8 @@ export interface Settings {
 	disabledHooks?: string[];
 	/** Status bar segment configuration: which are visible, order, and sides. */
 	statusBar?: StatusBarConfig;
+	/** The row at the top of the TUI: which parts, in what order. */
+	header?: HeaderConfig;
 	/** @deprecated Agent mode moved to SessionState.mode — the mode is per-task
 	 * session state, and storing it globally leaked plan mode across projects.
 	 * Kept only so old settings.json files still parse. */

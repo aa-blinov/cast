@@ -24,12 +24,13 @@ import {
 	unionStickyRules,
 } from "../core/rules.ts";
 import { resetSessionContext, saveSession } from "../core/session.ts";
-import { loadSettings, type StatusBarConfig } from "../core/settings.ts";
+import { type HeaderConfig, loadSettings, type StatusBarConfig } from "../core/settings.ts";
 import { formatSkillsForPrompt } from "../core/skills.ts";
 import type { StartupResult } from "../core/startup.ts";
 import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/upgrade.ts";
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
 import { displayWidth } from "./display-width.ts";
+import { defaultHeaderConfig } from "./header.ts";
 import { imageFilePathsInText } from "./paste.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { resolvePlanQuestionWithPicker } from "./plan-question.ts";
@@ -193,6 +194,7 @@ export function useAppModel(props: AppModelProps) {
 	const [statusBar, setStatusBar] = useState<StatusBarConfig>(
 		() => loadSettings().statusBar ?? defaultStatusBarConfig(),
 	);
+	const [header, setHeader] = useState<HeaderConfig>(() => loadSettings().header ?? defaultHeaderConfig());
 	// Mode is per-session state: restored from the (possibly resumed) session
 	// on startup, persisted into the session file on every toggle — so quitting
 	// mid-planning resumes planning in THAT session, without leaking plan mode
@@ -739,6 +741,8 @@ export function useAppModel(props: AppModelProps) {
 		onRepaintHistory,
 		statusBar,
 		setStatusBar,
+		header,
+		setHeader,
 	});
 	depsRef.current = {
 		agent,
@@ -797,6 +801,8 @@ export function useAppModel(props: AppModelProps) {
 		onRepaintHistory,
 		statusBar,
 		setStatusBar,
+		header,
+		setHeader,
 	};
 
 	// PageUp in the composer routes here (Composer's history.older binding) —
@@ -843,6 +849,7 @@ export function useAppModel(props: AppModelProps) {
 		skills,
 		running,
 		statusBar,
+		header,
 		currentPersona,
 		planMode,
 		activeModel,

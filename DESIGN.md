@@ -8,7 +8,7 @@ The conversation is set like a man page. Rank comes from weight and case; state 
 
 ## Structure
 
-- **Header row:** `CAST(1)` left, persona and model centred, `v<version>` right; the centre gives up parts (folder, then model) whole when the width is short. A muted hint row follows, dropping hints from the end.
+- **Header row:** `CAST(1) * persona * model * v<version> * folder`, joined by one ` * ` rather than padded to the edges (which a phone cannot spare); parts drop from the end, whole, when the width is short. The parts and their order are the user's (`/header`). A muted hint row follows, dropping hints from the end.
 - **Sections:** a blank row, a bold capitalised heading flush left (`YOU`, `AGENT`, `REASONING`; reasoning heading muted), then the text at a 4-column indent. Code is indented 4 further. A continued block has no heading.
 - **Tool rows:** a 4-column margin that is `  * ` when done, `  … ` while running (accent), `  ✗ ` plus the word `failed` on failure (error). Tool name bold, summary muted.
 - **Notices:** a blank row and muted text at the indent. Errors: `  ✗ ` and red text. Retries: a warning-coloured sentence.
@@ -22,7 +22,7 @@ Restrained: neutrals plus one accent. The `man` theme: accent ochre `#d8a657` (c
 
 ## Type
 
-The terminal's font, one size. Hierarchy is bold, capitals and indent only. Separators are ASCII: `*` between header parts and hints, `|` in the status row.
+The terminal's font, one size. Hierarchy is bold, capitals and indent only. Separators are ASCII: ` * ` between header parts and hints, `|` in the status row.
 
 ## Do not
 
