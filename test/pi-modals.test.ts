@@ -226,6 +226,31 @@ describe("SettingsModal", () => {
 		expect(text).toContain("search the web");
 	});
 
+	it("comes back on the row it was left on, since a row that opens its own picker closes the screen", () => {
+		const form = {
+			title: "Settings",
+			rows: () =>
+				[
+					{ kind: "open", label: "Model", value: "m1", open: async () => {} },
+					{ kind: "open", label: "Provider", value: "p1", open: async () => {} },
+					{ kind: "open", label: "Persona", value: "senior", open: async () => {} },
+				] as never,
+		};
+		const first = new SettingsModal(
+			form,
+			() => {},
+			() => {},
+		);
+		first.handleInput("\x1b[B");
+		first.handleInput("\x1b[B");
+		const again = new SettingsModal(
+			form,
+			() => {},
+			() => {},
+		);
+		expect(plain(again.render(60).join("\n"))).toMatch(/▸ Persona/);
+	});
+
 	it("cycles a choice with the arrows and applies it at once", () => {
 		const { modal, state } = build();
 		modal.handleInput("\x1b[B");
