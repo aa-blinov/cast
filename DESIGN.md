@@ -11,11 +11,11 @@ The conversation is set like a man page. Rank comes from weight and case; state 
 - **Header row:** `CAST(1) * persona * model * v<version> * folder`, joined by one ` * ` rather than padded to the edges (which a phone cannot spare); parts drop from the end, whole, when the width is short. The parts and their order are the user's (`/header`). A muted hint row follows, dropping hints from the end.
 - **Measure:** conversation text is held to 100 columns however wide the terminal is; the header, composer and status row use the full width.
 - **Sections:** a blank row, a bold capitalised heading flush left (`YOU`, `AGENT`, `REASONING`; reasoning heading muted), then the text at a 4-column indent. Code is indented 4 further. A continued block has no heading.
-- **Tool rows:** a 4-column margin that is `  * ` when done, `  … ` while running (accent), `  ✗ ` plus the word `failed` on failure (error). Tool name bold, summary muted.
-- **Notices:** a blank row and muted text at the indent. Errors: `  ✗ ` and red text. Retries: a warning-coloured sentence.
+- **Tool rows:** a 4-column margin that is `  * ` when done, `  … ` while running (accent), `  ✗ ` plus the word `failed` on failure (error). Tool name bold, summary muted. A bash timeout is shown only when the model chose one (`(timeout 10m)`), never the default.
+- **Notices:** a blank row and muted text at the indent in the transcript; the one-line notice above the composer is an unbracketed sentence aligned to the composer's text (`[Cancelled — x]` and `Cancelled — x` are the same notice). Errors: `  ✗ ` and red text. Retries: a warning-coloured sentence.
 - **Composer:** a hairline rule above and below, plain placeholder, no gradient.
 - **Status row:** `persona * mode * model * ctx … * took Ns`, one row joined by ` * ` with no padding to the edge (persona bold, mode muted, plan mode warning); the context figure turns warning at 70% and error at 90%.
-- **Modals:** a muted hairline box with a bold title, centred and at most 104 columns wide, the columns either side blanked; bold capitalised group headings in settings; the chosen row on a band with a `▸` marker; footer hints in muted text.
+- **Modals:** a muted hairline box with a bold title, centred and at most 104 columns wide, the columns either side blanked; bold capitalised group headings in settings; the chosen row on a band with a `▸` marker; footer hints are an ordered list in muted text, the exit key early (`Esc close`), the later hints dropped whole when the box is narrow; one vocabulary everywhere (`Enter confirm`, `Esc close`, `↑↓ move`), and one ellipsis, `…`. The status bar and header editors have no side column: the row is one line in the configured order. A list's filter placeholder sits on the prompt row.
 
 ## Colour
 

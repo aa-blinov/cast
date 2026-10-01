@@ -17,6 +17,7 @@ import type { ModalRequest } from "../ui/pickerBridge.ts";
 import { railMuted } from "../ui/span-style.ts";
 import type { StatusBarSegment } from "../ui/statusbar.ts";
 import { theme } from "../ui/themes/index.ts";
+import { fitParts } from "./banner.ts";
 import { band, paint } from "./paint.ts";
 import { surfaceHover } from "./surface.ts";
 
@@ -77,7 +78,7 @@ export class Sheet implements Component, Focusable {
 }
 
 /** A titled box round `body`, every row padded so it covers what lies under the overlay. */
-export function frame(title: string | undefined, body: string[], footer: string, width: number): string[] {
+export function frame(title: string | undefined, body: string[], footer: string | string[], width: number): string[] {
 	const inner = Math.max(10, width - 4);
 	const edge = (text: string) => paint(text, { color: railMuted(), exact: true });
 	const head = title ? ` ${truncateToWidth(title, Math.max(4, inner - 4), "…")} ` : "";
@@ -87,7 +88,9 @@ export function frame(title: string | undefined, body: string[], footer: string,
 		const cut = truncateToWidth(line, inner, "…");
 		return `${edge("│")} ${cut}${" ".repeat(Math.max(0, inner - visibleWidth(cut)))} ${edge("│")}`;
 	};
-	return [top, ...body.map(row), row(paint(footer, { color: theme().muted })), edge(`╰${"─".repeat(inner + 2)}╯`)];
+	// A footer given as hints keeps whole hints, the later ones dropped first: the exit key comes early.
+	const text = typeof footer === "string" ? footer : fitParts(footer, " * ", inner).join(" * ");
+	return [top, ...body.map(row), row(paint(text, { color: theme().muted })), edge(`╰${"─".repeat(inner + 2)}╯`)];
 }
 
 /** One choice: the highlighted one sits on a band the width of the box, so the eye finds it. */
@@ -232,11 +235,13 @@ export class OptionModal<T> implements Component {
 		if (this.opts?.error) body.push(paint(this.opts.error, { color: colors.error }), "");
 		if (this.opts?.detail) body.push(...detailRows(this.opts.detail, width - 4), "");
 		if (this.opts?.search) {
+			const placeholder = !this.query && this.opts.search.placeholder ? this.opts.search.placeholder : "";
 			body.push(
-				paint("> ", { color: colors.muted }) + this.query + paint(" ", { color: colors.accent, bold: true }),
+				paint("> ", { color: colors.muted }) +
+					this.query +
+					paint(" ", { color: colors.accent, bold: true }) +
+					paint(placeholder, { color: colors.muted }),
 			);
-			if (!this.query && this.opts.search.placeholder)
-				body.push(paint(this.opts.search.placeholder, { color: colors.muted }));
 		}
 		if (this.shown.length === 0) body.push(paint("No matches", { color: colors.muted }));
 		this.shown.slice(this.scroll, this.scroll + rows).forEach((o, vi) => {
@@ -253,12 +258,15 @@ export class OptionModal<T> implements Component {
 			);
 			if (selected && o.description) body.push(`  ${paint(o.description, { color: colors.muted })}`);
 		});
-		const switchKeys = this.opts?.switchTo !== undefined ? ` * ←/→ ${this.opts.switchHint ?? "switch"}` : "";
 		const keys = this.options.flatMap((o) => (o.key ? [o.key] : []));
-		const choose = keys.length > 0 && !this.opts?.search ? `${keys.join("/")} choose * ` : "";
-		const hint = `${choose}${this.opts?.search ? "type to filter" : "up/down select"} * Enter confirm${switchKeys} * Esc cancel${
-			this.shown.length > rows ? ` * ${this.idx + 1}/${this.shown.length}` : ""
-		}`;
+		const hint = [
+			...(keys.length > 0 && !this.opts?.search ? [`${keys.join("/")} choose`] : []),
+			"Enter confirm",
+			"Esc close",
+			...(this.opts?.switchTo !== undefined ? [`←/→ ${this.opts.switchHint ?? "switch"}`] : []),
+			...(this.shown.length > rows ? [`${this.idx + 1}/${this.shown.length}`] : []),
+			this.opts?.search ? "type to filter" : "↑↓ move",
+		];
 		return frame(this.opts?.title, body, hint, width);
 	}
 }
@@ -300,7 +308,7 @@ export class TextModal implements Component, Focusable {
 		if (this.request.error) body.unshift(paint(this.request.error, { color: colors.error }), "");
 		if (this.request.placeholder && this.input.getValue() === "")
 			body.push(paint(this.request.placeholder, { color: colors.muted }));
-		return frame(this.request.label, body, "Enter confirm * Esc cancel", width);
+		return frame(this.request.label, body, ["Enter confirm", "Esc close"], width);
 	}
 }
 
@@ -353,7 +361,7 @@ export class MultiModal<T> implements Component {
 			);
 			if (focused && o.description) body.push(`  ${paint(o.description, { color: colors.muted })}`);
 		});
-		return frame(this.opts?.title, body, "space toggle * Enter confirm * Esc cancel", width);
+		return frame(this.opts?.title, body, ["Enter confirm", "Esc close", "space toggle"], width);
 	}
 }
 
@@ -442,10 +450,13 @@ export class StatusBarModal implements Component {
 				{ selected: focused, color: focused ? colors.accent : undefined },
 			);
 		});
-		const hint =
-			this.opts.sides === false
-				? "space show * j/k reorder * Enter save * Esc cancel"
-				: "space show * ←/→ side * j/k reorder * Enter save * Esc cancel";
+		const hint = [
+			"Enter save",
+			"Esc close",
+			"space show",
+			"j/k reorder",
+			...(this.opts.sides === false ? [] : ["←/→ side"]),
+		];
 		return frame(this.opts.title ?? "Status bar segments", body, hint, width);
 	}
 }
@@ -555,7 +566,18 @@ export class SettingsModal implements Component {
 		const body = lines.slice(this.scroll, this.scroll + rows).map((l) => l.text);
 		const description = this.current()?.description;
 		body.push("", description ? paint(description, { color: colors.muted }) : " ");
-		return frame(this.form.title, body, "↑↓ move * Space/Enter change * ←/→ cycle * Esc close", width);
+		return frame(
+			this.form.title,
+			body,
+			[
+				"Esc close",
+				"Space/Enter change",
+				...(lines.length > rows ? [`${this.cursor + 1}/${selectable.length}`] : []),
+				"↑↓ move",
+				"←/→ cycle",
+			],
+			width,
+		);
 	}
 }
 
@@ -638,7 +660,12 @@ export class ViewModal implements Component {
 		const window = lines.slice(Math.max(0, end - rows), end);
 		const state = this.snapshot.running ? (this.stopped ? "* stopping…" : "* running") : "* finished";
 		const canStop = this.snapshot.running && this.view.stop !== undefined && !this.stopped;
-		const footer = `${back > 0 ? `${back} lines below * ` : ""}esc back * ↑↓ PgUp/PgDn scroll${canStop ? " * s stop it" : ""}`;
+		const footer = [
+			"Esc close",
+			"↑↓ PgUp/PgDn scroll",
+			...(canStop ? ["s stop it"] : []),
+			...(back > 0 ? [`${back} lines below`] : []),
+		];
 		return frame(
 			`${this.view.title} ${state}`,
 			window.map((l) => l || " "),

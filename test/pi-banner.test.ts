@@ -1,5 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
+import { unbracket } from "../src/ui-pi/app.ts";
 import { bannerRows, fitParts } from "../src/ui-pi/banner.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
@@ -38,5 +39,13 @@ describe("bannerRows", () => {
 		const rows = bannerRows(parts, 40);
 		expect(rows[0]).toContain("\x1b[1m");
 		expect(plain(rows[1]!)).toBe("/ commands * /settings");
+	});
+});
+
+describe("unbracket", () => {
+	it("makes `[Cancelled — x]` and `Cancelled — x` the same notice, and leaves inner brackets alone", () => {
+		expect(unbracket("[Cancelled — model unchanged]")).toBe("Cancelled — model unchanged");
+		expect(unbracket("Cancelled — staying in default mode.")).toBe("Cancelled — staying in default mode.");
+		expect(unbracket("[a] and [b]")).toBe("a] and [b");
 	});
 });

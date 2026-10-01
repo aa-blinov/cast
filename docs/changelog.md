@@ -18,6 +18,13 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Picker footers were cut mid-word and lost the exit key at 46 columns.** Footers are now an ordered list of hints, `Esc close` second, dropped whole from the end; the vocabulary is one set (`Enter confirm`, `Esc close`, `↑↓ move`), the palette marks the chosen row with `▸` like every other list, and truncation uses one `…`. A list's filter placeholder sits on the prompt row, and a settings list that scrolls shows where you are (`3/24`).
+- **A new session showed the last session's `took 9s`.** The elapsed time is shown only in a session that has had a turn.
+- **A bash row read `(3m)` on every call,** which looked like how long it took. A timeout is shown only when the model chose one, as `(timeout 10m)`.
+- **Notices were bracketed at column 1 and phrased two ways.** `[Cancelled — x]` and `Cancelled — x` are now the same unbracketed notice, aligned with the composer's text.
+- **The status-bar editor offered `left` and `right` for a row that no longer has sides.** The row follows the configured order, and the editor drops the side column.
+- **`/help` had `/rule::` and argument hints glued behind a dash.** Arguments now sit next to the command (`/worktree <name>`, `/code-review [range] [-- path…]`).
+- **A session row could run past its date,** because the folder column was not cut to its width. Columns are cut with `…`, and the list title no longer carries `(most recent first)`.
 - **A `#` heading and a `##` heading looked the same.** The top level is now bold and underlined, deeper levels bold.
 - **`/turn-cap` did nothing in the terminal screen.** The command was listed and documented but had no handler, so `/turn-cap 800` was sent to the model as a prompt (and now answered `Unknown command`). `/turn-cap` shows the cap, `/turn-cap N` sets it (10 to 10000), `/turn-cap reset` or `off` restores 500; the settings screen row shares the same code.
 - **`/current` listed the session twice.** The heading row and the `Session` segment both printed it.

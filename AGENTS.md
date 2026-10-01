@@ -55,6 +55,10 @@ If the local `npm test` was green and the commit is rushed, the next
 check` would have caught. Lesson: always run *all three* before
 `git push` — never substitute `npm test` for `npm run check`.
 
+**Gate commits on the exit code, not on the output.** `npm run check 2>&1 | tail -2` prints a clean-looking
+tail even when biome failed, and a `git commit && git push` chained after it ships the error (CI's "Type check +
+lint" step then goes red). Write `npm run check >/dev/null 2>&1 && git commit … && git push`, or check `$?`.
+
 Other:
 - `npm run format` — `biome format --write` (tabs, width 3, 120-col)
 - `npm run coverage && npm run coverage:check` — the per-file coverage floor CI
@@ -63,6 +67,17 @@ Other:
   red CI "Coverage + per-file floor" step means a file dropped below its
   baseline: add tests rather than lowering the baseline.
 - `npx vitest run test/<file>.test.ts` — run one test file
+
+## Terminal UI
+
+- The screen is `src/ui-pi/` on pi-tui only (the Ink front end is gone). Its look is recorded in `DESIGN.md`
+  (product facts in `PRODUCT.md`); change the record with the code.
+- Check a visual change at 46 columns (a phone) and at 100, in tmux with a scratch `HOME` — never the real
+  `~/.cast`. Every row must fit the width; use `visibleWidth`, not `.length`.
+- Separators and markers are ASCII (` * `, `*`/`-`/`+`, `[x]`); box and arrow glyphs are swapped for ASCII
+  on a non-UTF-8 terminal by `ui-pi/ascii.ts`, so a new glyph that is not in its map breaks that look.
+- Text colours go through `paint()`, which lifts them to 4.5:1 on the terminal's own background; do not write
+  raw SGR codes or hard-code truecolor.
 
 ## Testing
 

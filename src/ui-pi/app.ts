@@ -60,6 +60,12 @@ function findFd(): string | null {
 	return null;
 }
 
+/** A notice reads as a sentence: `[Cancelled — x]` and `Cancelled — x` are the same notice. */
+export function unbracket(text: string): string {
+	const t = text.trim();
+	return t.startsWith("[") && t.endsWith("]") ? t.slice(1, -1) : t;
+}
+
 const IDLE_PLACEHOLDER = "ask cast to do anything";
 const RUNNING_PLACEHOLDER = "type to steer * esc esc to stop";
 const HINT_MS = 2000;
@@ -103,8 +109,9 @@ export class PiApp {
 				// Hairlines, as quiet as the rest of the page's rules.
 				borderColor: (line) => paint(line, { color: railMuted(), exact: true }),
 				selectList: {
-					selectedPrefix: (text) => paint(text, { color: theme().accent }),
-					selectedText: (text) => paint(text, { color: theme().accent, bold: true }),
+					selectedPrefix: (text) => paint(text.replace("→", "▸"), { color: theme().accent }),
+					// pi-tui draws the chosen row's marker as `→`; every other list here uses `▸`.
+					selectedText: (text) => paint(text.replace("→", "▸"), { color: theme().accent, bold: true }),
 					description: (text) => paint(text, { color: theme().muted }),
 					scrollInfo: (text) => paint(text, { color: theme().muted }),
 					noMatch: (text) => paint(text, { color: theme().muted }),
@@ -280,7 +287,7 @@ export class PiApp {
 	private paintFooter(model: AppModel): void {
 		const colors = theme();
 		this.editor.placeholder = model.running ? RUNNING_PLACEHOLDER : IDLE_PLACEHOLDER;
-		this.notice.setText(model.notice ? paint(model.notice, { color: colors.warning }) : "");
+		this.notice.setText(model.notice ? paint(`  ${unbracket(model.notice)}`, { color: colors.warning }) : "");
 		const rows: string[] = [];
 		for (const [label, items] of [
 			["Steer queued", model.agent.pendingSteers],

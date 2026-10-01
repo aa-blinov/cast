@@ -344,9 +344,16 @@ for (const command of SLASH_COMMANDS) {
  */
 export function helpMarkdown(): string {
 	// Top-level commands only: a sub-command (`/worktree list`) shows once the parent is typed, in the palette.
-	const rows = SLASH_COMMANDS.filter((c) => !c.hidden && !c.name.includes(" ")).map(
-		(c) => `- **${c.name}**: ${c.description}`,
-	);
+	const rows = SLASH_COMMANDS.filter((c) => !c.hidden && !c.name.includes(" ")).map((c) => {
+		// "Disable a hook — id": what follows the last dash is the argument, which belongs next to the name.
+		const dash = c.takesArgs ? c.description.lastIndexOf(" — ") : -1;
+		const what = dash >= 0 ? c.description.slice(0, dash) : c.description;
+		const arg = dash >= 0 ? c.description.slice(dash + 3).trim() : c.name.endsWith(":") ? "name" : "";
+		const shown = arg && !arg.startsWith("[") ? `<${arg}>` : arg;
+		return c.name.endsWith(":")
+			? `- **${c.name}${shown}** ${what}`
+			: `- **${c.name}**${shown ? ` ${shown}` : ""}: ${what}`;
+	});
 	return [
 		"## Commands",
 		"",
@@ -2977,7 +2984,10 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Status bar picker not available in this mode]");
 				return;
 			}
-			const picked = await deps.pickers.pickStatusBar(allSegments, deps.statusBar);
+			const picked = await deps.pickers.pickStatusBar(allSegments, deps.statusBar, {
+				title: "Status bar segments",
+				sides: false,
+			});
 			if (picked === null) {
 				showNotice("[Cancelled — status bar unchanged]");
 				return;

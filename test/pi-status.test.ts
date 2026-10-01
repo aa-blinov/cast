@@ -28,6 +28,15 @@ describe("statusLine", () => {
 		expect(visibleWidth(line)).toBeLessThan(100);
 	});
 
+	it("follows the configured order and ignores sides, since the row is one line", () => {
+		const config = {
+			visible: ["model", "mode", "elapsed"],
+			order: ["elapsed", "model", "mode"],
+			sides: { elapsed: "right" as const, model: "left" as const, mode: "left" as const },
+		};
+		expect(plain(statusLine(ctx, config, 100))).toBe("41s * mock-model * BUILD");
+	});
+
 	it("drops whole segments, least useful first, rather than cutting one in half", () => {
 		const narrow = plain(statusLine(ctx, defaultStatusBarConfig(), 40));
 		expect(visibleWidth(narrow)).toBeLessThanOrEqual(40);
