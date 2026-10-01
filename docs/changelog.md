@@ -5,6 +5,7 @@ All notable user-facing changes to cast, newest first.
 ## Unreleased
 
 ### Fixed
+- **An MCP server the agent adds is connected at once.** Asking cast to add a server meant it wrote `mcp.json` and the list stayed empty, and the agent had no tools from it, until you ran `/reload` (and attached to the daemon, even `/reload` only updated the list, not the agent). When `write` or `edit` changes `~/.cast/mcp.json` or `.cast/mcp.json`, the servers are now connected right away: they appear in `/mcp`, and the agent has their tools on its next turn. `/reload` in the daemon mode reloads the daemon as well.
 - **`cast upgrade` no longer cuts off a turn that is running.** It stopped the daemon first and waited afterwards, so a request in progress ended as "Request interrupted — server restarted" with no response. It now asks the daemon whether any session is running a turn and waits for them to finish (up to two minutes) before restarting; if one is still running after that, the daemon stays on the old build and the message says how to restart it later.
 - **A remembered public address survives the restart in an upgrade.** The terminal screen checked whether the remembered port was free in the instant the old daemon was still letting go of it, called it taken, and started a private daemon. It now waits up to six seconds for the port to come free (or for the daemon `cast upgrade` starts to appear) before it falls back.
 

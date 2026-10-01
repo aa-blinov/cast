@@ -71,4 +71,5 @@ Never quit cast for these — the chat continues either way.
 | Change | How to apply |
 |--------|----------------|
 | `/skills` / `/mcp` toggle, enable/disable, uninstall | automatic (hot-reload) |
-| New/edited files under `.cast/` / `~/.cast/` / `.agents/` (skills, personas, rules, mcp.json) | `/reload` (same session) |
+| `mcp.json` written by your `write`/`edit` tools; skills from `skill_install` | automatic |
+| Other new/edited files under `.cast/` / `~/.cast/` / `.agents/` (skills, personas, rules, mcp.json by hand) | `/reload` (same session) |

@@ -2306,6 +2306,15 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			deps.setMcpResult(
 				await resolveMcpForCwd(deps.projectDeps, deps.cwd, trusted, loadSettings().disabledMcpServers ?? []),
 			);
+			// Attached to the daemon, the agent and its tools live there: reload it too, or the list shown here
+			// has servers the agent does not.
+			if (deps.agent.daemonMode) {
+				try {
+					await deps.agent.runCommand("/reload");
+				} catch {
+					// A turn is running: the daemon refuses and reloads at the next /reload.
+				}
+			}
 			showNotice(
 				`[Reloaded: ${newSkills.length} skill(s), ${resolvedRules.directoryRules.length} rule(s), ${deps.mcpResult.connections.length} mcp server(s), personas]`,
 			);

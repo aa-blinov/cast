@@ -1034,6 +1034,25 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * project state — needed after /reload, /mcp, or /skills, since those
 	 * change resources shared by every session, not just the one that issued
 	 * the command (unlike /model or /persona, which are already per-session). */
+	/** Reconnects the MCP servers when the config on disk names a different set than the one connected. */
+	async function reloadMcpFromDisk(sessionCwd: string): Promise<void> {
+		const prevNames = mcpResult.allServerNames.slice().sort().join(",");
+		const disabledMcp = loadSettings().disabledMcpServers ?? [];
+		const freshMcp = await resolveMcpForCwd(
+			projectDeps,
+			sessionCwd,
+			projectTrusted,
+			disabledMcp,
+			/*skipConnect=*/ true,
+		);
+		const newNames = freshMcp.allServerNames.slice().sort().join(",");
+		if (prevNames === newNames) return;
+		await withMcpLock(async () => {
+			await closeMcpConnections(mcpResult.connections);
+			mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, disabledMcp);
+		});
+	}
+
 	function recomputeAllSystemPrompts(): void {
 		for (const ws of sessions.values()) {
 			const persona = resolvePersona(ws.session.persona ?? "") ?? currentPersona;
@@ -2174,6 +2193,14 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					activeStreamCompletion = true;
 				}
 				if (event.type === "todos_updated") ws.session.todos = event.todos;
+				// The agent wrote an MCP config: connect the new servers now, so the next turn has their tools.
+				if (event.type === "mcp_changed") {
+					void reloadMcpFromDisk(ws.session.cwd ?? cwd)
+						.then(() => recomputeAllSystemPrompts())
+						.catch((err) =>
+							console.error("[cast server] MCP reload failed:", err instanceof Error ? err.message : err),
+						);
+				}
 				if (event.type === "usage") {
 					addUsage(ws.session, event.usage, {
 						subagent: event.subagent,
@@ -3265,23 +3292,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					directoryRules = rules.directoryRules;
 					ruleDiagnostics = rules.diagnostics;
 					personas = resolvePersonasForCwd(sessionCwd, trustForSessionCwd(sessionCwd)).personas;
-					// Only reconnect MCP if the config actually changed on disk.
-					const prevNames = mcpResult.allServerNames.slice().sort().join(",");
-					const disabledMcp = loadSettings().disabledMcpServers ?? [];
-					const freshMcp = await resolveMcpForCwd(
-						projectDeps,
-						sessionCwd,
-						projectTrusted,
-						disabledMcp,
-						/*skipConnect=*/ true,
-					);
-					const newNames = freshMcp.allServerNames.slice().sort().join(",");
-					if (prevNames !== newNames) {
-						await withMcpLock(async () => {
-							await closeMcpConnections(mcpResult.connections);
-							mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, disabledMcp);
-						});
-					}
+					await reloadMcpFromDisk(sessionCwd);
 					recomputeAllSystemPrompts();
 					return { ok: true, result: "Reloaded skills, rules, MCP, and personas" };
 				} catch (err) {

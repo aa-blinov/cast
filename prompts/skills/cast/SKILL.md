@@ -8,7 +8,7 @@ description: Configures cast itself — creates and manages personas, skills, MC
 cast stores user config under `~/.cast/` (global) and `<cwd>/.cast/` (project-local).
 
 - Slash toggles/install/uninstall for `/skills` and `/mcp`: hot-reload in the same session — no `/reload`, no restart.
-- File drops/edits (skills, personas, rules, mcp.json, `npx skills add`): `/reload` in the same session (does not reset chat).
+- `mcp.json` written with your `write`/`edit` tools and skills added with `skill_install`: connected at once, nothing to do. Other file drops/edits (skills, personas, rules, `mcp.json` edited by hand, `npx skills add`): `/reload` in the same session (does not reset chat).
 
 ## Plan mode
 
