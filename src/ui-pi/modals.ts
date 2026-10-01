@@ -472,7 +472,6 @@ type ItemRow = Exclude<SettingRow, { kind: "heading" }>;
  */
 export class SettingsModal implements Component {
 	private rows: SettingRow[];
-	private cursor = 0;
 	private scroll = 0;
 
 	constructor(
@@ -481,7 +480,15 @@ export class SettingsModal implements Component {
 		private readonly requestRender: () => void,
 	) {
 		this.rows = form.rows();
-		this.cursor = this.items().findIndex(Boolean) === -1 ? 0 : 0;
+		this.cursor = Math.min(this.cursor, Math.max(0, this.items().length - 1));
+	}
+
+	private get cursor(): number {
+		return this.form.cursor ?? 0;
+	}
+
+	private set cursor(value: number) {
+		this.form.cursor = value;
 	}
 
 	invalidate(): void {}

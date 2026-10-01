@@ -98,6 +98,11 @@ export interface SettingsForm {
 	title: string;
 	/** Read again after every change, so each row shows what is now set. */
 	rows(): SettingRow[];
+	/**
+	 * The selected row, kept on the form because a row that opens its own picker closes the screen and
+	 * shows it again: a fresh screen would otherwise start back on the first row.
+	 */
+	cursor?: number;
 }
 
 export interface Pickers {

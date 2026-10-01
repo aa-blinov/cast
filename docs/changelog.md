@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- `/settings` keeps your place: coming back from a row that opens its own list (model, provider, reasoning, skills and the like) no longer jumps the cursor to the first row.
+
 ## 0.52.3
 
 ### Changed
