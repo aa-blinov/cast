@@ -18,6 +18,7 @@ import { railMuted } from "../ui/span-style.ts";
 import type { StatusBarSegment } from "../ui/statusbar.ts";
 import { theme } from "../ui/themes/index.ts";
 import { fitParts } from "./banner.ts";
+import { dots, withoutDots } from "./dots.ts";
 import { band, paint } from "./paint.ts";
 import { surfaceHover } from "./surface.ts";
 
@@ -677,29 +678,29 @@ export class ViewModal implements Component {
 
 /** A one-line activity overlay (connection checks and the like): a small box round the line, centred in it. */
 export class StatusModal implements Component {
-	private frameIndex = 0;
+	constructor(
+		private readonly label: string,
+		private readonly now: () => number = Date.now,
+	) {}
 
-	constructor(private readonly label: string) {}
-
-	/** Columns the box needs for `label`: the spinner and a space, the borders, and room to breathe, never past the screen. */
+	/** Columns the box needs for `label`: the label, three dots, the borders, and room to breathe, never past the screen. */
 	static widthFor(label: string, columns = process.stdout.columns || 80): number {
-		return Math.min(columns, Math.max(32, visibleWidth(label) + 2 + 12));
+		return Math.min(columns, Math.max(32, visibleWidth(withoutDots(label)) + 3 + 12));
 	}
 
-	tick(): void {
-		this.frameIndex++;
-	}
+	/** Redraws are driven by the caller's timer; the dots follow the clock, not a frame count. */
+	tick(): void {}
 
 	invalidate(): void {}
 
 	handleInput(): void {}
 
 	render(width: number): string[] {
-		const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-		const spin = frames[this.frameIndex % frames.length] ?? "";
-		const line = `${paint(spin, { color: theme().accent })} ${this.label}`;
+		const text = withoutDots(this.label);
+		const line = `${text}${paint(dots(this.now()), { color: theme().accent })}`;
 		const inner = Math.max(10, width - 4);
-		const left = Math.max(0, Math.floor((inner - visibleWidth(line)) / 2));
+		// Centred on the label with its three dots, whichever of them are showing, so the text never shifts.
+		const left = Math.max(0, Math.floor((inner - (visibleWidth(text) + 3)) / 2));
 		// A blank row above and the (empty) footer row below the line: it sits in the middle of the box.
 		return frame(undefined, ["", `${" ".repeat(left)}${line}`], "", width);
 	}

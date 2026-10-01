@@ -22,9 +22,9 @@ describe("asciiOnly", () => {
 
 describe("toAscii", () => {
 	it("swaps the box, arrow and marker glyphs for ASCII, one cell for one cell", () => {
-		const row = "╭─ Title ─╮│ ▸ item ‹ on › │ ↓ newest ✗ …╰──╯ [⠋]";
+		const row = "╭─ Title ─╮│ ▸ item ‹ on › │ ↓ newest ✗ …╰──╯";
 		const out = toAscii(row);
-		expect(out).toBe("+- Title -+| > item < on > | v newest x ~+--+ [|]");
+		expect(out).toBe("+- Title -+| > item < on > | v newest x ~+--+");
 		expect(visibleWidth(out)).toBe(visibleWidth(row));
 	});
 

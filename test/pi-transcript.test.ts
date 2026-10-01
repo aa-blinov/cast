@@ -42,7 +42,7 @@ describe("Transcript", () => {
 			streaming: { blocks: [{ kind: "content", text: "thinking out loud" }] },
 		});
 		const waiting = transcript.render(60).map(plain);
-		expect(waiting.at(-1)).toMatch(/^ {2}[⠋-⠿]$/);
+		expect(waiting.at(-1)).toMatch(/^ {2}\.{1,3}$/);
 		transcript.set({
 			...base,
 			messages: [],
@@ -54,7 +54,7 @@ describe("Transcript", () => {
 			transcript
 				.render(60)
 				.map(plain)
-				.some((row) => /^ {2}[⠋-⠿]$/.test(row)),
+				.some((row) => /^ {2}\.{1,3}$/.test(row)),
 		).toBe(false);
 	});
 

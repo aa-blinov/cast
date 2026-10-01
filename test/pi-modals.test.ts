@@ -365,21 +365,34 @@ describe("modal footers", () => {
 });
 
 describe("StatusModal", () => {
+	const label = "Connecting to model...";
+
 	it("hugs its label, and centres the line in the box both ways", () => {
-		const label = "Connecting to model...";
 		const width = StatusModal.widthFor(label, 120);
 		expect(width).toBeLessThan(50);
-		const rows = new StatusModal(label).render(width).map(plain);
+		const rows = new StatusModal(label, () => 0).render(width).map(plain);
 		expect(rows).toHaveLength(5);
 		for (const row of rows) expect(visibleWidth(row)).toBe(width);
 		// Borders, a blank row, the line, and the empty footer row: the line has one row of air above and below.
 		expect(rows[1]!.replace(/[│ ]/g, "")).toBe("");
-		expect(rows[2]).toContain(label);
+		expect(rows[2]).toContain("Connecting to model");
 		expect(rows[3]!.replace(/[│ ]/g, "")).toBe("");
 		const inner = rows[2]!.slice(2, -2);
 		const left = inner.length - inner.trimStart().length;
 		const right = inner.length - inner.trimEnd().length;
-		expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+		expect(Math.abs(left - right)).toBeLessThanOrEqual(4);
+	});
+
+	it("runs the dots one, two, three, and the text does not move while they do", () => {
+		const width = StatusModal.widthFor(label, 120);
+		const at = (step: number) => new StatusModal(label, () => step * 400).render(width).map(plain)[2]!;
+		const [one, two, three] = [at(0), at(1), at(2)];
+		expect(one).toMatch(/Connecting to model\.\s/);
+		expect(two).toMatch(/Connecting to model\.\.\s/);
+		expect(three).toMatch(/Connecting to model\.\.\.\s/);
+		expect(one.indexOf("Connecting")).toBe(three.indexOf("Connecting"));
+		expect(label.endsWith("...")).toBe(true);
+		expect(one).not.toContain("....");
 	});
 
 	it("never asks for more columns than the screen has, nor fewer than a short label needs", () => {
