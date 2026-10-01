@@ -15,7 +15,7 @@ import {
 	resolvePlanQuestion,
 	resolvePlanTransition,
 } from "../core/plan.ts";
-import { buildSystemPrompt, makeConfirmBash, personaOptionsForCwd } from "../core/project.ts";
+import { buildSystemPrompt, makeConfirmBash, personaOptionsForCwd, resolveSkillsForCwd } from "../core/project.ts";
 import {
 	formatRulesForTurn,
 	matchAutoRules,
@@ -391,6 +391,12 @@ export function useAppModel(props: AppModelProps) {
 	const agent = useAgentSession({
 		onPersonaActivated: (name, mode) => {
 			pendingPersonaRef.current = { name, mode };
+		},
+		onSkillsChanged: () => {
+			void resolveSkillsForCwd(projectDeps, cwd, projectTrusted).then((next) => {
+				setSkills(next.skills);
+				setSkillsPromptSuffix(next.skillsPromptSuffix);
+			});
 		},
 		session,
 		config,
