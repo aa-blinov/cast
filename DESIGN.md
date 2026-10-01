@@ -9,6 +9,7 @@ The conversation is set like a man page. Rank comes from weight and case; state 
 ## Structure
 
 - **Header row:** `CAST(1) * persona * model * v<version> * folder`, joined by one ` * ` rather than padded to the edges (which a phone cannot spare); parts drop from the end, whole, when the width is short. The parts and their order are the user's (`/header`). A muted hint row follows, dropping hints from the end.
+- **Measure:** conversation text is held to 100 columns however wide the terminal is; the header, composer and status row use the full width.
 - **Sections:** a blank row, a bold capitalised heading flush left (`YOU`, `AGENT`, `REASONING`; reasoning heading muted), then the text at a 4-column indent. Code is indented 4 further. A continued block has no heading.
 - **Tool rows:** a 4-column margin that is `  * ` when done, `  … ` while running (accent), `  ✗ ` plus the word `failed` on failure (error). Tool name bold, summary muted.
 - **Notices:** a blank row and muted text at the indent. Errors: `  ✗ ` and red text. Retries: a warning-coloured sentence.
