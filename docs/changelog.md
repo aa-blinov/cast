@@ -2,10 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.2
 
 ### Added
 
+- **A guide to the terminal screen** (`docs/terminal-ui.md`, "The Terminal Screen" on the docs site): what is on the screen, how to type, scroll and choose, how to fit it to a phone or a wide monitor, colour and plain-terminal settings, and how to get back to a session. Getting Started, Sessions, Interactive Commands and the README link to it, and the text about unknown slash commands is corrected.
 - **`cast shell-init` puts `cast --resume=<id>` in your shell's history when a session ends.** Add the function it prints to your shell once (`cast shell-init >> ~/.zshrc`, or bash, or fish); after you quit, Up brings the command back. A child process cannot write its parent's history, so the function runs the real `cast` and then reads the command `cast` leaves in `~/.cast/last-resume`. An empty session adds `cast --continue`; the printed `Resume this session:` line stays for terminals without the function.
 
 ### Fixed
