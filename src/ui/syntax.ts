@@ -144,7 +144,7 @@ class TokenEmitter {
 		if (!text) return;
 		const scope = this.scopes[this.scopes.length - 1];
 		const last = this.tokens[this.tokens.length - 1];
-		// Merge neighbours with the same scope: fewer Ink elements per row, and
+		// Merge neighbours with the same scope: fewer spans per row, and
 		// the wrapper downstream has less to walk.
 		if (last && last.scope === scope) last.text += text;
 		else this.tokens.push(scope ? { text, scope } : { text });

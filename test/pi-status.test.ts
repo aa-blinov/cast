@@ -22,11 +22,10 @@ const ctx: SegmentContext = {
 };
 
 describe("statusLine", () => {
-	it("puts the left group at the left edge and the elapsed time against the right, in one row", () => {
+	it("joins the left group and then the elapsed time with ` * ` in one row, without padding to the edge", () => {
 		const line = plain(statusLine(ctx, defaultStatusBarConfig(), 100));
-		expect(line.startsWith("Senior Developer │ BUILD │ mock-model")).toBe(true);
-		expect(line.trimEnd().endsWith("41s")).toBe(true);
-		expect(visibleWidth(line)).toBe(100);
+		expect(line).toBe("Senior Developer * BUILD * mock-model * 41s");
+		expect(visibleWidth(line)).toBeLessThan(100);
 	});
 
 	it("drops whole segments, least useful first, rather than cutting one in half", () => {

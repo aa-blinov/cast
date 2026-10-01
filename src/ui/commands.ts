@@ -179,13 +179,13 @@ const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^\/memory (dream|distill) interval (\d+
 const MEMORY_CANCEL_RUN_COMMAND_RE = /^\/memory cancel ([a-f0-9-]+)$/;
 
 /**
- * Slash commands shown in the Composer's autocomplete palette.
+ * Slash commands shown in the the composer's autocomplete palette.
  *
  * `takesArgs` marks the commands that need an argument *typed inline* after the
  * name — picking those from the palette fills the name and waits for input.
  * Every other command runs standalone or opens its own picker, so the palette
  * runs it immediately on Enter instead of making the user confirm with a second
- * keystroke (see Composer's selectCommand).
+ * keystroke (see the editor's selection of a command).
  */
 // Rendered verbatim by the composer's command palette — keep alphabetical by
 // name (enforced by a test) so the list is scannable as it grows.
@@ -343,7 +343,10 @@ for (const command of SLASH_COMMANDS) {
  * A list, not columns: each command wraps under its own name at whatever width the screen has.
  */
 export function helpMarkdown(): string {
-	const rows = SLASH_COMMANDS.filter((c) => !c.hidden).map((c) => `- **${c.name}**: ${c.description}`);
+	// Top-level commands only: a sub-command (`/worktree list`) shows once the parent is typed, in the palette.
+	const rows = SLASH_COMMANDS.filter((c) => !c.hidden && !c.name.includes(" ")).map(
+		(c) => `- **${c.name}**: ${c.description}`,
+	);
 	return [
 		"## Commands",
 		"",
@@ -410,7 +413,7 @@ export interface CommandDeps {
 	planModelProvider?: string;
 	setPlanModelProvider: (p: string | undefined) => void;
 	onThemeChange?: () => void;
-	/** Force a full clear + <Static> replay after history was prepended. */
+	/** Force a full clear + the committed history replay after history was prepended. */
 	onRepaintHistory?: () => void | Promise<void>;
 	statusBar: StatusBarConfig;
 	setStatusBar: (s: StatusBarConfig) => void;
@@ -1349,7 +1352,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			}
 			// No transient showNotice on success — agent.pendingSteers now renders
 			// above the composer for as long as the message is actually queued (see
-			// App.tsx), not on a fixed timer that could clear it long before a
+			// the app model), not on a fixed timer that could clear it long before a
 			// tool-heavy turn gets around to draining the queue.
 			agent.steer(msg);
 		},
@@ -1451,7 +1454,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		match: (input) => input === "/older",
 		run: async ({ deps, agent, showNotice }) => {
 			if (agent.loadOlder()) {
-				// Prepending shifts every <Static> index — force the full replay so
+				// Prepending shifts every committed index — force the full replay so
 				// the freshly-loaded page renders above the existing transcript
 				// instead of duplicating the shifted tail (see useAgentSession.loadOlder).
 				await deps.onRepaintHistory?.();

@@ -2,7 +2,7 @@
  * Display-width cache for terminal column measurement.
  *
  * CJK and emoji code points occupy two cells; counting UTF-16 units
- * undercounts wrapped rows, which lets the live region overrun the viewport.
+ * undercounts wrapped rows, which lets the streaming tail overrun the viewport.
  * displayWidth() computes the real width; identical strings always produce
  * the same result, so the cache is safe.
  *
@@ -57,10 +57,9 @@ function isZeroWidth(cp: number): boolean {
  *
  * The width table used to be hand-rolled ranges plus "everything at or above
  * U+1F300 is two cells", which was wrong in both directions and both
- * directions hurt: overcounting made the live region drop text that would have
+ * directions hurt: overcounting made the streaming tail drop text that would have
  * fitted, undercounting let it overrun the viewport — the very failure this
- * module exists to prevent. Measured against `string-width` (the package Ink
- * measured with) on 33 strings, the old code disagreed on 8 of them:
+ * module exists to prevent. Measured against `string-width` (the package this was checked against) on 33 strings, the old code disagreed on 8 of them:
  * `👨‍👩‍👧‍👦` was 11 cells instead of 2, `👨‍💻` 5 instead of 2, `👍🏽` 4 instead of 2,
  * while `🀄`, `🈁` and `⌚` were 1 instead of 2. This agrees with all 33 —
  * see test/display-width.test.ts, which cross-checks against string-width

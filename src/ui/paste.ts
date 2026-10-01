@@ -1,5 +1,5 @@
 /**
- * Paste-chip logic for the Composer, extracted so it can be unit-tested
+ * Paste-chip logic for the composer, extracted so it can be unit-tested
  * without rendering anything.
  *
  * Multi-line pastes are collapsed to a single placeholder character in the

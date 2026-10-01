@@ -4,7 +4,7 @@ import { contextUsage, fitSegments, getStatusBarSegments, type SegmentContext } 
 import { theme } from "../ui/themes/index.ts";
 import { type Paint, paint } from "./paint.ts";
 
-const SEPARATOR = " │ ";
+const SEPARATOR = " * ";
 
 /** Who and what mode you are in stand out; the numbers behind them stay quiet. */
 function segmentStyle(id: string, ctx: SegmentContext): Paint {
@@ -22,8 +22,9 @@ function segmentStyle(id: string, ctx: SegmentContext): Paint {
 }
 
 /**
- * The status bar as one row: the left group, the right group against the far
- * edge, and whole segments dropped (least useful first) when they do not fit.
+ * The status bar as one row: the left group, then the right group, joined by one
+ * ` * ` (a phone has no room for padding to the far edge), and whole segments
+ * dropped (least useful first) when they do not fit.
  */
 export function statusLine(ctx: SegmentContext, config: StatusBarConfig, columns: number): string {
 	const visible = new Set(config.visible);
@@ -39,14 +40,8 @@ export function statusLine(ctx: SegmentContext, config: StatusBarConfig, columns
 		return [{ id: segment.id, side: config.sides[segment.id] ?? segment.side, text }];
 	});
 	const fitted = fitSegments(shown, columns, visibleWidth);
-	const group = (side: "left" | "right") =>
-		fitted
-			.filter((item) => item.side === side)
-			.map((item) => paint(item.text, segmentStyle(item.id, ctx)))
-			.join(paint(SEPARATOR, { color: theme().muted }));
-	const left = group("left");
-	const right = group("right");
-	if (!right) return truncateToWidth(left, columns, "…");
-	const gap = Math.max(1, columns - visibleWidth(left) - visibleWidth(right));
-	return truncateToWidth(left + " ".repeat(gap) + right, columns, "…");
+	const row = [...fitted.filter((i) => i.side === "left"), ...fitted.filter((i) => i.side === "right")]
+		.map((item) => paint(item.text, segmentStyle(item.id, ctx)))
+		.join(paint(SEPARATOR, { color: theme().muted }));
+	return truncateToWidth(row, columns, "…");
 }

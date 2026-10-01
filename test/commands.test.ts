@@ -448,9 +448,10 @@ describe("handleInput", () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/help", undefined, deps);
 		const shown = displayMessageText(calls);
-		for (const command of SLASH_COMMANDS.filter((c) => !c.hidden)) {
+		for (const command of SLASH_COMMANDS.filter((c) => !c.hidden && !c.name.includes(" "))) {
 			expect(shown, command.name).toContain(`**${command.name}**: ${command.description}`);
 		}
+		expect(shown).not.toContain("**/worktree list**");
 		for (const command of SLASH_COMMANDS.filter((c) => c.hidden)) {
 			expect(shown, command.name).not.toContain(`**${command.name}**:`);
 		}

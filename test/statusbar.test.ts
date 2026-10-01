@@ -77,10 +77,10 @@ describe("fitSegments", () => {
 	});
 
 	it("drops whole segments, least useful first, keeping mode, model and time", () => {
-		// 31 + 2 separators left, 26 + 2 right, 1 between: exactly 70.
-		expect(ids(70)).toEqual(["persona", "mode", "model", "context", "cost", "elapsed"]);
-		expect(ids(62)).toEqual(["persona", "mode", "model", "context", "elapsed"]);
-		expect(ids(45)).toEqual(["persona", "mode", "model", "elapsed"]);
+		// Six segments are 57 cells of text and five ` * ` separators: exactly 72.
+		expect(ids(72)).toEqual(["persona", "mode", "model", "context", "cost", "elapsed"]);
+		expect(ids(64)).toEqual(["persona", "mode", "model", "context", "elapsed"]);
+		expect(ids(44)).toEqual(["persona", "mode", "model", "elapsed"]);
 		expect(ids(30)).toEqual(["mode", "model", "elapsed"]);
 		expect(ids(5)).toEqual(["elapsed"]);
 	});

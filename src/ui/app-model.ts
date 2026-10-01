@@ -139,12 +139,9 @@ export function useAppModel(props: AppModelProps) {
 	const addDisplayMessageRef = useRef<((message: ChatMessage) => void) | null>(null);
 	const showNotice = useCallback((text: string, duration?: number) => {
 		// A listing is not a toast. Anything taller than a few rows goes to the
-		// transcript instead of the live notice line: the live region has to
-		// stay shorter than the terminal or Ink clears the screen *and* the
-		// scrollback on every frame (a 30-hook `/hooks` listing wiped it —
-		// measured), and a listing is worth scrolling back to anyway. Most
-		// commands already push their listings with addDisplayMessage; this
-		// catches the ones that don't.
+		// transcript instead of the notice line, which has room for one: a listing
+		// is worth scrolling back to anyway. Most commands already push their
+		// listings with addDisplayMessage; this catches the ones that don't.
 		if (noticeRows(text) > MAX_NOTICE_ROWS && addDisplayMessageRef.current) {
 			addDisplayMessageRef.current({ role: "warning", content: text });
 			return;
@@ -153,9 +150,9 @@ export function useAppModel(props: AppModelProps) {
 		noticeDurationRef.current = duration ?? 6000;
 	}, []);
 
-	// Pickers used after mount (slash commands, confirmBash) render their
-	// modal inline in this same Ink tree instead of spinning up a second
-	// `render()` — see pickerBridge.ts for why that matters. projectDeps.pickers
+	// Pickers used after mount (slash commands, confirmBash) are modals of this
+	// same screen, drawn from a request the bridge publishes — see
+	// pickerBridge.ts. projectDeps.pickers
 	// (the standalone onboarding pickers used by runStartup, pre-mount) is
 	// intentionally overridden here for every post-mount consumer. One-off
 	// status text (connection checks, trust prompts) routes through the same
@@ -805,7 +802,7 @@ export function useAppModel(props: AppModelProps) {
 		setHeader,
 	};
 
-	// PageUp in the composer routes here (Composer's history.older binding) —
+	// PageUp in the composer routes here (the history.older binding) —
 	// same load + replay flow as the /older command.
 	const onLoadOlder = useCallback(async () => {
 		if (agent.loadOlder()) {

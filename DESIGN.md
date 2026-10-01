@@ -14,7 +14,7 @@ The conversation is set like a man page. Rank comes from weight and case; state 
 - **Tool rows:** a 4-column margin that is `  * ` when done, `  … ` while running (accent), `  ✗ ` plus the word `failed` on failure (error). Tool name bold, summary muted.
 - **Notices:** a blank row and muted text at the indent. Errors: `  ✗ ` and red text. Retries: a warning-coloured sentence.
 - **Composer:** a hairline rule above and below, plain placeholder, no gradient.
-- **Status row:** `persona | mode | model` left (persona bold, mode muted, plan mode warning), `ctx` and elapsed right; `took Ns` after a turn; the context figure turns warning at 70% and error at 90%.
+- **Status row:** `persona * mode * model * ctx … * took Ns`, one row joined by ` * ` with no padding to the edge (persona bold, mode muted, plan mode warning); the context figure turns warning at 70% and error at 90%.
 - **Modals:** a muted hairline box with a bold title, centred and at most 104 columns wide, the columns either side blanked; bold capitalised group headings in settings; the chosen row on a band with a `▸` marker; footer hints in muted text.
 
 ## Colour
@@ -23,7 +23,11 @@ Restrained: neutrals plus one accent. The `man` theme: accent ochre `#d8a657` (c
 
 ## Type
 
-The terminal's font, one size. Hierarchy is bold, capitals and indent only. Separators are ASCII: ` * ` between header parts and hints, `|` in the status row.
+The terminal's font, one size. Hierarchy is bold, capitals and indent only. Separators are ASCII: ` * ` between header parts, hints and status segments. List markers are `*`, `-`, `+` by depth and task boxes are `[ ]` / `[x]`; switches read `[x] on` / `[ ] off`. A `#` heading is bold and underlined, deeper levels bold.
+
+## Terminals without UTF-8
+
+When the locale is set and is not UTF-8 (or `CAST_ASCII=1`), every box, arrow and marker glyph the screen draws is swapped for a one-cell ASCII look-alike on the way out (`CAST_ASCII=0` turns it off). Widths do not change.
 
 ## Do not
 

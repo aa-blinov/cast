@@ -45,7 +45,7 @@ describe("renderMarkdownLines", () => {
 	it("gives list items a hanging indent so continuations line up", () => {
 		const lines = render("- first item that is long enough to wrap onto another line for sure", 30);
 
-		expect(plain(lines[0]!)).toMatch(/^• /);
+		expect(plain(lines[0]!)).toMatch(/^\* /);
 		// The continuation is indented under the text, not under the bullet.
 		expect(plain(lines[1]!)).toMatch(/^ {2}\S/);
 	});
@@ -153,12 +153,12 @@ describe("code blocks and tables", () => {
 });
 
 describe("lists", () => {
-	it("draws a task list as boxes, not as typed-out brackets", () => {
+	it("draws a task list as a box in place of the bullet", () => {
 		const lines = renderMarkdownLines("- [ ] сделать\n- [x] сделано\n- обычный пункт", { width: 40, indent: "" });
 		expect(lines.map((line) => line.spans.map((span) => span.text).join(""))).toEqual([
-			"☐ сделать",
-			"☑ сделано",
-			"• обычный пункт",
+			"[ ] сделать",
+			"[x] сделано",
+			"* обычный пункт",
 		]);
 	});
 
@@ -168,8 +168,8 @@ describe("lists", () => {
 			indent: "",
 		});
 		const text = lines.map((line) => line.spans.map((span) => span.text).join(""));
-		// `1. ` is three cells wide, `• ` two — the indent follows the source.
-		expect(text).toEqual(["1. первый", "   1. вложенный", "• пункт", "  ◦ вложенный"]);
+		// `1. ` is three cells wide, `* ` two — the indent follows the source.
+		expect(text).toEqual(["1. первый", "   1. вложенный", "* пункт", "  - вложенный"]);
 	});
 
 	it("gives each level its own bullet shape", () => {
@@ -181,7 +181,17 @@ describe("lists", () => {
 					.join("")
 					.trim()[0],
 		);
-		expect(markers).toEqual(["•", "◦", "▪", "▪"]);
+		expect(markers).toEqual(["*", "-", "+", "+"]);
+	});
+
+	it("hangs a wrapped task under its text, past the whole box", () => {
+		const lines = renderMarkdownLines("- [ ] a task long enough to wrap onto a second row", {
+			width: 24,
+			indent: "",
+		});
+		const rows = lines.map((line) => line.spans.map((span) => span.text).join(""));
+		expect(rows[0]).toMatch(/^\[ \] a task/);
+		expect(rows[1]).toMatch(/^ {4}\S/);
 	});
 
 	it("wraps a long item under its own text, not under the marker", () => {
@@ -270,5 +280,15 @@ describe("fenced blocks across chunk boundaries", () => {
 		expect(text.some((row) => row.startsWith("┌"))).toBe(true);
 		expect(text.some((row) => row.startsWith("├"))).toBe(true);
 		expect(lines.every((line) => line.code !== true)).toBe(true);
+	});
+});
+
+describe("headings", () => {
+	it("underlines the top level, so `#` and `##` differ, and sets every level in bold", () => {
+		const [h1, h2, h3] = ["# One", "## Two", "### Three"].map((text) => renderMarkdownLines(text, { width: 40 })[0]!);
+		const flags = (line: typeof h1) => line.spans.filter((s) => s.text.trim()).map((s) => [s.bold, s.underline]);
+		expect(flags(h1)).toEqual([[true, true]]);
+		expect(flags(h2)).toEqual([[true, false]]);
+		expect(flags(h3)).toEqual([[true, false]]);
 	});
 });
