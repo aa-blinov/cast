@@ -106,9 +106,6 @@ body.resizing-sidebar * { user-select: none; }
 	font-family: var(--font-mono);
 	font-size: var(--fs-lead); font-weight: 600;
 	flex-shrink: 0;
-	background: var(--gradient);
-	background-clip: text; -webkit-background-clip: text;
-	color: transparent; -webkit-text-fill-color: transparent;
 }
 .status-dot {
 	width: 10px;
@@ -119,11 +116,9 @@ body.resizing-sidebar * { user-select: none; }
 }
 .status-dot.connected {
 	background: var(--green);
-	box-shadow: 0 0 6px color-mix(in srgb, var(--green) 50%, transparent);
 }
 .status-dot.reconnecting {
 	background: var(--amber);
-	box-shadow: 0 0 6px color-mix(in srgb, var(--amber) 50%, transparent);
 	/* Reserve the pulse for genuinely-attention-worthy states. A stable
 	 * SSE connection was getting the same 1.5s opacity oscillation as a
 	 * reconnecting one — for a UI that's mostly staring at a connected
@@ -132,7 +127,6 @@ body.resizing-sidebar * { user-select: none; }
 }
 .status-dot.offline {
 	background: var(--rose);
-	box-shadow: 0 0 6px color-mix(in srgb, var(--rose) 50%, transparent);
 	animation: pulse-status 1.5s ease-in-out infinite;
 }
 @keyframes pulse-status {
