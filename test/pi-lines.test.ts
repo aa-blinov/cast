@@ -28,6 +28,14 @@ describe("toolRowLines", () => {
 		expect(plain(toolRowLines(bash("error", "false"), 60)[0]!)).toMatch(/^ {2}✗ bash false.* failed$/);
 	});
 
+	it("shows a bash timeout only when the model chose one, and says what it is", () => {
+		const row = (args: object) =>
+			plain(toolRowLines({ id: "t", name: "bash", args: JSON.stringify(args), status: "ok" }, 80)[0]!);
+		expect(row({ command: "ls" })).not.toContain("timeout");
+		expect(row({ command: "ls", timeout: 180000 })).not.toContain("timeout");
+		expect(row({ command: "sleep 90", timeout: 600000 })).toContain("(timeout 10m)");
+	});
+
 	it("says what a queued subagent is waiting for, and what a running one is doing", () => {
 		const task = (status: "queued" | "running", tool?: { name: string; summary: string }): ToolCallEntry => ({
 			id: "k",

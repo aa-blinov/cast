@@ -147,8 +147,13 @@ describe("segment renderers", () => {
 	it("elapsed says `took` once the turn is over, and only then", () => {
 		const seg = getStatusBarSegments().find((s) => s.id === "elapsed")!;
 		expect(seg.formatValue(emptyCtx({ elapsedMs: 4000, running: true }))).toBe("4s");
-		expect(seg.formatValue(emptyCtx({ elapsedMs: 4000, running: false }))).toBe("took 4s");
+		expect(seg.formatValue(emptyCtx({ elapsedMs: 4000, running: false, messageCount: 2 }))).toBe("took 4s");
 		expect(seg.formatValue(emptyCtx({ elapsedMs: 4000 }))).toBe("4s");
+	});
+
+	it("elapsed says nothing in a session that has had no turn, whatever the last session's clock left behind", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "elapsed")!;
+		expect(seg.formatValue(emptyCtx({ elapsedMs: 9000, running: false, messageCount: 0 }))).toBeNull();
 	});
 
 	it("context is on by default and reports the share of the input budget", () => {

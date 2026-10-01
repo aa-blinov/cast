@@ -174,11 +174,12 @@ function shortenCwd(cwd: string): string {
 	const parts = cwd.split("/").filter(Boolean);
 	if (parts.length <= 1) return cwd;
 	const last = parts[parts.length - 1]!;
-	return last.length > 12 ? `.../${last.slice(0, 12)}...` : `.../${last}`;
+	return last.length > 12 ? `…/${last.slice(0, 11)}…` : `…/${last}`;
 }
 
+/** `str` cut with … or padded to exactly `width` cells' worth of characters, so the next column starts where it should. */
 function pad(str: string, width: number): string {
-	return str.length >= width ? `${str.slice(0, width - 1)}\u200b ` : str.padEnd(width);
+	return str.length >= width ? `${str.slice(0, width - 2)}… ` : str.padEnd(width);
 }
 
 type SessionPickValue = { id: string | null; action: "resume" | "fresh" | "delete" | "all" | "here" };
@@ -189,7 +190,7 @@ function sessionRowOptions(sessions: SessionSummary[], withCwd: boolean): PickOp
 		const cwd = shortenCwd(s.cwd || "");
 		const date = s.updatedAt.slice(0, 10);
 		const time = s.updatedAt.slice(11, 16);
-		const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
+		const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}…` : firstMsg || "(empty)";
 		const when = `${date.slice(5)} ${time}  ${s.msgCount} msgs`;
 		return {
 			value: { id: s.id, action: "resume" as const },
@@ -261,11 +262,8 @@ export async function selectSession(pickers: Pickers, opts: SelectSessionOptions
 		// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
 		const picked = await pickers.pickOption(options, {
 			switchTo: scopeOption[0]?.value,
-			switchHint: scope === "here" ? "all sessions" : "this directory",
-			title:
-				scope === "here"
-					? `Sessions in ${shortenCwd(opts.cwd ?? "")} (most recent first)`
-					: "All sessions (most recent first)",
+			switchHint: scope === "here" ? "all" : "folder",
+			title: scope === "here" ? `Sessions in ${shortenCwd(opts.cwd ?? "")}` : "All sessions",
 			search: {
 				placeholder: "filter by message, cwd, or id",
 				dynamicSearch: (query) => [
@@ -294,7 +292,7 @@ export async function selectSession(pickers: Pickers, opts: SelectSessionOptions
 		const delOptions = shown.map((s) => {
 			const firstMsg = s.firstUserMessage;
 			const cwd = shortenCwd(s.cwd || "");
-			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}...` : firstMsg || "(empty)";
+			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}…` : firstMsg || "(empty)";
 			return { value: s.id, label: `${pad(cwd, 18)}${pad(msgCol, 43)}${s.id}` };
 		});
 		const toDelete = await pickers.pickOption(delOptions, { title: "Delete which session?" });
@@ -412,7 +410,7 @@ export async function selectModel(
 		);
 	}
 
-	options.push({ value: { custom: true }, label: "Enter a custom model id..." });
+	options.push({ value: { custom: true }, label: "Enter a custom model id…" });
 
 	// Start the cursor on the current model so /model doubles as "show
 	// current" — the picker opens highlighting what's already selected.

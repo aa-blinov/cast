@@ -262,8 +262,11 @@ registerStatusBarSegment({
 	defaultOn: true,
 	side: "right",
 	// Once the turn is over the number stays as the length of that turn, and says so.
+	// Nothing to report before the session has had a turn, whatever the last session's clock said.
 	formatValue: (ctx) =>
-		ctx.elapsedMs > 0 ? `${ctx.running === false ? "took " : ""}${formatElapsed(ctx.elapsedMs)}` : null,
+		ctx.elapsedMs > 0 && !(ctx.running === false && ctx.messageCount === 0)
+			? `${ctx.running === false ? "took " : ""}${formatElapsed(ctx.elapsedMs)}`
+			: null,
 });
 
 registerStatusBarSegment({

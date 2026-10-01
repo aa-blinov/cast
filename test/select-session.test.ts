@@ -174,8 +174,8 @@ describe("selectSession over summaries", () => {
 				}),
 				{ cwd: project },
 			);
-			expect(switches[0]).toEqual({ to: expect.objectContaining({ action: "all" }), hint: "all sessions" });
-			expect(switches[1]).toEqual({ to: expect.objectContaining({ action: "here" }), hint: "this directory" });
+			expect(switches[0]).toEqual({ to: expect.objectContaining({ action: "all" }), hint: "all" });
+			expect(switches[1]).toEqual({ to: expect.objectContaining({ action: "here" }), hint: "folder" });
 		});
 
 		it("has no switch key when there is nothing to switch between", async () => {

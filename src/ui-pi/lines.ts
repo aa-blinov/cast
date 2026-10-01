@@ -1,4 +1,5 @@
 import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { DEFAULT_BASH_TIMEOUT_MS } from "../core/config.ts";
 import { type OpenFence, type RenderedLine, renderMarkdownLines, trailingOpenFence } from "../ui/markdown-terminal.ts";
 import { spanProps } from "../ui/span-style.ts";
 import { theme } from "../ui/themes/index.ts";
@@ -84,8 +85,8 @@ function summaryPieces(
 		case "bash":
 			return [
 				{ text: flat(model.command), style: "summary" },
-				...(model.timeoutMs !== undefined
-					? [{ text: ` (${formatTimeout(model.timeoutMs)})`, style: "meta" as const }]
+				...(model.timeoutMs !== undefined && model.timeoutMs !== DEFAULT_BASH_TIMEOUT_MS
+					? [{ text: ` (timeout ${formatTimeout(model.timeoutMs)})`, style: "meta" as const }]
 					: []),
 			];
 		case "read":

@@ -22,7 +22,7 @@ function segmentStyle(id: string, ctx: SegmentContext): Paint {
 }
 
 /**
- * The status bar as one row: the left group, then the right group, joined by one
+ * The status bar as one row, in the configured order, joined by one
  * ` * ` (a phone has no room for padding to the far edge), and whole segments
  * dropped (least useful first) when they do not fit.
  */
@@ -40,7 +40,8 @@ export function statusLine(ctx: SegmentContext, config: StatusBarConfig, columns
 		return [{ id: segment.id, side: config.sides[segment.id] ?? segment.side, text }];
 	});
 	const fitted = fitSegments(shown, columns, visibleWidth);
-	const row = [...fitted.filter((i) => i.side === "left"), ...fitted.filter((i) => i.side === "right")]
+	// In the configured order: the row is one line, so there are no sides left to sort by.
+	const row = fitted
 		.map((item) => paint(item.text, segmentStyle(item.id, ctx)))
 		.join(paint(SEPARATOR, { color: theme().muted }));
 	return truncateToWidth(row, columns, "…");

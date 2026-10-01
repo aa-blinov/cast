@@ -449,9 +449,16 @@ describe("handleInput", () => {
 		await handleInput("/help", undefined, deps);
 		const shown = displayMessageText(calls);
 		for (const command of SLASH_COMMANDS.filter((c) => !c.hidden && !c.name.includes(" "))) {
-			expect(shown, command.name).toContain(`**${command.name}**: ${command.description}`);
+			expect(shown, command.name).toContain(`**${command.name}`);
 		}
 		expect(shown).not.toContain("**/worktree list**");
+		// An argument hint moves next to the name instead of trailing the description behind a dash.
+		expect(shown).toContain(
+			"**/code-review** [range] [-- path…]: Review a diff with computed scope and language rules",
+		);
+		expect(shown).toContain("**/goal** <goal text>: Work toward a goal autonomously until done");
+		expect(shown).toContain("**/rule:<name>** Invoke a rule by name");
+		expect(shown).not.toContain("**/rule:**:");
 		for (const command of SLASH_COMMANDS.filter((c) => c.hidden)) {
 			expect(shown, command.name).not.toContain(`**${command.name}**:`);
 		}

@@ -329,3 +329,36 @@ describe("StatusBarModal without sides (the header's list)", () => {
 		expect(saved).toMatchObject({ visible: ["b"], order: ["b", "a"] });
 	});
 });
+
+describe("modal footers", () => {
+	it("keeps whole hints and drops the later ones first, so the exit key outlives the rest", () => {
+		const hints = ["Enter confirm", "Esc close", "↑↓ move", "←/→ all sessions", "3/12"];
+		const wide = plain(frame("T", ["body"], hints, 80).at(-2)!);
+		expect(wide).toContain("3/12");
+		const narrow = plain(frame("T", ["body"], hints, 36).at(-2)!);
+		expect(narrow).toContain("Esc close");
+		expect(narrow).not.toContain("←/→ all");
+		expect(narrow).not.toContain("…");
+	});
+
+	it("puts a list's placeholder on the prompt row, not on a row of its own", () => {
+		const modal = new OptionModal(options, { search: { placeholder: "filter by message" } }, () => {});
+		const text = plain(modal.render(60).join("\n"));
+		expect(text).toMatch(/> +filter by message/);
+	});
+
+	it("says where you are in a settings list that scrolls", () => {
+		const rows = Array.from({ length: 40 }, (_, i) => ({
+			kind: "open" as const,
+			label: `Row ${i}`,
+			value: "v",
+			open: async () => {},
+		}));
+		const modal = new SettingsModal(
+			{ title: "Settings", rows: () => rows },
+			() => {},
+			() => {},
+		);
+		expect(plain(modal.render(60).join("\n"))).toMatch(/1\/40/);
+	});
+});
