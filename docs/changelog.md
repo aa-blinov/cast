@@ -16,6 +16,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **The banner's gradient ignored the terminal's colour depth.** On a terminal without truecolor (macOS Terminal, many SSH clients) the screen used 256 colours but the `cast v…` wordmark still sent 24-bit codes. It now goes through the same colour path as everything else, and `NO_COLOR` applies to it.
 - **Modals showed scraps of the transcript beside them.** A picker or the settings screen now covers the full width with its box centred (at most 104 columns), so no half a word shows on either side.
 - **The banner and the hint line were cut in the middle of a word on a narrow terminal.** They now give up whole parts (the folder, then the model; the last hints first) until they fit. The settings screen also trims a long value (a provider URL) rather than the name beside it, and fits its list to a short window so its footer stays visible.
 - **`cast` started in a pipe wrote screen control sequences to stdout and exited 0.** It now says it needs an interactive terminal, points to `cast run`, and exits 1.

@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { gradientAnsi } from "../src/ui/gradient.ts";
 import { ALL_THEMES, WEB_THEMES } from "../src/ui/themes/index.ts";
 import { contrastRatio, legible } from "../src/ui-pi/contrast.ts";
-import { paint } from "../src/ui-pi/paint.ts";
+import { gradientLine, paint } from "../src/ui-pi/paint.ts";
 
 describe("legible", () => {
 	it("leaves a colour that already clears the floor alone", () => {
@@ -81,7 +80,7 @@ describe("NO_COLOR", () => {
 		const out = paint("hi", { color: "#ff0000", bg: "#00ff00", bold: true });
 		expect(out).not.toMatch(colourCodes);
 		expect(out).toContain("\x1b[1m");
-		expect(gradientAnsi("cast")).not.toMatch(colourCodes);
+		expect(gradientLine("cast", { bold: true })).not.toMatch(colourCodes);
 	});
 
 	it("an empty NO_COLOR does not switch colour off", () => {

@@ -29,21 +29,3 @@ function lerpColor(t: number): [number, number, number] {
 export function gradientHex(t: number): string {
 	return toHex(lerpColor(t));
 }
-
-/**
- * Per-character truecolor gradient, bold, as raw ANSI codes — for text
- * printed outside the screen (plain console.log), where there's no
- * styling layer to hand a color to.
- */
-export function gradientAnsi(text: string): string {
-	if ((process.env.NO_COLOR ?? "") !== "") return `\x1b[1m${text}\x1b[0m`;
-	const chars = [...text];
-	const steps = Math.max(1, chars.length - 1);
-	const painted = chars
-		.map((ch, i) => {
-			const [r, g, b] = lerpColor(i / steps);
-			return `\x1b[38;2;${r};${g};${b}m${ch}`;
-		})
-		.join("");
-	return `\x1b[1m${painted}\x1b[0m`;
-}
