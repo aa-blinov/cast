@@ -160,11 +160,10 @@ export function splitCompleteLines(block: StreamBlock): { settled: StreamBlock[]
 
 /**
  * How many leading blocks have settled — can't change again, so they're safe to
- * hand to Ink's <Static> (which freezes an item on first render). Streaming only
- * ever grows the trailing block, so any non-trailing text/reasoning block is
- * done; a tool block is done once it's no longer running. Draining these out of
- * the live region as they settle is what keeps that region from growing past the
- * terminal height — where Ink's log-update erase math breaks and frames stack.
+ * commit to the transcript. Streaming only ever grows the trailing block, so any
+ * non-trailing text/reasoning block is done; a tool block is done once it's no
+ * longer running. Committing these as they settle keeps the streaming tail small,
+ * so each frame lays out only what can still change.
  */
 export function settledPrefixLength(blocks: StreamBlock[]): number {
 	let n = 0;
@@ -256,7 +255,7 @@ export async function loadDaemonPendingState(client: ServerClient, sessionId: st
 /**
  * Commit a turn-ending error to the transcript and clear the live sticky error.
  * The loop fires `error` (which stashes the message) then `end` reason "error";
- * the latter calls this. Without it a 4xx stayed in ChatLog's live region above
+ * the latter calls this. Without it a 4xx stayed in the streaming tail above
  * the composer forever — it never entered the chronological history and never
  * cleared (the local path only cleared on turn_end, which an error turn never
  * reaches; the daemon SSE path never cleared at all).
@@ -319,9 +318,9 @@ export interface UseAgentSession {
 	hasOlder: boolean;
 	/**
 	 * Prepend the previous page of history to the transcript. Returns true when
-	 * a page was loaded. Prepending shifts every index the <Static> already
+	 * a page was loaded. Prepending shifts every index the committed history already
 	 * committed, so the caller must trigger a full replay (clear + bump the
-	 * <Static> key) right after — same machinery as a theme change.
+	 * history key) right after — same machinery as a theme change.
 	 */
 	loadOlder: () => boolean;
 	resetQueue: () => void;
@@ -444,7 +443,7 @@ interface UseAgentSessionParams {
  * in session.messages (and get persisted). Image attachments are structured
  * from the start too. Pull the text parts back out instead of collapsing the
  * whole thing to a "[structured content]" placeholder: otherwise a resumed
- * session — or a <Static> repaint after a terminal resize — renders the user's
+ * session — or a repaint of the history after a terminal resize — renders the user's
  * own prompt (and the assistant's replies) as that placeholder.
  */
 export function messageContentToText(content: unknown): string {
@@ -638,7 +637,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		buildDisplayMessages(initialPageRef.current!.messages),
 	);
 	// Streamed lines that settled since the last frame, waiting to join
-	// <Static>. They are appended in the same render as the streaming state
+	// the committed history. They are appended in the same render as the streaming state
 	// they left, so a settle no longer forces a frame of its own; and every
 	// other write goes through setMessages below, which appends them first, so
 	// nothing can land ahead of text that streamed before it.
@@ -675,7 +674,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// Live stopwatch: the timestamp the current turn started, or null when
 	// idle. Only changes at start/stop (not a per-tick state) — the status
 	// bar's elapsed segment ticks itself locally off this value instead of
-	// this hook re-rendering App every 200ms (see ElapsedSegment in App.tsx).
+	// this hook re-rendering the app every 200ms.
 	const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
 	const turnStartRef = useRef(0);
 	// Backend-authoritative turn start (daemon mode). The status event / hydrate
@@ -795,15 +794,11 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const updateStreaming = useCallback(
 		(updater: (prev: StreamingState | null) => StreamingState | null, immediate?: boolean) => {
 			let next = updater(streamingRef.current);
-			// Drain settled blocks (finished reasoning/text/completed tool calls)
-			// out of the live region into <Static> history the moment they can't
-			// change again, leaving only the actively-streaming tail live. Without
-			// this the whole turn accumulates in Ink's live region; once it grows
-			// past the terminal height, log-update's erase can't reach the rows
-			// that scrolled off and frames stack instead of overwriting (duplicated
-			// [reasoning] lines, spinner-per-line). The drained blocks wait in
-			// pendingSettledRef and join <Static> in the same render the live
-			// region drops them, so they are never shown twice or not at all.
+			// Move settled blocks (finished reasoning/text/completed tool calls) out of
+			// the streaming state into the committed history the moment they can't
+			// change again, leaving only the actively-streaming tail. They wait in
+			// pendingSettledRef and join the history in the same render the streaming
+			// state drops them, so they are never shown twice or not at all.
 			if (next && next.blocks.length > 0) {
 				const boundarySettled = settledPrefixLength(next.blocks);
 				let promoted = next.blocks.slice(0, boundarySettled);
@@ -827,8 +822,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				flushStreaming();
 			} else if (flushTimerRef.current === null) {
 				// A settle used to force its own frame, and a markdown answer settles
-				// a line with nearly every chunk: ~70 frames a second, each running
-				// Ink's whole output pipeline (ANSI tokenizing, string widths, diff).
+				// a line with nearly every chunk: ~70 frames a second, each laying out
+				// and measuring the whole screen again.
 				flushTimerRef.current = setTimeout(flushStreaming, STREAM_FRAME_MS);
 			}
 		},
@@ -836,18 +831,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	);
 
 	/**
-	 * Flushes whatever's left in the live region (the trailing block that never
+	 * Flushes whatever's left in the streaming tail (the trailing block that never
 	 * settled while streaming) into permanent history and resets streaming for
-	 * the next turn. Most blocks already left the live region as they settled
+	 * the next turn. Most blocks already left the streaming tail as they settled
 	 * (see updateStreaming's drain); this just commits the tail. Promoting from
 	 * the streaming state — not rebuilding from raw session/wire messages — is
 	 * what keeps each tool call's real final status without waiting on a
 	 * session rebuild. Rebuilds also restore status via castIsError on
-	 * role:"tool" messages (stripped before the provider). Respects Ink's
-	 * <Static>, which permanently commits
-	 * whatever an index held the first time it renders and never revisits it —
-	 * safe here because a tool block only ever leaves streaming once it's no
-	 * longer "running" (both here and in the incremental drain).
+	 * role:"tool" messages (stripped before the provider). The committed history
+	 * keeps whatever an index held the first time it was drawn and does not
+	 * revisit it — safe here because a tool block only ever leaves streaming
+	 * once it's no longer "running" (both here and in the incremental drain).
 	 */
 	const promoteStreamingToHistory = useCallback(() => {
 		const s = streamingRef.current;
@@ -857,7 +851,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		updateStreaming(() => ({ blocks: [] }), true);
 	}, [updateStreaming, setMessages]);
 
-	// Rebuild-from-session must never run mid-turn: <Static> permanently
+	// Rebuild-from-session must never run mid-turn: the committed history permanently
 	// commits items by index and never revisits them, so replacing the
 	// incrementally-promoted messages array with a (differently-sized) rebuild
 	// desyncs the array from what's already printed. Deps are [session] only —
@@ -887,8 +881,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	// Loads the page of history older than the currently-loaded window and
 	// prepends it to the transcript. Returned boolean: true when more history
 	// was loaded (and may still remain), false when there's nothing older.
-	// Prepending to the messages array shifts every index <Static> already
-	// committed (see ChatLog) — callers must follow up with a full replay via
+	// Prepending to the messages array shifts every index the committed history already
+	// committed (see the transcript) — callers must follow up with a full replay via
 	// the repaint-key bump that a theme change uses, or the shifted tail would
 	// render as duplicates in the terminal's scrollback.
 	const loadOlder = useCallback((): boolean => {
@@ -1097,7 +1091,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			// assistant turn back into session.messages (see the "aborted" case in
 			// loop.ts's runLoop), so a rebuild right after one would produce a
 			// *shorter* array than what promoteStreamingToHistory already
-			// incrementally appended for that turn. Ink's <Static> never revisits
+			// incrementally appended for that turn. the committed history never revisits
 			// an index once rendered, so overwriting that slot with this new user
 			// message here would just never be shown — the next thing appended
 			// after it (the new turn's response) would still show up, landing at a
@@ -1220,7 +1214,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					// append lands chronologically right — after the user message and
 					// any already-settled blocks, above the live streaming region.
 					// The old warnings-state + rebuild-on-refresh approach inserted
-					// them below <Static>'s already-rendered index, where they were
+					// them below the committed history's already-rendered index, where they were
 					// never printed at all.
 					onWarning: (message: string) => setMessages((msgs) => [...msgs, { role: "warning", content: message }]),
 					onEvent: (event: AgentEvent) => {
@@ -1446,7 +1440,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// Flush any trailing streamed content that never got a turn_end (e.g.
 				// an uncaught mid-stream error) so it isn't silently lost, then force
 				// streaming to null (not the blank object promoteStreamingToHistory
-				// leaves behind) — ChatLog treats a non-null streaming object as
+				// leaves behind) — the transcript treats a non-null streaming object as
 				// still running and would keep showing a spinner otherwise. No full
 				// refresh() here: messages are already accurate from incremental
 				// per-turn promotion, and rebuilding from raw session.messages would
@@ -2063,7 +2057,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		session.lastPromptTokens = undefined;
 		saveSession(session);
 		// Static-rendered history is permanently committed to the terminal's own
-		// scrollback (see ChatLog.tsx) — resetting the messages array doesn't
+		// scrollback (see the transcript) — resetting the messages array doesn't
 		// erase what's already printed. Clear screen + scrollback so /clear
 		// actually looks cleared instead of just starting a fresh transcript
 		// underneath the old one.

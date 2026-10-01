@@ -149,7 +149,7 @@ export class PiApp {
 		this.tui.requestRender();
 	}
 
-	/** Puts the saved clipboard image's path into the draft, the way the Ink composer does. */
+	/** Puts the saved clipboard image's path into the draft, the way the old composer does. */
 	private attachImage(): void {
 		if (!this.onPasteImage) {
 			this.flash("[Image paste not available]");

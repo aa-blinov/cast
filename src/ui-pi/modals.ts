@@ -566,8 +566,8 @@ function settingRow(row: ItemRow, selected: boolean, inner: number): string {
 	let value: string;
 	if (row.kind === "toggle") {
 		value = row.value
-			? paint("● on", { color: colors.success, bold: true, bg })
-			: paint("○ off", { color: colors.muted, bg });
+			? paint("[x] on", { color: colors.success, bold: true, bg })
+			: paint("[ ] off", { color: colors.muted, bg });
 	} else if (row.kind === "choice") {
 		value = paint(`‹ ${row.value} ›`, { color: colors.accent, bg });
 	} else {

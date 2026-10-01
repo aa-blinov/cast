@@ -300,7 +300,7 @@ export interface WebAgentSession {
 	 * sticky rules — see rules.ts's matchAutoRules/unionStickyRules). Ephemeral
 	 * like activeStream: re-latches from scratch on the next turn if the
 	 * session is evicted and rehydrated, same as the standalone TUI's copy
-	 * (App.tsx) resets on process restart. */
+	 * (the app model) resets on process restart. */
 	activeAutoRules?: Rule[];
 	/** Skills discovered for this session's own directory, refreshed before each
 	 * turn (see skillsForSessionCwd). Ephemeral like activeAutoRules. */
@@ -1742,7 +1742,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 		planState.enabled = planMode;
 		// Plan mode can run under a separate, usually-cheaper model (matches the
-		// TUI's App.tsx activeModel calc) — this only affects THIS run, session.model
+		// TUI's app model's activeModel calc) — this only affects THIS run, session.model
 		// itself is untouched so leaving plan mode reverts automatically.
 		const runModel = planMode && planModel ? planModel : ws.session.model;
 
@@ -1864,7 +1864,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// idle and a later submit starting a fresh call.
 			contextFiles: ws.contextFiles,
 			// Web UI/daemon-backed equivalent of the standalone TUI's
-			// rebuildSystemPrompt (App.tsx) — same directoryRules catalog, same
+			// rebuildSystemPrompt (the app model) — same directoryRules catalog, same
 			// rules.ts/context-files.ts functions, just reading/writing the
 			// per-session sticky set off `ws` instead of React state. Without
 			// this, `applyMode: "auto"` rules (glob-matched, sticky once
@@ -1875,7 +1875,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			rebuildSystemPrompt: ({ userText, contextFiles: ctxFiles }) => {
 				const sessionCwd = ws.session.cwd ?? cwd;
 				const sessionRules = rulesForSessionCwd(sessionCwd);
-				// Mentioned rules latch like auto ones, see App.tsx.
+				// Mentioned rules latch like auto ones, see the app model.
 				const sticky = unionStickyRules(ws.activeAutoRules ?? [], [
 					...matchAutoRules(sessionRules.directoryRules, ctxFiles),
 					...selectMentionedRules(sessionRules.directoryRules, userText),

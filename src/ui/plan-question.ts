@@ -7,7 +7,7 @@
  * `pickers.promptText` collects a typed answer, and that string (not the
  * sentinel) is what we return for that question.
  *
- * Lives outside `App.tsx` so the orchestration can be unit-tested against a
+ * Lives outside `the app model` so the orchestration can be unit-tested against a
  * mock `Pickers` (the same pattern `connection-pickers.test.ts` uses).
  */
 

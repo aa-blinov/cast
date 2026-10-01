@@ -135,7 +135,7 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 }
 
 /**
- * Collapse a summary to one physical line for the live region.
+ * Collapse a summary to one physical line for the streaming tail.
  *
  * Truncating to the width does not remove newlines: a value that
  * already fits comes back unchanged, so a multi-line `task` assignment ("Do

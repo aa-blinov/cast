@@ -35,7 +35,7 @@ Any theme can be used with this look; the theme only supplies the accent, muted,
 
 ## Readability
 
-Text colours are checked against the background they are drawn on (the terminal's own, when it reports it) and lifted to a 4.5:1 contrast ratio when a theme's palette falls short, so the muted grey of a theme such as Nord stays legible. Set `NO_COLOR` (to anything but empty) and cast draws no colour at all: bold and underline remain, and meaning is carried by markers (`▸`, `●`/`○`) and words.
+Text colours are checked against the background they are drawn on (the terminal's own, when it reports it) and lifted to a 4.5:1 contrast ratio when a theme's palette falls short, so the muted grey of a theme such as Nord stays legible. Set `NO_COLOR` (to anything but empty) and cast draws no colour at all: bold and underline remain, and meaning is carried by markers (`>`, `[x]`/`[ ]`) and words. A terminal whose locale is set and is not UTF-8 (`LANG=C`), or `CAST_ASCII=1`, gets every box, arrow and marker glyph swapped for a one-cell ASCII look-alike (`+---+`, `|`, `>`, `~`); `CAST_ASCII=0` turns that off.
 
 ## Changing Themes
 

@@ -1,4 +1,4 @@
-import { ProcessTerminal, type TerminalColors, TuiAltScreen } from "@earendil-works/pi-tui";
+import { type TerminalColors, TuiAltScreen } from "@earendil-works/pi-tui";
 import { createElement, useEffect } from "react";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
@@ -6,6 +6,7 @@ import { type AppModel, type AppModelProps, useAppModel } from "../ui/app-model.
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import { theme } from "../ui/themes/index.ts";
 import { PiApp } from "./app.ts";
+import { makeTerminal } from "./ascii.ts";
 import { createStore, mountHeadless } from "./headless.ts";
 import { applyUserKeybindings } from "./keys.ts";
 import { paint } from "./paint.ts";
@@ -40,7 +41,7 @@ function ModelHost(props: { model: AppModelProps; publish: (model: AppModel) => 
  */
 export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 	applyUserKeybindings();
-	const terminal = new ProcessTerminal();
+	const terminal = makeTerminal();
 	const tui = new TuiAltScreen(terminal, false, undefined, {
 		// The wheel and drag-to-select belong to the app in the alternate screen; a
 		// terminal's own selection then needs Shift held. CAST_NO_MOUSE=1 leaves the

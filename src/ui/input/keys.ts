@@ -18,12 +18,6 @@ const CSI_HOME_END_RE = /^\x1b\[1;(\d+)(?::\d+)?([HF])$/;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
 const CSI_MOD_KEY_RE = /^\x1b\[27;(\d+);(\d+)~$/;
 
-let _kittyProtocolActive = false;
-
-export function setKittyProtocolActive(active: boolean): void {
-	_kittyProtocolActive = active;
-}
-
 type Letter =
 	| "a"
 	| "b"
@@ -482,7 +476,6 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 				)
 					return true;
 				if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.shift)) return true;
-				if (_kittyProtocolActive) return data === "\x1b\r" || data === "\n";
 				return false;
 			}
 			if (modifier === MODIFIERS.alt) {
@@ -492,13 +485,12 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 				)
 					return true;
 				if (matchesModifyOtherKeys(data, CODEPOINTS.enter, MODIFIERS.alt)) return true;
-				if (!_kittyProtocolActive) return data === "\x1b\r";
-				return false;
+				return data === "\x1b\r";
 			}
 			if (modifier === 0) {
 				return (
 					data === "\r" ||
-					(!_kittyProtocolActive && data === "\n") ||
+					data === "\n" ||
 					data === "\x1bOM" ||
 					matchesKittySequence(data, CODEPOINTS.enter, 0) ||
 					matchesKittySequence(data, CODEPOINTS.kpEnter, 0)
@@ -627,7 +619,7 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 				return (
 					data === "\x1bb" ||
 					data === "\x1b[1;3D" ||
-					(!_kittyProtocolActive && data === "\x1bB") ||
+					data === "\x1bB" ||
 					matchesKittySequence(data, ARROW_CODEPOINTS.left, MODIFIERS.alt)
 				);
 			if (modifier === 0)
@@ -647,7 +639,7 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 				return (
 					data === "\x1bf" ||
 					data === "\x1b[1;3C" ||
-					(!_kittyProtocolActive && data === "\x1bF") ||
+					data === "\x1bF" ||
 					matchesKittySequence(data, ARROW_CODEPOINTS.right, MODIFIERS.alt)
 				);
 			if (modifier === 0)
@@ -694,7 +686,7 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 		}
 
 		if (modifier === MODIFIERS.alt) {
-			// Not gated on !_kittyProtocolActive: some terminals (VS Code's
+			// Not gated on the Kitty protocol being on: some terminals (VS Code's
 			// integrated one among them) answer just enough of the Kitty
 			// handshake to flip that flag on — e.g. they disambiguate escape
 			// codes — without actually honoring the "report alternate keys"

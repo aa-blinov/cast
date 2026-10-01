@@ -1,5 +1,6 @@
-import { type Component, type OverlayHandle, ProcessTerminal, TuiAltScreen } from "@earendil-works/pi-tui";
+import { type Component, type OverlayHandle, TuiAltScreen } from "@earendil-works/pi-tui";
 import type { Pickers, PickOption, PickOptions } from "../pickers/types.ts";
+import { makeTerminal } from "./ascii.ts";
 import { MultiModal, OptionModal, Sheet, StatusModal, TextModal } from "./modals.ts";
 
 /**
@@ -21,7 +22,7 @@ export function createStartupUi(): {
 
 	const ensure = (): TuiAltScreen => {
 		if (!screen) {
-			screen = new TuiAltScreen(new ProcessTerminal(), false, undefined, { mouse: false });
+			screen = new TuiAltScreen(makeTerminal(), false, undefined, { mouse: false });
 			screen.start();
 		}
 		return screen;

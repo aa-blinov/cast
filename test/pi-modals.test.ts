@@ -221,7 +221,7 @@ describe("SettingsModal", () => {
 		expect(state.web).toBe(true);
 		expect(followUps).toEqual([]);
 		const text = plain(modal.render(60).join("\n"));
-		expect(text).toContain("● on");
+		expect(text).toContain("[x] on");
 		expect(text).toContain("search the web");
 	});
 

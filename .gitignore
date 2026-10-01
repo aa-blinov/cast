@@ -44,3 +44,7 @@ __pycache__/
 evals/review-bench/work/
 evals/review-bench/ready.tsv
 evals/review-bench/*.jsonl
+
+# Impeccable design tool: the direction contract (surfaces/) is tracked; its caches and critique snapshots are not.
+.impeccable/hook.cache.json
+.impeccable/critique/

@@ -6,6 +6,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 
+- **An ASCII look for terminals that are not UTF-8.** With `LANG=C` (or any set locale that is not UTF-8) or `CAST_ASCII=1`, the box, arrow and marker glyphs the screen draws are swapped for one-cell ASCII look-alikes on the way out, so the layout holds instead of showing garbage. `CAST_ASCII=0` turns it off.
 - **`/header` chooses and orders the parts of the top row.** The row is now `CAST(1) * persona * model * v0.51.1 * folder`, joined by one ` * ` instead of padding to the edges, which a phone has no room for. Each part can be switched off or moved (also under Appearance in `/settings`); on a narrow screen the parts at the end drop first, whole. The model shown is the live one, so a `/model` change shows up.
 - **`cast-light`, a theme for light terminals, and `NO_COLOR`.** The new theme keeps the cast hues at 4.5:1 or better on white. With `NO_COLOR` set, cast draws no colour and relies on markers and words.
 - **`/settings` is a settings screen, not a menu of commands.** Toggles, the permission mode and the theme change in place (Space, Enter or ← → ) and are saved at once; each row shows what it is set to. Rows that need a list or a prompt (model, provider, persona, turn cap, status bar, skills, MCP) open it and bring the screen back after. Choosing `bypass` still asks first. `/theme`, `/permissions` and `/web` share the setters, so the screen and the commands cannot disagree.
@@ -17,6 +18,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **A `#` heading and a `##` heading looked the same.** The top level is now bold and underlined, deeper levels bold.
 - **`/turn-cap` did nothing in the terminal screen.** The command was listed and documented but had no handler, so `/turn-cap 800` was sent to the model as a prompt (and now answered `Unknown command`). `/turn-cap` shows the cap, `/turn-cap N` sets it (10 to 10000), `/turn-cap reset` or `off` restores 500; the settings screen row shares the same code.
 - **`/current` listed the session twice.** The heading row and the `Session` segment both printed it.
 - **Blank lines in an answer were padded with the four-column indent,** which copied out as trailing spaces. They are empty now.
@@ -37,10 +39,17 @@ All notable user-facing changes to cast, newest first.
 
 ### Changed
 
+- **The status row is one row joined by ` * `** (`Senior Developer * BUILD * model * ctx 9k/168k (5%) * took 3s`), like the header, instead of two groups pushed to the edges.
+- **Markers are ASCII.** List bullets are `*`, `-`, `+` by depth, task boxes `[ ]` and `[x]`, and the switches in `/settings` read `[x] on` and `[ ] off`, like the checklists in the status bar and header editors.
+- **`/help` lists top-level commands only;** a sub-command such as `/worktree list` shows in the palette once its parent is typed.
 - **`/help` is built from the same command table as the `/` palette and fits any width.** It was a hand-set text in 80-column columns that broke on a phone and had drifted from the real commands (it listed some settings and missed others). It is now a list that wraps under each command's name, shows every command the palette shows, and points to `/settings` for the settings.
 - **The terminal screen is set like a man page, and the default theme is `man`.** Speakers are bold headings (`YOU`, `AGENT`, `REASONING`) with their text at a four-column indent; code is indented four further. The coloured stripe down every line, the gradient wordmark and gradient rules around the composer, the band behind your turns, the accent-coloured boxes and the muted capitals over settings groups are gone. The header reads `CAST(1)`, persona and model, version. State is a mark and a word rather than a colour, and `*` replaces the middle dot as the separator. Your saved theme is kept; `/theme man` switches to the new default.
 - **The context figure is on in the status bar by default**, and turns amber at 70% and red at 90% of the input budget. Speech and embedding models sit below the chat models in `/model`, marked `not for chat`.
 - **`/sessions` (and `cast --resume`) list this directory's sessions first.** The picker opens on the sessions whose folder is the one you are in; **Show all sessions (N)** on the next row lists every project's, and **Only this directory** comes back. ←, → or Tab flip between the two views without moving to that row (the footer says so). Search stays inside the scope you are in. When the directory has no sessions yet it shows all of them and says so. Sessions with no messages, which every launch leaves behind, are no longer listed.
+
+### Internal
+
+- The always-false Kitty-protocol flag and its setter are gone from the key matcher, about 45 comments that still described the Ink renderer now describe the current one, and `.impeccable/hook.cache.json` and the critique snapshots are git-ignored while the direction contract stays tracked.
 
 ## 0.51.1
 

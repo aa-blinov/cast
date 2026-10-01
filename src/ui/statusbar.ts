@@ -90,8 +90,7 @@ export function formatElapsed(ms: number): string {
 /**
  * The segments that fit `columns`, whole: cutting one mid-text (`Senior
  * Developer │ …ctx`) lost the mode and model while keeping the token count.
- * Widths come from each segment's plain text; ` │ ` joins a group, and one
- * column separates the two groups.
+ * Widths come from each segment's plain text; ` * ` joins them all.
  */
 export function fitSegments<T extends { id: string; text: string; side: "left" | "right" }>(
 	items: T[],
@@ -99,14 +98,8 @@ export function fitSegments<T extends { id: string; text: string; side: "left" |
 	width: (text: string) => number,
 ): T[] {
 	const kept = [...items];
-	const total = () => {
-		let sum = 0;
-		for (const side of ["left", "right"] as const) {
-			const group = kept.filter((i) => i.side === side);
-			if (group.length) sum += group.reduce((acc, i) => acc + width(i.text), 0) + 3 * (group.length - 1);
-		}
-		return sum + (kept.some((i) => i.side === "left") && kept.some((i) => i.side === "right") ? 1 : 0);
-	};
+	// One row, one separator (` * `, three cells) between all of them: no padding to the far edge.
+	const total = () => kept.reduce((acc, i) => acc + width(i.text), 0) + 3 * Math.max(0, kept.length - 1);
 	const rank = (id: string) => SEGMENT_DROP_ORDER.indexOf(id);
 	while (kept.length > 1 && total() > columns) {
 		let drop = 0;

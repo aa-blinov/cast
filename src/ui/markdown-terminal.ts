@@ -8,7 +8,7 @@
  *
  * The output is *lines*, not a blob, and each line is already wrapped to the
  * width it was rendered for. That is deliberate: the live-region clamp needs
- * to know exactly how many rows a block will occupy (see ChatLog), and a
+ * to know exactly how many rows a block will occupy (see the transcript), and a
  * renderer that returns pre-wrapped lines answers that question by
  * construction instead of by estimating cells afterwards.
  *
@@ -44,9 +44,9 @@ const FENCE_RE = /^\s*(```+|~~~+)\s*(\S*)/;
 const BULLET_RE = /^(\s*)([-*+])\s+(.*)$/;
 /** GitHub task list: `- [ ] todo`, `- [x] done`. */
 const TASK_RE = /^\[([ xX])\]\s+(.*)$/;
-/** Bullet per nesting level — three shapes, so the third level is not a
- *  slightly smaller version of the second. */
-const BULLETS = ["•", "◦", "▪"] as const;
+/** Bullet per nesting level, in ASCII like the rest of the screen's separators: three shapes, so the
+ *  third level is not a slightly smaller version of the second. */
+const BULLETS = ["*", "-", "+"] as const;
 const ORDERED_RE = /^(\s*)(\d{1,3})[.)]\s+(.*)$/;
 const QUOTE_RE = /^\s*>\s?(.*)$/;
 const HR_RE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
@@ -451,10 +451,14 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 		}
 		const heading = HEADING_RE.exec(raw);
 		if (heading) {
+			// Bold for every level; the top one is also underlined, so a `#` and a `##` do not read as the same weight.
 			const level = heading[1]!.length;
 			out.push(
-				...wrapSpans(inlineSpans(heading[2]!, { bold: true, tone: "heading" }), width, indent, `${indent}  `).map(
-					(line) => (level > 2 ? line : line),
+				...wrapSpans(
+					inlineSpans(heading[2]!, { bold: true, underline: level === 1, tone: "heading" }),
+					width,
+					indent,
+					`${indent}  `,
 				),
 			);
 			continue;
@@ -470,13 +474,18 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 		if (bullet) {
 			const pad = listPad(bullet[1]!);
 			const task = TASK_RE.exec(bullet[3]!);
-			// A task list is a list of boxes, not of `[ ]` typed out. The box
-			// replaces the bullet rather than sitting after it: two markers in a
-			// row (`• [ ]`) is one marker too many, and both are one cell wide.
-			const marker = task ? (task[1] === " " ? "☐" : "☑") : (BULLETS[Math.min(pad / 2, BULLETS.length - 1)] ?? "•");
+			// A task list replaces the bullet with its box: two markers in a row
+			// (`* [ ]`) is one marker too many. The box is wider than a bullet, so the
+			// wrapped lines hang under the text by the marker's own width.
+			const marker = task
+				? task[1] === " "
+					? "[ ]"
+					: "[x]"
+				: (BULLETS[Math.min(pad / 2, BULLETS.length - 1)] ?? "*");
 			const text = task ? task[2]! : bullet[3]!;
 			const lead = `${indent}${" ".repeat(pad)}${marker} `;
-			out.push(...wrapSpans(inlineSpans(text), width, lead, `${indent}${" ".repeat(pad + LIST_MARKER_WIDTH)}`));
+			const hang = task ? displayWidth(`${marker} `) : LIST_MARKER_WIDTH;
+			out.push(...wrapSpans(inlineSpans(text), width, lead, `${indent}${" ".repeat(pad + hang)}`));
 			continue;
 		}
 		const ordered = ORDERED_RE.exec(raw);
@@ -503,7 +512,7 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 }
 
 /**
- * The last `maxLines` rendered lines of `text`, for the live region.
+ * The last `maxLines` rendered lines of `text`, for the streaming tail.
  *
  * Rendering a whole streaming block every frame is what the old cell
  * arithmetic was avoiding, and a reasoning stream reaches hundreds of KB. Only
