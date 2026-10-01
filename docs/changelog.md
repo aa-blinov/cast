@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.10
 
 ### Fixed
 - **An MCP server the agent adds is connected at once.** Asking cast to add a server meant it wrote `mcp.json` and the list stayed empty, and the agent had no tools from it, until you ran `/reload` (and attached to the daemon, even `/reload` only updated the list, not the agent). When `write` or `edit` changes `~/.cast/mcp.json` or `.cast/mcp.json`, the servers are now connected right away: they appear in `/mcp`, and the agent has their tools on its next turn. `/reload` in the daemon mode reloads the daemon as well.
