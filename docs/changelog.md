@@ -17,6 +17,7 @@ All notable user-facing changes to cast, newest first.
 
 ### Fixed
 
+- **Prose ran the whole width of a wide terminal.** At 200 columns a paragraph was lines of 190+ characters. The conversation now keeps a measure of at most 100 columns (headings, code and tool rows too); the header, composer and status row still use the full width, and a narrow screen uses all of it.
 - **The permission question did not show what it was asking about.** On a phone the box covered the transcript, and the command was only visible cut off inside the `Always allow` row. The box now carries the reason and the full command (wrapped, the rest marked), and `y`, `a` and `n` choose Allow once, Always allow and Block at once.
 - **A session row lost its date on a narrow screen.** The first line of the message took the whole row and the date and message count were cut off. They now sit against the right edge and keep their room; the message gives way.
 - **Footers and the placeholder mixed separators and ran past the edge.** Every picker footer now uses ` * ` like the header, and the placeholder while a turn runs reads `type to steer * esc esc to stop`.

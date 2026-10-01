@@ -1,7 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "../src/ui/useAgentSession.ts";
-import { Transcript } from "../src/ui-pi/transcript.ts";
+import { MAX_MEASURE, Transcript } from "../src/ui-pi/transcript.ts";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
 const plain = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, "");
@@ -77,6 +77,22 @@ describe("Transcript", () => {
 		const rows = transcript.render(40);
 		expect(rows.some((row) => row.includes("\x1b[48"))).toBe(false);
 		for (const row of rows) expect(visibleWidth(row)).toBeLessThan(40);
+	});
+
+	it("keeps prose to a readable measure on a wide terminal, and uses the whole width on a narrow one", () => {
+		const transcript = new Transcript();
+		transcript.set({
+			...base,
+			messages: [
+				user("hello"),
+				{ role: "assistant", content: "", blocks: [{ kind: "content", text: "word ".repeat(200) }] },
+			],
+		});
+		const widest = (width: number) => Math.max(...transcript.render(width).map((row) => visibleWidth(row)));
+		expect(widest(240)).toBeLessThanOrEqual(MAX_MEASURE);
+		expect(widest(240)).toBeGreaterThan(MAX_MEASURE - 12);
+		expect(widest(60)).toBeLessThanOrEqual(60);
+		expect(widest(60)).toBeGreaterThan(48);
 	});
 
 	it("shows an error and a retry notice ahead of the live answer", () => {

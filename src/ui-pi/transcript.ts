@@ -5,6 +5,9 @@ import type { ChatMessage, RetryInfo, StreamingState } from "../ui/useAgentSessi
 import { blockLines, fenceAfter, messageLines } from "./lines.ts";
 import { paint } from "./paint.ts";
 
+/** A line of prose stops being readable far short of a wide terminal: past this the text keeps its measure and the rest stays empty. */
+export const MAX_MEASURE = 100;
+
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 export interface TranscriptState {
@@ -56,25 +59,26 @@ export class Transcript implements Component {
 	render(width: number): string[] {
 		const { messages, streaming, error, retry, showReasoning } = this.state;
 		const w = Math.max(20, width);
+		const content = Math.min(w, MAX_MEASURE);
 		const header = typeof this.header === "function" ? this.header(w) : this.header;
 		const out: string[] = header.map((line) => truncateToWidth(line, w, "…"));
 		messages.forEach((message, i) => {
 			const fence = this.fences[i] ?? null;
-			const key = `${w}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;
+			const key = `${content}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;
 			let entry = this.cache.get(message);
 			if (!entry || entry.key !== key) {
-				entry = { key, lines: messageLines(message, { width: w, showReasoning, openFence: fence }) };
+				entry = { key, lines: messageLines(message, { width: content, showReasoning, openFence: fence }) };
 				this.cache.set(message, entry);
 			}
 			out.push(...entry.lines);
 		});
 		const colors = theme();
-		if (error) out.push("", ...wrapTextWithAnsi(paint(`  ✗ ${error}`, { color: colors.error }), w));
+		if (error) out.push("", ...wrapTextWithAnsi(paint(`  ✗ ${error}`, { color: colors.error }), content));
 		if (retry) {
 			out.push(
 				truncateToWidth(
 					paint(`    Retrying (attempt ${retry.attempt}): ${retry.reason}`, { color: colors.warning }),
-					w,
+					content,
 					"…",
 				),
 			);
@@ -83,7 +87,7 @@ export class Transcript implements Component {
 			let fence: OpenFence | null = null;
 			let runningTool = false;
 			for (const block of streaming.blocks) {
-				out.push(...blockLines(block, { width: w, showReasoning, openFence: fence }));
+				out.push(...blockLines(block, { width: content, showReasoning, openFence: fence }));
 				if (block.kind !== "tool") fence = trailingOpenFence(block.text, fence);
 				else if (block.call.status === "running") runningTool = true;
 			}
