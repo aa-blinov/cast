@@ -119,33 +119,47 @@ export async function execSsh(
 		proc.stdout.on("data", (d: Buffer) => output.append(d));
 		proc.stderr.on("data", (d: Buffer) => output.append(d));
 
-		const timer = setTimeout(() => {
-			timedOut = true;
+		let finalResult: ToolResult | null = null;
+
+		const settle = (exitCode: number | null) => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			if (finalResult) return;
+			const result = formatBashResult(output.final(), config, {
+				exitCode,
+				aborted,
+				timedOut,
+				outputTruncated: output.truncated,
+				fullOutputPath: output.spillPath,
+				timeoutMs,
+			});
+			finalResult = result;
+			resolve(result);
+		};
+
+		// Killing the client is not enough to end it: with ControlMaster the persistent master keeps the
+		// pipes open until the remote command finishes, so `close` came only then (a 2s timeout on
+		// `sleep 30` answered after 30s). A killed client has said all it will; give its last output a
+		// moment to arrive and answer.
+		const killClient = () => {
 			try {
 				process.kill(-proc.pid!, "SIGKILL");
 			} catch {
 				// already dead
 			}
+			setTimeout(() => settle(null), 500);
+		};
+
+		const timer = setTimeout(() => {
+			timedOut = true;
+			killClient();
 		}, timeoutMs);
 
 		const onAbort = () => {
 			aborted = true;
-			try {
-				process.kill(-proc.pid!, "SIGKILL");
-			} catch {
-				// already dead
-			}
-			setTimeout(() => {
-				if (!finalResult)
-					resolve({
-						content: "[ABORTED] Command was interrupted by user (forced — process did not exit).",
-						isError: true,
-					});
-			}, 5000);
+			killClient();
 		};
 		signal?.addEventListener("abort", onAbort, { once: true });
-
-		let finalResult: ToolResult | null = null;
 
 		// Spawn failure (ssh/sshpass missing, permission denied, …): without
 		// this handler an unhandled 'error' event on the child process crashes
@@ -164,20 +178,6 @@ export async function execSsh(
 			resolve(result);
 		});
 
-		proc.on("close", (exitCode) => {
-			clearTimeout(timer);
-			signal?.removeEventListener("abort", onAbort);
-
-			const result = formatBashResult(output.final(), config, {
-				exitCode,
-				aborted,
-				timedOut,
-				outputTruncated: output.truncated,
-				fullOutputPath: output.spillPath,
-				timeoutMs,
-			});
-			finalResult = result;
-			resolve(result);
-		});
+		proc.on("close", (exitCode) => settle(exitCode));
 	});
 }
