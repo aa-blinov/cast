@@ -2,6 +2,15 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **`/ssh` (and any command hidden from the `/` list, such as `/skills`) runs what you typed.** Typing `/ssh` and pressing Enter ran `/skills-sh`: the list offered fuzzy neighbours of the hidden command and Enter took the first one. A hidden command typed in full now shows no suggestions, so Enter sends it as it is.
+- `/current` shows the working folder row it has had no value for since the folder moved to the status row.
+
+### Changed
+- **`/keys`, `/current`, `/ssh` and `/context` open in a window** you read and close with Esc, instead of leaving a block of text in the conversation. They still print into the chat where there is no window (the plain command line).
+
 ## 0.52.5
 
 ### Fixed

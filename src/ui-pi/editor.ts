@@ -53,6 +53,8 @@ export class CastAutocompleteProvider implements AutocompleteProvider {
 		commands: SlashCommand[],
 		private readonly cwd: string,
 		fdPath: string | null,
+		/** Commands left out of `commands` on purpose (the settings screen covers them) that still run when typed. */
+		private readonly hiddenCommands: ReadonlySet<string> = new Set(),
 	) {
 		this.inner = new CombinedAutocompleteProvider(commands, cwd, fdPath);
 	}
@@ -64,6 +66,10 @@ export class CastAutocompleteProvider implements AutocompleteProvider {
 		options: { signal: AbortSignal; force?: boolean },
 	): Promise<AutocompleteSuggestions | null> {
 		const before = (lines[cursorLine] ?? "").slice(0, cursorCol);
+		// A hidden command typed in full is not in the list, so the fuzzy matches for it ("/ssh" gives
+		// "skills-sh") would be what Enter takes instead of what was typed.
+		const typed = /^\/(\S+)$/.exec(before);
+		if (cursorLine === 0 && lines.length === 1 && typed?.[1] && this.hiddenCommands.has(typed[1])) return null;
 		const mention = atTokenAt(before, before.length);
 		if (!mention) return this.inner.getSuggestions(lines, cursorLine, cursorCol, options);
 		const paths = await searchProjectFiles(this.cwd, mention.query);

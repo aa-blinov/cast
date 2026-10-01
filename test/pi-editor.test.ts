@@ -73,4 +73,23 @@ describe("CastAutocompleteProvider", () => {
 		const commands = await provider.getSuggestions(["/he"], 0, 3, { signal: new AbortController().signal });
 		expect(commands?.items.map((i) => i.value)).toContain("help");
 	});
+
+	it("offers nothing for a hidden command typed in full, so Enter runs it and not a fuzzy neighbour", async () => {
+		const commands = [
+			{ name: "skills-sh", description: "skills.sh" },
+			{ name: "sessions", description: "Sessions" },
+		];
+		const signal = new AbortController().signal;
+		const plainProvider = new CastAutocompleteProvider(commands, dir, null);
+		// Without the hidden set "/ssh" fuzzy-matches "skills-sh", which Enter would then take.
+		expect((await plainProvider.getSuggestions(["/ssh"], 0, 4, { signal }))?.items.map((i) => i.value)).toEqual([
+			"skills-sh",
+		]);
+		const provider = new CastAutocompleteProvider(commands, dir, null, new Set(["ssh"]));
+		expect(await provider.getSuggestions(["/ssh"], 0, 4, { signal })).toBeNull();
+		// Still completes what is not a hidden command, and a longer word keeps its suggestions.
+		expect((await provider.getSuggestions(["/sess"], 0, 5, { signal }))?.items.map((i) => i.value)).toEqual([
+			"sessions",
+		]);
+	});
 });

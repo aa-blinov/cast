@@ -630,6 +630,8 @@ export class ViewModal implements Component {
 		private readonly requestRender: () => void,
 	) {
 		this.snapshot = view.read();
+		// A reference starts at its top; a running log starts at its end. The render clamps this to the top.
+		if (view.text) this.fromBottom = Number.MAX_SAFE_INTEGER;
 	}
 
 	/** Re-reads the source; called on a timer while the modal is open. */
@@ -648,6 +650,7 @@ export class ViewModal implements Component {
 		const rows = this.viewportRows();
 		const total = this.snapshot.text.split("\n").length;
 		const maxBack = Math.max(0, total - rows);
+		this.fromBottom = Math.min(this.fromBottom, maxBack);
 		if (matchesKey(data, "escape") || matchesKey(data, "left") || data === "q") this.done();
 		else if (matchesKey(data, "up")) this.fromBottom = Math.min(maxBack, this.fromBottom + 1);
 		else if (matchesKey(data, "down")) this.fromBottom = Math.max(0, this.fromBottom - 1);
@@ -666,7 +669,13 @@ export class ViewModal implements Component {
 		const back = Math.min(this.fromBottom, Math.max(0, lines.length - rows));
 		const end = Math.max(rows, lines.length - back);
 		const window = lines.slice(Math.max(0, end - rows), end);
-		const state = this.snapshot.running ? (this.stopped ? "* stopping…" : "* running") : "* finished";
+		const state = this.view.text
+			? ""
+			: this.snapshot.running
+				? this.stopped
+					? "* stopping…"
+					: "* running"
+				: "* finished";
 		const canStop = this.snapshot.running && this.view.stop !== undefined && !this.stopped;
 		const footer = [
 			"Esc close",
@@ -675,7 +684,7 @@ export class ViewModal implements Component {
 			...(back > 0 ? [`${back} lines below`] : []),
 		];
 		return frame(
-			`${this.view.title} ${state}`,
+			`${this.view.title} ${state}`.trim(),
 			window.map((l) => l || " "),
 			footer,
 			width,

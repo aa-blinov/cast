@@ -432,6 +432,20 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("2 segments");
 	});
 
+	it("/keys and /current open a window of their own where there is one, and leave the chat alone", async () => {
+		for (const cmd of ["/keys", "/current"]) {
+			const { deps, calls } = createFakeDeps();
+			const viewLive = vi.fn().mockResolvedValue(undefined);
+			deps.pickers = { ...deps.pickers, viewLive };
+			await handleInput(cmd, undefined, deps);
+			expect(viewLive, cmd).toHaveBeenCalledOnce();
+			const view = viewLive.mock.calls[0]![0];
+			expect(view.text, cmd).toBe(true);
+			expect(view.read().text.length, cmd).toBeGreaterThan(20);
+			expect(calls.displayMessages ?? [], cmd).toEqual([]);
+		}
+	});
+
 	it("/older reports the start of the session when nothing older remains", async () => {
 		const { deps, calls } = createFakeDeps();
 		const loadOlder = deps.agent.loadOlder;

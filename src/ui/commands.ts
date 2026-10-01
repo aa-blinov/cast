@@ -373,6 +373,19 @@ function echoCommand(deps: CommandDeps, input: string): void {
 	if (deps.echoCommand !== false) deps.agent.addDisplayMessage({ role: "user", content: input });
 }
 
+/**
+ * A reference listing (keys, status, context files): a window of its own that is read and closed,
+ * not a message left in the conversation. Where there is no window (readline, tests) it is a message.
+ */
+async function showReference(deps: CommandDeps, input: string, title: string, body: string): Promise<void> {
+	if (deps.pickers.viewLive) {
+		await deps.pickers.viewLive({ title, text: true, read: () => ({ text: body, running: false }) });
+		return;
+	}
+	echoCommand(deps, input);
+	deps.agent.addDisplayMessage({ role: "warning", content: `${title}\n${body}` });
+}
+
 export interface CommandDeps {
 	/** False when the command is run by a screen on the person's behalf rather than typed (default true). */
 	echoCommand?: boolean;
@@ -3231,8 +3244,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			}
 
 			// /ssh (no subcommand) — list hosts
-			echoCommand(deps, input);
 			if (deps.sshHosts.length === 0) {
+				echoCommand(deps, input);
 				deps.agent.addDisplayMessage({
 					role: "warning",
 					content: "No SSH hosts configured. Use /ssh add to add one, or edit ~/.cast/ssh.json",
@@ -3245,7 +3258,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				const danger = h.dangerousCommands === "bypass" ? " (no safety check)" : "";
 				return `  ${h.name.padEnd(16)} ${user}${h.host}:${h.port || 22}  ${auth}${danger}`;
 			});
-			deps.agent.addDisplayMessage({ role: "warning", content: `SSH Hosts\n${lines.join("\n")}` });
+			await showReference(deps, input, "SSH Hosts", lines.join("\n"));
 			return;
 		},
 	},
@@ -3295,7 +3308,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		// for a prompt and nonsense for /help — and left the text sitting in
 		// the composer as though Enter had been swallowed.
 		whileRunning: "submit",
-		run: ({ deps, agent, session, config }) => {
+		run: async ({ input, deps, agent, session, config }) => {
 			const allSegs = getStatusBarSegments();
 			const cfg = deps.statusBar;
 			const activeModel = deps.planMode && deps.planModel ? deps.planModel : session.model;
@@ -3313,6 +3326,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				maxResponseTokens: config.maxResponseTokens,
 				messages: session.messages,
 				sessionId: session.id,
+				cwd: deps.cwd,
 				lspServers: deps.agent.daemonMode ? undefined : [...new Set(lspStatus().running.map((l) => l.id))],
 			};
 			// Build ordered list from statusBar.order, then append any new segments
@@ -3327,7 +3341,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				const value = seg.formatValue(ctxForCurrent) ?? "—";
 				lines.push(`  ${seg.label.padEnd(16)} ${value}`);
 			}
-			deps.agent.addDisplayMessage({ role: "warning", content: `Current\n${lines.join("\n")}` });
+			await showReference(deps, input, "Current", lines.join("\n"));
 			return;
 		},
 	},
@@ -3429,7 +3443,6 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		// the composer as though Enter had been swallowed.
 		whileRunning: "submit",
 		run: async ({ input, deps }) => {
-			echoCommand(deps, input);
 			// There was no way to see which context files are in play — the
 			// question behind "why is the agent doing that?" — and an unreadable
 			// one was skipped in silence, so instructions the user had written
@@ -3447,11 +3460,21 @@ const COMMAND_ROUTES: CommandRoute[] = [
 							.map((issue) => `  ${issue}`)
 							.join("\n")}`
 					: "";
-			const body =
-				files.length > 0
-					? `Context files (sent with every request)\n${lines.join("\n")}${issuesBlock}`
-					: `No context files loaded. Create AGENTS.md in the project root to add project instructions.${issuesBlock}`;
-			deps.agent.addDisplayMessage({ role: "warning", content: body });
+			if (files.length > 0) {
+				await showReference(
+					deps,
+					input,
+					"Context files (sent with every request)",
+					`${lines.join("\n")}${issuesBlock}`,
+				);
+				return;
+			}
+			// One line does not need a window.
+			echoCommand(deps, input);
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: `No context files loaded. Create AGENTS.md in the project root to add project instructions.${issuesBlock}`,
+			});
 			return;
 		},
 	},
@@ -3881,8 +3904,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		// for a prompt and nonsense for /help — and left the text sitting in
 		// the composer as though Enter had been swallowed.
 		whileRunning: "submit",
-		run: ({ input, deps }) => {
-			echoCommand(deps, input);
+		run: async ({ input, deps }) => {
 			const ACTION_LABELS: Record<string, string> = {
 				"editor.cursorUp": "Previous prompt (palette: up)",
 				"editor.cursorDown": "Next prompt (palette: down)",
@@ -3954,7 +3976,6 @@ const COMMAND_ROUTES: CommandRoute[] = [
 						.join(" / ") || "(unbound)";
 				return `  ${label.padEnd(22)} ${keys}`;
 			});
-			const header = "Keybindings";
 			// Esc and Ctrl+C are context-dependent (a single label can't capture it):
 			// spell out what each does while a turn is running vs idle.
 			const notes =
@@ -3963,10 +3984,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				"\n  Enter    sends; for a line break use Shift+Enter or Alt+Enter, or end the line with \\" +
 				"\n           (Shift+Enter needs a terminal that reports it — kitty, WezTerm, Ghostty, iTerm2)" +
 				"\n  Tab      completes a slash command, or a path containing / or starting with ~";
-			deps.agent.addDisplayMessage({
-				role: "warning",
-				content: `${header}\n${lines.join("\n")}${notes}`,
-			});
+			await showReference(deps, input, "Keybindings", `${lines.join("\n")}${notes}`);
 			return;
 		},
 	},
