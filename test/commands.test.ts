@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCheckpoint } from "../src/core/checkpoint.ts";
 import type { AppConfig } from "../src/core/config.ts";
@@ -18,11 +19,12 @@ import {
 } from "../src/core/session.ts";
 import { type PermissionMode, updateSettings } from "../src/core/settings.ts";
 import type { Pickers } from "../src/pickers/types.ts";
-import type { CommandDeps } from "../src/ui/commands.ts";
+import { type CommandDeps, helpMarkdown, SLASH_COMMANDS } from "../src/ui/commands.ts";
 import { defaultHeaderConfig } from "../src/ui/header.ts";
 import { buildSettingsForm, parseTurnCap } from "../src/ui/settings-form.ts";
 import { defaultStatusBarConfig } from "../src/ui/statusbar.ts";
 import type { UseAgentSession } from "../src/ui/useAgentSession.ts";
+import { messageLines } from "../src/ui-pi/lines.ts";
 
 // /compact runs a real summarization call; stub it so the hook wiring can be
 // tested without a provider.
@@ -442,12 +444,28 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("start of the session");
 	});
 
-	it("/help lists command names", async () => {
+	it("/help is built from the same table as the palette: every shown command, no hidden one, one pointer to /settings", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/help", undefined, deps);
-		expect(displayMessageText(calls)).toContain("/clear");
-		expect(displayMessageText(calls)).toContain("/model");
-		expect(displayMessageText(calls)).toContain("/quit");
+		const shown = displayMessageText(calls);
+		for (const command of SLASH_COMMANDS.filter((c) => !c.hidden)) {
+			expect(shown, command.name).toContain(`**${command.name}**: ${command.description}`);
+		}
+		for (const command of SLASH_COMMANDS.filter((c) => c.hidden)) {
+			expect(shown, command.name).not.toContain(`**${command.name}**:`);
+		}
+		expect(shown).toContain("**/settings**");
+		expect(shown).toContain("**/clear**");
+	});
+
+	it("/help is a list that wraps under each command, so it holds at any width", async () => {
+		const rows = messageLines({ role: "warning", content: helpMarkdown() }, { width: 40, showReasoning: false });
+		expect(rows.length).toBeGreaterThan(40);
+		for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(40);
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping the SGR codes
+		const text = rows.map((row) => row.replace(/\x1b\[[0-9;]*m/g, ""));
+		const continued = text.filter((row) => row.startsWith("      ") && row.trim() !== "");
+		expect(continued.length).toBeGreaterThan(0);
 	});
 
 	it("/persona cancelled (Escape) leaves the persona unchanged and doesn't exit the process", async () => {
