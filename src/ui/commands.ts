@@ -338,6 +338,23 @@ for (const command of SLASH_COMMANDS) {
 	if (SETTING_COMMANDS.has(command.name.split(" ")[0] ?? command.name)) command.hidden = true;
 }
 
+/**
+ * The command list as markdown, built from the same table as the `/` palette, so the two cannot drift.
+ * A list, not columns: each command wraps under its own name at whatever width the screen has.
+ */
+export function helpMarkdown(): string {
+	const rows = SLASH_COMMANDS.filter((c) => !c.hidden).map((c) => `- **${c.name}**: ${c.description}`);
+	return [
+		"## Commands",
+		"",
+		...rows,
+		"",
+		"Settings (model, provider, persona, permissions, reasoning, theme, status bar, header, web tools, skills, MCP, memory, turn cap, keys): **/settings**",
+		"",
+		"A loaded skill runs as **/<skill>** (or **/skill:<name>**), a rule as **/rule:<name>**. Plain text while a turn runs steers it.",
+	].join("\n");
+}
+
 export interface CommandDeps {
 	agent: UseAgentSession;
 	session: SessionState;
@@ -3806,51 +3823,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		whileRunning: "submit",
 		run: ({ input, deps }) => {
 			deps.agent.addDisplayMessage({ role: "user", content: input });
-			deps.agent.addDisplayMessage({
-				role: "warning",
-				content:
-					"Commands\n" +
-					"  /build              Exit plan mode, restore full toolset\n" +
-					"  /copy               Copy last assistant response\n" +
-					"  /current            Show all status bar data\n" +
-					"  /clear              Clear context\n" +
-					"  /compact            Compact context now\n" +
-					"  /continue           Resume the most recent session\n" +
-					"  /fork               Fork current safe context into a new session\n" +
-					"  /new                Start new session\n" +
-					"  /plan               Enter plan mode (explore + plan only)\n" +
-					"  /plan-model [m|off] Show or change the plan-mode model\n" +
-					"  /abort              Abort running agent (alias: /stop)\n" +
-					"  /queue (/q)         Queue message for next turn\n" +
-					"  /queue-reset (/qr)  Clear queue\n" +
-					"  /steer (/s)         Inject message into running turn (plain text does this too)\n" +
-					"  /model [name]       Show/change model\n" +
-					"  /subagent-model [name]  Show/change subagent model\n" +
-					"  /reasoning [level]  Show/change reasoning level\n" +
-					"  /persona [name]     Show/change persona\n" +
-					"  /skills …           Toggle / list / enable|disable / uninstall (/skills help)\n" +
-					"  /mcp …              Toggle / list / enable|disable / uninstall (/mcp help)\n" +
-					"  /hooks              List hooks; /hooks enable|disable <id>\n" +
-					"  /reload             Re-scan skills, MCP, rules\n" +
-					"  /<skill-id>         Invoke a loaded skill directly (also: /skill:<name>)\n" +
-					"  /rule:<name>        Invoke a rule\n" +
-					"  /provider [name]    Switch / add / delete providers\n" +
-					"  /permissions        Change bash confirmation mode\n" +
-					"  /web                Toggle web tools (web_search, web_fetch)\n" +
-					"  /memory             Toggle durable project memory\n" +
-					"  /web-search-provider    Switch web_search backend (DuckDuckGo / Tavily / Brave)\n" +
-					"  /web-fetch-provider     Switch web_fetch backend (Jina Reader / local)\n" +
-					"  /ssh                Manage SSH hosts (list, add, remove)\n" +
-					"  /statusbar          Toggle and reorder status bar segments\n" +
-					"  /worktree <name>    Switch session into a git worktree (creates it on first use, reuses on resume)\n" +
-					"  /theme              Change color theme\n" +
-					"  /current            Show all status bar data\n" +
-					"  /sessions           List/switch sessions\n" +
-					"  /rules              List loaded rules\n" +
-					"  /repo               Show cwd and git branch\n" +
-					"  /keys               List keybindings\n" +
-					"  /quit               Save and exit (alias: /exit)",
-			});
+			deps.agent.addDisplayMessage({ role: "warning", content: helpMarkdown() });
 			return;
 		},
 	},
