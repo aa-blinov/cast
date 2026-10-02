@@ -52,17 +52,23 @@ export async function resolveConnection(
 		);
 	}
 
+	// Left empty, the question comes back saying why: a bare re-ask looked like Enter did nothing, and the
+	// grey example under the field looks like a default it is not.
+	let problem: string | undefined;
 	while (!baseURL) {
 		// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
-		const v = await pickers.promptText("Provider base URL", undefined, "https://api.openai.com/v1");
+		const v = await pickers.promptText("Provider base URL", undefined, "https://api.openai.com/v1", problem);
 		if (v === null) process.exit(0);
 		baseURL = v.trim() || undefined;
+		problem = "The address is required: type it, for example https://api.openai.com/v1";
 	}
+	problem = undefined;
 	while (!apiKey) {
 		// biome-ignore lint/performance/noAwaitInLoops: sequential — each step depends on the previous
-		const v = await pickers.promptText("Provider API key", undefined, "sk-...");
+		const v = await pickers.promptText("Provider API key", undefined, "sk-...", problem);
 		if (v === null) process.exit(0);
 		apiKey = v.trim() || undefined;
+		problem = "The key is required: paste the API key of this provider";
 	}
 
 	return { baseURL, apiKey };

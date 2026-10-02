@@ -90,6 +90,27 @@ describe("resolveConnection", () => {
 		expect(result).toEqual({ baseURL: "https://legacy.example/v1", apiKey: "sk-legacy" });
 	});
 
+	it("says why when the address or the key is left empty, instead of asking again in silence", async () => {
+		const errors: Array<string | undefined> = [];
+		const answers = ["", "  ", "https://new.example/v1", "", "sk-new"];
+		let i = 0;
+		const pickers = {
+			pickOption: async () => null,
+			promptText: async (_label: string, _default?: string, _placeholder?: string, error?: string) => {
+				errors.push(error);
+				return answers[i++] ?? null;
+			},
+			log: () => {},
+		} as unknown as Parameters<typeof resolveConnection>[0];
+		const result = await resolveConnection(pickers, {});
+		expect(result).toEqual({ baseURL: "https://new.example/v1", apiKey: "sk-new" });
+		expect(errors[0]).toBeUndefined();
+		expect(errors[1]).toContain("address is required");
+		expect(errors[2]).toContain("address is required");
+		expect(errors[3]).toBeUndefined();
+		expect(errors[4]).toContain("key is required");
+	});
+
 	it("does not crash when providers is undefined and baseURL/apiKey unset", async () => {
 		// Interactive prompt returns null → resolveConnection calls
 		// process.exit(0). We don't actually want to exit the test
