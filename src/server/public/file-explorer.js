@@ -514,7 +514,7 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 					: null
 			}
 			<div class="fs-tree${dropTarget === "" ? " drop" : ""}" ...${dropProps("")}>
-				${error ? html`<div class="diff-empty diff-empty-error" role="alert">${error}</div>` : null}
+				${error ? html`<div class="fs-error" role="alert"><span>${error}</span><button type="button" class="fs-error-dismiss" aria-label="Dismiss" onClick=${() => setError(null)}><${icons.xMark} /></button></div>` : null}
 				${
 					creating
 						? html`<div class="fs-row fs-create-row"><span class="fs-icon">${creating === "dir" ? html`<${icons.folder} />` : html`<${icons.docFile} />`}</span><input ref=${createInputRef} class="fs-rename-input" aria-label=${creating === "dir" ? "New folder name" : "New file name"} placeholder=${`${selectedDir ? `${selectedDir}/` : ""}${creating === "dir" ? "folder" : "file.txt"} (a/b/c.txt works)`} value=${createValue} onInput=${(e) => setCreateValue(e.target.value)} onKeyDown=${(e) => { if (e.key === "Enter") { e.preventDefault(); void commitCreate(); } if (e.key === "Escape") { e.preventDefault(); createCommittedRef.current = true; setCreating(null); } }} onBlur=${() => void commitCreate()} /></div>`

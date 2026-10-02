@@ -4278,6 +4278,21 @@ describe("web bridge", () => {
 		expect(ws.systemPrompt).toContain("Mode: build");
 	});
 
+	it("continuing a plan clears the review card and stays in plan mode", async () => {
+		// "Continue planning" used to take the approve path, so the session went to build while the page still said
+		// PLAN: the model could write code and plan_done was no longer offered.
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		bridge.setSessionMode(ws.id, "plan");
+		ws.session.planTransition = { kind: "done" };
+
+		expect(bridge.resolvePlanTransition(ws.id, "done", "continue")).toEqual({ ok: true });
+
+		expect(ws.session.mode).toBe("plan");
+		expect(ws.session.planTransition).toBeUndefined();
+		expect(ws.systemPrompt).toContain("Mode: plan");
+	});
+
 	it("approving a plan switches the session to build in the same call", async () => {
 		// The client used to resolve the transition and then separately POST
 		// /build, so an interruption between the two left the approval consumed

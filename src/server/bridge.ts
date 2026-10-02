@@ -499,7 +499,12 @@ export interface ServerBridge {
 	 * connects mid-turn can render it instead of waiting for a replayed event. */
 	getBashConfirm(sessionId: string): PendingBashConfirm | undefined;
 	getPlanTransition(sessionId: string): { kind: "done" } | undefined;
-	resolvePlanTransition(sessionId: string, kind: "done"): { ok: true } | { ok: false; error: string };
+	/** `outcome: "continue"` clears the review card and stays in plan mode; the default approves, which is the switch to build. */
+	resolvePlanTransition(
+		sessionId: string,
+		kind: "done",
+		outcome?: "approve" | "continue",
+	): { ok: true } | { ok: false; error: string };
 	/** Flip a session between plan/build mode. The TUI in daemon mode owns its
 	 * mode locally but the daemon caches the session it hydrates — without an
 	 * explicit sync the daemon would keep running the old mode. */
@@ -2556,6 +2561,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function resolvePersistedPlanTransition(
 		sessionId: string,
 		kind: "done",
+		outcome: "approve" | "continue" = "approve",
 	): { ok: true } | { ok: false; error: string } {
 		const ws = sessions.get(sessionId);
 		if (!ws) return { ok: false, error: "Session not found" };
@@ -2570,6 +2576,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const transition = ws.session.planTransition;
 		if (!transition || transition.kind !== kind)
 			return { ok: false, error: "No matching plan transition is awaiting a choice" };
+		if (outcome === "continue") {
+			// Refining the plan is still planning: the model stays read-only with plan_done available.
+			resolvePlanTransition(planState);
+			saveSession(ws.session);
+			broadcaster.broadcastSessionUpdate(ws);
+			return { ok: true };
+		}
 		ws.session.todos = createPlanTodos(planState);
 		resolvePlanTransition(planState);
 		// Approving a plan *is* the switch to build — do it here rather than
@@ -2716,7 +2729,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function closeSession(sessionId: string, reason?: "shutdown"): boolean {
 		const ws = sessions.get(sessionId);
 		if (!ws) return false;
-		if (ws.status === "running") ws.runner.abort(reason);
+		const wasRunning = ws.status === "running";
+		if (wasRunning) ws.runner.abort(reason);
 		ws.backgroundBash.registry.killAll();
 		// A session with no real turns yet (freshly created — e.g. a persona
 		// picked in the sidebar — then closed or dropped on shutdown without
@@ -2724,8 +2738,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// A session only ever reaches disk via submit()'s saveSession call,
 		// which never runs before the first message is appended, so a hydrated
 		// (already-on-disk) session always has turns here too.
+		// Only a turn cut short is activity. A session that was merely open (evicted when idle, or closed by a daemon
+		// restart) keeps its time, or looking at an old thread would float it to the top of the list.
 		if (countTurnMessages(ws.session.messages) > 0) {
-			saveSession(ws.session);
+			saveSession(ws.session, { touch: wasRunning });
 		}
 		void runHooksForEvent(resolveHooksForCwd(ws.session.cwd ?? cwd, trustForSessionCwd(ws.session.cwd ?? cwd)), {
 			event: "SessionEnd",

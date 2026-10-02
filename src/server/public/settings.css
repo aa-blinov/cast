@@ -30,7 +30,7 @@
 	font-family: var(--font);
 	font-size: var(--fs-ui);
 	cursor: pointer;
-	transition: background .1s, color .1s;
+	transition: background var(--dur-instant), color var(--dur-instant);
 }
 .settings-tab:hover { background: var(--bg-hover); color: var(--text); }
 .settings-tab.active { background: var(--bg-raised); color: var(--text); font-weight: 600; }
@@ -53,6 +53,8 @@
  * tall Settings tab or the Status popover body where the text would
  * otherwise float awkwardly near the top instead of the middle. */
 .settings-loading {
+	/* Shown only if the wait outlasts a beat: a load that finishes at once never flashes the word. */
+	animation: rise var(--dur-fast) var(--ease-out) var(--dur-fast) backwards;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -195,7 +197,7 @@
 	border: 1px solid var(--border-subtle);
 	border-radius: var(--radius-sm);
 	background: var(--bg);
-	transition: border-color .15s, background .15s;
+	transition: border-color var(--dur-fast), background var(--dur-fast);
 }
 .settings-item-row:hover { border-color: var(--border-active); background: var(--bg-hover); }
 .settings-item-row.active { border-color: var(--border-active); background: var(--bg-raised); }
@@ -332,7 +334,7 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
-	transition: border-color .15s, background .15s, color .15s;
+	transition: border-color var(--dur-fast), background var(--dur-fast), color var(--dur-fast);
 }
 .settings-theme-swatch:hover, .settings-font-swatch:hover, .settings-scale-btn:hover { border-color: var(--border-active); background: var(--bg-hover); color: var(--text); }
 .settings-theme-swatch.active, .settings-font-swatch.active, .settings-scale-btn.active { border-color: var(--swatch-accent, var(--cyan)); background: var(--bg-raised); color: var(--text); }

@@ -26,6 +26,19 @@ All notable user-facing changes to cast, newest first.
 - **A tooltip no longer sits over the page after a click or a file dialog;** it shows on hover and for keyboard focus only.
 - **"1 notes" in project memory** reads "1 note".
 
+- **"Continue planning" no longer leaves plan mode.** It took the approve path on the server: the session went to build while the page still said PLAN, the model could write code, and `plan_done` stopped being offered. Only approving switches to build now.
+- **Escape while renaming a session no longer saves the text.** The input's blur on the way out committed what Escape was meant to throw away.
+- **A message queued or steered during a run is no longer lost when you stop it silently.** The stop now says which messages were not sent, with their text.
+- **Looking at an old session no longer moves it to the top.** Closing a session (idle eviction, a daemon restart or upgrade) rewrote its time as "now", so every thread you had opened floated up after a restart.
+- **The saved theme is marked in Settings after a load.** A parameter was never passed to the session controller, the call threw inside a promise chain with an empty catch, and no swatch looked selected. A test now checks the wiring.
+- **A file error ("Already exists") is a line above the list** you can dismiss, not a page that pushed the list out of the panel.
+
+### Changed
+- **Motion is one scale.** Three durations (instant, fast, base) replace a dozen literals. Dialogs lift in, menus and the command palette drop in, a phone dialog slides up, tool bodies and plan cards fade in, and a press sinks a control slightly. With reduced motion these arrivals just appear and every transition is instant.
+- **"Loading" shows only after a beat,** so a load that finishes at once never flashes the word.
+- **After a rewind that removes the conversation, the message comes back in the composer** to change and send again (unless you are already typing).
+- **Notices no longer start with a bare "[system]".**
+
 ### Added
 - `docs/web-ux.md`: the map of the browser client (surfaces, flows, responsive rules, decisions).
 

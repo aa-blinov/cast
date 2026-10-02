@@ -1753,14 +1753,16 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("POST", "/api/sessions/:id/plan-transition", async (req, res, params) => {
 		const body = await readBody(req);
 		let kind: "done";
+		let outcome: "approve" | "continue" = "approve";
 		try {
-			const parsed = JSON.parse(body) as { kind?: string };
+			const parsed = JSON.parse(body) as { kind?: string; outcome?: string };
 			if (parsed.kind !== "done") return json(res, { error: "Invalid plan transition" }, 400);
 			kind = parsed.kind;
+			if (parsed.outcome === "continue") outcome = "continue";
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
-		const result = bridge.resolvePlanTransition(params.id, kind);
+		const result = bridge.resolvePlanTransition(params.id, kind, outcome);
 		if (!result.ok) return json(res, { error: result.error }, bridgeErrorStatus(result.error));
 		json(res, { ok: true }, 202);
 	});

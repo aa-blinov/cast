@@ -43,6 +43,7 @@
 .tool-card-status.error { color: var(--status-error-fg); }
 .tool-card-failed { color: var(--status-error-fg); flex-shrink: 0; }
 .tool-card-body {
+	animation: rise var(--dur-fast) var(--ease-out);
 	margin: 2px 0 4px calc(1.5ch + 8px);
 	padding: 6px 10px;
 	border: 1px solid var(--border-subtle);

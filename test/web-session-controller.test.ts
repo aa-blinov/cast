@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("preact/hooks", () => ({ useCallback: (fn: unknown) => fn }), { virtual: true });
@@ -49,5 +51,24 @@ describe("web session controller", () => {
 			expect(ref.current.size).toBe(3);
 			expect(readOlderPages(ref, "a")).toEqual(entry("a2"));
 		});
+	});
+});
+
+describe("useSessionController wiring", () => {
+	it("is given every parameter it destructures", () => {
+		// A missing one is just undefined, and the call that needs it throws inside a promise chain whose catch is empty:
+		// the saved theme was never marked as current in settings for exactly that reason.
+		const dir = join(import.meta.dirname, "../src/server/public");
+		const controller = readFileSync(join(dir, "use-session-controller.js"), "utf8");
+		const app = readFileSync(join(dir, "app.js"), "utf8");
+		const wanted = /export function useSessionController\(\{([\s\S]*?)\}\)/
+			.exec(controller)![1]!
+			.split(",")
+			.map((part) => part.trim().split(":")[0]!.trim())
+			.filter(Boolean);
+		const start = app.indexOf("useSessionController({");
+		const call = app.slice(start, app.indexOf("});", start));
+		const passed = new Set([...call.matchAll(/^\s*(\w+)\s*[,:]/gm)].map((m) => m[1]));
+		expect(wanted.filter((name) => !passed.has(name))).toEqual([]);
 	});
 });
