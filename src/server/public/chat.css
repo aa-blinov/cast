@@ -216,6 +216,14 @@
 	padding: 2px 4px 10px;
 	font-family: var(--font);
 }
+.reasoning-folded summary { display: flex; gap: 10px; align-items: baseline; cursor: pointer; list-style: none; min-width: 0; }
+.reasoning-folded summary::-webkit-details-marker { display: none; }
+.reasoning-folded summary .message-label { margin: 0; flex-shrink: 0; }
+.reasoning-folded summary::before { content: "+"; color: var(--text-dim); flex-shrink: 0; }
+.reasoning-folded[open] summary::before { content: "-"; }
+.reasoning-peek { color: var(--text-dim); font-style: italic; font-size: var(--fs-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.reasoning-folded[open] .reasoning-peek { display: none; }
+.reasoning-folded[open] .message-content { margin-top: 4px; }
 .message-reasoning .message-label { color: var(--text-dim); }
 .message-reasoning .message-content { color: var(--text-dim); font-style: italic; overflow-wrap: break-word; word-break: break-word; }
 .message-label {

@@ -53,3 +53,31 @@ export function sortSessionsByActivity(a, b) {
 	if (runningA !== runningB) return runningB - runningA;
 	return a.updatedAt < b.updatedAt ? 1 : -1;
 }
+
+// An untitled session has nothing to tell it apart by but its persona, which every row shares:
+// say an unused one is new, and give the rest the folder and age a person would look for.
+export function sessionLabel(session) {
+	if (session.title) return session.title;
+	return session.messageCount === 0 ? "New session" : session.persona || "unknown";
+}
+
+export function relativeAge(updatedAt, now = Date.now()) {
+	const ts = Date.parse(updatedAt);
+	if (Number.isNaN(ts)) return "";
+	const min = Math.floor((now - ts) / 60000);
+	if (min < 1) return "now";
+	if (min < 60) return `${min}m`;
+	const hours = Math.floor(min / 60);
+	if (hours < 24) return `${hours}h`;
+	return `${Math.floor(hours / 24)}d`;
+}
+
+export function sessionMeta(session, now = Date.now()) {
+	const folder = session.cwd ? session.cwd.split("/").filter(Boolean).pop() : "";
+	return [isSandboxSessionCwd(session.cwd) ? "sandbox" : folder, relativeAge(session.updatedAt, now)].filter(Boolean).join(" · ");
+}
+
+// A session nobody wrote in is clutter once another one is open; the one you are in stays so it does not vanish under you.
+export function visibleSessions(sessions, activeId) {
+	return sessions.filter((s) => s.messageCount !== 0 || s.id === activeId || s.pinned || s.status === "running");
+}

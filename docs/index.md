@@ -15,6 +15,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 | [Getting Started](getting-started.md) | Install, first run, provider setup |
 | [CLI Reference](cli-reference.md) | All flags and subcommands |
 | [The Terminal Screen](terminal-ui.md) | A tour of the screen: reading, typing, scrolling, choosing, fitting a phone, getting back to a session |
+| [The Web UI](web-ux.md) | The map of the browser client: surfaces, flows, responsive rules and why the layout is what it is |
 | [Interactive Commands](interactive-commands.md) | All `/slash` commands in the TUI |
 | [Tools](tools.md) | Built-in tools the agent uses |
 | [Personas](personas.md) | Built-in personas and creating custom ones |

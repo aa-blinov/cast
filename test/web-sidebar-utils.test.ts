@@ -5,9 +5,13 @@ import {
 	dateBucketFor,
 	groupSessionsByDate,
 	isSandboxSessionCwd,
+	relativeAge,
 	SANDBOX_CWD,
+	sessionLabel,
+	sessionMeta,
 	shortPath,
 	sortSessionsByActivity,
+	visibleSessions,
 } from "../src/server/public/sidebar-utils.js";
 
 describe("web sidebar session helpers", () => {
@@ -84,4 +88,34 @@ describe("web sidebar session helpers", () => {
 			expect(sorted.map((s) => s.id)).toEqual(["running", "newer-idle", "old"]);
 		});
 	});
+});
+
+describe("session label and meta", () => {
+	const now = Date.parse("2026-10-02T12:00:00Z");
+
+	it("calls an unused untitled session new, and a used one by its persona", () => {
+		expect(sessionLabel({ persona: "senior", messageCount: 0 })).toBe("New session");
+		expect(sessionLabel({ persona: "senior", messageCount: 3 })).toBe("senior");
+		expect(sessionLabel({ title: "Fix login", persona: "senior", messageCount: 0 })).toBe("Fix login");
+	});
+
+	it("shows the folder and how long ago", () => {
+		expect(sessionMeta({ cwd: "/home/u/proj", updatedAt: "2026-10-02T11:30:00Z" }, now)).toBe("proj · 30m");
+		expect(sessionMeta({ cwd: "/home/u/.cast/sandbox/x", updatedAt: "2026-09-30T12:00:00Z" }, now)).toBe(
+			"sandbox · 2d",
+		);
+		expect(relativeAge("2026-10-02T11:59:50Z", now)).toBe("now");
+		expect(relativeAge("garbage", now)).toBe("");
+	});
+});
+
+it("hides unused sessions except the open, pinned and running ones", () => {
+	const list = [
+		{ id: "a", messageCount: 0 },
+		{ id: "b", messageCount: 0 },
+		{ id: "c", messageCount: 0, pinned: true },
+		{ id: "d", messageCount: 0, status: "running" },
+		{ id: "e", messageCount: 2 },
+	];
+	expect(visibleSessions(list, "b").map((s) => s.id)).toEqual(["b", "c", "d", "e"]);
 });

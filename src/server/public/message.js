@@ -5,7 +5,7 @@ import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
 import { pressable } from "./modal-focus.js";
 import { collapseMidWordBoundaries, mergeMidWordBoundary } from "./reasoning-split.js";
-import { BlockView } from "./streaming-blocks.js";
+import { BlockView, FoldedReasoning } from "./streaming-blocks.js";
 import { ToolCard } from "./tool-card.js";
 import { TurnMetaLine } from "./turn-meta.js";
 
@@ -117,12 +117,7 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 				${
 					visibleThinking &&
 					showReasoning &&
-					html`
-					<div class="message message-reasoning">
-						<div class="message-label">reasoning</div>
-						<div class="message-content">${visibleThinking}</div>
-					</div>
-				`
+					html`<${FoldedReasoning} text=${visibleThinking} />`
 				}
 				${
 					content &&

@@ -2,6 +2,7 @@ import htm from "htm";
 import { h } from "preact";
 import { icons } from "./icons.js";
 import { pressable } from "./modal-focus.js";
+import { sessionLabel, sessionMeta } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
@@ -80,10 +81,10 @@ export function SidebarSessionItem({
 								cancelEdit();
 							}
 						}} onBlur=${commitEdit} />`
-					: html`<span class="sidebar-item-name" onDblClick=${(e) => {
+					: html`<span class="sidebar-item-text" onDblClick=${(e) => {
 							e.stopPropagation();
 							startEdit(s);
-						}}>${s.title || s.persona || "unknown"}</span>`
+						}}><span class="sidebar-item-name">${sessionLabel(s)}</span><span class="sidebar-item-meta">${sessionMeta(s)}</span></span>`
 			}
 			<div class="sidebar-item-menu-anchor">
 				<button class="sidebar-item-more" title="More" aria-label="More" aria-haspopup="menu" aria-expanded=${menuOpen} onClick=${(e) => {
