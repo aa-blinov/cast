@@ -9,6 +9,8 @@ All notable user-facing changes to cast, newest first.
 - **Finished reasoning folds to one line in the web UI** (tap to open); it stays open while it streams. On a phone a reply with tool calls was mostly boxes of thought.
 - **The web composer's role line shows "sandbox"** instead of the long sandbox path (the path is in the tooltip).
 
+- **The new-session dialog fits a phone on one screen.** Persona name and source share a row, so the folder choice and the Create button are no longer below the fold.
+
 ### Added
 - `docs/web-ux.md`: the map of the browser client (surfaces, flows, responsive rules, decisions).
 

@@ -1398,6 +1398,10 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
  * persona name whole. */
 @media (max-width: 420px) {
 	.new-session-personas { grid-template-columns: 1fr; }
+	/* Name and source on one row: eight personas stacked two lines each pushed the folder choice off the screen. */
+	.new-session-persona { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 10px; }
+	.new-session-persona .new-session-persona-label { flex: 1; width: auto; min-width: 0; }
+	.new-session-persona .new-session-persona-source { flex-shrink: 0; width: auto; }
 }
 .new-session-persona:hover { border-color: var(--border-active); color: var(--text); }
 .new-session-persona.selected {

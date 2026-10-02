@@ -40,3 +40,4 @@ modals      new session . share . shortcuts . command palette (type / in the com
 - **Unused sessions are hidden.** A session with no messages stays out of the list unless it is open, pinned or running, so clicking New session and leaving does not leave a trail.
 - **Finished reasoning folds to one line.** It stays one tap away; while it streams it is open. A reply with several tool calls otherwise spends most of a phone screen on boxes of thought.
 - **The role line says "sandbox", not a path.** The full path is in its tooltip.
+- **The new-session dialog is one screen on a phone.** Persona cards put name and source on one row.
