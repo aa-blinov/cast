@@ -251,6 +251,8 @@ describe("web bridge", () => {
 		expect(bridge.cancelAgent(ws.id, child.id)).toBe(false);
 		bridge.getSession(child.id);
 		await expect(bridge.submit(child.id, "hi")).rejects.toThrow("subagent");
+		// Open in memory while someone views it, a subagent's thread is still not a conversation of its own.
+		expect(bridge.listSessions().map((s) => s.id)).not.toContain(child.id);
 
 		await bridge.submit(ws.id, "delegate");
 		const { onSubagentEvent } = runAgentLoop.mock.calls.at(-1)![1] as {
