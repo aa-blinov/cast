@@ -63,7 +63,9 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 	const stopScreen = () => {
 		app.dispose();
 		root?.unmount();
-		tui.stop();
+		// Only leave the alternate screen: without this pi-tui writes the whole last frame (header, input, status bar)
+		// into the terminal's scrollback, and the line the person needs, how to resume, drowns in it.
+		tui.stop({ preserveScreen: true });
 	};
 	const quit = () => options.quit(stopScreen);
 	const app = new PiApp(tui, quit, options.version, options.onPasteImage);
@@ -82,7 +84,7 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 	// raw input: hand it back first, whatever ends the process.
 	const restore = () => {
 		try {
-			tui.stop();
+			tui.stop({ preserveScreen: true });
 		} catch {
 			// already stopped
 		}
