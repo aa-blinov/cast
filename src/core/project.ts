@@ -273,6 +273,30 @@ export function resolveHooksForCwd(cwd: string, trusted: boolean): HooksFile {
 	return loadHooksForCwd(cwd, trusted, new Set(settings.disabledHooks ?? []));
 }
 
+/**
+ * The MCP servers as the config files name them right now: global, then the project's (only when trusted), then the
+ * `--mcp` paths, later winning a name. Separate from connecting so a caller can tell whether the files changed.
+ */
+export function loadMergedMcpConfig(
+	deps: ProjectResolverDeps,
+	cwd: string,
+	trusted: boolean,
+): { merged: Record<string, McpServerConfig>; serverSources: Record<string, "global" | "project"> } {
+	const globalServers = loadMcpConfig(globalMcpPath());
+	let projectServers: Record<string, McpServerConfig> = {};
+	const mcpPath = projectMcpPath(cwd);
+	if (trusted && mcpPath && existsSync(mcpPath)) {
+		projectServers = loadMcpConfig(mcpPath);
+	}
+	const extraServers: Record<string, McpServerConfig> = {};
+	for (const path of deps.cliMcpPaths ?? []) Object.assign(extraServers, loadMcpConfig(path));
+	const serverSources: Record<string, "global" | "project"> = {};
+	for (const name of Object.keys(globalServers)) serverSources[name] = "global";
+	for (const name of Object.keys(projectServers)) serverSources[name] = "project";
+	for (const name of Object.keys(extraServers)) serverSources[name] = "project";
+	return { merged: { ...globalServers, ...projectServers, ...extraServers }, serverSources };
+}
+
 /** Every hook group for a cwd (enabled and disabled) with stable ids — for `/hooks` listing/toggling. */
 export function listHooksForCwdSettings(
 	cwd: string,
@@ -301,20 +325,8 @@ export async function resolveMcpForCwd(
 		serverSources: {} as Record<string, "global" | "project">,
 	};
 	if (deps.noMcp) return emptyResult;
-	const globalServers = loadMcpConfig(globalMcpPath());
-	let projectServers: Record<string, McpServerConfig> = {};
-	const mcpPath = projectMcpPath(cwd);
-	if (trusted && mcpPath && existsSync(mcpPath)) {
-		projectServers = loadMcpConfig(mcpPath);
-	}
-	const extraServers: Record<string, McpServerConfig> = {};
-	for (const path of deps.cliMcpPaths) Object.assign(extraServers, loadMcpConfig(path));
-	const merged = { ...globalServers, ...projectServers, ...extraServers };
+	const { merged, serverSources } = loadMergedMcpConfig(deps, cwd, trusted);
 	const allNames = Object.keys(merged);
-	const serverSources: Record<string, "global" | "project"> = {};
-	for (const name of Object.keys(globalServers)) serverSources[name] = "global";
-	for (const name of Object.keys(projectServers)) serverSources[name] = "project";
-	for (const name of Object.keys(extraServers)) serverSources[name] = "project";
 	if (allNames.length === 0) return { ...emptyResult, allServerNames: [], serverSources };
 	if (skipConnect)
 		return {

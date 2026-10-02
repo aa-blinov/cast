@@ -11,8 +11,10 @@ import {
 	loadMcpConfig,
 	mcpHttpFetch,
 	mcpToolName,
+	reconnectMcpServer,
 	sanitizeToolNamePart,
 	saveMcpConfig,
+	syncMcpServers,
 } from "../src/core/mcp.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__mcp_test_tmp__");
@@ -103,6 +105,97 @@ describe("saveMcpConfig", () => {
 		saveMcpConfig(path, {});
 		expect(loadMcpConfig(path)).toEqual({});
 	});
+});
+
+describe("syncMcpServers and in-place reconnect (real spawned MCP servers)", () => {
+	const cfg = { command: "node", args: [FIXTURE_SERVER] };
+	const sources = { echo: "global" as const, other: "global" as const };
+
+	it("touches only the servers that differ: one that is up on the same config keeps running", async () => {
+		const result = await connectMcpServers({ echo: cfg });
+		try {
+			const echoBefore = result.connections[0]!;
+			// A second server joins; the first has the same config, so it must not be restarted.
+			await syncMcpServers(
+				result,
+				{ echo: cfg, other: { ...cfg, args: [FIXTURE_SERVER, "--other"] } },
+				["echo", "other"],
+				sources,
+			);
+			expect(result.connections.map((c) => c.serverName).sort()).toEqual(["echo", "other"]);
+			expect(result.connections.find((c) => c.serverName === "echo")).toBe(echoBefore);
+			expect(echoBefore.alive).toBe(true);
+
+			// A changed config is a different server: that one is reconnected, the other left alone.
+			const otherBefore = result.connections.find((c) => c.serverName === "other")!;
+			await syncMcpServers(
+				result,
+				{ echo: cfg, other: { ...cfg, args: [FIXTURE_SERVER, "--changed"] } },
+				["echo", "other"],
+				sources,
+			);
+			expect(result.connections.find((c) => c.serverName === "echo")).toBe(echoBefore);
+			expect(result.connections.find((c) => c.serverName === "other")).not.toBe(otherBefore);
+			expect(otherBefore.closing).toBe(true);
+
+			// Disabled (no longer desired): closed and its tools gone, but still listed by name.
+			await syncMcpServers(result, { echo: cfg }, ["echo", "other"], sources);
+			expect(result.connections.map((c) => c.serverName)).toEqual(["echo"]);
+			expect([...result.toolIndex.keys()].every((name) => name.startsWith("mcp_echo_"))).toBe(true);
+			expect(result.allServerNames).toEqual(["echo", "other"]);
+
+			// `force` reconnects a healthy server on request.
+			await syncMcpServers(result, { echo: cfg }, ["echo", "other"], sources, new Set(["echo"]));
+			expect(result.connections[0]).not.toBe(echoBefore);
+			expect(result.connections[0]!.alive).toBe(true);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("retries a server that failed to start, and shows why while it is down", async () => {
+		const broken = { command: "/nonexistent/binary-for-cast-test" };
+		const result = await connectMcpServers({ echo: broken });
+		try {
+			expect(result.connections).toEqual([]);
+			expect(result.diagnostics.join("\n")).toContain('mcp server "echo"');
+			// The config is fixed: a sync connects it, and the old complaint is gone.
+			await syncMcpServers(result, { echo: cfg }, ["echo"], sources);
+			expect(result.connections.map((c) => c.serverName)).toEqual(["echo"]);
+			expect(result.diagnostics.filter((d) => d.startsWith('mcp server "echo"'))).toEqual([]);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("recovers a server that drops again after a manual reconnect (regression)", async () => {
+		// The reconnected connection's handlers used to tend a private copy of the result, so the first drop was
+		// healed and the second was not: the live set kept a dead connection and every call said "no longer connected".
+		const result = await connectMcpServers({ echo: cfg });
+		const realError = console.error;
+		console.error = () => {};
+		try {
+			expect(await reconnectMcpServer(result, "echo")).toBe(true);
+			const pidOf = () =>
+				(result.connections[0]!.client as unknown as { _transport?: { pid?: number } })._transport?.pid;
+			const first = pidOf();
+			expect(first).toBeTypeOf("number");
+			process.kill(first!, "SIGKILL");
+			// The automatic retry backs off 1s, then reconnects.
+			await vi.waitFor(
+				() => {
+					expect(result.connections.some((c) => c.alive && pidOf() !== first)).toBe(true);
+				},
+				{ timeout: 8000, interval: 200 },
+			);
+			const handle = result.toolIndex.get("mcp_echo_echo")!;
+			const reply = await handle.call({ text: "again" }, new AbortController().signal);
+			expect(reply.isError).toBeFalsy();
+		} finally {
+			console.error = realError;
+			await closeMcpConnections(result.connections);
+		}
+	}, 20000);
 });
 
 describe("connectMcpServers (real spawned MCP server, not mocked)", () => {

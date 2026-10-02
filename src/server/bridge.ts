@@ -31,6 +31,7 @@ import {
 	formatMcpForPrompt,
 	loadMcpConfig,
 	type McpSetupResult,
+	syncMcpServers,
 } from "../core/mcp.ts";
 import {
 	approvedResumeText,
@@ -53,6 +54,7 @@ import {
 import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
+	loadMergedMcpConfig,
 	projectMcpPath,
 	resolveHooksForCwd,
 	resolveMcpForCwd,
@@ -619,6 +621,9 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	let planModel = result.planModel;
 	let planModelProvider = result.planModelProvider;
 	let projectTrusted = result.projectTrusted;
+	// What the daemon decided about its own directory when it started. `projectTrusted` above moves (a /reload from
+	// a session elsewhere writes that session's decision into it), so the shared MCP set is resolved from this.
+	const startupProjectTrusted = result.projectTrusted;
 	const contextFilesSuffix = result.contextFilesSuffix;
 	let rulesSuffix = result.rulesSuffix;
 	let rulesLazySuffix = result.rulesLazySuffix;
@@ -673,12 +678,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const mcpPath = projectMcpPath(sessionCwd);
 		if (!mcpPath || !existsSync(mcpPath) || !trustForSessionCwd(sessionCwd)) return;
 		const disabled = new Set(loadSettings().disabledMcpServers ?? []);
-		const servers = Object.fromEntries(
-			Object.entries(loadMcpConfig(mcpPath)).filter(([name]) => !disabled.has(name)),
-		);
-		if (Object.keys(servers).length === 0) return;
+		const configured = loadMcpConfig(mcpPath);
+		if (Object.keys(configured).length === 0) return;
+		const servers = Object.fromEntries(Object.entries(configured).filter(([name]) => !disabled.has(name)));
 		const entry: { result?: McpSetupResult; pending?: Promise<void> } = {};
-		const names = Object.keys(servers).sort((a, b) => a.localeCompare(b));
+		// Every configured name, disabled ones too: a server switched off still has to be listed to be switched on.
+		const names = Object.keys(configured).sort((a, b) => a.localeCompare(b));
 		entry.pending = connectMcpServers(servers)
 			.then((result: McpSetupResult) => {
 				// connectMcpServers reports tools and connections; the names and
@@ -1042,23 +1047,73 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * project state — needed after /reload, /mcp, or /skills, since those
 	 * change resources shared by every session, not just the one that issued
 	 * the command (unlike /model or /persona, which are already per-session). */
-	/** Reconnects the MCP servers when the config on disk names a different set than the one connected. */
-	async function reloadMcpFromDisk(sessionCwd: string): Promise<void> {
-		const prevNames = mcpResult.allServerNames.slice().sort().join(",");
-		const disabledMcp = loadSettings().disabledMcpServers ?? [];
-		const freshMcp = await resolveMcpForCwd(
-			projectDeps,
-			sessionCwd,
-			projectTrusted,
-			disabledMcp,
-			/*skipConnect=*/ true,
+	/**
+	 * The MCP set every session shares: the global servers and the daemon's own project's, under the daemon's own
+	 * trust. A session in another directory never feeds it. Resolving from the session's directory with the
+	 * daemon's trust (what /mcp and /reload used to do) ran an untrusted project's server commands and put them in
+	 * every other session's tool list.
+	 */
+	function resolveBaseMcp(disabled: string[], skipConnect = false): Promise<McpSetupResult> {
+		return resolveMcpForCwd(projectDeps, cwd, startupProjectTrusted, disabled, skipConnect);
+	}
+
+	/**
+	 * Bring the shared set in line with the config files and the disabled list, touching only the servers that
+	 * differ (see syncMcpServers): enabling one server does not restart the browser another is driving.
+	 */
+	async function syncBaseMcp(force: ReadonlySet<string>): Promise<void> {
+		// The startup connect is still running and will replace this set when it lands (applyMcpResult); servers
+		// connected into the placeholder now would be dropped without being closed.
+		if (mcpResult.connectPending) return;
+		const disabled = new Set(loadSettings().disabledMcpServers ?? []);
+		const { merged, serverSources } = loadMergedMcpConfig(projectDeps, cwd, startupProjectTrusted);
+		const desired = Object.fromEntries(Object.entries(merged).filter(([name]) => !disabled.has(name)));
+		await syncMcpServers(mcpResult, desired, Object.keys(merged), serverSources, force);
+	}
+
+	/** The same for one other directory's project servers, created when the file has begun to name some. */
+	async function syncProjectMcp(dir: string, force: ReadonlySet<string>): Promise<void> {
+		if (dir === cwd) return;
+		if (!projectMcpByCwd.has(dir)) ensureProjectMcpForCwd(dir);
+		const entry = projectMcpByCwd.get(dir);
+		await entry?.pending;
+		if (!entry?.result) return;
+		const mcpPath = projectMcpPath(dir);
+		const configured = mcpPath && existsSync(mcpPath) && trustForSessionCwd(dir) ? loadMcpConfig(mcpPath) : {};
+		const disabled = new Set(loadSettings().disabledMcpServers ?? []);
+		const desired = Object.fromEntries(Object.entries(configured).filter(([name]) => !disabled.has(name)));
+		const names = Object.keys(configured);
+		await syncMcpServers(
+			entry.result,
+			desired,
+			names,
+			Object.fromEntries(names.map((n) => [n, "project" as const])),
+			force,
 		);
-		const newNames = freshMcp.allServerNames.slice().sort().join(",");
-		if (prevNames === newNames) return;
+	}
+
+	/**
+	 * /mcp reconnect, enable, disable and uninstall, and /reload: sync the shared set and this session's project
+	 * servers (every live directory's, with `allProjects`, since the disabled list is shared).
+	 */
+	async function syncMcp(
+		sessionCwd: string,
+		options: { force?: string[]; allProjects?: boolean } = {},
+	): Promise<void> {
+		const force = new Set(options.force ?? []);
 		await withMcpLock(async () => {
-			await closeMcpConnections(mcpResult.connections);
-			mcpResult = await resolveMcpForCwd(projectDeps, sessionCwd, projectTrusted, disabledMcp);
+			await syncBaseMcp(force);
+			const dirs = options.allProjects ? new Set([...projectMcpByCwd.keys(), sessionCwd]) : new Set([sessionCwd]);
+			for (const dir of dirs) {
+				// biome-ignore lint/performance/noAwaitInLoops: one directory at a time, each waits for its own connect
+				await syncProjectMcp(dir, force);
+			}
 		});
+	}
+
+	/** /reload and an agent's edit of an mcp.json: apply what the files say now. */
+	async function reloadMcpFromDisk(sessionCwd: string): Promise<void> {
+		await syncMcp(sessionCwd);
 	}
 
 	function recomputeAllSystemPrompts(): void {
@@ -3336,9 +3391,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			saveSshConfig,
 			mcpForSessionCwd,
 			withMcpLock,
-			setMcpResult: (next) => {
-				mcpResult = next;
-			},
+			syncMcp,
+			trustForCwd: trustForSessionCwd,
 			mcpResult,
 			projectDeps,
 			projectTrusted,

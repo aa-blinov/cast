@@ -18,7 +18,13 @@ import { runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT, runMemoryMaintenanceAgent } from "../core/loop.ts";
 import { formatLspStatus, lspStatus } from "../core/lsp/index.ts";
-import { closeMcpConnections, formatMcpForPrompt, type McpSetupResult, mcpServerToolBlurbs } from "../core/mcp.ts";
+import {
+	closeMcpConnections,
+	formatMcpForPrompt,
+	type McpSetupResult,
+	mcpServerToolBlurbs,
+	syncMcpServers,
+} from "../core/mcp.ts";
 import {
 	cancelAutomaticMemoryRun,
 	distillProjectMemory,
@@ -32,6 +38,7 @@ import {
 	discoverSkillsForCwd,
 	listHooksForCwdSettings,
 	listUninstallableMcpServers,
+	loadMergedMcpConfig,
 	type ProjectResolverDeps,
 	personaOptionsForCwd,
 	removeMcpServerFromDisk,
@@ -795,10 +802,27 @@ async function handleSkillSources(deps: CommandDeps, args: string[]): Promise<vo
 	deps.agent.addDisplayMessage({ role: "warning", content: `[Skill sources off: ${off}]` });
 }
 
+/**
+ * Bring the connected MCP servers in line with the config files and the disabled list, touching only what differs:
+ * switching one server, or reloading, no longer restarts every other (a browser one is driving, say). A set that
+ * has not connected yet (startup is deferred) is connected the plain way.
+ */
+async function syncMcpFromConfig(deps: CommandDeps, trusted: boolean, disabledServers: string[]): Promise<void> {
+	const current = deps.mcpResult;
+	if (current.connectPending) {
+		await closeMcpConnections(current.connections);
+		deps.setMcpResult(await resolveMcpForCwd(deps.projectDeps, deps.cwd, trusted, disabledServers));
+		return;
+	}
+	if (deps.projectDeps.noMcp) return;
+	const { merged, serverSources } = loadMergedMcpConfig(deps.projectDeps, deps.cwd, trusted);
+	const off = new Set(disabledServers);
+	const desired = Object.fromEntries(Object.entries(merged).filter(([name]) => !off.has(name)));
+	await syncMcpServers(current, desired, Object.keys(merged), serverSources);
+}
+
 async function reloadMcpAfterChange(deps: CommandDeps, disabledServers: string[]): Promise<void> {
-	await closeMcpConnections(deps.mcpResult.connections);
-	const newResult = await resolveMcpForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted, disabledServers);
-	deps.setMcpResult(newResult);
+	await syncMcpFromConfig(deps, deps.projectTrusted, disabledServers);
 	rebuildSystemPrompt(deps, deps.cwd);
 }
 
@@ -2315,10 +2339,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				rulesLazySuffix: resolvedRules.lazySuffix,
 				skillsPromptSuffix,
 			});
-			await closeMcpConnections(deps.mcpResult.connections);
-			deps.setMcpResult(
-				await resolveMcpForCwd(deps.projectDeps, deps.cwd, trusted, loadSettings().disabledMcpServers ?? []),
-			);
+			await syncMcpFromConfig(deps, trusted, loadSettings().disabledMcpServers ?? []);
 			// Attached to the daemon, the agent and its tools live there: reload it too, or the list shown here
 			// has servers the agent does not.
 			if (deps.agent.daemonMode) {

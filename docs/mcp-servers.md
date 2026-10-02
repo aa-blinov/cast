@@ -117,7 +117,9 @@ Extra paths (`--mcp`) work even with `--no-mcp`.
 
 ### Hot-reload
 
-`/mcp` toggle / `enable` / `disable` / `uninstall` reconnect servers **in the current session** (no `/reload`, no restart).
+`/mcp` toggle / `enable` / `disable` / `uninstall` reconnect servers **in the current session** (no `/reload`, no restart). They touch only the servers that differ: switching one off or on, or reloading, leaves every other server running (a browser server keeps its page, a stateful one its state). A server that is up on an unchanged config is not restarted; one whose command, arguments, environment or address were edited, one that is down, and one named in `/mcp reconnect <name>` are connected afresh from the file as it is now, so fixing a broken entry and running `/mcp reconnect` is enough. `/reload` does the same for the whole set.
+
+A daemon (the web UI, `cast server`) keeps one shared set, from `~/.cast/mcp.json` and the project it was started in under that project's trust decision. A session in another folder adds that folder's own `.cast/mcp.json` servers (only if you trusted the folder), for that folder's sessions alone; an untrusted project's servers are never started, however `/mcp` is used from its sessions.
 
 When the agent itself writes or edits `~/.cast/mcp.json` or `.cast/mcp.json` (the `write` and `edit` tools), cast connects the new servers at once: they appear in `/mcp` and the agent has their tools on the next turn, no `/reload` and no restart. Use `/reload` after editing those files by hand or by any other program. Attached to the daemon, `/reload` reloads the daemon too, so the list and the agent's tools agree. See [Interactive commands](interactive-commands.md#hot-reload-vs-reload).
 

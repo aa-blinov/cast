@@ -1068,7 +1068,7 @@ describe("handleInput", () => {
 		expect(displayMessageText(calls)).toContain("No MCP");
 	});
 
-	it("/mcp toggle persists disabled servers and updates mcpResult", async () => {
+	it("/mcp toggle persists disabled servers and syncs mcpResult in place", async () => {
 		const { deps, calls } = createFakeDeps();
 		// Populate mcpResult with server names
 		(deps.mcpResult as any).allServerNames = ["context7", "github"];
@@ -1084,7 +1084,8 @@ describe("handleInput", () => {
 		};
 		await handleInput("/mcp", undefined, deps);
 		expect(displayMessageText(calls)).toContain("disabled 1");
-		expect(calls.setMcpResult).toHaveLength(1);
+		// Synced in place, server by server: the result object is not replaced (which restarted every server).
+		expect(calls.setMcpResult ?? []).toHaveLength(0);
 	});
 
 	it("/steer without a message shows usage and does not enqueue", async () => {

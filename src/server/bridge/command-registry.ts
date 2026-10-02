@@ -282,10 +282,13 @@ export interface CommandContext {
 	/** Serialize concurrent /mcp mutations so they don't race the
 	 *  close-then-resolve sequence. Closure-bound to withMcpLock. */
 	withMcpLock: <T>(fn: () => Promise<T>) => Promise<T>;
-	/** Mutate the closure-local mcpResult slot after reconnect-style
-	 *  operations (enable/disable/reconnect/uninstall all close the
-	 *  existing connections and resolve a fresh mcpResult). */
-	setMcpResult: (next: McpSetupResult) => void;
+	/** Bring the MCP servers in line with the config and the disabled list: the shared set and this session's
+	 *  directory's project servers (every live directory's with `allProjects`). Only servers that differ are touched,
+	 *  `force` ones are reconnected regardless. The shared set comes from the daemon's own directory under its own
+	 *  trust, never from the session's. */
+	syncMcp: (sessionCwd: string, options?: { force?: string[]; allProjects?: boolean }) => Promise<void>;
+	/** Whether the daemon has a trust decision for this directory ("never asked" is untrusted). */
+	trustForCwd: (dir: string) => boolean;
 	/** Current mcpResult snapshot, read by /mcp reconnect to gate the
 	 *  'Unknown MCP server' error before doing any reconnect work. */
 	mcpResult: McpSetupResult;
@@ -1336,8 +1339,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 		return { ok: false, error: `Unknown /ssh subcommand: ${sub}` };
 	},
 	"/mcp": async (ctx) => {
-		const { arg, ws, cwd, loadSettings, mcpForSessionCwd, withMcpLock, setMcpResult, recomputeAllSystemPrompts } =
-			ctx;
+		const { arg, ws, cwd, loadSettings, mcpForSessionCwd, syncMcp, recomputeAllSystemPrompts } = ctx;
 		const [sub, rest] = arg ? splitArgInline(arg) : ["", ""];
 		const sessionCwd = ws.session.cwd ?? cwd;
 		if (!sub || sub === "list") {
@@ -1375,24 +1377,15 @@ const commandHandlers: Record<string, CommandHandler> = {
 		}
 		if (sub === "reconnect") {
 			if (!rest) return { ok: false, error: "Usage: /mcp reconnect <name>" };
-			// Note: we read the current mcpResult snapshot from the closure;
-			// the dispatcher passes it via `mcpResultForReconnect` so the
-			// allServerNames check matches what the inline path used.
-			const mcpResult = ctx.mcpResult;
-			if (!mcpResult.allServerNames.includes(rest)) return { ok: false, error: `Unknown MCP server: ${rest}` };
+			if (!mcpForSessionCwd(sessionCwd).allServerNames.includes(rest)) {
+				return { ok: false, error: `Unknown MCP server: ${rest}` };
+			}
 			try {
-				const connected = await withMcpLock(async () => {
-					await closeMcpConnections(mcpResult.connections);
-					const next = await resolveMcpForCwd(
-						ctx.projectDeps,
-						sessionCwd,
-						ctx.projectTrusted,
-						loadSettings().disabledMcpServers ?? [],
-					);
-					setMcpResult(next);
-					recomputeAllSystemPrompts();
-					return next.connections.some((c) => c.serverName === rest);
-				});
+				await syncMcp(sessionCwd, { force: [rest] });
+				recomputeAllSystemPrompts();
+				const connected = mcpForSessionCwd(sessionCwd).connections.some(
+					(c) => c.serverName === rest && c.alive !== false,
+				);
 				return { ok: true, result: `MCP server "${rest}" ${connected ? "reconnected" : "reconnect failed"}` };
 			} catch (err) {
 				return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -1407,18 +1400,9 @@ const commandHandlers: Record<string, CommandHandler> = {
 				return { disabledMcpServers: [...disabled] };
 			});
 			try {
-				const mcpResult = ctx.mcpResult;
-				await withMcpLock(async () => {
-					await closeMcpConnections(mcpResult.connections);
-					const next = await resolveMcpForCwd(
-						ctx.projectDeps,
-						sessionCwd,
-						ctx.projectTrusted,
-						loadSettings().disabledMcpServers ?? [],
-					);
-					setMcpResult(next);
-					recomputeAllSystemPrompts();
-				});
+				// The disabled list is shared by every directory, so every live project's servers are re-read too.
+				await syncMcp(sessionCwd, { allProjects: true });
+				recomputeAllSystemPrompts();
 				return { ok: true, result: `MCP server "${rest}" ${sub}d` };
 			} catch (err) {
 				return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -1426,21 +1410,11 @@ const commandHandlers: Record<string, CommandHandler> = {
 		}
 		if (sub === "uninstall") {
 			if (!rest) return { ok: false, error: "Usage: /mcp uninstall <name>" };
-			const mcpResult = ctx.mcpResult;
-			const removed = removeMcpServerFromDisk(rest, sessionCwd, ctx.projectTrusted);
+			const removed = removeMcpServerFromDisk(rest, sessionCwd, ctx.trustForCwd(sessionCwd));
 			if (!removed) return { ok: false, error: `Unknown or already-removed MCP server: ${rest}` };
 			try {
-				await withMcpLock(async () => {
-					await closeMcpConnections(mcpResult.connections);
-					const next = await resolveMcpForCwd(
-						ctx.projectDeps,
-						sessionCwd,
-						ctx.projectTrusted,
-						loadSettings().disabledMcpServers ?? [],
-					);
-					setMcpResult(next);
-					recomputeAllSystemPrompts();
-				});
+				await syncMcp(sessionCwd);
+				recomputeAllSystemPrompts();
 				return { ok: true, result: `Uninstalled MCP server "${rest}" (${removed.origin})` };
 			} catch (err) {
 				return { ok: false, error: `Reconnect failed: ${err instanceof Error ? err.message : String(err)}` };
