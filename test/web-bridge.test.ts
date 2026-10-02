@@ -2627,6 +2627,20 @@ describe("web bridge", () => {
 		}
 	});
 
+	it("/mcp list says why a server is not connected", async () => {
+		const mcpResult = {
+			...emptyMcp,
+			allServerNames: ["broken"],
+			serverSources: { broken: "global" as const },
+			diagnostics: ['mcp server "broken": spawn /nope ENOENT'],
+		};
+		const bridge = createServerBridge(makeResult({ mcpResult }));
+		const ws = bridge.createSession();
+		const result = await bridge.executeCommand(ws.id, "/mcp list");
+		const list = result.result as Array<{ name: string; connected: boolean; problem?: string }>;
+		expect(list).toMatchObject([{ name: "broken", connected: false, problem: "spawn /nope ENOENT" }]);
+	});
+
 	it("/mcp (no arg) is an alias for /mcp list and returns the same shape", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

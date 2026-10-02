@@ -260,6 +260,10 @@ export function SettingsModal({
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 	}, [onClose]);
+	// Fifteen tabs scroll sideways on a phone; a tab chosen from a link or by keyboard can sit past the edge.
+	useEffect(() => {
+		modalRef.current?.querySelector(".settings-tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+	}, [tab]);
 
 	// Runs a mutating command, shows any error inline, and reloads the
 	// current tab's data on success so the list reflects the new state

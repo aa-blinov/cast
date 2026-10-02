@@ -16,6 +16,16 @@ All notable user-facing changes to cast, newest first.
 - **Settings opens with its current tab focused,** not "Reload resources" with its tooltip over the tab row.
 - **The dashboard button is back on phones.** It was hidden although the dashboard already fits a phone.
 
+- **A file preview fills a phone screen** instead of stopping 70px short, and no longer numbers a phantom empty line after the last newline.
+- **Line numbers in the Changes diff were wrong** after the first context line (an added line showed `1` where it was line 2), and context lines had none. A phantom empty line and `\ No newline at end of file` also showed as context.
+- **A message with a picture lost its attached documents** (only the picture showed) and its Fork and Rewind buttons.
+- **The plan review card shows the plan.** It said only "Plan ready. What next?" over a JSON dump in a collapsed tool row; it now shows the plan's summary and a "Read the plan" button that opens the plan file.
+- **MCP settings say why a server is not connected** (the spawn error, the HTTP failure) instead of just "not connected".
+- **Settings buttons for hooks, MCP servers and skills say Enable or Disable** in words, not a pause or play icon that said nothing on a phone; the reconnect and uninstall icons got accessible names.
+- **Voice errors tell a denied microphone from a missing or busy one.** The settings tab strip scrolls the chosen tab into view.
+- **A tooltip no longer sits over the page after a click or a file dialog;** it shows on hover and for keyboard focus only.
+- **"1 notes" in project memory** reads "1 note".
+
 ### Added
 - `docs/web-ux.md`: the map of the browser client (surfaces, flows, responsive rules, decisions).
 

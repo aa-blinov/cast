@@ -1338,10 +1338,18 @@ const commandHandlers: Record<string, CommandHandler> = {
 			// connected for its directory, and a listing that omitted them
 			// disagreed with the tools the model actually has.
 			const sessionMcp = mcpForSessionCwd(sessionCwd);
+			// Why a server is not up: the reason it died, or the error its connect attempt left in the diagnostics.
+			const problemOf = (n: string): string | undefined => {
+				const conn = sessionMcp.connections.find((c) => c.serverName === n);
+				if (conn && conn.alive === false) return conn.deadReason;
+				const prefix = `mcp server "${n}": `;
+				return sessionMcp.diagnostics.find((d) => d.startsWith(prefix))?.slice(prefix.length);
+			};
 			return {
 				ok: true,
 				result: sessionMcp.allServerNames.map((n) => ({
 					name: n,
+					problem: problemOf(n),
 					source: sessionMcp.serverSources[n] ?? "global",
 					// alive, not merely present: a server whose transport died is
 					// still in `connections` (nothing prunes it), and reporting it

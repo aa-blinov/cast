@@ -98,7 +98,7 @@ export function MemoryExplorer({ activeId }) {
 					<input class="memory-search" value=${query} placeholder="Search project memory" aria-label="Search project memory" onInput=${(event) => onSearchInput(event.target.value)} />
 					${searching && html`<span class="memory-search-status">Searching…</span>`}
 				</div>
-				<div class="memory-summary">${query.trim() ? `${items.length} matches` : `${items.length} notes`}</div>
+				<div class="memory-summary">${query.trim() ? `${items.length} ${items.length === 1 ? "match" : "matches"}` : `${items.length} ${items.length === 1 ? "note" : "notes"}`}</div>
 			</div>
 			${error && html`<div class="diff-empty diff-empty-error">${error}</div>`}
 			${!error && !query.trim() && checkpoint && html`<section class="memory-checkpoint">

@@ -14,7 +14,7 @@ vi.mock(
 );
 vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
 
-import { atTokenAt, Composer, canSubmitAttachments } from "../src/server/public/composer.js";
+import { atTokenAt, Composer, canSubmitAttachments, voiceErrorMessage } from "../src/server/public/composer.js";
 
 describe("Composer", () => {
 	it("is exported as the isolated composer component", () => {
@@ -32,5 +32,14 @@ describe("Composer", () => {
 		expect(atTokenAt("@", 1)).toEqual({ from: 0, to: 1, query: "" });
 		expect(atTokenAt("mail a@b.com", 12)).toBeNull();
 		expect(atTokenAt("@done next", 10)).toBeNull();
+	});
+});
+
+describe("voiceErrorMessage", () => {
+	it("tells denied, missing and busy microphones apart", () => {
+		expect(voiceErrorMessage({ name: "NotFoundError" })).toBe("No microphone found");
+		expect(voiceErrorMessage({ name: "NotAllowedError" })).toBe("Microphone access was denied");
+		expect(voiceErrorMessage({ name: "NotReadableError" })).toBe("The microphone is in use by another app");
+		expect(voiceErrorMessage({ name: "Other" })).toBe("Could not start recording");
 	});
 });

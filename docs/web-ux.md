@@ -45,3 +45,6 @@ modals      new session . share . shortcuts . command palette (type / in the com
 - **Settings opens on its current tab,** not on "Reload resources", whose tooltip covered the tab row.
 - **Signing in returns to where you were going.** A link to a session, or an expired login mid-session, goes to `/login?next=...` and comes back; `next` is accepted only as a path on this site.
 - **Losing the server is visible and recovers by itself:** the dot turns yellow, the composer reads "Reconnecting..." and is disabled, and it returns without a reload.
+- **A plan is shown before it is approved.** The review card carries the plan's summary and opens the plan file; approving a plan you cannot read was the gap.
+- **Settings say what is wrong.** An MCP server that is not connected shows its error; hook, MCP and skill toggles are words, not icons.
+- **Previews are full screen on a phone,** like settings and the new-session dialog.

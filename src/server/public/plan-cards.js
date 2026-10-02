@@ -1,6 +1,10 @@
 import htm from "htm";
 import { h } from "preact";
 import { useState } from "preact/hooks";
+import { lazy } from "./lazy.js";
+
+const TRAILING_SLASH_RE = /\/$/;
+const FilePreviewModal = lazy(() => import("./file-preview.js"), (m) => m.FilePreviewModal);
 
 const html = htm.bind(h);
 
@@ -14,12 +18,36 @@ export const PLAN_DECISION_OPTIONS = [
 	},
 ];
 
-export function PlanDecisionCard({ transition, onChoose }) {
+// The plan the agent just finished is what the person is asked to approve, so the card has to show it. It is in the
+// result of the last plan_done call: its summary, and the file the full plan was written to (shown only when that
+// file is inside the project, since that is all the file API serves).
+export function latestPlan(messages, cwd) {
+	for (let i = (messages?.length ?? 0) - 1; i >= 0; i--) {
+		const calls = messages[i]?.toolCalls;
+		for (let j = (calls?.length ?? 0) - 1; j >= 0; j--) {
+			if (calls[j].name !== "plan_done" || !calls[j].result) continue;
+			try {
+				const { name, summary, path } = JSON.parse(calls[j].result);
+				const prefix = cwd ? `${cwd.replace(TRAILING_SLASH_RE, "")}/` : null;
+				return { name, summary, relPath: prefix && typeof path === "string" && path.startsWith(prefix) ? path.slice(prefix.length) : null };
+			} catch {
+				return null;
+			}
+		}
+	}
+	return null;
+}
+
+export function PlanDecisionCard({ transition, onChoose, plan, sessionId }) {
+	const [reading, setReading] = useState(false);
 	if (!transition) return null;
+	const href = plan?.relPath ? `/api/sessions/${sessionId}/fs/download?path=${encodeURIComponent(plan.relPath)}` : null;
 	return html`
 		<section class="plan-decision-card plan-review-card" aria-label="Plan review">
 			<div class="plan-decision-header"><span class="plan-decision-name">plan</span><span class="plan-decision-kind">review</span></div>
-			<div class="plan-decision-body">Plan ready. What next?</div>
+			<div class="plan-decision-body">${plan?.summary ? plan.summary : "Plan ready. What next?"}</div>
+			${href && html`<button type="button" class="plan-decision-option plan-read" onClick=${() => setReading(true)}><span class="plan-decision-option-label">Read the plan</span><span class="plan-decision-option-description">${plan.relPath}</span></button>`}
+			${reading && html`<${FilePreviewModal} path=${plan.relPath} onClose=${() => setReading(false)} downloadHref=${href} previewHref=${`${href}&inline=1`} />`}
 			<div class="plan-decision-options">
 				${PLAN_DECISION_OPTIONS.map(
 					(option) => html`<button class="plan-decision-option" onClick=${() => onChoose(option.value)}>

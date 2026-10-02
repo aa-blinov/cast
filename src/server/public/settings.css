@@ -207,6 +207,12 @@
 	display: flex; gap: 4px; align-items: center;
 	flex-shrink: 0;
 }
+.settings-item-problem {
+	flex-basis: 100%;
+	font-size: var(--fs-micro);
+	color: var(--status-error-fg);
+	overflow-wrap: anywhere;
+}
 .settings-item-tag {
 	display: inline-block;
 	margin-left: 6px;

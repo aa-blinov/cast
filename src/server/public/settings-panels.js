@@ -390,12 +390,13 @@ function SettingsMcp({ data, busy, act, confirm }) {
 				<span class="settings-item-meta">${s.disabled ? "disabled" : s.connected ? "connected" : "not connected"}</span>
 			</div>
 			<div class="settings-item-actions">
-				${!s.disabled && html`<button class="modal-btn icon-btn" title="Reconnect" disabled=${busy || pending.has(reconnectKey)} onClick=${() => actPending(act, addPending, removePending, reconnectKey, `/mcp reconnect ${s.name}`)}>${pending.has(reconnectKey) ? "loading" : html`<${icons.arrowPath} />`}</button>`}
-				<button class="modal-btn icon-btn" title=${s.disabled ? "Enable" : "Disable"} disabled=${busy || pending.has(toggleKey)} onClick=${() => actPending(act, addPending, removePending, toggleKey, `/mcp ${s.disabled ? "enable" : "disable"} ${s.name}`)}>${pending.has(toggleKey) ? "loading" : s.disabled ? html`<${icons.play} />` : html`<${icons.pause} />`}</button>
-				<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy || pending.has(uninstallKey)} onClick=${async () => {
+				${!s.disabled && html`<button class="modal-btn icon-btn" title="Reconnect" aria-label="Reconnect" disabled=${busy || pending.has(reconnectKey)} onClick=${() => actPending(act, addPending, removePending, reconnectKey, `/mcp reconnect ${s.name}`)}>${pending.has(reconnectKey) ? "loading" : html`<${icons.arrowPath} />`}</button>`}
+				<button class="modal-btn" disabled=${busy || pending.has(toggleKey)} onClick=${() => actPending(act, addPending, removePending, toggleKey, `/mcp ${s.disabled ? "enable" : "disable"} ${s.name}`)}>${pending.has(toggleKey) ? "..." : s.disabled ? "Enable" : "Disable"}</button>
+				<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" aria-label="Uninstall" disabled=${busy || pending.has(uninstallKey)} onClick=${async () => {
 					if (await confirm(`Uninstall MCP server "${s.name}"?`)) actPending(act, addPending, removePending, uninstallKey, `/mcp uninstall ${s.name}`);
 				}}>${pending.has(uninstallKey) ? "loading" : html`<${icons.trash} />`}</button>
 			</div>
+			${!s.connected && !s.disabled && s.problem && html`<div class="settings-item-problem">${s.problem}</div>`}
 		</div>
 	`;
 	};
@@ -438,7 +439,7 @@ function SettingsSkills({ data, sources, busy, act, confirm }) {
 				<span class="settings-item-name">${src.label}</span>
 			</div>
 			<div class="settings-item-actions">
-				<button class="modal-btn icon-btn" title=${src.enabled ? "Turn off this source" : "Turn on this source"} disabled=${busy || pending.has(key)} onClick=${() => actPending(act, addPending, removePending, key, `/skills sources ${src.family} ${src.enabled ? "off" : "on"}`)}>${pending.has(key) ? "loading" : src.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+				<button class="modal-btn" disabled=${busy || pending.has(key)} onClick=${() => actPending(act, addPending, removePending, key, `/skills sources ${src.family} ${src.enabled ? "off" : "on"}`)}>${pending.has(key) ? "..." : src.enabled ? "Turn off this source" : "Turn on this source"}</button>
 			</div>
 		</div>
 	`;
@@ -455,10 +456,10 @@ function SettingsSkills({ data, sources, busy, act, confirm }) {
 				<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
 			</div>
 			<div class="settings-item-actions">
-				<button class="modal-btn icon-btn" title=${s.enabled ? "Disable" : "Enable"} disabled=${busy || pending.has(toggleKey)} onClick=${() => actPending(act, addPending, removePending, toggleKey, `/skills ${s.enabled ? "disable" : "enable"} ${s.name}`)}>${pending.has(toggleKey) ? "loading" : s.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+				<button class="modal-btn" disabled=${busy || pending.has(toggleKey)} onClick=${() => actPending(act, addPending, removePending, toggleKey, `/skills ${s.enabled ? "disable" : "enable"} ${s.name}`)}>${pending.has(toggleKey) ? "..." : s.enabled ? "Disable" : "Enable"}</button>
 				${
 					s.uninstallable &&
-					html`<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy || pending.has(uninstallKey)} onClick=${async () => {
+					html`<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" aria-label="Uninstall" disabled=${busy || pending.has(uninstallKey)} onClick=${async () => {
 						if (await confirm(`Uninstall skill "${s.name}"?`)) actPending(act, addPending, removePending, uninstallKey, `/skills uninstall ${s.name}`);
 					}}>${pending.has(uninstallKey) ? "loading" : html`<${icons.trash} />`}</button>`
 				}
@@ -503,7 +504,7 @@ function SettingsHooks({ data, busy, act }) {
 				<span class="settings-item-status ${h.enabled ? "ok" : "off"}" />
 				<span class="settings-item-name">${h.event}${h.matcher ? html` <span style=${{ opacity: 0.6 }}>(${h.matcher})</span>` : ""}</span>
 				<div class="settings-item-actions">
-					<button class="modal-btn icon-btn" title=${h.enabled ? "Disable" : "Enable"} disabled=${busy || pending.has(h.id)} onClick=${() => actPending(act, addPending, removePending, h.id, `/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${pending.has(h.id) ? "loading" : h.enabled ? html`<${icons.pause} />` : html`<${icons.play} />`}</button>
+					<button class="modal-btn" disabled=${busy || pending.has(h.id)} onClick=${() => actPending(act, addPending, removePending, h.id, `/hooks ${h.enabled ? "disable" : "enable"} ${h.id}`)}>${pending.has(h.id) ? "..." : h.enabled ? "Disable" : "Enable"}</button>
 				</div>
 			</div>
 			${
@@ -608,7 +609,7 @@ function SettingsSkillssh({ data, busy, act, confirm }) {
 						<${InfoPopover} text=${s.description} readUrl=${`/api/skill-content?name=${encodeURIComponent(s.name)}`} />
 					</div>
 					<div class="settings-item-actions">
-						<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" disabled=${busy} onClick=${async () => {
+						<button class="modal-btn icon-btn modal-btn-danger" title="Uninstall" aria-label="Uninstall" disabled=${busy} onClick=${async () => {
 							if (await confirm(`Uninstall skill "${s.name}" (via npx skills rm)?`))
 								act(`/skills-sh uninstall ${s.name}`);
 						}}><${icons.trash} /></button>
