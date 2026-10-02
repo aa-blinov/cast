@@ -921,6 +921,11 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 						type: "boolean",
 						description: "True when the session runs in a throwaway sandbox directory.",
 					},
+					goal: {
+						type: ["string", "null"],
+						description:
+							'The session\'s goal as one phrase ("goal active", "goal paused", "goal blocked", "goal out of budget"); null with none or when it is done.',
+					},
 				},
 			},
 			Session: {

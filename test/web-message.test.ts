@@ -17,7 +17,14 @@ vi.mock("../src/server/public/streaming-blocks.js", () => ({ BlockView: () => nu
 vi.mock("../src/server/public/tool-card.js", () => ({ ToolCard: () => null }));
 vi.mock("../src/server/public/turn-meta.js", () => ({ TurnMetaLine: () => null }));
 
-import { isForkableAnswer, Message, parseSkillInvocation } from "../src/server/public/message.js";
+import {
+	goalPromptDisplay as coreGoalPromptDisplay,
+	GOAL_BUDGET_PROMPT,
+	GOAL_CONTINUATION_PROMPT,
+	GOAL_NUDGE_PROMPT,
+} from "../src/core/goal.ts";
+import { buildGoalPrompt } from "../src/server/commands.ts";
+import { goalPromptDisplay, isForkableAnswer, Message, parseSkillInvocation } from "../src/server/public/message.js";
 
 const renderMarkdown = (s: string) => s;
 const escapeHtml = (s: string) => s;
@@ -95,5 +102,19 @@ describe("isForkableAnswer", () => {
 		expect(isForkableAnswer({ role: "assistant", content: null, seq: 3 }, true)).toBe(false);
 		expect(isForkableAnswer({ role: "user", content: "hi", seq: 1 }, true)).toBe(false);
 		expect(isForkableAnswer({ role: "warning", content: "w", seq: 2 }, true)).toBe(false);
+	});
+});
+
+describe("goalPromptDisplay", () => {
+	it("is the web port of the core mapping: same lines for every goal prompt, and nothing for other text", () => {
+		for (const text of [
+			buildGoalPrompt("ship the importer, with tests", 10),
+			GOAL_CONTINUATION_PROMPT,
+			GOAL_NUDGE_PROMPT,
+			GOAL_BUDGET_PROMPT,
+			"fix the tests please",
+		]) {
+			expect(goalPromptDisplay(text) ?? undefined, text.slice(0, 40)).toEqual(coreGoalPromptDisplay(text));
+		}
 	});
 });

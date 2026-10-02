@@ -181,4 +181,28 @@ describe("web message submission", () => {
 		await submitMessage("/queue-reset", undefined, undefined, context);
 		expect(setPendingQueue).toHaveBeenLastCalledWith([]);
 	});
+
+	it("hands a refused command back to the composer and says why", async () => {
+		const addNotice = vi.fn();
+		const context = {
+			planRefineArmedRef: { current: false },
+			session: { id: "session-1", messages: [] },
+			draftVersionRef: { current: 0 },
+			activeId: "session-1",
+			setSession: vi.fn(),
+			pendingOutgoingRef: { current: new Map() },
+			waitForSessionStream: vi.fn().mockResolvedValue(true),
+			setRunning: vi.fn(),
+			showToast: vi.fn(),
+			addNotice,
+			setPendingQueue: vi.fn(),
+			setPendingSteers: vi.fn(),
+		};
+
+		vi.mocked(api).mockRejectedValueOnce(new Error("Agent running — use /queue, /steer, or /abort"));
+		const result = await submitMessage("/goal 10 a long objective", undefined, undefined, context);
+
+		expect(result).toBe(false);
+		expect(addNotice).toHaveBeenLastCalledWith("Agent running — use /queue, /steer, or /abort", "error");
+	});
 });

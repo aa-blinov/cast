@@ -11,6 +11,7 @@ import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { forkSessionWithFiles } from "../core/fork-files.ts";
+import { goalPromptDisplay } from "../core/goal.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { describeTurnError, isRetryableStreamError, type Message, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
@@ -498,6 +499,9 @@ export function userMessageRows(text: string, clientMessageId?: string): ChatMes
 	// A /skill command reaches the model as the whole SKILL.md; the thread shows what was typed.
 	const typed = skillInvocationLabel(text);
 	if (typed) return [{ role: "user", content: typed, ...(clientMessageId ? { clientMessageId } : {}) }];
+	// So does /goal: the objective as typed, and the goal drive's own prompts as one-line notices.
+	const goalRow = goalPromptDisplay(text);
+	if (goalRow) return [{ ...goalRow, ...(goalRow.role === "user" && clientMessageId ? { clientMessageId } : {}) }];
 	const { cleaned, reminders } = extractSystemReminders(text);
 	const rows: ChatMessage[] = [];
 	for (const body of reminders) {

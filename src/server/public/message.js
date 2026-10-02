@@ -40,6 +40,25 @@ export function parseSkillInvocation(content) {
 
 const SYSTEM_TAG_RE = /^\[system\]\s+/;
 
+// Port of goalPromptDisplay in src/core/goal.ts (a test keeps the two in step): the goal's own prompts are cast
+// talking to the model, so show the command typed and one-line notices, not a page of rules as the user's words.
+const GOAL_START_OBJECTIVE_RE = /\n\nGoal: ([\s\S]*?)\n\nWork as a careful senior engineer:/;
+export function goalPromptDisplay(content) {
+	if (typeof content !== "string") return null;
+	if (content.startsWith("You are working toward a goal autonomously.")) {
+		const objective = GOAL_START_OBJECTIVE_RE.exec(content)?.[1]?.trim();
+		return objective ? { role: "user", content: `/goal ${objective}` } : null;
+	}
+	if (content.startsWith("The goal above is still open.")) return { role: "warning", content: "Goal: still open, continuing" };
+	if (content.startsWith("That pass changed nothing:")) {
+		return { role: "warning", content: "Goal: that pass changed nothing, trying another route" };
+	}
+	if (content.startsWith("The goal has used its continuation budget")) {
+		return { role: "warning", content: "Goal: continuation budget used, wrapping up" };
+	}
+	return null;
+}
+
 function attachmentChips(attachments) {
 	if (!attachments?.length) return null;
 	return html`
@@ -231,6 +250,7 @@ export class Message extends Component {
 	}
 
 	render(props) {
-		return h(MessageView, props);
+		const goal = props.msg?.role === "user" ? goalPromptDisplay(props.msg.content) : null;
+		return h(MessageView, goal ? { ...props, msg: { ...props.msg, role: goal.role, content: goal.content } } : props);
 	}
 }

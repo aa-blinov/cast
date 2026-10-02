@@ -378,3 +378,36 @@ export function parseGoalJudgeVerdict(text: string): { gap: string } | undefined
 
 export const goalJudgeRejection = (gap: string): string =>
 	`Not closed: an independent check of your evidence found a gap — ${gap}\n\nCheck or finish that, then call \`goal_update\` with status "complete" again. This check turns a close down only once.`;
+
+/** What a goal's own prompts look like on screen. */
+export interface GoalPromptDisplay {
+	role: "user" | "warning";
+	content: string;
+}
+
+const GOAL_START_PREFIX = "You are working toward a goal autonomously.";
+const GOAL_START_OBJECTIVE_RE = /\n\nGoal: ([\s\S]*?)\n\nWork as a careful senior engineer:/;
+const GOAL_CONTINUATION_PREFIX = "The goal above is still open.";
+const GOAL_NUDGE_PREFIX = "That pass changed nothing:";
+const GOAL_BUDGET_PREFIX = "The goal has used its continuation budget";
+
+/**
+ * The line to show for a prompt `/goal` or the goal drive put in the transcript: the wrapper around the objective
+ * is shown as the command the person typed (`/goal <objective>`), and the continuation, nudge and wrap-up prompts as
+ * one-line notices. They are cast talking to the model; shown raw they read as the user saying a page of rules, and
+ * titled the session "You are working toward a goal autonomously". The web client has a port of this in message.js.
+ */
+export function goalPromptDisplay(text: string): GoalPromptDisplay | undefined {
+	if (text.startsWith(GOAL_START_PREFIX)) {
+		const objective = GOAL_START_OBJECTIVE_RE.exec(text)?.[1]?.trim();
+		return objective ? { role: "user", content: `/goal ${objective}` } : undefined;
+	}
+	if (text.startsWith(GOAL_CONTINUATION_PREFIX)) return { role: "warning", content: "Goal: still open, continuing" };
+	if (text.startsWith(GOAL_NUDGE_PREFIX)) {
+		return { role: "warning", content: "Goal: that pass changed nothing, trying another route" };
+	}
+	if (text.startsWith(GOAL_BUDGET_PREFIX)) {
+		return { role: "warning", content: "Goal: continuation budget used, wrapping up" };
+	}
+	return undefined;
+}
