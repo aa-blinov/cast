@@ -10,6 +10,16 @@ All notable user-facing changes to cast, newest first.
 - **The memory docs said the agent stores memory through its `memory` tool.** It only searches. The page now lists who really writes memory (you, the checkpoint writer, dream, distill), and says plainly that with the defaults a short conversation writes nothing until a checkpoint threshold, an automatic dream or `/dream`. The `/memory checkpoint ...` subcommands are documented. The tool's own error, which claimed memory is written "at the end of a turn", no longer does.
 - **`docs/web-ux.md` was overwritten with the changelog's text** in 0.52.12 and later (a script reused the wrong file's contents). It is restored, with its motion section.
 
+## Unreleased
+
+### Fixed
+- **A second `/goal` during a run no longer replaces the live goal.** `/goal` and `/review` were marked as needing an idle session but were missing from the list the server checks, so a `/goal something else` sent mid-run overwrote the durable goal under the running turn (resetting its counters) and then silently failed to start, while answering "Working toward the goal...". The server now refuses it with the usual "Agent running" and keeps the goal.
+- **`/goal status`, `/goal edit` and `/goal clear` work while a turn runs** in both the terminal (`edit` was refused there) and the web composer, as the docs said. `/goal edit` also works on a goal paused by an interruption, and a bare `/goal edit` is a usage message instead of starting a goal called "edit".
+- **Starting a goal says when it replaces one that was still open,** in the terminal and over the API. Over the API `/goal edit` answers "Goal objective updated" instead of dumping the goal's JSON.
+
+### Added
+- **A `goal` status bar segment** shows `goal active`, `paused`, `blocked` or `out of budget`, and nothing once the goal is done or cleared. Until now a goal riding along with every turn (or one that had given up) was invisible unless you asked with `/goal status`. It is on by default; `/statusbar` toggles it.
+
 ## 0.52.15
 
 ### Fixed

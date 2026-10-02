@@ -6,6 +6,7 @@ import {
 	challengeGoalCompletion,
 	clearGoal,
 	editGoalObjective,
+	formatGoalSegment,
 	goalPath,
 	goalPromptBlock,
 	pauseGoalForAbort,
@@ -180,6 +181,31 @@ describe("durable goal", () => {
 		expect(goal?.turns).toBe(1);
 		expect(goal?.continuations).toBe(1);
 		expect(goal?.status).toBe("active");
+	});
+
+	it("lets an interrupted goal be reworded before it resumes, but not a closed one", () => {
+		startGoal("s1", "make it fast");
+		pauseGoalForAbort("s1");
+		expect(editGoalObjective("s1", "make it fast and small")?.status).toBe("paused");
+		expect(resumeGoalAfterPause("s1")).toBe(true);
+		expect(readGoal("s1")?.objective).toBe("make it fast and small");
+
+		updateGoal("s1", "blocked", "needs a key");
+		expect(editGoalObjective("s1", "something else")).toBeUndefined();
+	});
+
+	it("shows a goal in the status bar unless there is none or it is done", () => {
+		expect(formatGoalSegment(undefined)).toBeUndefined();
+		startGoal("s1", "ship it");
+		expect(formatGoalSegment(readGoal("s1"))).toBe("goal active");
+		pauseGoalForAbort("s1");
+		expect(formatGoalSegment(readGoal("s1"))).toBe("goal paused");
+		updateGoal("s1", "blocked", "needs a key");
+		expect(formatGoalSegment(readGoal("s1"))).toBe("goal blocked");
+		updateGoal("s1", "budget_limited");
+		expect(formatGoalSegment(readGoal("s1"))).toBe("goal out of budget");
+		updateGoal("s1", "complete", "done");
+		expect(formatGoalSegment(readGoal("s1"))).toBeUndefined();
 	});
 
 	it("challenges a completion once and then lets it through", () => {

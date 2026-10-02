@@ -40,6 +40,9 @@ export const NON_BLOCKING_COMMANDS = new Set([
 ]);
 
 /** Commands that require the agent to be idle. */
+/** `/goal` subcommands that work while a turn runs. */
+const GOAL_LIVE_SUBCOMMANDS = new Set(["status", "clear", "edit"]);
+
 export const BLOCKING_COMMANDS = new Set([
 	"/clear",
 	"/new",
@@ -59,6 +62,7 @@ export const BLOCKING_COMMANDS = new Set([
 	"/subagent-model",
 	"/undo",
 	"/rewind",
+	"/review",
 ]);
 
 export const SLASH_COMMANDS: Array<{
@@ -267,6 +271,9 @@ export function isCommandBlocking(input: string): boolean {
 	if (!trimmed.startsWith("/")) return false;
 	const [name, ...rest] = trimmed.split(WHITESPACE_RE);
 	if (NON_BLOCKING_COMMANDS.has(name!)) return false;
+	// Starting a goal needs an idle session, but reading it, rewording it and calling it off are exactly what you want
+	// during a long autonomous run, and take effect on the agent's next step.
+	if (name === "/goal") return !GOAL_LIVE_SUBCOMMANDS.has(rest[0] ?? "");
 	// "/provider" (bare, or explicit "list") only reads the configured
 	// providers — it's just "/provider <name>"/"add"/"delete" that mutate the
 	// active endpoint. Reading it is what the web UI's status popover does on

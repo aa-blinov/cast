@@ -9,6 +9,7 @@ import {
 	type ViewportTUI,
 	VStack,
 } from "@earendil-works/pi-tui";
+import { formatGoalSegment, readGoal } from "../core/goal.ts";
 import { skillInvocationLabel } from "../core/session-title.ts";
 import type { StatusBarConfig } from "../core/settings.ts";
 import type { AppModel } from "../ui/app-model.ts";
@@ -344,8 +345,20 @@ export class PiApp {
 				? model.cwd.split("/.cast/worktrees/")[1]?.split("/")[0]
 				: undefined,
 			lspServers: model.lspServers,
+			goal: this.goalSegment(session.id),
 		};
 		this.status.set(ctx, model.statusBar);
+	}
+
+	private goalRead: { id: string; at: number; text: string | undefined } | undefined;
+
+	/** The goal phrase for the status bar, read from its file at most once a second: the bar repaints on every spinner tick. */
+	private goalSegment(sessionId: string): string | undefined {
+		const now = Date.now();
+		if (this.goalRead?.id !== sessionId || now - this.goalRead.at > 1000) {
+			this.goalRead = { id: sessionId, at: now, text: formatGoalSegment(readGoal(sessionId)) };
+		}
+		return this.goalRead.text;
 	}
 
 	/** Called on every render of the app model. */
