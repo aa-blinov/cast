@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.12
 
 ### Changed
 - **The web session list says what each session is.** An untitled session was named after its persona, so every row read "senior". It now shows "New session" while empty, and each row has the folder and its age. Sessions nobody wrote in are hidden unless open, pinned or running.
