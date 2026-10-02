@@ -515,7 +515,7 @@ export function useSessionController({
 						if (!t) return;
 						try { localStorage.setItem("cast:themes", JSON.stringify(t)); } catch {}
 						setThemes(t);
-						const current = t.find((x) => x.id === cfg?.theme) ?? t.find((x) => x.id === "cast");
+						const current = t.find((x) => x.id === cfg?.theme) ?? t.find((x) => x.id === "man");
 						if (current) {
 							applyTheme(current.colors);
 							setCurrentThemeId(current.id);

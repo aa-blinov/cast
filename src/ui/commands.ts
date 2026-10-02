@@ -3316,7 +3316,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		run: async ({ input, deps, showNotice }) => {
 			const arg = input.slice("/theme".length).trim();
 			if (arg) {
-				const found = ALL_THEMES.find((t) => t.id === arg);
+				const found = ALL_THEMES.find((t) => t.id === arg.toLowerCase());
 				if (!found) {
 					showNotice(`[Unknown theme "${arg}". Use /theme to list available.]`);
 					return;

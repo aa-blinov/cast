@@ -79,3 +79,18 @@ describe("every theme", () => {
 		}
 	});
 });
+
+describe("theme roles stay tellable apart", () => {
+	// A failed row and an AGENT heading in one colour read as the same thing; every theme keeps what must never be
+	// confused (error, warning, success, and the speakers) on different colours.
+	it("never gives an error the colour of a speaker, the accent, or another status", () => {
+		for (const theme of ALL_THEMES) {
+			const c = theme.colors;
+			for (const other of ["user", "agent", "tool", "persona", "accent", "success", "warning"] as const) {
+				expect(c.error.toLowerCase(), `${theme.id}: error vs ${other}`).not.toBe(c[other].toLowerCase());
+			}
+			expect(c.agent.toLowerCase(), `${theme.id}: agent vs user`).not.toBe(c.user.toLowerCase());
+			expect(c.success.toLowerCase(), `${theme.id}: success vs warning`).not.toBe(c.warning.toLowerCase());
+		}
+	});
+});

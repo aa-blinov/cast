@@ -29,7 +29,7 @@ import { closeSseConnection, openSseConnection } from "./sse-connection.js";
 import { handleSseEvent } from "./sse-events.js";
 import { StatusPopover } from "./status-popover.js";
 import { LiveStreamingBlocks as LiveStreamingBlocksModule } from "./streaming-blocks.js";
-import { accentForeground, readableTextLevels } from "./theme-contrast.js";
+import { accentForeground, readableText, readableTextLevels } from "./theme-contrast.js";
 import { usePanelResize } from "./use-panel-resize.js";
 import { readOlderPages, useSessionController } from "./use-session-controller.js";
 import { useSessionState } from "./use-session-state.js";
@@ -88,6 +88,8 @@ window.addEventListener("storage", (e) => {
 const TEXT_COLOR = "#fafafa";
 const DIM_TEXT_COLOR = "#a1a1aa";
 
+const ROLE_COLOR_KEYS = ["user", "agent", "tool", "success", "warning", "error", "persona"];
+
 function applyTheme(themeColors) {
 	if (!themeColors) return;
 	let colors = themeColors;
@@ -100,19 +102,25 @@ function applyTheme(themeColors) {
 	// CSS `stop-color: var(...)`, which can't parse a `linear-gradient(...)` value.
 	root.setProperty("--gradient-from", colors.gradient.from);
 	root.setProperty("--gradient-to", colors.gradient.to);
-	root.setProperty("--teal", colors.user);
-	root.setProperty("--purple", colors.agent);
-	root.setProperty("--blue", colors.tool);
-	root.setProperty("--green", colors.success);
-	root.setProperty("--amber", colors.warning);
-	root.setProperty("--rose", colors.error);
-	root.setProperty("--persona", colors.persona);
 	const hex = /^#[0-9a-f]{6}$/i;
 	const surfaces = [colors.bg, colors.bgSurface, colors.bgRaised, colors.bgHover];
 	if ([colors.accent, colors.muted, ...surfaces].every((c) => hex.test(c ?? ""))) {
 		colors = {
 			...colors,
 			accentFg: accentForeground(colors.accent, colors.bg),
+			// Role colours are drawn as text (labels, status words) on the page, panels and cards: lift each only as far
+			// as the least contrasting of those needs, so a palette like Nord's or Solarized's keeps its hue.
+			...Object.fromEntries(
+				ROLE_COLOR_KEYS.map((key) => [
+					key,
+					hex.test(colors[key] ?? "")
+						? [colors.bg, colors.bgSurface, colors.bgRaised].reduce(
+								(color, surface) => readableText(color, TEXT_COLOR, surface),
+								colors[key],
+							)
+						: colors[key],
+				]),
+			),
 			...readableTextLevels({
 				muted: colors.muted,
 				dim: DIM_TEXT_COLOR,
@@ -123,6 +131,13 @@ function applyTheme(themeColors) {
 			}),
 		};
 	}
+	root.setProperty("--teal", colors.user);
+	root.setProperty("--purple", colors.agent);
+	root.setProperty("--blue", colors.tool);
+	root.setProperty("--green", colors.success);
+	root.setProperty("--amber", colors.warning);
+	root.setProperty("--rose", colors.error);
+	root.setProperty("--persona", colors.persona);
 	root.setProperty("--text-muted", colors.mutedText ?? colors.muted);
 	for (const [prop, value] of [
 		["--accent-fg", colors.accentFg],
