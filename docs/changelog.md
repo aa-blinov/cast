@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.11
 
 ### Fixed
 - **`/continue` goes back to this folder's latest session with something in it.** It took the newest session of any folder, empty ones included (a `/clear` or `/new` that was never used), and could drop you into another project. It now does what `cast -c` does.
