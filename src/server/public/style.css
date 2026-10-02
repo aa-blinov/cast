@@ -178,8 +178,6 @@ body.resizing-sidebar * { user-select: none; }
 /* Chevron rotates to reflect open/closed state instead of a static glyph —
  * shared by the sidebar toggle (points left = collapse this way, right =
  * expand) and the diff toggle (mirrored: right = open, left = close). */
-.chevron-icon { transition: transform .18s ease; }
-.menu-toggle.active .chevron-icon { transform: rotate(180deg); }
 
 /* ── Status modal ─────────────────────────────────────────────────── */
 /* max-width lives with the rest of .modal's own overrides, further down —
@@ -1645,7 +1643,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 		from { opacity: 0; transform: translate(-50%, 0); }
 		to { opacity: 1; transform: translate(-50%, 0); }
 	}
-	.app, .sidebar, .diff-panel, .chevron-icon, .fs-chevron { transition: none; }
+	.app, .sidebar, .diff-panel, .fs-chevron { transition: none; }
 	/* Offline stays red and is announced; the blink added nothing but motion. */
 	.status-dot.offline, .fs-skeleton-row { animation: none; }
 }

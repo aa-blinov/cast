@@ -400,12 +400,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		failedLogins.delete(req.socket.remoteAddress ?? "unknown");
 	}
 
-	function requireAuth(res: ServerResponse, isApi: boolean): void {
+	function requireAuth(res: ServerResponse, isApi: boolean, returnTo: string): void {
 		if (isApi) {
 			json(res, { error: "Authentication required" }, 401);
 			return;
 		}
-		res.writeHead(302, { Location: "/login", "Cache-Control": "no-store" });
+		// A deep link (a session, /settings) comes back after signing in; the login page checks it is a path on this site.
+		const next = returnTo === "/" || !returnTo.startsWith("/") ? "" : `?next=${encodeURIComponent(returnTo)}`;
+		res.writeHead(302, { Location: `/login${next}`, "Cache-Control": "no-store" });
 		res.end();
 	}
 
@@ -2896,7 +2898,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			// so a logged-out visitor still gets bounced to /login.
 			PUBLIC_ASSET_FILES.has(urlPath);
 		if (!isPublicShareRoute && !isAuthenticated(req)) {
-			requireAuth(res, urlPath.startsWith("/api/"));
+			requireAuth(res, urlPath.startsWith("/api/"), req.url ?? "/");
 			return;
 		}
 

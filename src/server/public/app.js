@@ -2091,7 +2091,7 @@ function App() {
 			<header class="header">
 				<h1 class="sr-only">${session?.title || "Cast"}</h1>
 				<button class="menu-toggle${sidebarVisible ? " active" : " collapsed"}" onClick=${toggleSidebar} aria-label=${sidebarVisible ? "Collapse sessions" : "Expand sessions"}>
-					<${icons.chevronRight} class="chevron-icon" />
+					<${icons.panelLeft} />
 				</button>
 				<!-- The title sits on the wrapper too: the dot itself is 10px, and
 				     the padding around it is part of what a pointer aims at. -->
@@ -2113,7 +2113,7 @@ function App() {
 						<${icons.keyboard} />
 					</button>
 					<button class="menu-toggle diff-toggle${diffOpen ? " active" : ""}" onClick=${toggleDiff} aria-label=${diffOpen ? "Close files panel" : "Open files panel"} title="Files and changes">
-						<${icons.chevronLeft} class="chevron-icon" />
+						<${icons.panelRight} />
 					</button>
 				</div>
 			</header>

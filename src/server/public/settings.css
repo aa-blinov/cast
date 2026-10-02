@@ -682,7 +682,4 @@
 	.dash-tabs { margin-left: 0; order: 3; width: 100%; flex-wrap: wrap; }
 	.dash-tabs .modal-btn { min-width: 0; flex: 1 1 auto; }
 	.dash-range { margin-left: 0; margin-right: 0; order: 4; width: 100%; }
-	/* The chart-heavy dashboard doesn't fit a phone screen (header with four
-	   tabs + date pickers overflows); hide its entry point on mobile. */
-	.header .menu-toggle[title="Dashboard"] { display: none; }
 }

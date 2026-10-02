@@ -50,11 +50,17 @@ async function renderLogo() {
 	} catch {}
 }
 
+// Back to where the person was headed, but only to a path on this site: a `next` of "//evil.test" or a URL is ignored.
+function destination() {
+	const next = new URLSearchParams(window.location.search).get("next");
+	return next?.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+}
+
 async function redirectIfAuthenticated() {
 	try {
 		const response = await fetch("/api/auth/session");
 		const session = await response.json();
-		if (session.authenticated) window.location.replace("/");
+		if (session.authenticated) window.location.replace(destination());
 	} catch {}
 }
 
@@ -71,7 +77,7 @@ form.addEventListener("submit", async (event) => {
 		});
 		const result = await response.json().catch(() => null);
 		if (!response.ok) throw new Error(result?.error || "Could not sign in");
-		window.location.replace("/");
+		window.location.replace(destination());
 	} catch (err) {
 		error.textContent = err instanceof Error ? err.message : "Could not sign in";
 		error.hidden = false;

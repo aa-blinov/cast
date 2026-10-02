@@ -55,6 +55,11 @@ afterEach(async () => {
 });
 
 describe("web session authentication", () => {
+	it("keeps a deep link through sign-in", async () => {
+		const link = await fetch(`${origin}/?session=abc`, { redirect: "manual" });
+		expect(link.headers.get("location")).toBe("/login?next=%2F%3Fsession%3Dabc");
+	});
+
 	it("uses Cast's login page instead of a browser Basic Auth prompt", async () => {
 		const root = await fetch(`${origin}/`, { redirect: "manual" });
 		expect(root.status).toBe(302);

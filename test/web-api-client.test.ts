@@ -48,3 +48,16 @@ describe("web api client", () => {
 		await expect(api("GET", "/api/private")).rejects.toThrow("Not allowed");
 	});
 });
+
+describe("web api client sign-in return", () => {
+	it("sends an expired session to sign in and back to where it was", async () => {
+		const assign = vi.fn();
+		vi.stubGlobal("window", {
+			location: { origin: "http://cast.test", pathname: "/", search: "?session=abc", assign },
+		});
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 401 })));
+
+		await api("GET", "/api/private");
+		expect(assign).toHaveBeenCalledWith("/login?next=%2F%3Fsession%3Dabc");
+	});
+});

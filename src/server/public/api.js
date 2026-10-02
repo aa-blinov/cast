@@ -37,7 +37,9 @@ export async function api(method, path, body, { signal: externalSignal } = {}) {
 	if (res.status === 401) {
 		// The server owns the HttpOnly session. A missing/expired cookie is a
 		// navigation concern, not an API error the current view can recover from.
-		window.location.assign("/login");
+		const { pathname, search } = window.location;
+		const here = `${pathname ?? "/"}${search ?? ""}`;
+		window.location.assign(here === "/" ? "/login" : `/login?next=${encodeURIComponent(here)}`);
 		return null;
 	}
 	const data = await res.json().catch(() => null);
