@@ -276,8 +276,16 @@ export function handleSseEvent(event, context) {
 			}
 			setRunning(false);
 			setSession((prev) => (prev ? { ...prev, status: "idle" } : prev));
-			setPendingSteers([]);
-			setPendingQueue([]);
+			// A stopped run takes its waiting messages with it. Say which ones, with their text, rather than letting them
+			// vanish from the screen as if they had been sent.
+			const unsent = (kind) => (previous) => {
+				if (event.reason === "aborted" && previous.length > 0) {
+					queueMicrotask(() => addNotice(`Not sent (the run was stopped), ${kind}: ${previous.join(" / ")}`));
+				}
+				return [];
+			};
+			setPendingSteers(unsent("steering"));
+			setPendingQueue(unsent("queued"));
 			if (pendingPlanSignalRef.current?.sessionId === streamSessionId) {
 				setPlanTransition(pendingPlanSignalRef.current);
 				pendingPlanSignalRef.current = null;

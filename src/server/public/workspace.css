@@ -11,7 +11,7 @@
 	border-left: 1px solid var(--border);
 	background: var(--bg);
 	width: 100%;
-	transition: border-color .16s ease;
+	transition: border-color var(--dur-fast) ease;
 }
 /* Zero width, not just transparent: in a 0px track the 1px border itself
  * overflowed the page, and touch browsers widen the layout viewport to fit. */
@@ -35,7 +35,7 @@
 	top: 0; bottom: 0; left: 3px;
 	width: 2px;
 	background: transparent;
-	transition: background .12s;
+	transition: background var(--dur-instant);
 }
 .diff-resize-handle:hover::after,
 body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
@@ -70,7 +70,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	padding: 4px 10px;
 	border-radius: 4px;
 	cursor: pointer;
-	transition: background .12s, color .12s;
+	transition: background var(--dur-instant), color var(--dur-instant);
 }
 .diff-tab:hover { color: var(--text); }
 .diff-tab.active { background: var(--bg-raised); color: var(--text); }
@@ -165,7 +165,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	font-size: var(--fs-ui);
 	font-family: var(--font-mono);
 	color: var(--text-dim);
-	transition: background .1s;
+	transition: background var(--dur-instant);
 }
 .diff-file-item:hover { background: var(--bg-hover); }
 .diff-file-item.active { background: var(--bg-raised); color: var(--text); }
@@ -380,7 +380,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	width: 14px; height: 14px;
 	flex-shrink: 0;
 	color: var(--text-muted);
-	transition: transform .1s;
+	transition: transform var(--dur-instant);
 }
 .fs-chevron.open { transform: rotate(90deg); }
 .fs-chevron-spacer { width: 14px; flex-shrink: 0; }
@@ -411,7 +411,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	   makes them permanently visible, same fix already used for the
 	   directory-picker's delete button and code-copy buttons. */
 	opacity: 0;
-	transition: opacity .1s;
+	transition: opacity var(--dur-instant);
 }
 .fs-row:hover .fs-row-actions,
 .fs-row:focus-within .fs-row-actions { opacity: 1; }
@@ -678,3 +678,20 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .fs-more:hover:not(:disabled) { color: var(--cyan); border-color: var(--border-active); }
 .fs-more-note { padding: 8px; }
 .fs-create-row { align-items: center; gap: 6px; padding: 2px 8px; }
+
+/* An error is a line above the list, not a page that pushes the list out of the panel. */
+.fs-error {
+	display: flex; align-items: flex-start; gap: 8px;
+	margin: 6px 8px;
+	padding: 6px 8px;
+	background: var(--danger-subtle);
+	border: 1px solid var(--danger-border);
+	border-radius: var(--radius-sm);
+	color: var(--status-error-fg);
+	font-size: var(--fs-ui);
+	overflow-wrap: anywhere;
+	animation: rise var(--dur-fast) var(--ease-out);
+}
+.fs-error > span { flex: 1; min-width: 0; }
+.fs-error-dismiss { display: flex; padding: 2px; background: none; border: none; color: inherit; cursor: pointer; border-radius: 4px; }
+.fs-error-dismiss svg { width: 12px; height: 12px; }

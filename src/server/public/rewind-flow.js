@@ -71,6 +71,10 @@ export async function rewindTo({ id, userSeq, confirm, addNotice, showToast, ref
 		const result = await api("POST", `/api/sessions/${id}/rewind`, { userSeq, mode, force });
 		if (result?.result) addNotice(result.result);
 		await refresh();
+		// The message came out of the conversation: hand its text back so it can be changed and sent again.
+		if (mode !== "code" && preview.message && typeof window !== "undefined") {
+			window.dispatchEvent(new CustomEvent("cast:set-draft", { detail: { text: preview.message } }));
+		}
 		return true;
 	} catch (err) {
 		showToast(err.message, "error");

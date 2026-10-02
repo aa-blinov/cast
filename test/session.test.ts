@@ -854,6 +854,19 @@ describe("session persistence", () => {
 		expect(loaded?.messages).toEqual(session.messages);
 	});
 
+	it("saves without moving the activity time when asked not to touch it", () => {
+		const session = createSession("gpt-4o", projectA);
+		session.messages.push({ role: "user", content: "hello" });
+		saveSession(session);
+		const before = loadSession(session.id)?.updatedAt;
+		// A save inside the same millisecond would hide the difference.
+		for (const start = Date.now(); Date.now() === start; );
+		saveSession(session, { touch: false });
+		expect(loadSession(session.id)?.updatedAt).toBe(before);
+		saveSession(session);
+		expect(loadSession(session.id)?.updatedAt).not.toBe(before);
+	});
+
 	it("commits a durable checkpoint watermark monotonically and survives reload", () => {
 		const session = createSession("gpt-4o", projectA);
 		const first: Message = { role: "user", content: "first" };

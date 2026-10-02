@@ -32,7 +32,7 @@
  * applied once by the client on first paint, then removed — play it.
  * Streaming updates on the same DOM subtree don't re-add it, so the
  * growing reply stays still while tokens arrive. */
-.message-entering { animation: rise .15s var(--ease-out); }
+.message-entering { animation: rise var(--dur-fast) var(--ease-out); }
 .messages-inner > * + * { padding-top: 6px; }
 /* Under a /skill command: the model got the whole SKILL.md, the thread shows what was typed. */
 .message-skill-note { color: var(--text-muted); font-size: var(--fs-micro); margin-top: 2px; }
@@ -77,6 +77,24 @@
 @keyframes rise {
 	from { opacity: 0; }
 	to { opacity: 1; }
+}
+/* Arrivals have a direction: a dialog lifts into place, a menu drops from its button, a phone sheet slides up. The
+ * transcript itself only fades (rise): movement there would fight the auto-scroll while a reply streams. */
+@keyframes modal-in {
+	from { opacity: 0; transform: translateY(8px) scale(.985); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes backdrop-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+@keyframes pop-in {
+	from { opacity: 0; transform: translateY(4px); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes sheet-in {
+	from { opacity: 0; transform: translateY(24px); }
+	to { opacity: 1; transform: none; }
 }
 /* Plain transcript, not a stack of cards — a role label plus content, like a
  * terminal/IDE chat log rather than a messaging-app bubble list. Only roles
@@ -146,8 +164,8 @@
 	cursor: pointer;
 	z-index: 10;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-	transition: background-color .15s ease, border-color .15s ease, color .15s ease;
-	animation: btn-fade-in .15s var(--ease-out);
+	transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
+	animation: btn-fade-in var(--dur-fast) var(--ease-out);
 }
 .scroll-bottom-btn:hover { color: var(--text); border-color: var(--cyan); }
 
@@ -176,7 +194,7 @@
 	font-size: var(--fs-ui);
 	color: var(--text);
 	box-shadow: 0 4px 16px rgba(0,0,0,.3);
-	animation: toast-in .18s var(--ease-out);
+	animation: toast-in var(--dur-base) var(--ease-out);
 }
 .toast-error { border-color: var(--danger-border); color: var(--status-error-fg); }
 @keyframes toast-in {
@@ -223,7 +241,7 @@
 .reasoning-folded[open] summary::before { content: "-"; }
 .reasoning-peek { color: var(--text-dim); font-style: italic; font-size: var(--fs-ui); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .reasoning-folded[open] .reasoning-peek { display: none; }
-.reasoning-folded[open] .message-content { margin-top: 4px; }
+.reasoning-folded[open] .message-content { margin-top: 4px; animation: rise var(--dur-fast) var(--ease-out); }
 .message-reasoning .message-label { color: var(--text-dim); }
 .message-reasoning .message-content { color: var(--text-dim); font-style: italic; overflow-wrap: break-word; word-break: break-word; }
 .message-label {
@@ -351,7 +369,7 @@
 	color: var(--text-muted);
 	cursor: pointer;
 	opacity: 0;
-	transition: opacity .1s ease, color .1s ease, border-color .1s ease;
+	transition: opacity var(--dur-instant) ease, color var(--dur-instant) ease, border-color var(--dur-instant) ease;
 }
 .code-copy-btn svg { width: 14px; height: 14px; }
 pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }

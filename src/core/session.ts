@@ -772,9 +772,10 @@ function sessionMetaRow(session: SessionState) {
 	};
 }
 
-export function saveSession(session: SessionState): void {
+/** `touch: false` writes the session without moving its "last activity" time: closing one that was only looked at is not activity. */
+export function saveSession(session: SessionState, options: { touch?: boolean } = {}): void {
 	session.version = (session.version ?? 0) + 1;
-	session.updatedAt = new Date().toISOString();
+	if (options.touch !== false) session.updatedAt = new Date().toISOString();
 	const db = getDb();
 	// Every row this save writes goes in as one transaction. The sessions
 	// UPSERT bumps version/updated_at and each message is a separate INSERT,

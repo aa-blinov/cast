@@ -42,6 +42,24 @@ describe("web SSE events", () => {
 		expect(clear(card).bashConfirm).toBeUndefined();
 	});
 
+	it("names the queued and steering messages a stopped run took with it", async () => {
+		const state = createContext();
+		handleSseEvent({ type: "end", reason: "aborted" }, state);
+		const queue = state.setPendingQueue.mock.calls[0]![0] as (prev: string[]) => string[];
+		const steer = state.setPendingSteers.mock.calls[0]![0] as (prev: string[]) => string[];
+		expect(queue(["after that, say hi"])).toEqual([]);
+		expect(steer([])).toEqual([]);
+		await Promise.resolve();
+		expect(state.addNotice).toHaveBeenCalledTimes(1);
+		expect(state.addNotice.mock.calls[0]![0]).toContain("queued: after that, say hi");
+
+		const finished = createContext();
+		handleSseEvent({ type: "end", reason: "completed" }, finished);
+		(finished.setPendingQueue.mock.calls[0]![0] as (prev: string[]) => string[])(["x"]);
+		await Promise.resolve();
+		expect(finished.addNotice).not.toHaveBeenCalled();
+	});
+
 	it("notifies while the tab is hidden: turn done and approval needed", () => {
 		const shown: [string, { body: string }][] = [];
 		const FakeNotification = Object.assign(

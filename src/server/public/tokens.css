@@ -56,7 +56,11 @@
 		--fs-display: 1.25rem;
 		--radius: 8px;
 		--radius-sm: 6px;
-		--transition-fast: .15s ease;
+		/* One scale for every transition and animation: a press answers at once, a hover is quick, an arrival takes a beat. */
+		--dur-instant: .1s;
+		--dur-fast: .15s;
+		--dur-base: .22s;
+		--transition-fast: var(--dur-fast) ease;
 		/* Arrivals decelerate into place; routine hovers keep plain ease. */
 		--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 		--sidebar-w: 272px;

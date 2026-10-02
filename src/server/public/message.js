@@ -38,6 +38,8 @@ export function parseSkillInvocation(content) {
 	return { name: unescape(match[1]), location: unescape(match[2]), args: args.trim() };
 }
 
+const SYSTEM_TAG_RE = /^\[system\]\s+/;
+
 function attachmentChips(attachments) {
 	if (!attachments?.length) return null;
 	return html`
@@ -118,6 +120,8 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 	// content is `null` for a tool-call-only turn (see core/loop.ts) — treat
 	// that as "no text", not the literal string "null" JSON.stringify gives it.
 	let content = typeof msg.content === "string" ? msg.content : msg.content == null ? "" : JSON.stringify(msg.content);
+	// The server tags harness notes "[system] ..." for clients that have no label of their own; this one prints NOTICE.
+	if (role === "warning") content = content.replace(SYSTEM_TAG_RE, "");
 
 	if (role === "assistant") {
 		let visibleThinking = msg.thinking;

@@ -196,11 +196,23 @@ export function Sidebar({
 		return () => obs.disconnect();
 	}, [hasMore, onLoadMore, isSearching, sessions.length]);
 
+	// Escape unmounts the focused input, and the browser fires blur on the way out: without this the blur
+	// handler saved the text that Escape was meant to throw away.
+	const cancelledEditRef = useRef(false);
 	const startEdit = useCallback((s) => {
+		cancelledEditRef.current = false;
 		setEditingId(s.id);
 		setEditValue(s.title || "");
 	}, []);
+	const cancelEdit = useCallback(() => {
+		cancelledEditRef.current = true;
+		setEditingId(null);
+	}, []);
 	const commitEdit = useCallback(() => {
+		if (cancelledEditRef.current) {
+			cancelledEditRef.current = false;
+			return;
+		}
 		if (editingId) onRenameSession(editingId, editValue);
 		setEditingId(null);
 	}, [editingId, editValue, onRenameSession]);
@@ -236,7 +248,7 @@ export function Sidebar({
 		editValue=${editValue}
 		setEditValue=${setEditValue}
 		commitEdit=${commitEdit}
-		cancelEdit=${() => setEditingId(null)}
+		cancelEdit=${cancelEdit}
 		startEdit=${startEdit}
 		menuFor=${menuFor}
 		openMenu=${openMenu}

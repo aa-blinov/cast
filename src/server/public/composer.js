@@ -141,6 +141,15 @@ export function Composer({
 	}, []);
 
 	const MAX_IMAGES = 6;
+	// A rewind returns the removed message here, but never over what the person is already typing.
+	useEffect(() => {
+		const onDraft = (e) => {
+			setValue((current) => (current.trim() ? current : String(e.detail?.text ?? "")));
+			textareaRef.current?.focus();
+		};
+		window.addEventListener("cast:set-draft", onDraft);
+		return () => window.removeEventListener("cast:set-draft", onDraft);
+	}, []);
 	const [resizingImages, setResizingImages] = useState(0);
 	const addImageFiles = useCallback(async (files) => {
 		if (files.length === 0) return;

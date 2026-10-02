@@ -996,6 +996,7 @@ function App() {
 			setPersonas,
 			setCommands,
 			setThemes,
+			setCurrentThemeId,
 			setDefaultCwd,
 			setDefaultModel,
 			setQuickSessionPersona,
@@ -1360,7 +1361,7 @@ function App() {
 				await api("POST", `/api/sessions/${transitionSessionId}/command`, { command: `/plan-note ${text}` });
 			};
 			try {
-				await api("POST", `/api/sessions/${transitionSessionId}/plan-transition`, { kind: transition.kind });
+				await api("POST", `/api/sessions/${transitionSessionId}/plan-transition`, { kind: transition.kind, outcome: choice === "continue" ? "continue" : "approve" });
 				setPlanTransition(null);
 				setSession((prev) => (prev ? { ...prev, planTransition: undefined } : prev));
 				if (choice === "continue") {
