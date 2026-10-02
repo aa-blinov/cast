@@ -442,6 +442,33 @@ function tryAcquireProjectMemoryLease(cwd: string, operation: string, leaseMs: n
 	return result.changes > 0 ? token : undefined;
 }
 
+function processIsAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		// EPERM: it exists, it is just not ours to signal.
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+/**
+ * A lease holds for minutes after its owner is gone: a terminal closed right after a turn, a killed daemon.
+ * Everything that wants the project's memory then waits out its time and reports a failure. When the owner
+ * is a process that no longer exists the lease is taken back at once.
+ */
+function reclaimDeadOwnerLease(cwd: string): boolean {
+	const projectId = projectIdForCwd(cwd);
+	const row = getDb()
+		.prepare("SELECT owner_token, owner_pid FROM project_memory_operations WHERE project_id = ?")
+		.get(projectId) as { owner_token: string; owner_pid: number | null } | undefined;
+	if (!row || !row.owner_pid || row.owner_pid === process.pid || processIsAlive(row.owner_pid)) return false;
+	const removed = getDb()
+		.prepare("DELETE FROM project_memory_operations WHERE project_id = ? AND owner_token = ?")
+		.run(projectId, row.owner_token);
+	return Number(removed.changes) > 0;
+}
+
 function releaseProjectMemoryLease(cwd: string, token: string): void {
 	getDb()
 		.prepare("DELETE FROM project_memory_operations WHERE project_id = ? AND owner_token = ?")
@@ -471,6 +498,7 @@ export async function withProjectMemoryLease<T>(
 	let token: string | undefined;
 	while (!token) {
 		token = tryAcquireProjectMemoryLease(cwd, operation, leaseMs);
+		if (!token && reclaimDeadOwnerLease(cwd)) token = tryAcquireProjectMemoryLease(cwd, operation, leaseMs);
 		if (token) break;
 		if (Date.now() >= deadline)
 			throw new Error(`Timed out waiting for project memory lease: ${projectIdForCwd(cwd)}`);

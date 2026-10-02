@@ -378,6 +378,38 @@ describe("project memory", () => {
 		expect(events).toEqual(["first:start", "first:end", "second"]);
 	});
 
+	it("takes the lease back at once from an owner that no longer exists, but not from a live one", async () => {
+		const projectCwd = join(root, "dead-owner-project");
+		const projectId = projectIdForCwd(projectCwd);
+		const db = getDb();
+		const future = new Date(Date.now() + 300_000).toISOString();
+		const hold = (pid: number) =>
+			db
+				.prepare(
+					"INSERT OR REPLACE INTO project_memory_operations (project_id, operation, owner_token, owner_pid, lease_until, acquired_at) VALUES (?, 'dream', 'ghost', ?, ?, ?)",
+				)
+				.run(projectId, pid, future, new Date().toISOString());
+		// A process id that cannot exist (above the kernel's limit).
+		hold(4_194_999);
+		let ran = false;
+		await withProjectMemoryLease(
+			projectCwd,
+			"test",
+			async () => {
+				ran = true;
+			},
+			{ waitMs: 500 },
+		);
+		expect(ran).toBe(true);
+
+		// The parent of this test process is alive: its lease stands until it expires.
+		hold(process.ppid);
+		await expect(withProjectMemoryLease(projectCwd, "test", async () => {}, { waitMs: 300 })).rejects.toThrow(
+			"Timed out waiting for project memory lease",
+		);
+		db.prepare("DELETE FROM project_memory_operations WHERE project_id = ?").run(projectId);
+	});
+
 	it("records retrieval and writes as durable session events", () => {
 		const projectCwd = join(root, "project");
 		const session = createSession("test-model", projectCwd);
