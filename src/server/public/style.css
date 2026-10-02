@@ -426,7 +426,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 }
 .sidebar-item {
 	content-visibility: auto;
-	contain-intrinsic-size: auto 36px;
+	contain-intrinsic-size: auto 46px;
 }
 .sidebar-session-group {
 	content-visibility: auto;
@@ -458,6 +458,8 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	color: var(--text);
 	border-color: var(--border);
 }
+.sidebar-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sidebar-item-meta { font-size: var(--fs-micro); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-item-name-input {
 	flex: 1;

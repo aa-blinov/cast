@@ -68,6 +68,17 @@ function StreamingMarkdown({ text, renderMarkdown }) {
 	return html`<div ref=${setRef} class="message-content md-body"></div>`;
 }
 
+// A finished thought folds to one line: a reply with several tool calls otherwise buries the answer
+// under boxes of reasoning, which on a phone is most of the screen.
+export function FoldedReasoning({ text }) {
+	return html`
+		<details class="message message-reasoning reasoning-folded">
+			<summary><span class="message-label">reasoning</span><span class="reasoning-peek">${text}</span></summary>
+			<div class="message-content">${text}</div>
+		</details>
+	`;
+}
+
 export function BlockView({ block, streaming = false, renderMarkdown, showReasoning = false }) {
 	if (block.kind === "tool") {
 		// Key on the tool-call id (not position): when a second tool call
@@ -90,6 +101,7 @@ export function BlockView({ block, streaming = false, renderMarkdown, showReason
 	const isReasoning = block.kind === "thinking";
 	const className = `message message-${kind}`;
 	const streamingClass = streaming ? " message-entering" : "";
+	if (isReasoning && !streaming) return html`<${FoldedReasoning} text=${block.text} />`;
 	return html`
 		<div class=${className + streamingClass}>
 			<div class="message-label">${block.kind === "thinking" ? "reasoning" : "agent"}</div>
@@ -98,9 +110,7 @@ export function BlockView({ block, streaming = false, renderMarkdown, showReason
 					? isReasoning
 						? html`<${StreamingText} text=${block.text} />`
 						: html`<${StreamingMarkdown} text=${block.text} renderMarkdown=${renderMarkdown} />`
-					: block.kind === "thinking"
-						? html`<div class="message-content">${block.text}</div>`
-						: html`<div class="message-content md-body" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />`
+					: html`<div class="message-content md-body" dangerouslySetInnerHTML=${{ __html: renderMarkdown(block.text) }} />`
 			}
 		</div>
 	`;

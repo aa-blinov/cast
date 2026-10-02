@@ -34,7 +34,7 @@ import { usePanelResize } from "./use-panel-resize.js";
 import { readOlderPages, useSessionController } from "./use-session-controller.js";
 import { useSessionState } from "./use-session-state.js";
 import { useWorkspaceState } from "./use-workspace-state.js";
-import { SANDBOX_CWD } from "./sidebar-utils.js";
+import { isSandboxSessionCwd, SANDBOX_CWD } from "./sidebar-utils.js";
 
 const FRONTMATTER_LINE_RE = /^- (.+?): (.+)$/;
 
@@ -2344,7 +2344,7 @@ function App() {
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
 							${
 								session?.cwd &&
-								html`<span class="composer-role-cwd" title=${session.cwd}>(<span class="composer-role-cwd-path">${`\u200e${session.cwd}`}</span>)</span>`
+								html`<span class="composer-role-cwd" title=${session.cwd}>(<span class="composer-role-cwd-path">${`\u200e${isSandboxSessionCwd(session.cwd) ? "sandbox" : session.cwd}`}</span>)</span>`
 							}
 							${session?.worktree && html`<span class="composer-role-mode composer-role-worktree">worktree</span>`}
 						</div>

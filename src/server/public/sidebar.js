@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { SidebarSessionItem } from "./sidebar-session-item.js";
-import { groupSessionsByDate, SANDBOX_CWD, shortPath, sortSessionsByActivity } from "./sidebar-utils.js";
+import { groupSessionsByDate, SANDBOX_CWD, shortPath, sortSessionsByActivity, visibleSessions } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
@@ -181,7 +181,7 @@ export function Sidebar({
 	// you mean this specific session").
 	const isSearching = search.trim().length > 0;
 	const searching = isSearching && searchResults === null;
-	const filtered = isSearching ? (searchResults ?? []) : sessions;
+	const filtered = isSearching ? (searchResults ?? []) : visibleSessions(sessions, activeId);
 	const sessionGroups = isSearching ? [] : groupSessionsByDate(filtered);
 	const isSandbox = cwd === SANDBOX_CWD;
 
@@ -198,7 +198,7 @@ export function Sidebar({
 
 	const startEdit = useCallback((s) => {
 		setEditingId(s.id);
-		setEditValue(s.title || s.persona || "");
+		setEditValue(s.title || "");
 	}, []);
 	const commitEdit = useCallback(() => {
 		if (editingId) onRenameSession(editingId, editValue);

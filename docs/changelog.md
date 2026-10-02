@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Changed
+- **The web session list says what each session is.** An untitled session was named after its persona, so every row read "senior". It now shows "New session" while empty, and each row has the folder and its age. Sessions nobody wrote in are hidden unless open, pinned or running.
+- **Finished reasoning folds to one line in the web UI** (tap to open); it stays open while it streams. On a phone a reply with tool calls was mostly boxes of thought.
+- **The web composer's role line shows "sandbox"** instead of the long sandbox path (the path is in the tooltip).
+
+### Added
+- `docs/web-ux.md`: the map of the browser client (surfaces, flows, responsive rules, decisions).
+
 ## 0.52.11
 
 ### Fixed
