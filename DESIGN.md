@@ -117,7 +117,7 @@ Restrained: neutrals plus one accent. Every theme can supply these roles; the st
 
 **Browser.** A sidebar of sessions (272px) beside the chat, a header with the connection dot, and the composer at the foot. On a phone (coarse pointer, under 768px) the sidebar is a drawer, the composer tightens, and every control has a 44px target; the page never scrolls sideways at 320px.
 
-Tool rows (terminal) sit at the same margin: `  * ` done, `  … ` running (accent), `  ✗ ` plus the word `failed`. Tool name bold, arguments muted; a bash timeout appears only when the model chose one (`(timeout 10m)`).
+Tool rows (terminal) sit at the same margin: `  * ` done, `  … ` running (accent), `  ✗ ` plus the word `failed`. Tool name bold, arguments muted; a bash row ends with the deadline it runs under (` * timeout 3m`, or the one the model chose), kept when a running row is cut to one line; a finished command wraps under its text, not under the margin.
 
 ## Elevation & Depth
 

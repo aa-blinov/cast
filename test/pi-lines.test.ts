@@ -28,12 +28,34 @@ describe("toolRowLines", () => {
 		expect(plain(toolRowLines(bash("error", "false"), 60)[0]!)).toMatch(/^ {2}✗ bash false.* failed$/);
 	});
 
-	it("shows a bash timeout only when the model chose one, and says what it is", () => {
-		const row = (args: object) =>
-			plain(toolRowLines({ id: "t", name: "bash", args: JSON.stringify(args), status: "ok" }, 80)[0]!);
-		expect(row({ command: "ls" })).not.toContain("timeout");
-		expect(row({ command: "ls", timeout: 180000 })).not.toContain("timeout");
-		expect(row({ command: "sleep 90", timeout: 600000 })).toContain("(timeout 10m)");
+	it("shows the deadline a bash command runs under, default or chosen", () => {
+		const row = (args: object, status: "ok" | "running" = "ok", width = 80) =>
+			plain(toolRowLines({ id: "t", name: "bash", args: JSON.stringify(args), status }, width)[0]!);
+		expect(row({ command: "ls" })).toContain(" * timeout 3m");
+		expect(row({ command: "ls", timeout: 180000 })).toContain(" * timeout 3m");
+		expect(row({ command: "sleep 90", timeout: 600000 })).toContain(" * timeout 10m");
+		// A background task that asked for nothing has no deadline to show.
+		expect(row({ command: "server", run_in_background: true })).not.toContain("timeout");
+	});
+
+	it("wraps a finished command under its text, not under the margin", () => {
+		const lines = toolRowLines(
+			{ id: "t", name: "bash", args: JSON.stringify({ command: `echo ${"word ".repeat(30)}` }), status: "ok" },
+			46,
+		).map(plain);
+		expect(lines.length).toBeGreaterThan(1);
+		for (const line of lines.slice(1)) expect(line.startsWith("    ")).toBe(true);
+		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(46);
+	});
+
+	it("keeps the deadline when a running row is cut to one line", () => {
+		const long = `git log --oneline ${"-v ".repeat(60)}`;
+		const line = plain(
+			toolRowLines({ id: "t", name: "bash", args: JSON.stringify({ command: long }), status: "running" }, 50)[0]!,
+		);
+		expect(line.endsWith(" * timeout 3m")).toBe(true);
+		expect(line).toContain("…");
+		expect(visibleWidth(line)).toBeLessThanOrEqual(50);
 	});
 
 	it("says what a queued subagent is waiting for, and what a running one is doing", () => {
