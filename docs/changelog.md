@@ -2,46 +2,29 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.53.0
+
+### Added
+- **The web shows the goal too:** a `goal active` / `paused` / `blocked` / `out of budget` badge in the composer's role line, which clears when the goal is done or cleared. Until now only the terminal could say so, and only on asking.
+- **A `goal` status bar segment** shows `goal active`, `paused`, `blocked` or `out of budget`, and nothing once the goal is done or cleared. Until now a goal riding along with every turn (or one that had given up) was invisible unless you asked with `/goal status`. It is on by default; `/statusbar` toggles it.
 
 ### Fixed
 - **`/dream` and `/distill` with nothing to work on return at once.** In a project with no conversation, no history and no memory they started an agent that wandered the folder for minutes (its context growing to 40k tokens) while the command waited with no output and held the project's memory queue. They now say "Nothing to consolidate yet".
 - **`/dream` says what it did.** It reported "N notes stored" where N was the number of notes now in memory, even when nothing new was added. It now reads "N notes kept, M removed".
 - **The memory docs said the agent stores memory through its `memory` tool.** It only searches. The page now lists who really writes memory (you, the checkpoint writer, dream, distill), and says plainly that with the defaults a short conversation writes nothing until a checkpoint threshold, an automatic dream or `/dream`. The `/memory checkpoint ...` subcommands are documented. The tool's own error, which claimed memory is written "at the end of a turn", no longer does.
 - **`docs/web-ux.md` was overwritten with the changelog's text** in 0.52.12 and later (a script reused the wrong file's contents). It is restored, with its motion section.
-
-## Unreleased
-
-### Fixed
 - **A second `/goal` during a run no longer replaces the live goal.** `/goal` and `/review` were marked as needing an idle session but were missing from the list the server checks, so a `/goal something else` sent mid-run overwrote the durable goal under the running turn (resetting its counters) and then silently failed to start, while answering "Working toward the goal...". The server now refuses it with the usual "Agent running" and keeps the goal.
 - **`/goal status`, `/goal edit` and `/goal clear` work while a turn runs** in both the terminal (`edit` was refused there) and the web composer, as the docs said. `/goal edit` also works on a goal paused by an interruption, and a bare `/goal edit` is a usage message instead of starting a goal called "edit".
 - **Starting a goal says when it replaces one that was still open,** in the terminal and over the API. Over the API `/goal edit` answers "Goal objective updated" instead of dumping the goal's JSON.
-
 - **A goal's own prompts no longer pose as your words.** The wrapper `/goal` sends, and the continuation, nudge and wrap-up prompts the goal drive injects, showed in the terminal and the web as a page of rules under "USER", and a goal session was titled "You are working toward a goal autonomously". The thread now shows `/goal <objective>` as typed and the others as one-line notices ("Goal: still open, continuing"), and the title is the objective.
 - **A refused command in the web composer keeps its text.** A `/goal ...` sent while a turn ran was refused (with an error in the transcript) and the typed text vanished; it is handed back to the composer, as a failed message already was.
-
-### Added
-- **The web shows the goal too:** a `goal active` / `paused` / `blocked` / `out of budget` badge in the composer's role line, which clears when the goal is done or cleared. Until now only the terminal could say so, and only on asking.
-- **A `goal` status bar segment** shows `goal active`, `paused`, `blocked` or `out of budget`, and nothing once the goal is done or cleared. Until now a goal riding along with every turn (or one that had given up) was invisible unless you asked with `/goal status`. It is on by default; `/statusbar` toggles it.
-
-## Unreleased
-
-### Fixed
 - **Compaction no longer runs before every model call on a small window.** When the system prompt and tool schemas alone sit above the compaction threshold (a 30k window with a 13k trigger, say), each compaction left the next prompt over it again, so one ran per call, each paying for a summary and folding the previous summary into a newer one. After a compaction the next measured prompt now says whether it worked; if not, further compactions wait until the context has grown a margin past where it landed, and the run says so once. Checked on a long goal (three modules, three test files, 18 compactions before): 3 compactions, a faster run, the same correct result.
 - **A compaction right after a compaction.** The reading that decides it (the last measured prompt, and the index it was taken at) described the history from before the compaction, so a second compaction could follow at once. Nothing is due again until the provider measures a prompt.
-
-## Unreleased
-
-### Fixed
 - **`/mcp` in the web UI started an untrusted project's servers.** `/mcp reconnect`, `enable`, `disable`, `uninstall` and `/reload` read the MCP config of the *session's* folder under the *daemon's* trust decision, so from a session in a folder you had never trusted, that folder's `.cast/mcp.json` commands were run, and its servers then showed up in every other session's tool list. The shared set is now resolved from the daemon's own folder under its own trust; another folder's project servers are connected only if that folder is trusted, and stay in that folder's sessions.
 - **A server that dropped twice stayed dead.** After a manual or automatic reconnect, the new connection's disconnect handlers tended a private copy of the server set, so the first drop was healed and the second was not: the live set kept a dead connection and every call said "no longer connected" until `/mcp reconnect`. Reconnects now connect into the live set.
 - **Switching one MCP server restarted all of them.** `/mcp enable`, `disable`, `uninstall`, `reconnect` and `/reload` closed and reconnected every server, so a browser server lost its page whenever any other server was toggled, in the terminal and in the daemon. Only the servers that differ are touched now.
 - **`/reload` did not apply an edited server.** It reconnected only when the set of names changed, so editing a server's command, arguments or address and reloading did nothing. It compares each server's config now. `/mcp reconnect` also picks up a corrected config for a server that never started.
 - **A disabled project server vanished from `/mcp list`,** so it could not be switched back on from the list. Every configured name is listed, disabled ones included.
-
-## Unreleased
-
-### Fixed
 - **Role colours in the web UI are lifted to a readable contrast.** Muted and dim text already were, but the colours of the speaker labels and statuses (user, agent, tool, persona, success, warning, error) were drawn raw, so Nord's and Solarized's `agent` label sat at 4.4:1 and 3.4:1. Each is now moved toward the text colour only as far as the page, panels and cards need, so a palette keeps its hue. A check of every rendered text element in all 19 themes (about 6000 per run) now finds none under 4.5:1.
 - **Monokai gave the error colour to the agent label, the tool label and the accent** (all `#f92672`), so a failure read like any agent heading; Molokai gave it to the persona name. They now use orange and purple from the same palette, and a test keeps every theme's error, success and warning, and the speakers, on different colours.
 - **The web fell back to the Cast theme when none was saved,** while the terminal and the docs say Man page is the default for both. The fallback, `/theme` with no argument and the first-paint colours of the speaker roles all follow Man page now.
