@@ -23,6 +23,17 @@ describe("web slash commands", () => {
 		}
 	});
 
+	it("blocks starting a goal or a review mid-run, but not reading, rewording or clearing a goal", () => {
+		// Both were declared blocking and missing from the set the server gates on, so a second /goal replaced the
+		// durable goal under a live run and then silently failed to start.
+		for (const command of ["/goal", "/goal ship it", "/goal 10 ship it", "/goal statusline fix", "/review"]) {
+			expect(isCommandBlocking(command), command).toBe(true);
+		}
+		for (const command of ["/goal status", "/goal clear", "/goal edit new text", "/goal edit"]) {
+			expect(isCommandBlocking(command), command).toBe(false);
+		}
+	});
+
 	it("allows read-only resource inspection during a turn", () => {
 		for (const command of [
 			"/mcp",

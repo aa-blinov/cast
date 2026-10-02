@@ -6,7 +6,14 @@ import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
 import { previewForkFiles } from "../core/fork-files.ts";
-import { clearGoal, editGoalObjective, formatGoalStatus, readGoal, startGoal } from "../core/goal.ts";
+import {
+	clearGoal,
+	editGoalObjective,
+	formatGoalSegment,
+	formatGoalStatus,
+	readGoal,
+	startGoal,
+} from "../core/goal.ts";
 import { runHooksForEvent } from "../core/hooks.ts";
 import type { Message } from "../core/llm.ts";
 import { compactSessionMessages, PLAN_COMPACTION_PROMPT, runMemoryMaintenanceAgent } from "../core/loop.ts";
@@ -3343,6 +3350,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				sessionId: session.id,
 				cwd: deps.cwd,
 				lspServers: deps.agent.daemonMode ? undefined : [...new Set(lspStatus().running.map((l) => l.id))],
+				goal: formatGoalSegment(readGoal(session.id)),
 			};
 			// Build ordered list from statusBar.order, then append any new segments
 			const ordered: StatusBarSegment[] = cfg.order
@@ -3823,16 +3831,30 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		},
 	},
 	{
-		// Its own route, ahead of `/goal <objective>`, because these two survive a
-		// running turn and starting a goal must not: a long autonomous run is
-		// exactly when you want to read the goal or call it off, and refusing
-		// both because they share a command word was the wrong trade.
-		match: (input) => input === "/goal status" || input === "/goal clear",
+		// Its own route, ahead of `/goal <objective>`, because these survive a running turn and starting a goal
+		// must not: a long autonomous run is exactly when you want to read the goal, reword it or call it off, and
+		// refusing them because they share a command word with starting one was the wrong trade.
+		match: (input) =>
+			input === "/goal status" ||
+			input === "/goal clear" ||
+			input === "/goal edit" ||
+			input.startsWith("/goal edit "),
 		whileRunning: "submit",
 		run: ({ input, session, showNotice }) => {
 			if (input === "/goal clear") {
 				clearGoal(session.id);
 				showNotice("[Goal cleared]");
+				return;
+			}
+			if (input === "/goal edit" || input.startsWith("/goal edit ")) {
+				// Rewording an objective must not reset its history: a plain /goal would start a fresh one and drop
+				// the turns and continuations spent getting here.
+				const next = input.slice("/goal edit".length).trim();
+				if (!next) {
+					showNotice("[Usage: /goal edit <new objective>]");
+					return;
+				}
+				showNotice(editGoalObjective(session.id, next) ? "[Goal objective updated]" : "[No goal to edit]");
 				return;
 			}
 			showNotice(`[${formatGoalStatus(readGoal(session.id))}]`);
@@ -3842,19 +3864,6 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		match: (input) => input === "/goal" || input.startsWith("/goal "),
 		run: async ({ input, images, deps, agent, session, showNotice }) => {
 			const raw = input === "/goal" ? "" : input.slice("/goal ".length);
-			const trimmed = raw.trim();
-			// Rewording an objective must not reset its history: a plain /goal
-			// would start a fresh one and drop the turns and continuations spent
-			// getting here.
-			if (trimmed.startsWith("edit ")) {
-				const next = trimmed.slice("edit ".length).trim();
-				if (!next) {
-					showNotice("[Usage: /goal edit <new objective>]");
-					return;
-				}
-				showNotice(editGoalObjective(session.id, next) ? "[Goal objective updated]" : "[No goal to edit]");
-				return;
-			}
 			const { goal: goalText, maxIterations } = parseGoalInput(raw);
 			if (!goalText) {
 				showNotice(
@@ -3867,10 +3876,13 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				return;
 			}
 			echoCommand(deps, input);
-			// The goal outlives this turn: it lands in .cast/goals/<session>.json
+			// The goal outlives this turn: it lands in ~/.cast/goals/<session>.json
 			// and rides along with every later turn until the agent closes it or
 			// the user clears it. maxIterations still caps *this* turn so the
 			// autonomous first pass can't loop forever.
+			const previous = readGoal(session.id);
+			if (previous?.status === "active" || previous?.status === "paused")
+				showNotice("[This replaces the previous goal]");
 			startGoal(session.id, goalText);
 			await agent.submit(buildGoalPrompt(goalText, maxIterations), images, maxIterations);
 			return;

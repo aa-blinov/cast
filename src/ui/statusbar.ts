@@ -35,6 +35,8 @@ export interface SegmentContext {
 	cwd?: string;
 	/** Language servers running for this cast (ids), for the `lsp` segment. */
 	lspServers?: string[];
+	/** The session's goal as one phrase (`goal active`), for the `goal` segment. */
+	goal?: string;
 }
 
 // ============================================================================
@@ -78,6 +80,7 @@ export const SEGMENT_DROP_ORDER = [
 	"usage",
 	"folder",
 	"context",
+	"goal",
 	"worktree",
 	"persona",
 	"model",
@@ -137,6 +140,7 @@ export const SEGMENT_MAX_WIDTH: Record<string, number> = {
 	elapsed: 7,
 	subagent: 9,
 	lsp: 20,
+	goal: 18,
 };
 
 // ============================================================================
@@ -272,6 +276,14 @@ registerStatusBarSegment({
 	defaultOn: false,
 	side: "right",
 	formatValue: (ctx) => (ctx.lspServers?.length ? ctx.lspServers.join(", ") : null),
+});
+
+registerStatusBarSegment({
+	id: "goal",
+	label: "Goal",
+	defaultOn: true,
+	side: "right",
+	formatValue: (ctx) => ctx.goal ?? null,
 });
 
 registerStatusBarSegment({

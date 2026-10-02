@@ -127,7 +127,9 @@ function writeGoal(sessionId: string, goal: GoalState): GoalState {
  */
 export function editGoalObjective(sessionId: string, objective: string): GoalState | undefined {
 	const goal = readGoal(sessionId);
-	if (!goal || goal.status !== "active") return undefined;
+	// A goal paused by an interrupted turn is still the user's goal: rewording it is the natural thing to do before
+	// carrying on, and the next run resumes it with the new text.
+	if (!goal || (goal.status !== "active" && goal.status !== "paused")) return undefined;
 	return writeGoal(sessionId, { ...goal, objective });
 }
 
@@ -256,6 +258,16 @@ export function formatGoalStatus(goal: GoalState | undefined): string {
 	if (!goal) return "No goal in this session";
 	const turns = `${goal.turns} turn${goal.turns === 1 ? "" : "s"}`;
 	return `Goal (${goal.status}, ${turns}, ${goal.continuations}/${goal.maxContinuations} continuations): ${goal.objective}${goal.note ? ` — ${goal.note}` : ""}`;
+}
+
+/**
+ * The goal as the status bar shows it, or undefined when there is nothing to point at: no goal, or one that has
+ * been closed as done. A goal that is stuck (blocked, out of budget, paused) is exactly what is worth seeing.
+ */
+export function formatGoalSegment(goal: GoalState | undefined): string | undefined {
+	if (!goal || goal.status === "complete") return undefined;
+	const word = { active: "active", paused: "paused", blocked: "blocked", budget_limited: "out of budget" } as const;
+	return `goal ${word[goal.status]}`;
 }
 
 /** Remove the goal file entirely (`/goal clear`). */

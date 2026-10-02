@@ -2223,6 +2223,27 @@ describe("/goal", () => {
 		expect(goal?.turns).toBe(1);
 	});
 
+	it("rewords the goal while a turn is running, and a bare /goal edit is a usage error, not a goal", async () => {
+		const idle = createFakeDeps();
+		const { readGoal } = await import("../src/core/goal.ts");
+		await handleInput("/goal make it fast", undefined, idle.deps);
+
+		const running = createFakeDeps({ running: true });
+		await handleInput("/goal edit make it fast and small", undefined, running.deps);
+		expect(readGoal("test-session")?.objective).toBe("make it fast and small");
+
+		await handleInput("/goal edit", undefined, running.deps);
+		expect(readGoal("test-session")?.objective).toBe("make it fast and small");
+		expect(String(running.calls.showNotice?.at(-1)?.[0] ?? "")).toContain("Usage: /goal edit");
+	});
+
+	it("says when a new goal replaces one that is still open", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/goal first thing", undefined, deps);
+		await handleInput("/goal second thing", undefined, deps);
+		expect(noticeText(calls)).toContain("replaces the previous goal");
+	});
+
 	it("refuses to start a goal mid-run but still answers status", async () => {
 		const { deps, calls } = createFakeDeps({ running: true });
 		const { readGoal } = await import("../src/core/goal.ts");

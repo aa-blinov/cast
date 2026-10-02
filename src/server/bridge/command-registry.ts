@@ -1103,11 +1103,13 @@ const commandHandlers: Record<string, CommandHandler> = {
 			clearGoal(ws.session.id);
 			return { ok: true, result: "Goal cleared" };
 		}
-		if (trimmed.startsWith("edit ")) {
-			const next = trimmed.slice("edit ".length).trim();
+		if (trimmed === "edit" || trimmed.startsWith("edit ")) {
+			const next = trimmed.slice("edit".length).trim();
 			if (!next) return { ok: false, error: "Usage: /goal edit <new objective>" };
 			const edited = editGoalObjective(ws.session.id, next);
-			return edited ? { ok: true, result: edited } : { ok: false, error: "No active goal to edit" };
+			return edited
+				? { ok: true, result: "Goal objective updated" }
+				: { ok: false, error: "No active goal to edit" };
 		}
 		const { goal, maxIterations } = parseGoalInput(arg);
 		if (!goal)
@@ -1115,8 +1117,10 @@ const commandHandlers: Record<string, CommandHandler> = {
 				ok: false,
 				error: "Usage: /goal [N] <what to achieve>  (also: /goal status, /goal edit <text>, /goal clear)",
 			};
-		// Durable: the objective lands in .cast/goals/<session>.json and is
-		// injected into every later turn until it is closed or cleared.
+		// Durable: the objective lands in ~/.cast/goals/<session>.json and is
+		// injected into every later turn until it is closed or cleared. Starting one replaces the last, so say so.
+		const previous = readGoal(ws.session.id);
+		const replaces = previous && (previous.status === "active" || previous.status === "paused");
 		startGoal(ws.session.id, goal);
 		// /goal is blocking (isCommandBlocking), so this only runs idle.
 		// Kick off the autonomous run with the chosen iteration budget and
@@ -1126,7 +1130,10 @@ const commandHandlers: Record<string, CommandHandler> = {
 		}).catch((error) => {
 			console.error(`[cast server] /goal submit failed:`, error);
 		});
-		return { ok: true, result: `Working toward the goal autonomously (budget: ${maxIterations})…` };
+		return {
+			ok: true,
+			result: `Working toward the goal autonomously (budget: ${maxIterations})…${replaces ? " This replaces the previous goal." : ""}`,
+		};
 	},
 	"/review": ({ ws, submit }) => {
 		// /review is blocking (isCommandBlocking), so this only runs idle.
