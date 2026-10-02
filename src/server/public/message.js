@@ -43,8 +43,16 @@ const SYSTEM_TAG_RE = /^\[system\]\s+/;
 // Port of goalPromptDisplay in src/core/goal.ts (a test keeps the two in step): the goal's own prompts are cast
 // talking to the model, so show the command typed and one-line notices, not a page of rules as the user's words.
 const GOAL_START_OBJECTIVE_RE = /\n\nGoal: ([\s\S]*?)\n\nWork as a careful senior engineer:/;
+const CODE_REVIEW_RANGE_RE = /^Review the changes in (.+?)\. The scope below was computed, not guessed/;
 export function goalPromptDisplay(content) {
 	if (typeof content !== "string") return null;
+	if (content.startsWith("Review the work done in this session as a careful senior engineer.")) {
+		return { role: "user", content: "/review" };
+	}
+	if (content.startsWith("Review the changes in ")) {
+		const range = CODE_REVIEW_RANGE_RE.exec(content)?.[1];
+		return { role: "user", content: range && !range.startsWith("working tree") ? `/code-review ${range}` : "/code-review" };
+	}
 	if (content.startsWith("You are working toward a goal autonomously.")) {
 		const objective = GOAL_START_OBJECTIVE_RE.exec(content)?.[1]?.trim();
 		return objective ? { role: "user", content: `/goal ${objective}` } : null;

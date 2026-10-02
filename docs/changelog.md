@@ -2,6 +2,18 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+- **`/goal resume`** continues a goal that was paused by an interruption or a failure. Until now the word became a new goal called "resume".
+
+### Fixed
+- **`/review` and `/code-review` show as typed.** The thread (terminal and web) and the session title showed the whole instruction page as if you had written it; it is now `/review` or `/code-review <range>`.
+- **`/goal`, `/review` and `/code-review` no longer print the command twice** in the terminal.
+- **Web commands refuse names they do not know.** `/mcp enable|disable`, `/skills enable|disable` and `/subagent-model-provider`, `/plan-model-provider` answered "enabled" or stored the name for a server, skill or provider that does not exist; they now say it is unknown, as the terminal already did.
+- **`/skills-sh` failures read as a message,** not as the installer's box drawing and "Agent detected" banner.
+- **`/ssh list` works in the terminal** as it does in the web.
+
 ## 0.53.1
 
 ### Fixed

@@ -541,6 +541,42 @@ describe("web bridge", () => {
 		expect(skills.find((skill) => skill.name === "from-amp")).toMatchObject({ skillssh: false });
 	});
 
+	it("refuses names it does not know for /skills|/mcp enable|disable and for the model-provider commands", async () => {
+		const bridge = createServerBridge(
+			makeResult({
+				projectDeps: {
+					noSkills: false,
+					noMcp: false,
+					cliSkillPaths: [],
+					cliMcpPaths: [],
+				} as StartupResult["projectDeps"],
+			}),
+		);
+		const ws = bridge.createSession();
+		for (const command of [
+			"/skills enable nosuch",
+			"/skills disable nosuch",
+			"/mcp enable nosuch",
+			"/mcp disable nosuch",
+			"/subagent-model-provider nosuch",
+			"/plan-model-provider nosuch",
+		]) {
+			await expect(bridge.executeCommand(ws.id, command), command).resolves.toMatchObject({ ok: false });
+		}
+	});
+
+	it("/goal resume needs an open goal and is not stored as one called resume", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		await expect(bridge.executeCommand(ws.id, "/goal resume")).resolves.toMatchObject({
+			ok: false,
+			error: "No goal to resume",
+		});
+		await expect(bridge.executeCommand(ws.id, "/goal status")).resolves.toMatchObject({
+			result: "No goal in this session",
+		});
+	});
+
 	it("sandbox sentinel creates a scratch dir named after the session id before hooks can use its cwd", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession(undefined, undefined, SANDBOX_CWD);
@@ -1989,6 +2025,8 @@ describe("web bridge", () => {
 	});
 
 	it("/subagent-model-provider <name> sets the slot and the next read returns it", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ providers: [{ name: "worker-provider", url: "http://localhost:1/v1", apiKey: "k" }] });
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const set = await bridge.executeCommand(ws.id, "/subagent-model-provider worker-provider");
@@ -2013,6 +2051,8 @@ describe("web bridge", () => {
 	});
 
 	it("/plan-model-provider <name> sets the slot and the next read returns it", async () => {
+		const { updateSettings } = await import("../src/core/settings.ts");
+		updateSettings({ providers: [{ name: "planner-provider", url: "http://localhost:1/v1", apiKey: "k" }] });
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const set = await bridge.executeCommand(ws.id, "/plan-model-provider planner-provider");
@@ -2299,7 +2339,7 @@ describe("web bridge", () => {
 		const result = await bridge.executeCommand(ws.id, "/goal");
 		expect(result).toEqual({
 			ok: false,
-			error: "Usage: /goal [N] <what to achieve>  (also: /goal status, /goal edit <text>, /goal clear)",
+			error: "Usage: /goal [N] <what to achieve>  (also: /goal status, /goal edit <text>, /goal resume, /goal clear)",
 		});
 		// No submit was fired — the loop stays quiet for at least one tick.
 		await new Promise((r) => setTimeout(r, 50));
@@ -3560,7 +3600,7 @@ describe("web bridge", () => {
 	});
 
 	it("concurrent /mcp enable and disable calls serialize their reconnect instead of racing", async () => {
-		const bridge = createServerBridge(makeResult());
+		const bridge = createServerBridge(makeResult({ mcpResult: { ...emptyMcp, allServerNames: ["srv"] } }));
 		const ws = bridge.createSession();
 
 		let releaseFirst: () => void = () => {};

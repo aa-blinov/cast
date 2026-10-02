@@ -391,6 +391,10 @@ const GOAL_CONTINUATION_PREFIX = "The goal above is still open.";
 const GOAL_NUDGE_PREFIX = "That pass changed nothing:";
 const GOAL_BUDGET_PREFIX = "The goal has used its continuation budget";
 
+const REVIEW_PROMPT_PREFIX = "Review the work done in this session as a careful senior engineer.";
+const CODE_REVIEW_BRIEF_PREFIX = "Review the changes in ";
+const CODE_REVIEW_RANGE_RE = /^Review the changes in (.+?)\. The scope below was computed, not guessed/;
+
 /**
  * The line to show for a prompt `/goal` or the goal drive put in the transcript: the wrapper around the objective
  * is shown as the command the person typed (`/goal <objective>`), and the continuation, nudge and wrap-up prompts as
@@ -398,6 +402,15 @@ const GOAL_BUDGET_PREFIX = "The goal has used its continuation budget";
  * titled the session "You are working toward a goal autonomously". The web client has a port of this in message.js.
  */
 export function goalPromptDisplay(text: string): GoalPromptDisplay | undefined {
+	// /review and /code-review are the same kind of thing: a command whose prompt is a page of instructions.
+	if (text.startsWith(REVIEW_PROMPT_PREFIX)) return { role: "user", content: "/review" };
+	if (text.startsWith(CODE_REVIEW_BRIEF_PREFIX)) {
+		const range = CODE_REVIEW_RANGE_RE.exec(text)?.[1];
+		return {
+			role: "user",
+			content: range && !range.startsWith("working tree") ? `/code-review ${range}` : "/code-review",
+		};
+	}
 	if (text.startsWith(GOAL_START_PREFIX)) {
 		const objective = GOAL_START_OBJECTIVE_RE.exec(text)?.[1]?.trim();
 		return objective ? { role: "user", content: `/goal ${objective}` } : undefined;

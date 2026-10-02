@@ -2238,6 +2238,21 @@ describe("/goal", () => {
 		expect(String(running.calls.showNotice?.at(-1)?.[0] ?? "")).toContain("Usage: /goal edit");
 	});
 
+	it('/goal resume continues the open goal, and is not a goal called "resume"', async () => {
+		const { deps, calls } = createFakeDeps();
+		const { readGoal, pauseGoalForAbort } = await import("../src/core/goal.ts");
+
+		await handleInput("/goal resume", undefined, deps);
+		expect(readGoal("test-session")).toBeUndefined();
+		expect(noticeText(calls)).toContain("No goal to resume");
+
+		await handleInput("/goal ship the importer", undefined, deps);
+		pauseGoalForAbort("test-session");
+		await handleInput("/goal resume", undefined, deps);
+		expect(readGoal("test-session")?.objective).toBe("ship the importer");
+		expect(calls["agent.submit"]?.length).toBe(2);
+	});
+
 	it("says when a new goal replaces one that is still open", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/goal first thing", undefined, deps);
