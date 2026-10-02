@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.53.1
 
 ### Fixed
 - **Stop during a subagent now stops the turn.** An abort sent while a `task` was running let the parent call the model again (often starting a second `task`) and take up to a minute to settle; it now ends as aborted right after the tool batch.
