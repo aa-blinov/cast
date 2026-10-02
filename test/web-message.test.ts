@@ -112,6 +112,9 @@ describe("goalPromptDisplay", () => {
 			GOAL_CONTINUATION_PROMPT,
 			GOAL_NUDGE_PROMPT,
 			GOAL_BUDGET_PROMPT,
+			"Review the work done in this session as a careful senior engineer.\n\n1. Identify",
+			"Review the changes in main..HEAD. The scope below was computed, not guessed: review every group.",
+			"Review the changes in working tree vs HEAD. The scope below was computed, not guessed: x",
 			"fix the tests please",
 		]) {
 			expect(goalPromptDisplay(text) ?? undefined, text.slice(0, 40)).toEqual(coreGoalPromptDisplay(text));

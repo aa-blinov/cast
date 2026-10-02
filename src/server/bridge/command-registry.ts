@@ -110,7 +110,13 @@ import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat 
 import { createSessionWorktree, listWorktrees, removeSessionWorktree } from "../../core/worktree.ts";
 import { DEFAULT_THEME_ID, WEB_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
-import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
+import {
+	buildGoalPrompt,
+	GOAL_MAX_OUTER_ITERATIONS,
+	parseGoalInput,
+	REVIEW_PROMPT,
+	SLASH_COMMANDS,
+} from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
 import { runDetached } from "./detached.ts";
 import { rewindTurn, undoLastTurn } from "./undo.ts";
@@ -709,12 +715,19 @@ const commandHandlers: Record<string, CommandHandler> = {
 		updateSettings({ subagentModel: arg });
 		return { ok: true, result: { subagentModel: arg } };
 	},
-	"/subagent-model-provider": ({ arg, setSubagentModelProvider, subagentModelProvider }) => {
+	"/subagent-model-provider": ({ arg, setSubagentModelProvider, subagentModelProvider, loadSettings }) => {
 		if (!arg) return { ok: true, result: { subagentModelProvider: subagentModelProvider ?? null } };
 		if (arg === "off" || arg === "reset") {
 			setSubagentModelProvider(undefined);
 			updateSettings({ subagentModelProvider: undefined });
 			return { ok: true, result: { subagentModelProvider: null } };
+		}
+		const providers = loadSettings().providers ?? [];
+		if (!providers.some((p) => p.name === arg)) {
+			return {
+				ok: false,
+				error: `Provider "${arg}" not found. Saved: ${providers.map((p) => p.name).join(", ") || "none"}`,
+			};
 		}
 		setSubagentModelProvider(arg);
 		updateSettings({ subagentModelProvider: arg });
@@ -741,12 +754,19 @@ const commandHandlers: Record<string, CommandHandler> = {
 		updateSettings({ planModel: arg });
 		return { ok: true, result: { planModel: arg } };
 	},
-	"/plan-model-provider": ({ arg, setPlanModelProvider, planModelProvider }) => {
+	"/plan-model-provider": ({ arg, setPlanModelProvider, planModelProvider, loadSettings }) => {
 		if (!arg) return { ok: true, result: { planModelProvider: planModelProvider ?? null } };
 		if (arg === "off" || arg === "reset") {
 			setPlanModelProvider(undefined);
 			updateSettings({ planModelProvider: undefined });
 			return { ok: true, result: { planModelProvider: null } };
+		}
+		const providers = loadSettings().providers ?? [];
+		if (!providers.some((p) => p.name === arg)) {
+			return {
+				ok: false,
+				error: `Provider "${arg}" not found. Saved: ${providers.map((p) => p.name).join(", ") || "none"}`,
+			};
 		}
 		setPlanModelProvider(arg);
 		updateSettings({ planModelProvider: arg });
@@ -1114,11 +1134,23 @@ const commandHandlers: Record<string, CommandHandler> = {
 				? { ok: true, result: "Goal objective updated" }
 				: { ok: false, error: "No active goal to edit" };
 		}
+		if (trimmed === "resume") {
+			const open = readGoal(ws.session.id);
+			if (!open || (open.status !== "active" && open.status !== "paused")) {
+				return { ok: false, error: "No goal to resume" };
+			}
+			void submit(ws.id, buildGoalPrompt(open.objective), undefined, undefined, undefined, {
+				maxOuterIterations: GOAL_MAX_OUTER_ITERATIONS,
+			}).catch((error) => {
+				console.error(`[cast server] /goal resume submit failed:`, error);
+			});
+			return { ok: true, result: `Resuming the goal (budget: ${GOAL_MAX_OUTER_ITERATIONS})…` };
+		}
 		const { goal, maxIterations } = parseGoalInput(arg);
 		if (!goal)
 			return {
 				ok: false,
-				error: "Usage: /goal [N] <what to achieve>  (also: /goal status, /goal edit <text>, /goal clear)",
+				error: "Usage: /goal [N] <what to achieve>  (also: /goal status, /goal edit <text>, /goal resume, /goal clear)",
 			};
 		// Durable: the objective lands in ~/.cast/goals/<session>.json and is
 		// injected into every later turn until it is closed or cleared. Starting one replaces the last, so say so.
@@ -1393,6 +1425,9 @@ const commandHandlers: Record<string, CommandHandler> = {
 		}
 		if (sub === "enable" || sub === "disable") {
 			if (!rest) return { ok: false, error: `Usage: /mcp ${sub} <name>` };
+			if (!mcpForSessionCwd(sessionCwd).allServerNames.includes(rest)) {
+				return { ok: false, error: `Unknown MCP server: ${rest}` };
+			}
 			updateSettings((current) => {
 				const disabled = new Set(current.disabledMcpServers ?? []);
 				if (sub === "disable") disabled.add(rest);
@@ -1473,6 +1508,13 @@ const commandHandlers: Record<string, CommandHandler> = {
 		}
 		if (sub === "enable" || sub === "disable") {
 			if (!rest) return { ok: false, error: `Usage: /skills ${sub} <name>` };
+			if (
+				!discoverSkillsForCwd(projectDeps, sessionCwd, projectTrusted).some(
+					(sk: { name: string }) => sk.name === rest,
+				)
+			) {
+				return { ok: false, error: `Unknown skill: ${rest}` };
+			}
 			updateSettings((current) => {
 				const disabled = new Set(current.disabledSkills ?? []);
 				if (sub === "disable") disabled.add(rest);

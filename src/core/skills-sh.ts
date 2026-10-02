@@ -90,7 +90,14 @@ export async function runSkillsSh(args: string[], timeout: number): Promise<stri
 		const execError = error as { stdout?: string; stderr?: string; message?: string };
 		const out = stripAnsi(execError.stdout || "").trim();
 		const err = stripAnsi(execError.stderr || execError.message || String(error)).trim();
-		const combined = [out, err].filter(Boolean).join("\n").trim();
+		// The CLI draws a box around its messages; as an error that is a column of bars and an "Agent detected" banner.
+		const combined = [out, err]
+			.filter(Boolean)
+			.join("\n")
+			.split("\n")
+			.map((line) => line.replace(/^[│●◇■◆└┌]\s*/u, "").trim())
+			.filter((line) => line && !line.includes("Agent detected"))
+			.join("\n");
 		throw new Error(combined || "skills.sh failed");
 	}
 }

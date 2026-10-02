@@ -121,7 +121,7 @@ import {
 	selectSkills,
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
-import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
+import { buildGoalPrompt, GOAL_MAX_OUTER_ITERATIONS, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
 import { copyToClipboard } from "./clipboard.ts";
 import { headerSegments } from "./header.ts";
 import { getKeybindings, type Keybinding, TUI_KEYBINDINGS } from "./input/keybindings.ts";
@@ -3281,7 +3281,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			// hosts" default below — a typo like "/ssh ad" (missing the second d)
 			// silently listed hosts instead of erroring on the unrecognized
 			// subcommand, same as bare /ssh.
-			if (sub) {
+			if (sub && sub !== "list") {
 				showNotice(`[Unknown /ssh subcommand "${sub}". Use /ssh add or /ssh remove.]`);
 				return;
 			}
@@ -3823,7 +3823,6 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				);
 				return;
 			}
-			echoCommand(deps, input);
 			showNotice(
 				`[Reviewing ${scope.files.length} file(s) in ${scope.groups.length} group(s); rules: ${scope.rules.map((r) => r.name).join(", ")}]${
 					scope.files.length > LARGE_REVIEW_FILES
@@ -3846,7 +3845,6 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Agent is running — wait for it to finish, or use /steer, before /review]");
 				return;
 			}
-			echoCommand(deps, input);
 			await agent.submit(REVIEW_PROMPT, images);
 			return;
 		},
@@ -3882,13 +3880,31 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		},
 	},
 	{
+		// The submitted prompt shows as the typed command (goalPromptDisplay), so these routes do not echo it again.
+		// A paused goal also resumes on the next prompt; this is the explicit way, and it keeps the word "resume"
+		// from becoming a goal called "resume".
+		match: (input) => input === "/goal resume",
+		run: async ({ input, images, deps, agent, session, showNotice }) => {
+			const goal = readGoal(session.id);
+			if (!goal || (goal.status !== "active" && goal.status !== "paused")) {
+				showNotice("[No goal to resume]");
+				return;
+			}
+			if (deps.running) {
+				showNotice("[Agent is running — wait for it to finish, or use /steer, before /goal resume]");
+				return;
+			}
+			await agent.submit(buildGoalPrompt(goal.objective), images, GOAL_MAX_OUTER_ITERATIONS);
+		},
+	},
+	{
 		match: (input) => input === "/goal" || input.startsWith("/goal "),
 		run: async ({ input, images, deps, agent, session, showNotice }) => {
 			const raw = input === "/goal" ? "" : input.slice("/goal ".length);
 			const { goal: goalText, maxIterations } = parseGoalInput(raw);
 			if (!goalText) {
 				showNotice(
-					"[Usage: /goal [N] <what to achieve> — persists until done (also: /goal status, /goal edit <text>, /goal clear)]",
+					"[Usage: /goal [N] <what to achieve> — persists until done (also: /goal status, /goal edit <text>, /goal resume, /goal clear)]",
 				);
 				return;
 			}
@@ -3896,7 +3912,6 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				showNotice("[Agent is running — wait for it to finish, or use /steer, before /goal]");
 				return;
 			}
-			echoCommand(deps, input);
 			// The goal outlives this turn: it lands in ~/.cast/goals/<session>.json
 			// and rides along with every later turn until the agent closes it or
 			// the user clears it. maxIterations still caps *this* turn so the

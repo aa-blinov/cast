@@ -296,4 +296,14 @@ describe("goalPromptDisplay", () => {
 		expect(goalPromptDisplay(GOAL_BUDGET_PROMPT)?.role).toBe("warning");
 		expect(goalPromptDisplay("fix the tests please")).toBeUndefined();
 	});
+
+	it("shows /review and /code-review as typed, not as their instruction pages", async () => {
+		const { REVIEW_PROMPT } = await import("../src/server/commands.ts");
+		const { goalPromptDisplay } = await import("../src/core/goal.ts");
+		expect(goalPromptDisplay(REVIEW_PROMPT)).toEqual({ role: "user", content: "/review" });
+		const brief = (range: string) =>
+			`Review the changes in ${range}. The scope below was computed, not guessed: review every group.\n\n## Scope`;
+		expect(goalPromptDisplay(brief("working tree vs HEAD"))).toEqual({ role: "user", content: "/code-review" });
+		expect(goalPromptDisplay(brief("main..HEAD"))).toEqual({ role: "user", content: "/code-review main..HEAD" });
+	});
 });
