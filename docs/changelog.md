@@ -24,6 +24,12 @@ All notable user-facing changes to cast, newest first.
 - **The web shows the goal too:** a `goal active` / `paused` / `blocked` / `out of budget` badge in the composer's role line, which clears when the goal is done or cleared. Until now only the terminal could say so, and only on asking.
 - **A `goal` status bar segment** shows `goal active`, `paused`, `blocked` or `out of budget`, and nothing once the goal is done or cleared. Until now a goal riding along with every turn (or one that had given up) was invisible unless you asked with `/goal status`. It is on by default; `/statusbar` toggles it.
 
+## Unreleased
+
+### Fixed
+- **Compaction no longer runs before every model call on a small window.** When the system prompt and tool schemas alone sit above the compaction threshold (a 30k window with a 13k trigger, say), each compaction left the next prompt over it again, so one ran per call, each paying for a summary and folding the previous summary into a newer one. After a compaction the next measured prompt now says whether it worked; if not, further compactions wait until the context has grown a margin past where it landed, and the run says so once. Checked on a long goal (three modules, three test files, 18 compactions before): 3 compactions, a faster run, the same correct result.
+- **A compaction right after a compaction.** The reading that decides it (the last measured prompt, and the index it was taken at) described the history from before the compaction, so a second compaction could follow at once. Nothing is due again until the provider measures a prompt.
+
 ## 0.52.15
 
 ### Fixed

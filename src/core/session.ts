@@ -273,8 +273,12 @@ interface CompactionSummary {
  */
 export function shouldCompact(_messages: Message[], config: AppConfig, lastPromptTokens?: number): boolean {
 	if (lastPromptTokens === undefined) return false;
-	const budget = inputTokenBudget(config);
-	return lastPromptTokens > budget * config.compactionThreshold;
+	return lastPromptTokens > compactionTriggerTokens(config);
+}
+
+/** The prompt size above which automatic compaction runs. */
+export function compactionTriggerTokens(config: AppConfig): number {
+	return inputTokenBudget(config) * config.compactionThreshold;
 }
 
 /**
