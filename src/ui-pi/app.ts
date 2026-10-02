@@ -181,6 +181,12 @@ export class PiApp {
 		});
 	}
 
+	/** Whether a question has the keyboard (a picker, a prompt): the progress box of a slow step does not. */
+	private modalOpen(): boolean {
+		const request = this.model?.modalRequest;
+		return request !== null && request !== undefined && request.kind !== "status";
+	}
+
 	private onKey(data: string): TuiInputListenerResult | undefined {
 		// The terminal says when its window gains or loses focus (DEC mode 1004);
 		// a notification is only worth sending while it is out of focus.
@@ -194,27 +200,33 @@ export class PiApp {
 		// PageUp at the very top is asking for what came before: page it in. The key
 		// still goes on to the scroll view, which has nothing left to scroll until
 		// the older turns land.
-		if (keys.matches(data, "history.older") && this.scrollView.scrollTop === 0 && model.agent.hasOlder) {
+		// With a question open these keys belong to it, not to the draft behind it: Ctrl+L would wipe the
+		// draft, Ctrl+G put a path into it, Ctrl+X suspend the screen under a pending permission.
+		const asking = this.modalOpen();
+		if (!asking && keys.matches(data, "history.older") && this.scrollView.scrollTop === 0 && model.agent.hasOlder) {
 			void model.onLoadOlder();
 		}
-		if (keys.matches(data, "input.attachImage")) {
+		if (!asking && keys.matches(data, "input.attachImage")) {
 			this.attachImage();
 			return { consume: true };
 		}
-		if (keys.matches(data, "input.externalEditor")) {
+		if (!asking && keys.matches(data, "input.externalEditor")) {
 			this.editExternally();
 			return { consume: true };
 		}
-		if (keys.matches(data, "editor.clearBuffer")) {
+		if (!asking && keys.matches(data, "editor.clearBuffer")) {
 			this.editor.setText("");
 			this.tui.requestRender();
 			return { consume: true };
 		}
 		// Ctrl+C: exit, after confirming, in every state. Stopping a turn is Esc's job.
+		if (!keys.matches(data, "input.abort") && !data.startsWith("\x1b[<")) this.lastCtrlC = 0;
 		if (keys.matches(data, "input.abort")) {
 			const now = Date.now();
-			if (now - this.lastCtrlC < HINT_MS) this.onQuit();
-			else {
+			if (now - this.lastCtrlC < HINT_MS) {
+				this.lastCtrlC = 0;
+				this.onQuit();
+			} else {
 				this.lastCtrlC = now;
 				this.flash("Press Ctrl+C again to exit");
 			}
@@ -223,12 +235,7 @@ export class PiApp {
 		// Esc stops a running turn, on the second press within two seconds; the
 		// draft is left as it is. Anything else Esc does (closing the autocomplete)
 		// is the editor's, so it only counts when nothing of the kind is open.
-		if (
-			keys.matches(data, "input.escape") &&
-			model.running &&
-			!this.tui.hasOverlay() &&
-			!this.editor.isShowingAutocomplete()
-		) {
+		if (keys.matches(data, "input.escape") && model.running && !asking && !this.editor.isShowingAutocomplete()) {
 			const now = Date.now();
 			if (now - this.lastEsc < HINT_MS) {
 				this.lastEsc = 0;
@@ -245,7 +252,12 @@ export class PiApp {
 	private submit(text: string): void {
 		const model = this.model;
 		if (!model || !text.trim()) return;
-		if (!model.canSubmit(text)) return;
+		// pi-tui has already emptied the composer: a refused message (a command during a turn, a lost daemon) goes
+		// back into it, as the notice says it does.
+		if (!model.canSubmit(text)) {
+			this.editor.setText(text);
+			return;
+		}
 		this.editor.addToHistory(text);
 		this.historySeen++;
 		this.editor.setText("");
@@ -340,6 +352,8 @@ export class PiApp {
 	update(model: AppModel): void {
 		const previous = this.model;
 		this.model = model;
+		// A turn that has ended is not the one a first Esc was meant for.
+		if (previous?.running && !model.running) this.lastEsc = 0;
 		const { agent } = model;
 		this.transcript.set({
 			messages: agent.messages,

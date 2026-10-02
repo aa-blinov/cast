@@ -102,18 +102,24 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 
 	// Ends the session: save it, close what was opened,
 	// hand the terminal back with `stopScreen`, say how to resume, exit.
+	let ending = false;
 	const endSession = (stopScreen: () => void) => {
+		// Ctrl+C and /quit can arrive again while the session is still closing: once is enough.
+		if (ending) return;
+		ending = true;
 		saveSession(result.session);
-		if (result.hooks) {
-			void runHooksForEvent(result.hooks, {
-				event: "SessionEnd",
-				cwd: result.cwd,
-				sessionId: result.session.id,
-				payload: { reason: "quit" },
-			});
-		}
+		const sessionEnd = result.hooks
+			? runHooksForEvent(result.hooks, {
+					event: "SessionEnd",
+					cwd: result.cwd,
+					sessionId: result.session.id,
+					payload: { reason: "quit" },
+				}).catch(() => {})
+			: Promise.resolve();
 		void drainProjectCheckpointWriters(2_500)
 			.finally(() => closeMcpConnections(result.mcpResult.connections))
+			// The SessionEnd hook gets a moment to finish; exiting right after cut it off.
+			.then(() => Promise.race([sessionEnd, new Promise((resolve) => setTimeout(resolve, 1_500))]))
 			.then(async () => {
 				// Stop drawing first, so the screen does not repaint over the resume hint.
 				stopScreen();

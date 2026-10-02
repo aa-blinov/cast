@@ -61,12 +61,31 @@ interface ModalBridge {
  * front end draws the matching modal and resolves it via the `resolve` callback.
  */
 export function createModalBridge(onLog: (text: string) => void): ModalBridge {
+	// Questions that have the keyboard, newest on top. A second one (a permission asked while a settings
+	// screen is open) is shown at once and the first comes back once it is answered; neither is lost.
+	const stack: ModalRequest[] = [];
+	// The progress box of a slow step: shown only while no question is.
+	let progress: ModalRequest | null = null;
 	let current: ModalRequest | null = null;
 	const listeners = new Set<() => void>();
 
-	const setRequest = (req: ModalRequest | null): void => {
-		current = req;
+	const publish = (): void => {
+		current = stack.at(-1) ?? progress;
 		for (const listener of listeners) listener();
+	};
+
+	const open = (request: ModalRequest): void => {
+		stack.push(request);
+		publish();
+	};
+
+	/** Takes a request off the stack, wherever it is; false when it already was (a second answer, a stale one). */
+	const close = (request: ModalRequest): boolean => {
+		const at = stack.indexOf(request);
+		if (at < 0) return false;
+		stack.splice(at, 1);
+		publish();
+		return true;
 	};
 
 	const pickers: Pickers = {
@@ -79,28 +98,27 @@ export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 					opts,
 					resolve: (value) => {
 						opts?.signal?.removeEventListener("abort", onAbort);
-						if (current === request) setRequest(null);
-						resolvePromise(value as T | null);
+						if (close(request)) resolvePromise(value as T | null);
 					},
 				};
 				const onAbort = () => request.resolve(null);
 				opts?.signal?.addEventListener("abort", onAbort, { once: true });
-				setRequest(request);
+				open(request);
 			});
 		},
 		promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null> {
 			return new Promise((resolvePromise) => {
-				setRequest({
+				const request: ModalRequest = {
 					kind: "text",
 					label,
 					defaultValue,
 					placeholder,
 					error,
 					resolve: (value) => {
-						setRequest(null);
-						resolvePromise(value);
+						if (close(request)) resolvePromise(value);
 					},
-				});
+				};
+				open(request);
 			});
 		},
 		pickMulti<T>(options: PickOption<T>[], opts?: PickOptions & { initialSelected?: T[] }): Promise<T[] | null> {
@@ -113,17 +131,18 @@ export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 				}
 			}
 			return new Promise((resolvePromise) => {
-				setRequest({
+				const request: ModalRequest = {
 					kind: "multi",
 					options: options as PickOption<unknown>[],
 					opts,
 					initialSelected: initialIndices,
 					resolve: (indices) => {
-						setRequest(null);
+						if (!close(request)) return;
 						if (indices === null) resolvePromise(null);
 						else resolvePromise(indices.map((i) => options[i]!.value));
 					},
-				});
+				};
+				open(request);
 			});
 		},
 		pickStatusBar(
@@ -132,48 +151,52 @@ export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 			opts?: { title?: string; sides?: boolean },
 		): Promise<StatusBarConfig | null> {
 			return new Promise((resolvePromise) => {
-				setRequest({
+				const request: ModalRequest = {
 					kind: "statusbar",
 					segments,
 					initialConfig,
 					opts,
 					resolve: (config) => {
-						setRequest(null);
-						resolvePromise(config);
+						if (close(request)) resolvePromise(config);
 					},
-				});
+				};
+				open(request);
 			});
 		},
 		settings(form: SettingsForm): Promise<SettingFollowUp | null> {
 			return new Promise((resolvePromise) => {
-				setRequest({
+				const request: ModalRequest = {
 					kind: "settings",
 					form,
 					resolve: (followUp) => {
-						setRequest(null);
-						resolvePromise(followUp);
+						if (close(request)) resolvePromise(followUp);
 					},
-				});
+				};
+				open(request);
 			});
 		},
 		viewLive(view: LiveView): Promise<void> {
 			return new Promise((resolvePromise) => {
-				setRequest({
+				const request: ModalRequest = {
 					kind: "view",
 					view,
 					resolve: () => {
-						setRequest(null);
-						resolvePromise();
+						if (close(request)) resolvePromise();
 					},
-				});
+				};
+				open(request);
 			});
 		},
 		status(label: string): () => void {
-			// Callers always dismiss the spinner before opening the next modal
-			// (in a finally, or right after the awaited step), so a plain clear is
-			// safe — nothing has replaced it by the time dismiss runs.
-			setRequest({ kind: "status", label });
-			return () => setRequest(null);
+			const request: ModalRequest = { kind: "status", label };
+			progress = request;
+			publish();
+			// Only its own box is taken down: a later step's must stay.
+			return () => {
+				if (progress !== request) return;
+				progress = null;
+				publish();
+			};
 		},
 		log(text: string): void {
 			onLog(text);
