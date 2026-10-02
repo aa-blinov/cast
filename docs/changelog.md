@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **`/dream` and `/distill` with nothing to work on return at once.** In a project with no conversation, no history and no memory they started an agent that wandered the folder for minutes (its context growing to 40k tokens) while the command waited with no output and held the project's memory queue. They now say "Nothing to consolidate yet".
+- **`/dream` says what it did.** It reported "N notes stored" where N was the number of notes now in memory, even when nothing new was added. It now reads "N notes kept, M removed".
+- **The memory docs said the agent stores memory through its `memory` tool.** It only searches. The page now lists who really writes memory (you, the checkpoint writer, dream, distill), and says plainly that with the defaults a short conversation writes nothing until a checkpoint threshold, an automatic dream or `/dream`. The `/memory checkpoint ...` subcommands are documented. The tool's own error, which claimed memory is written "at the end of a turn", no longer does.
+- **`docs/web-ux.md` was overwritten with the changelog's text** in 0.52.12 and later (a script reused the wrong file's contents). It is restored, with its motion section.
+
 ## 0.52.15
 
 ### Fixed

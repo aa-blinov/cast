@@ -65,12 +65,11 @@ Example layout:
 
 ## How memory gets written
 
-Four things write memory:
+Four things write memory (the agent is not one of them: its `memory` tool only
+searches, and a model that tries to "store" something is told so):
 
-1. **The agent itself**, through the `memory` tool. An entry the agent stores
-   is written straight into the project's `MEMORY.md` as well as the index, so
-   a fact learned mid-conversation survives in the file a person reads, and
-   survives the next dream, which reconciles the file rather than replacing it.
+1. **You**, by editing the files by hand. The search index picks the change up
+   on the next search.
 2. **The checkpoint writer.** While a conversation grows, Cast keeps a copy of
    the transcript in its context window. When the used context crosses a
    **threshold** (a percentage of the model's window), Cast quietly launches a
@@ -81,13 +80,22 @@ Four things write memory:
    default 13K tokens) so the writer always has room to finish. This is why a
    checkpoint is almost always fresh when a long conversation needs to be
    compacted.
-3. **Dream** (`/dream`, or automatically with `memoryDreamAuto`). Periodically
-   reviews the recent conversation history, keeps only durable facts, merges
-   duplicates, and removes stale entries from `MEMORY.md`. Default: every 7
-   days.
+3. **Dream** (`/dream`, or automatically with `memoryDreamAuto`). Reviews the
+   current conversation and the recent history of the project, keeps only
+   durable facts, merges duplicates, replaces entries a newer statement
+   contradicts, and removes stale ones from `MEMORY.md`. Default: every 7
+   days. With nothing to review (no conversation, no history, no memory yet)
+   it says so at once instead of starting an agent.
 4. **Distill** (`/distill`, or `memoryDistillAuto`). Looks for workflows you did
    repeatedly and packages them as reusable skills/personas/commands. Default:
    every 30 days.
+
+**With the defaults, a short conversation writes nothing:** the first checkpoint
+is at 5% of a large window, and automatic dream is off. A rule you state once
+survives into the next session only after a checkpoint threshold is crossed,
+an automatic dream runs, or you run `/dream`. Turn `memoryDreamAuto` on (and
+`memoryDreamIntervalDays` to `0` to dream at the start of every session) if you
+want facts picked up as you go.
 
 Writing is **best-effort**: if the model call fails, the conversation is
 unaffected and Cast reports a non-fatal warning. Memory writing can be switched
@@ -134,13 +142,16 @@ Scopes explained:
 | `/memory floor <0..1>` | Relative BM25 score floor for search (default `0.15`; `0` keeps all) |
 | `/memory reconcile on/off` | Re-sync memory files into the search index before searching |
 | `/memory checkpoint fork on/off` | Checkpoint writers reuse the parent prompt prefix (cache reuse) |
+| `/memory checkpoint thresholds <pct,..\|default>` | Window percentages that trigger a checkpoint (e.g. `20,50,80`) |
+| `/memory checkpoint reserved <tokens>` | Safety buffer below the window (default 13000) |
+| `/memory checkpoint caps <k=v,..\|default>` | Size caps for what a checkpoint writer may push |
 | `/memory dream on/off` | Toggle automatic dream consolidation |
 | `/memory dream interval <days>` | Days between dream runs (default 7) |
 | `/memory distill on/off` | Toggle automatic distill |
 | `/memory distill interval <days>` | Days between distill runs (default 30) |
 | `/memory runs` | List automatic background memory runs |
 | `/memory cancel <run-id>` | Cancel a background run |
-| `/dream` | Run memory consolidation now |
+| `/dream` | Run memory consolidation now; reports how many notes are in memory afterwards and how many were removed |
 | `/distill` | Package repeated workflows into reusable assets now |
 
 ## Configuration

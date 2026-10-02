@@ -1876,10 +1876,13 @@ async function runMemoryMaintenance(
 		};
 		if (kind === "dream") {
 			const result = await dreamProjectMemory(input);
-			return { ok: true, result: { removed: result.removed, stored: result.stored } };
+			return {
+				ok: true,
+				result: { removed: result.removed, stored: result.stored, skipped: result.skipped === true },
+			};
 		}
 		const result = await distillProjectMemory(input);
-		return { ok: true, result: { artifacts: result.artifacts } };
+		return { ok: true, result: { artifacts: result.artifacts, skipped: result.skipped === true } };
 	} catch (error) {
 		return { ok: false, error: error instanceof Error ? error.message : String(error) };
 	}

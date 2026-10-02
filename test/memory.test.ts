@@ -643,7 +643,8 @@ describe("project memory", () => {
 		const result = execMemorySearch({ operation: "store", query: "anything" }, join(root, "op-project"));
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("only searches");
-		expect(result.content).toContain("automatically");
+		expect(result.content).toContain("background");
+		expect(result.content).toContain("/dream");
 		// A plain search still works.
 		expect(
 			execMemorySearch({ operation: "search", query: "anything" }, join(root, "op-project")).isError,
@@ -880,6 +881,24 @@ describe("project memory", () => {
 				expect.objectContaining({ content: "Keep the indexed rule." }),
 			]);
 		});
+	});
+
+	it("skips dream and distill when there is nothing to consolidate, without starting the agent", async () => {
+		const projectCwd = join(root, "empty-project");
+		const session = createSession("test-model", projectCwd);
+		const runAgent = vi.fn(async () => ({ messages: [] }));
+		const input = {
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: "test-model",
+			config: testConfig,
+			messages: [],
+			runAgent,
+		};
+
+		expect(await dreamProjectMemory(input)).toEqual({ removed: 0, stored: 0, skipped: true });
+		expect(await distillProjectMemory(input)).toEqual({ artifacts: [], skipped: true });
+		expect(runAgent).not.toHaveBeenCalled();
 	});
 
 	it("runs dream through a maintenance agent and reconciles its file edits", async () => {

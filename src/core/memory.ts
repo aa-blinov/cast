@@ -1449,6 +1449,8 @@ function formatProjectMemoryForMaintenance(cwd: string): string {
 		.slice(0, 24_000);
 }
 
+const NO_PROJECT_TRAJECTORY = "(no project trajectory in this time window)";
+
 function formatProjectTrajectory(cwd: string, days: number): string {
 	const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 	const rows = getDb()
@@ -1487,7 +1489,7 @@ function formatProjectTrajectory(cwd: string, days: number): string {
 		lines.push(`[session ${row.session_id} · ${row.updated_at} · ${row.role} · #${row.seq}]\n${text}${calls}`);
 		if (lines.join("\n\n").length >= 80_000) break;
 	}
-	return lines.join("\n\n").slice(0, 80_000) || "(no project trajectory in this time window)";
+	return lines.join("\n\n").slice(0, 80_000) || NO_PROJECT_TRAJECTORY;
 }
 
 function formatExistingAssets(cwd: string): string {
@@ -1784,8 +1786,20 @@ function parseMemoryDreamOutput(raw: string): {
 	};
 }
 
+/**
+ * Whether there is anything to consolidate or distill: a conversation, recent history of this project, a memory
+ * already written or a checkpoint. Without any, the maintenance agent has nothing to read and wanders the folder
+ * for minutes, holding the project's memory queue while the command waits with no output.
+ */
+function hasMaintenanceMaterial(input: MemoryMaintenanceInput): boolean {
+	if (formatMemoryTranscript(input.messages).trim()) return true;
+	if (formatProjectTrajectory(input.cwd, 7) !== NO_PROJECT_TRAJECTORY) return true;
+	return listProjectMemory(input.cwd, 1).length > 0 || latestProjectMemoryCheckpoint(input.cwd) !== undefined;
+}
+
 async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDreamResult> {
 	if (!isMemoryWriteEnabled() || input.signal?.aborted) return { removed: 0, stored: 0, skipped: true };
+	if (!hasMaintenanceMaterial(input)) return { removed: 0, stored: 0, skipped: true };
 	if (input.runAgent) {
 		const before = listProjectMemory(input.cwd, 100);
 		const response = await input.runAgent({
@@ -2103,6 +2117,7 @@ export function listProjectMemoryArtifacts(cwd: string, limit = 100): MemoryArti
 
 async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDistillResult> {
 	if (!isMemoryWriteEnabled() || input.signal?.aborted) return { artifacts: [], skipped: true };
+	if (!hasMaintenanceMaterial(input)) return { artifacts: [], skipped: true };
 	if (input.runAgent) {
 		const response = await input.runAgent({
 			prompt: maintenanceAgentPrompt(input, "distill"),
@@ -2791,7 +2806,7 @@ export function execMemorySearch(args: Record<string, unknown>, cwd: string): To
 	const operation = typeof args.operation === "string" ? args.operation.trim().toLowerCase() : "";
 	if (operation && operation !== "search") {
 		return {
-			content: `The memory tool only searches — there is no "${operation}" operation. Durable memory is written for you automatically at the end of a turn (and by /memory dream), so nothing needs storing by hand. Re-run with operation "search" to look something up.`,
+			content: `The memory tool only searches — there is no "${operation}" operation. Durable memory is written for you in the background (checkpoints as a long conversation grows, and dream: automatic when enabled, or the user's /dream), so nothing needs storing by hand. If the user wants a fact kept now, suggest /dream. Re-run with operation "search" to look something up.`,
 			isError: true,
 		};
 	}
