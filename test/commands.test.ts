@@ -1324,18 +1324,6 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("share the working folder");
 	});
 
-	it("/continue refreshes SSH hosts for the resumed project", async () => {
-		const { deps, calls } = createFakeDeps();
-		const other = createSession("test-model", join(tmpdir(), `cast-other-project-${Date.now()}`));
-		other.messages = [{ role: "user", content: "other project" }];
-		saveSession(other);
-
-		await handleInput("/continue", undefined, deps);
-
-		expect(calls.setSshHosts).toHaveLength(1);
-		expect(noticeText(calls)).toContain("Continued session");
-	});
-
 	it("/continue does not send a foreign-provider model to the active provider", async () => {
 		const { deps, calls } = createFakeDeps();
 		const other = createSession("foreign-model", "/tmp");
@@ -1354,7 +1342,24 @@ describe("handleInput", () => {
 		const { deps, calls } = createFakeDeps();
 		// No sessions saved — only the current in-memory one exists.
 		await handleInput("/continue", undefined, deps);
-		expect(noticeText(calls)).toContain("No other session");
+		expect(noticeText(calls)).toContain("No earlier session in this folder");
+	});
+
+	it("/continue takes this folder's latest session with something in it, not an empty one or another folder's", async () => {
+		const { deps, calls } = createFakeDeps();
+		const earlier = createSession("test-model", "/tmp");
+		earlier.messages = [{ role: "user", content: "the one to go back to" }];
+		saveSession(earlier);
+		const elsewhere = createSession("test-model", join(tmpdir(), `cast-other-folder-${Date.now()}`));
+		elsewhere.messages = [{ role: "user", content: "another folder" }];
+		saveSession(elsewhere);
+		const empty = createSession("test-model", "/tmp");
+		saveSession(empty);
+
+		await handleInput("/continue", undefined, deps);
+
+		expect(deps.session.id).toBe(earlier.id);
+		expect(noticeText(calls)).toContain("Continued session");
 	});
 
 	it("/sessions with no saved history says so, rather than reporting a cancel", async () => {

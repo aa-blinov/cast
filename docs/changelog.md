@@ -5,6 +5,9 @@ All notable user-facing changes to cast, newest first.
 ## Unreleased
 
 ### Fixed
+- **`/continue` goes back to this folder's latest session with something in it.** It took the newest session of any folder, empty ones included (a `/clear` or `/new` that was never used), and could drop you into another project. It now does what `cast -c` does.
+- **`/copy` and copying by selecting text work in more places, and say what happened.** `/copy` knew only `xclip` and showed the shell's own error ("/bin/sh: 1: xclip: not found"). It now tries `pbcopy`, `wl-copy`, `xclip`, `xsel` or `clip`, and over SSH (where a local tool would fill the remote machine's clipboard) or when none is installed asks the terminal itself (OSC 52), saying that it cannot tell whether that arrived. Selecting text with the mouse uses the same path.
+- **A project's memory lease is taken back at once from a process that is gone.** Closing a terminal right after a turn left the lease for five minutes, and every session in that project then reported "Automatic dream scheduling failed: Timed out waiting for project memory lease" for as long.
 - **A table with many columns stays inside the screen.** Columns of a wide table were given their minimum width and the rest shrunk by one common factor, so the sum could exceed the room; the room is now shared out in proportion to how much wider than the minimum each column is. A fuzz test over thousands of random documents at every width from 24 columns up now guards this.
 - **Ctrl+X writes the draft to a file only you can read** (it may hold a secret), says so when it cannot write it, and says when the editor was stopped by a signal instead of "exited with code null".
 - **Lighter frames while a long answer streams.** A frame with no new token (the dots ticking) no longer lays the streamed blocks out again.

@@ -3,6 +3,7 @@ import { createElement, useEffect } from "react";
 import type { StartupResult } from "../core/startup.ts";
 import { setSuspendHook } from "../core/stdin-manager.ts";
 import { type AppModel, type AppModelProps, useAppModel } from "../ui/app-model.ts";
+import { copyToClipboard } from "../ui/clipboard.ts";
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import { theme } from "../ui/themes/index.ts";
 import { PiApp } from "./app.ts";
@@ -48,6 +49,13 @@ export async function runPiFrontEnd(options: PiFrontEndOptions): Promise<void> {
 		// mouse to the terminal, at the price of scrolling by keyboard only.
 		mouse: process.env.CAST_NO_MOUSE !== "1",
 		wheelScrollLines: "auto",
+		// Selecting text copies it: through the machine's clipboard tool when there is one (and not over SSH,
+		// where it would be the remote machine's), else the terminal's. The bare terminal write says "Copied!"
+		// whether or not anything arrived.
+		copySelection: async (text) => {
+			const copied = copyToClipboard(text);
+			return copied.ok ? true : copied.error;
+		},
 		scrollToEndIndicator: () => paint(" ↓ newest ", { color: theme().accent, bold: true }),
 	});
 	const store = createStore<AppModel>();

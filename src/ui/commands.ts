@@ -1,5 +1,6 @@
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { filesLostByRestore, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
@@ -107,6 +108,7 @@ import {
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
+import { copyToClipboard } from "./clipboard.ts";
 import { headerSegments } from "./header.ts";
 import { getKeybindings, type Keybinding, TUI_KEYBINDINGS } from "./input/keybindings.ts";
 import {
@@ -1499,12 +1501,16 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	{
 		match: (input) => input === "/continue",
 		run: async ({ deps, agent, session, config, showNotice }) => {
-			// Find the most recent session that isn't the current one — equivalent
-			// to `cast -c` but from within a running session.
+			// The latest session of this folder with something in it that isn't the current one — what `cast -c`
+			// does, from within a running session. An empty one (a /clear or /new that was never used) is not
+			// worth going back to, and another folder's session is not "continuing": /sessions lists those.
+			const here = resolve(deps.cwd);
 			const summaries = listSessionSummaries().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
-			const target = summaries.find((s) => s.id !== session.id);
+			const target = summaries.find(
+				(s) => s.id !== session.id && s.msgCount > 0 && s.cwd && resolve(s.cwd) === here,
+			);
 			if (!target) {
-				showNotice("[No other session to continue — this is the only one]");
+				showNotice("[No earlier session in this folder to continue — /sessions lists the others]");
 				return;
 			}
 			const chosen = loadSession(target.id);
@@ -1703,18 +1709,13 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				const msg = session.messages[i]!;
 				if (msg.role === "assistant" && typeof msg.content === "string" && msg.content.length > 0) {
 					const text = msg.content;
-					try {
-						const platform = process.platform;
-						if (platform === "darwin") execSync("pbcopy", { input: text });
-						else if (platform === "linux") execSync("xclip -selection clipboard", { input: text });
-						else if (platform === "win32") execSync("clip", { input: Buffer.from(text, "utf-16le") });
-						else {
-							showNotice("[Clipboard not supported on this platform]");
-							return;
-						}
-						showNotice(`[Copied ${text.length} chars to clipboard]`);
-					} catch (err) {
-						showNotice(`[Copy failed: ${err instanceof Error ? err.message : String(err)}]`);
+					const copied = copyToClipboard(text);
+					if (!copied.ok) showNotice(`[Copy failed: ${copied.error}]`);
+					else if (copied.verified) showNotice(`[Copied ${text.length} chars to the clipboard (${copied.via})]`);
+					else {
+						showNotice(
+							`[Sent ${text.length} chars to ${copied.via}: if nothing arrives, your terminal does not allow clipboard writes]`,
+						);
 					}
 					return;
 				}
