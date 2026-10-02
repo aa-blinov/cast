@@ -1445,12 +1445,14 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			try {
 				if (agent.daemonMode) {
 					const result = (await agent.runCommand(input)) as
-						| { removed?: number; stored?: number; artifacts?: unknown[] }
+						| { removed?: number; stored?: number; artifacts?: unknown[]; skipped?: boolean }
 						| undefined;
 					showNotice(
-						input === "/dream"
-							? `[Memory consolidated: ${result?.stored ?? 0} notes stored, ${result?.removed ?? 0} removed]`
-							: `[Workflows distilled: ${result?.artifacts?.length ?? 0} artifact${result?.artifacts?.length === 1 ? "" : "s"}]`,
+						result?.skipped
+							? NOTHING_TO_CONSOLIDATE
+							: input === "/dream"
+								? dreamNotice(result?.stored ?? 0, result?.removed ?? 0)
+								: `[Workflows distilled: ${result?.artifacts?.length ?? 0} artifact${result?.artifacts?.length === 1 ? "" : "s"}]`,
 					);
 					return;
 				}
@@ -1463,7 +1465,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 						messages: session.messages,
 						runAgent: runMemoryMaintenanceAgent,
 					});
-					showNotice(`[Memory consolidated: ${result.stored} notes stored, ${result.removed} removed]`);
+					showNotice(result.skipped ? NOTHING_TO_CONSOLIDATE : dreamNotice(result.stored, result.removed));
 				} else {
 					const result = await distillProjectMemory({
 						cwd: deps.cwd,
@@ -1474,7 +1476,9 @@ const COMMAND_ROUTES: CommandRoute[] = [
 						runAgent: runMemoryMaintenanceAgent,
 					});
 					showNotice(
-						`[Workflows distilled: ${result.artifacts.length} artifact${result.artifacts.length === 1 ? "" : "s"}]`,
+						result.skipped
+							? NOTHING_TO_CONSOLIDATE
+							: `[Workflows distilled: ${result.artifacts.length} artifact${result.artifacts.length === 1 ? "" : "s"}]`,
 					);
 				}
 			} catch (error) {
@@ -4016,6 +4020,13 @@ export function canSubmitDuringRun(text: string): boolean {
 
 const COMMAND_WORD_RE = /^\/[a-z][\w:-]*$/i;
 const FIRST_WORD_RE = /^(\S+)([\s\S]*)$/;
+const NOTHING_TO_CONSOLIDATE = "[Nothing to consolidate yet: no conversation, no history of this project, no memory]";
+
+/** `stored` is the number of notes now in project memory, not how many were added this time. */
+function dreamNotice(kept: number, removed: number): string {
+	return `[Memory consolidated: ${kept} note${kept === 1 ? "" : "s"} kept, ${removed} removed]`;
+}
+
 const KNOWN_COMMAND_WORDS = new Set(SLASH_COMMANDS.map((c) => c.name.split(" ")[0] ?? c.name));
 
 /** `/HELP` and `/Steer hi` are the commands they spell: the command word is case-insensitive, its arguments are not touched. */
