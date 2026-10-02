@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.15
 
 ### Fixed
 - **Quitting leaves only the resume line.** The screen was left by writing its whole last frame (header, input box, status bar, "Press Ctrl+C again to exit") into the terminal's scrollback, with the line that matters, how to resume, under it. It now just returns the terminal to what it showed before cast started.
