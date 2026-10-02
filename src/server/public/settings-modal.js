@@ -252,7 +252,7 @@ export function SettingsModal({
 		if (tab === "appearance" || tab === "personas" || tab === "updates") return;
 		load(tab);
 	}, [tab, activeId, load]);
-	const modalRef = useModalFocusTrap(true);
+	const modalRef = useModalFocusTrap(true, ".settings-tab.active");
 	useEffect(() => {
 		const onKey = (e) => {
 			if (e.key === "Escape") onClose();

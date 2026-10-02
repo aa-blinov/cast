@@ -40,6 +40,17 @@ export const icons = {
 				d: "M5.25 3A2.25 2.25 0 0 0 3 5.25v9.5A2.25 2.25 0 0 0 5.25 17h9.5A2.25 2.25 0 0 0 17 14.75v-9.5A2.25 2.25 0 0 0 14.75 3h-9.5Z",
 			}),
 		),
+	// A window with a side bar: says which panel a button opens, where a chevron only said "a direction".
+	panelLeft: icon(
+		h("g", null, h("rect", { x: 3, y: 4.5, width: 18, height: 15, rx: 2 }), h("path", { d: "M9.5 4.5v15" })),
+		20,
+		20,
+	),
+	panelRight: icon(
+		h("g", null, h("rect", { x: 3, y: 4.5, width: 18, height: 15, rx: 2 }), h("path", { d: "M14.5 4.5v15" })),
+		20,
+		20,
+	),
 	bookmark: icon2(
 		"M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z",
 		undefined,

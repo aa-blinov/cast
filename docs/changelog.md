@@ -11,6 +11,11 @@ All notable user-facing changes to cast, newest first.
 
 - **The new-session dialog fits a phone on one screen.** Persona name and source share a row, so the folder choice and the Create button are no longer below the fold.
 
+- **Signing in takes you back to the page you were going to.** A link to a session, or a login that expired while you worked, used to land on the empty home page afterwards.
+- **The web header's two panel buttons look like panels** (a window with a left or right bar) instead of two chevrons pointing opposite ways.
+- **Settings opens with its current tab focused,** not "Reload resources" with its tooltip over the tab row.
+- **The dashboard button is back on phones.** It was hidden although the dashboard already fits a phone.
+
 ### Added
 - `docs/web-ux.md`: the map of the browser client (surfaces, flows, responsive rules, decisions).
 
