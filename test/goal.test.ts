@@ -280,3 +280,20 @@ describe("goal completion check", () => {
 		expect(prompt.match(/<\/recent_tool_results>/g)).toHaveLength(1);
 	});
 });
+
+describe("goalPromptDisplay", () => {
+	it("shows the objective as typed and the drive's prompts as one-line notices", async () => {
+		const { buildGoalPrompt } = await import("../src/server/commands.ts");
+		const { goalPromptDisplay, GOAL_BUDGET_PROMPT, GOAL_CONTINUATION_PROMPT, GOAL_NUDGE_PROMPT } = await import(
+			"../src/core/goal.ts"
+		);
+		expect(goalPromptDisplay(buildGoalPrompt("ship the importer, with tests", 10))).toEqual({
+			role: "user",
+			content: "/goal ship the importer, with tests",
+		});
+		expect(goalPromptDisplay(GOAL_CONTINUATION_PROMPT)?.role).toBe("warning");
+		expect(goalPromptDisplay(GOAL_NUDGE_PROMPT)?.role).toBe("warning");
+		expect(goalPromptDisplay(GOAL_BUDGET_PROMPT)?.role).toBe("warning");
+		expect(goalPromptDisplay("fix the tests please")).toBeUndefined();
+	});
+});

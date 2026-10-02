@@ -1990,6 +1990,8 @@ function App() {
 	// composer (not the header, which is shared chrome) so it's always clear
 	// which role a message is about to go to, especially when switching
 	// between sessions that don't share one.
+	// The goal rides in the sidebar's summary of the session (refreshed as turns start and end).
+	const activeGoal = sessions.find((s) => s.id === activeId)?.goal;
 	const activePersonaLabel = session
 		? (personas.find((p) => p.name === session.persona)?.label ?? session.persona)
 		: null;
@@ -2345,6 +2347,7 @@ function App() {
 						<div class="composer-role-left">
 							${activePersonaLabel}
 							${session?.mode && session.mode !== "build" && html`<span class="composer-role-mode">${session.mode}</span>`}
+							${activeGoal && html`<span class="composer-role-mode composer-role-goal" title="Set with /goal; /goal status shows it, /goal clear drops it">${activeGoal}</span>`}
 							${
 								session?.cwd &&
 								html`<span class="composer-role-cwd" title=${session.cwd}>(<span class="composer-role-cwd-path">${`\u200e${isSandboxSessionCwd(session.cwd) ? "sandbox" : session.cwd}`}</span>)</span>`

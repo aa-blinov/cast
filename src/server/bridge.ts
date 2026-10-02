@@ -21,6 +21,7 @@ import {
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
 import { invalidateProjectFiles } from "../core/file-search.ts";
 import { type ForkFilesPreview, forkSessionWithFiles, previewForkFiles } from "../core/fork-files.ts";
+import { formatGoalSegment, readGoal } from "../core/goal.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { createClient, type Message, streamAndCollect } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
@@ -347,6 +348,8 @@ export interface SessionSummary {
 	 * also deletes that folder. */
 	isSandbox?: boolean;
 	messageCount: number;
+	/** The session's goal as one phrase (`goal active`, `goal blocked`...); null with none or when it is done, not absent: a client merging updates would otherwise keep the old phrase. */
+	goal?: string | null;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -2898,6 +2901,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			status,
 			isSandbox: (session.cwd ?? cwd) === join(homedir(), ".cast", "sandbox", `cast-${session.id}`),
 			messageCount: countTurnMessages(session.messages),
+			goal: formatGoalSegment(readGoal(session.id)) ?? null,
 			createdAt: session.createdAt,
 			updatedAt: session.updatedAt,
 		};
@@ -2919,6 +2923,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			status: effectiveStatusFromFile(cold.id),
 			isSandbox: (cold.cwd ?? cwd) === join(homedir(), ".cast", "sandbox", `cast-${cold.id}`),
 			messageCount: cold.msgCount,
+			goal: formatGoalSegment(readGoal(cold.id)) ?? null,
 			createdAt: cold.createdAt ?? cold.updatedAt,
 			updatedAt: cold.updatedAt,
 		};

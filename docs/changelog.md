@@ -17,7 +17,11 @@ All notable user-facing changes to cast, newest first.
 - **`/goal status`, `/goal edit` and `/goal clear` work while a turn runs** in both the terminal (`edit` was refused there) and the web composer, as the docs said. `/goal edit` also works on a goal paused by an interruption, and a bare `/goal edit` is a usage message instead of starting a goal called "edit".
 - **Starting a goal says when it replaces one that was still open,** in the terminal and over the API. Over the API `/goal edit` answers "Goal objective updated" instead of dumping the goal's JSON.
 
+- **A goal's own prompts no longer pose as your words.** The wrapper `/goal` sends, and the continuation, nudge and wrap-up prompts the goal drive injects, showed in the terminal and the web as a page of rules under "USER", and a goal session was titled "You are working toward a goal autonomously". The thread now shows `/goal <objective>` as typed and the others as one-line notices ("Goal: still open, continuing"), and the title is the objective.
+- **A refused command in the web composer keeps its text.** A `/goal ...` sent while a turn ran was refused (with an error in the transcript) and the typed text vanished; it is handed back to the composer, as a failed message already was.
+
 ### Added
+- **The web shows the goal too:** a `goal active` / `paused` / `blocked` / `out of budget` badge in the composer's role line, which clears when the goal is done or cleared. Until now only the terminal could say so, and only on asking.
 - **A `goal` status bar segment** shows `goal active`, `paused`, `blocked` or `out of budget`, and nothing once the goal is done or cleared. Until now a goal riding along with every turn (or one that had given up) was invisible unless you asked with `/goal status`. It is on by default; `/statusbar` toggles it.
 
 ## 0.52.15

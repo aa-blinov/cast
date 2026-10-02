@@ -324,6 +324,9 @@ export async function submitMessage(text, images, pendingDocs, context) {
 			}
 		} catch (err) {
 			addNotice(err.message, "error");
+			// A refused command (the agent is running, a bad argument) hands its text back to the composer,
+			// like a message that failed to send: retyping a long /goal to try again is not what anyone wants.
+			return false;
 		}
 		return true;
 	}
