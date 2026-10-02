@@ -463,6 +463,9 @@ describe("JSON response compression", () => {
 		}
 		expect(byPath["plain.ts"]!.additions).toBe(1);
 		expect(byPath["plain.ts"]!.deletions).toBe(1);
+		// No phantom empty context line after the last real one.
+		const hunk = byPath["plain.ts"]!.hunks[0] as { lines: Array<{ type: string }> };
+		expect(hunk.lines.map((l) => l.type)).toEqual(["-", "+"]);
 	});
 
 	it("gzip-encodes JSON responses that exceed the 8 KB threshold", async () => {

@@ -15,6 +15,21 @@ import { MAX_VOICE_SECONDS, startVoiceRecording, voiceUnavailableReason } from "
 const PERSONA_CMD_RE = /^\/persona\s+(\S*)$/i;
 
 /** The `@query` token ending at the caret; `@` must start a word, so an e-mail address doesn't count. Same rule as the TUI. */
+// Telling "denied" from "busy" matters: the first is fixed in the browser's site settings, the second by closing another app.
+export function voiceErrorMessage(error) {
+	switch (error?.name) {
+		case "NotFoundError":
+			return "No microphone found";
+		case "NotAllowedError":
+		case "SecurityError":
+			return "Microphone access was denied";
+		case "NotReadableError":
+			return "The microphone is in use by another app";
+		default:
+			return error?.message || "Could not start recording";
+	}
+}
+
 export function atTokenAt(value, caret) {
 	let from = caret;
 	while (from > 0 && !/\s/.test(value[from - 1])) from--;
@@ -115,7 +130,7 @@ export function Composer({
 			setRecordingSince(Date.now());
 		} catch (error) {
 			recorderRef.current = null;
-			setVoiceStatus(error?.name === "NotFoundError" ? "No microphone found" : "Microphone access was denied");
+			setVoiceStatus(voiceErrorMessage(error));
 		}
 	}, [finishRecording]);
 

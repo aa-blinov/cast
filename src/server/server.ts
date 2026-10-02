@@ -3151,7 +3151,10 @@ function parseDiff(raw: string): { files: DiffFile[] } {
 	let currentFile: DiffFile | null = null;
 	let currentHunk: DiffHunk | null = null;
 
-	for (const line of raw.split("\n")) {
+	const rawLines = raw.split("\n");
+	// The text ends with a newline, so the split leaves one empty element that is not a line of the file.
+	if (rawLines[rawLines.length - 1] === "") rawLines.pop();
+	for (const line of rawLines) {
 		if (line.startsWith("diff --git")) {
 			const match = DIFF_FILE_RE.exec(line);
 			currentFile = {
@@ -3199,6 +3202,8 @@ function parseDiff(raw: string): { files: DiffFile[] } {
 		}
 
 		if (!currentHunk) continue;
+		// "\ No newline at end of file" describes the line above it; it is not a line of either file.
+		if (line.startsWith("\\")) continue;
 
 		if (line.startsWith("+")) {
 			currentHunk.lines.push({ type: "+", content: line.slice(1) });

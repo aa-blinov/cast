@@ -38,6 +38,27 @@ export function parseSkillInvocation(content) {
 	return { name: unescape(match[1]), location: unescape(match[2]), args: args.trim() };
 }
 
+function attachmentChips(attachments) {
+	if (!attachments?.length) return null;
+	return html`
+		<div class="message-attachments">
+			${attachments.map(
+				(a) => html`
+				<span key=${a.name} class="message-attachment-chip" title=${a.path}>
+					<${icons.docFile} /><span class="message-attachment-name">${a.name}</span>
+				</span>
+			`,
+			)}
+		</div>
+	`;
+}
+
+// Shared by every kind of user message: one with a photo or a voice note used to lose these two.
+function forkRewindButtons(msg, onFork, onRewind) {
+	if (typeof msg.seq !== "number") return null;
+	return html`${onFork && html`<button type="button" class="message-fork" title="Fork before this message: a new session with the conversation up to here, without this message" aria-label="Fork before this message" onClick=${() => onFork(msg.seq)}><${icons.fork} /> Fork before</button>`}${onRewind && html`<button type="button" class="message-fork message-rewind" title="Rewind to before this message: put the files back, remove the conversation from here, or both" aria-label="Rewind to before this message" onClick=${() => onRewind(msg.seq)}><${icons.arrowUturnLeft} /> Rewind</button>`}`;
+}
+
 function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, onFork, onForkAfter, onRewind }) {
 	const role = msg.role || "assistant";
 	// Under an answer that ends a turn: fork through it (the conversation up to and including it).
@@ -148,7 +169,7 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 		const isRealSend = msg.content !== null;
 		return html`
 		<div class="message ${isRealSend ? "message-user" : "message-image-result"}">
-		<div class="message-label">${isRealSend ? "user" : "image (read)"}</div>
+		<div class="message-label">${isRealSend ? "user" : "image (read)"}${isRealSend && forkRewindButtons(msg, onFork, onRewind)}</div>
 			${content && html`<div class="message-content" dangerouslySetInnerHTML=${{ __html: escapeHtml(content) }} />`}
 			${msg.audios?.map((src, i) => html`<audio key=${`a${i}`} class="message-audio" controls preload="metadata" src=${src} aria-label="Voice message ${i + 1}"></audio>`)}
 			${
@@ -159,6 +180,7 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 				)}
 			</div>`
 			}
+			${attachmentChips(msg.attachments)}
 			${
 				previewSrc &&
 				html`<${FilePreviewModal}
@@ -185,32 +207,9 @@ function MessageView({ msg, renderMarkdown, escapeHtml, showReasoning = false, o
 
 	return html`
 	<div class="message message-${role}">
-		<div class="message-label">${labelMap[role] ?? role}${
-			role === "user" &&
-			onFork &&
-			typeof msg.seq === "number" &&
-			html`<button type="button" class="message-fork" title="Fork before this message: a new session with the conversation up to here, without this message" aria-label="Fork before this message" onClick=${() => onFork(msg.seq)}><${icons.fork} /> Fork before</button>`
-		}${
-			role === "user" &&
-			onRewind &&
-			typeof msg.seq === "number" &&
-			html`<button type="button" class="message-fork message-rewind" title="Rewind to before this message: put the files back, remove the conversation from here, or both" aria-label="Rewind to before this message" onClick=${() => onRewind(msg.seq)}><${icons.arrowUturnLeft} /> Rewind</button>`
-		}</div>
+		<div class="message-label">${labelMap[role] ?? role}${role === "user" && forkRewindButtons(msg, onFork, onRewind)}</div>
 		<div class="message-content ${role === "user" ? "" : "md-body"}" dangerouslySetInnerHTML=${{ __html: role === "user" ? escapeHtml(content) : renderMarkdown(content) }} />
-		${
-			msg.attachments?.length > 0 &&
-			html`
-			<div class="message-attachments">
-				${msg.attachments.map(
-					(a) => html`
-					<span key=${a.name} class="message-attachment-chip" title=${a.path}>
-						<${icons.docFile} /><span class="message-attachment-name">${a.name}</span>
-					</span>
-				`,
-				)}
-			</div>
-			`
-		}
+		${attachmentChips(msg.attachments)}
 	</div>
 `;
 }

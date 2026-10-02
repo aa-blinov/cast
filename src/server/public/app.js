@@ -23,7 +23,7 @@ import { describeFork } from "./fork-flow.js";
 import { rewindTo } from "./rewind-flow.js";
 import { undoLastTurn } from "./undo-flow.js";
 import { useModalFocusTrap } from "./modal-focus.js";
-import { BashConfirmCard, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
+import { BashConfirmCard, latestPlan, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { Sidebar as SidebarModule } from "./sidebar.js";
 import { closeSseConnection, openSseConnection } from "./sse-connection.js";
 import { handleSseEvent } from "./sse-events.js";
@@ -273,6 +273,8 @@ function initTooltips() {
 		// enough to filter fly-bys — a user has to hold the
 		// anything, which is the hover-intent.
 		el.addEventListener("focus", () => {
+			// Only for keyboard focus: after a click or a file dialog the browser hands focus back to the button, and the bubble then sat on top of what the person was looking at.
+			if (!el.matches(":focus-visible")) return;
 			cancelPending(el);
 			show(el);
 		});
@@ -2326,7 +2328,7 @@ function App() {
 							${
 								!running &&
 								html`
-									<${PlanDecisionCard} transition=${session?.planTransition ?? planTransition} onChoose=${handlePlanTransition} />
+									<${PlanDecisionCard} transition=${session?.planTransition ?? planTransition} onChoose=${handlePlanTransition} plan=${latestPlan(session?.messages, session?.cwd)} sessionId=${activeId} />
 									${session?.question && html`<${QuestionCard} question=${session.question} onChoose=${answerQuestion} />`}
 								`
 							}

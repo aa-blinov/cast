@@ -11,7 +11,7 @@ vi.mock(
 vi.mock("htm", () => ({ default: { bind: () => () => null } }), { virtual: true });
 vi.mock("preact", () => ({ h: () => null }), { virtual: true });
 
-import { detectDelimiter, fileExtOf, parseDelimited } from "../src/server/public/file-preview.js";
+import { detectDelimiter, fileExtOf, parseDelimited, splitLines } from "../src/server/public/file-preview.js";
 
 describe("web file preview helpers", () => {
 	it("detects CSV and TSV delimiters", () => {
@@ -30,5 +30,14 @@ describe("web file preview helpers", () => {
 		expect(fileExtOf("src/app.ts")).toBe("ts");
 		expect(fileExtOf(".env")).toBe("");
 		expect(fileExtOf("Makefile")).toBe("");
+	});
+});
+
+describe("splitLines", () => {
+	it("does not count the empty line after a final newline", () => {
+		expect(splitLines("a\nb\n")).toEqual(["a", "b"]);
+		expect(splitLines("a\nb")).toEqual(["a", "b"]);
+		expect(splitLines("")).toEqual([""]);
+		expect(splitLines("a\n\n")).toEqual(["a", ""]);
 	});
 });

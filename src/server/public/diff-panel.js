@@ -6,6 +6,24 @@ import { pressable } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
+// Added lines carry their new number, removed ones their old number. Context lines sit in both files: they carry
+// the new number and move both counters, or every number after them is off.
+export function numberHunkLines(hunk) {
+	let addN = hunk.newStart;
+	let delN = hunk.oldStart;
+	return hunk.lines.map((line, key) => {
+		const typeClass = line.type === "+" ? "diff-line-add" : line.type === "-" ? "diff-line-del" : "";
+		let num;
+		if (line.type === "+") num = addN++;
+		else if (line.type === "-") num = delN++;
+		else {
+			num = addN++;
+			delN++;
+		}
+		return { key, typeClass, num, content: line.content };
+	});
+}
+
 export function DiffPanel({
 	InputsExplorer,
 	FileExplorer: FileExplorerModule,
@@ -190,23 +208,7 @@ function ChangesView({ data, activeFile, onSelectFile, header, openClass, open, 
 	// Pre-compute hunk lines
 	let diffContent = null;
 	if (file && !file.stub && file.hunks.length > 0) {
-		diffContent = file.hunks.map((hunk, hi) => {
-			let addN = hunk.newStart;
-			let delN = hunk.oldStart;
-			const lines = hunk.lines.map((line, li) => {
-				const typeClass = line.type === "+" ? "diff-line-add" : line.type === "-" ? "diff-line-del" : "";
-				let num = "";
-				if (line.type === "+") {
-					num = addN;
-					addN++;
-				} else if (line.type === "-") {
-					num = delN;
-					delN++;
-				}
-				return { key: li, typeClass, num, content: line.content };
-			});
-			return { hi, hunk, lines };
-		});
+		diffContent = file.hunks.map((hunk, hi) => ({ hi, hunk, lines: numberHunkLines(hunk) }));
 	}
 
 	return html`

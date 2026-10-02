@@ -105,6 +105,13 @@ function loadHljs() {
 	return hljsModulePromise;
 }
 
+// A file ending in a newline has no last empty line; counting one showed a phantom numbered row.
+export function splitLines(content) {
+	const lines = content.split("\n");
+	if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+	return lines;
+}
+
 export function detectDelimiter(text, ext) {
 	if (ext === "tsv") return "\t";
 	const firstLine = text.slice(0, text.indexOf("\n") === -1 ? text.length : text.indexOf("\n"));
@@ -240,7 +247,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 			loadHljs()
 				.then(({ default: hljs }) => {
 					if (cancelled) return;
-					const lines = content.split("\n").map((line) => {
+					const lines = splitLines(content).map((line) => {
 						const result = hljs.getLanguage(hljsLang)
 							? hljs.highlight(line || " ", { language: hljsLang })
 							: hljs.highlightAuto(line || " ");
@@ -285,7 +292,7 @@ export function FilePreviewModal({ path, onClose, downloadHref, previewHref }) {
 		<div class="fs-preview-code-wrap"><div class="fs-preview-gutter" aria-hidden="true">${enhanced.lines.map((_, i) => html`<span key=${i}>${i + 1}</span>`)}</div>
 		<pre class="fs-preview-text fs-preview-code hljs"><code>${enhanced.lines.map((line, i) => html`<span key=${i} class="fs-preview-line" dangerouslySetInnerHTML=${{ __html: line }} />`)}</code></pre></div>`;
 	else {
-		const lines = content.split("\n");
+		const lines = splitLines(content);
 		body = html`<div class="fs-preview-code-wrap"><div class="fs-preview-gutter" aria-hidden="true">${lines.map((_, i) => html`<span key=${i}>${i + 1}</span>`)}</div>
 		<pre class="fs-preview-text fs-preview-code"><code>${lines.map((line, i) => html`<span key=${i} class="fs-preview-line">${line || " "}</span>`)}</code></pre></div>`;
 	}
