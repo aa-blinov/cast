@@ -1797,6 +1797,15 @@ describe("web bridge", () => {
 		expect(result.result).toMatchObject({ theme: expect.any(String) });
 	});
 
+	it("/theme with nothing saved reports the same default the terminal uses (man), and takes an id in any case", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		expect((await bridge.executeCommand(ws.id, "/theme")).result).toEqual({ theme: "man" });
+		expect(bridge.getConfig().theme).toBe("man");
+		const set = await bridge.executeCommand(ws.id, "/theme NORD");
+		expect((set.result as { theme: string }).theme).toBe("nord");
+	});
+
 	it("/theme <id> sets the theme and returns its label and colors", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

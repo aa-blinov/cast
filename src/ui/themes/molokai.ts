@@ -9,7 +9,7 @@ export const molokai: Theme = {
 		user: "#66d9ef",
 		agent: "#ae81ff",
 		tool: "#66d9ef",
-		persona: "#f92672",
+		persona: "#fd971f",
 		accent: "#66d9ef",
 		success: "#a6e22e",
 		warning: "#e6db74",

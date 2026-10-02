@@ -52,6 +52,9 @@ export const ALL_THEMES: Theme[] = [
 /** What the browser UI can show. */
 export const WEB_THEMES: Theme[] = ALL_THEMES.filter((t) => !t.terminalOnly);
 
+/** The theme when none is saved, in the terminal and in the browser. */
+export const DEFAULT_THEME_ID = man.id;
+
 let active: Theme = man;
 
 /** Get the full active theme object. */

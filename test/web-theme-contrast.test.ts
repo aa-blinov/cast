@@ -17,6 +17,18 @@ describe("web theme contrast", () => {
 
 	for (const theme of WEB_THEMES) {
 		const c = theme.colors;
+		it(`${theme.id}: role colours, lifted the way the page lifts them, read on the page, panels and cards`, () => {
+			for (const key of ["user", "agent", "tool", "persona", "success", "warning", "error"] as const) {
+				const lifted = [c.bg, c.bgSurface, c.bgRaised].reduce(
+					(color, surface) => readableText(color, TEXT, surface),
+					c[key],
+				);
+				for (const surface of [c.bg, c.bgSurface, c.bgRaised]) {
+					expect(contrast(lifted, surface), `${key} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+				}
+			}
+		});
+
 		it(`${theme.id}: accent labels, muted and dim text meet AA`, () => {
 			expect(contrast(accentForeground(c.accent, c.bg), c.accent)).toBeGreaterThanOrEqual(4.5);
 

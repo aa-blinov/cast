@@ -108,7 +108,7 @@ import { activeTaskIds, cancelTask, queuedTaskIds, runningTaskIds } from "../../
 import type { ModelReasoningMeta, ReasoningFormat } from "../../core/vendors.ts";
 import { buildReasoningParams, REASONING_FORMAT_OPTIONS, resolveReasoningFormat } from "../../core/vendors.ts";
 import { createSessionWorktree, listWorktrees, removeSessionWorktree } from "../../core/worktree.ts";
-import { WEB_THEMES } from "../../ui/themes/index.ts";
+import { DEFAULT_THEME_ID, WEB_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
 import { buildGoalPrompt, parseGoalInput, REVIEW_PROMPT, SLASH_COMMANDS } from "../commands.ts";
 import type { Broadcaster } from "./broadcaster.ts";
@@ -646,10 +646,10 @@ const commandHandlers: Record<string, CommandHandler> = {
 		// A UI preference, not agent state — shared with the TUI's settings.json
 		// `theme` field so picking one here also changes what `cast` shows next.
 		if (!arg) {
-			const current = loadSettings().theme ?? "cast";
+			const current = loadSettings().theme ?? DEFAULT_THEME_ID;
 			return { ok: true, result: { theme: current } };
 		}
-		const found = WEB_THEMES.find((t) => t.id === arg);
+		const found = WEB_THEMES.find((t) => t.id === arg.toLowerCase());
 		if (!found) {
 			return {
 				ok: false,

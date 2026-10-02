@@ -20,13 +20,13 @@
 		--cyan: #d8a657;
 		--accent-fg: var(--bg);
 		--violet: #d8a657;
-		--teal: #2dd4bf;
-		--purple: #a78bfa;
-		--blue: #60a5fa;
+		--teal: #7daea3;
+		--purple: #c8c8c8;
+		--blue: #89b482;
 		--green: #a9b665;
 		--amber: #e78a4e;
 		--rose: #ea6962;
-		--persona: #c084fc;
+		--persona: #d8a657;
 		--gradient-from: var(--cyan);
 		--gradient-to: var(--violet);
 		--gradient: linear-gradient(135deg, var(--gradient-from), var(--gradient-to));

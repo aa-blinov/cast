@@ -128,7 +128,7 @@ import {
 	resolveReasoningFormat,
 } from "../core/vendors.ts";
 import type { SessionWorktree } from "../core/worktree.ts";
-import { WEB_THEMES } from "../ui/themes/index.ts";
+import { DEFAULT_THEME_ID, WEB_THEMES } from "../ui/themes/index.ts";
 import type { ThemeColors } from "../ui/themes/types.ts";
 // Broadcast primitives (noteActivity, broadcast, broadcastSessionUpdate,
 // fireNotificationHook, persistDecisionState) live in ./bridge/broadcaster.ts
@@ -3458,7 +3458,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			baseURL: config.baseURL,
 			model: defaultModel,
 			persona: currentPersona.name,
-			theme: loadSettings().theme ?? "cast",
+			theme: loadSettings().theme ?? DEFAULT_THEME_ID,
 			cwd,
 			quickSessionPersona,
 			memoryEnabled: loadSettings().memoryEnabled !== false,

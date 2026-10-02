@@ -39,6 +39,14 @@ All notable user-facing changes to cast, newest first.
 - **`/reload` did not apply an edited server.** It reconnected only when the set of names changed, so editing a server's command, arguments or address and reloading did nothing. It compares each server's config now. `/mcp reconnect` also picks up a corrected config for a server that never started.
 - **A disabled project server vanished from `/mcp list`,** so it could not be switched back on from the list. Every configured name is listed, disabled ones included.
 
+## Unreleased
+
+### Fixed
+- **Role colours in the web UI are lifted to a readable contrast.** Muted and dim text already were, but the colours of the speaker labels and statuses (user, agent, tool, persona, success, warning, error) were drawn raw, so Nord's and Solarized's `agent` label sat at 4.4:1 and 3.4:1. Each is now moved toward the text colour only as far as the page, panels and cards need, so a palette keeps its hue. A check of every rendered text element in all 19 themes (about 6000 per run) now finds none under 4.5:1.
+- **Monokai gave the error colour to the agent label, the tool label and the accent** (all `#f92672`), so a failure read like any agent heading; Molokai gave it to the persona name. They now use orange and purple from the same palette, and a test keeps every theme's error, success and warning, and the speakers, on different colours.
+- **The web fell back to the Cast theme when none was saved,** while the terminal and the docs say Man page is the default for both. The fallback, `/theme` with no argument and the first-paint colours of the speaker roles all follow Man page now.
+- **`/theme NORD` was refused;** theme ids are taken in any case, in the terminal and the web.
+
 ## 0.52.15
 
 ### Fixed
