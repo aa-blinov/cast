@@ -119,6 +119,7 @@ import {
 } from "./settings-form.ts";
 import { getStatusBarSegments, SEGMENT_MAX_WIDTH, type SegmentContext, type StatusBarSegment } from "./statusbar.ts";
 import { ALL_THEMES, getActiveTheme } from "./themes/index.ts";
+import { logTuiError } from "./tui-errors.ts";
 import type { PendingImage, UseAgentSession } from "./useAgentSession.ts";
 
 const FORCE_HINT_RE = / Re-run with --force to proceed\.$/;
@@ -4013,6 +4014,15 @@ export function canSubmitDuringRun(text: string): boolean {
 }
 
 const COMMAND_WORD_RE = /^\/[a-z][\w:-]*$/i;
+const FIRST_WORD_RE = /^(\S+)([\s\S]*)$/;
+const KNOWN_COMMAND_WORDS = new Set(SLASH_COMMANDS.map((c) => c.name.split(" ")[0] ?? c.name));
+
+/** `/HELP` and `/Steer hi` are the commands they spell: the command word is case-insensitive, its arguments are not touched. */
+function lowerCommandWord(input: string): string {
+	const parts = FIRST_WORD_RE.exec(input);
+	const word = parts?.[1]?.toLowerCase();
+	return parts && word && KNOWN_COMMAND_WORDS.has(word) ? `${word}${parts[2]}` : input;
+}
 
 /**
  * Route a line of user input. Every slash command is handled
@@ -4020,7 +4030,7 @@ const COMMAND_WORD_RE = /^\/[a-z][\w:-]*$/i;
  */
 export async function handleInput(text: string, images: PendingImage[] | undefined, deps: CommandDeps): Promise<void> {
 	const { agent, session, config, running, onQuit, showNotice } = deps;
-	const input = text.trim();
+	const input = lowerCommandWord(text.trim());
 
 	if (!input) return;
 
@@ -4051,7 +4061,14 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 			showNotice(BUSY_NOTICE);
 			return;
 		}
-		await route.run({ input, text, images, deps, agent, session, config, running, onQuit, showNotice });
+		try {
+			await route.run({ input, text, images, deps, agent, session, config, running, onQuit, showNotice });
+		} catch (error) {
+			// A command that throws must say so: the composer was already cleared, and nothing else would.
+			const reason = error instanceof Error ? error.message : String(error);
+			showNotice(`[${input.split(WHITESPACE_RE)[0]} failed: ${reason}]`);
+			logTuiError("command failed", error instanceof Error ? (error.stack ?? reason) : reason);
+		}
 		return;
 	}
 
@@ -4082,6 +4099,13 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	// leading slash (a path such as /tmp/cast-clipboard-UUID.png) is still text.
 	const word = input.split(WHITESPACE_RE)[0] ?? "";
 	if (COMMAND_WORD_RE.test(word)) {
+		// A command that exists, given something it does not take (`/compact keep auth`), is not a typo.
+		if (KNOWN_COMMAND_WORDS.has(word.toLowerCase())) {
+			showNotice(
+				`[${word.toLowerCase()} did not take that: ${input.slice(word.length).trim() || "its arguments"}. See /help]`,
+			);
+			return;
+		}
 		const typed = word.slice(1).toLowerCase();
 		const close = SLASH_COMMANDS.filter((c) => !c.hidden && c.name.slice(1).startsWith(typed))
 			.slice(0, 3)

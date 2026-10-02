@@ -446,6 +446,33 @@ describe("handleInput", () => {
 		}
 	});
 
+	it("reads the command word without regard to case, and leaves the arguments alone", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/HELP", undefined, deps);
+		expect(calls["agent.addDisplayMessage"]).toBeDefined();
+		const steer = createFakeDeps();
+		steer.deps.running = true;
+		await handleInput("/Steer Keep THE Auth", undefined, steer.deps);
+		expect(steer.calls["agent.steer"]?.[0]).toEqual(["Keep THE Auth"]);
+	});
+
+	it("does not call a real command a typo when it is given what it does not take", async () => {
+		const { deps, calls } = createFakeDeps();
+		await handleInput("/compact keep auth", undefined, deps);
+		const notice = noticeText(calls);
+		expect(notice).toContain("/compact did not take that: keep auth");
+		expect(notice).not.toContain("Unknown command");
+	});
+
+	it("says so when a command throws, instead of leaving the cleared composer silent", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.agent.addDisplayMessage = () => {
+			throw new Error("boom");
+		};
+		await handleInput("/help", undefined, deps);
+		expect(noticeText(calls)).toContain("/help failed: boom");
+	});
+
 	it("/older reports the start of the session when nothing older remains", async () => {
 		const { deps, calls } = createFakeDeps();
 		const loadOlder = deps.agent.loadOlder;

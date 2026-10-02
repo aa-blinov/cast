@@ -948,7 +948,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				// status:running SSE event (which would otherwise be the first
 				// signal) only lands after the POST round-trip. Guarded so an
 				// already-streaming turn (steering) keeps its live blocks.
-				if (!streamingRef.current) updateStreaming(() => ({ blocks: [] }), true);
+				const showedSpinner = !streamingRef.current;
+				if (showedSpinner) updateStreaming(() => ({ blocks: [] }), true);
 				const attempt = async (client: ServerClient): Promise<boolean> => {
 					try {
 						await submitServerChat(
@@ -983,6 +984,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				};
 				if (!(await attempt(serverClient))) {
 					await reconnectAndWait();
+					// Nothing is running yet: the message only waits for the daemon, and the spinner would say otherwise.
+					if (showedSpinner) updateStreaming(() => null, true);
 					setError("Daemon unavailable — message kept until the daemon reconnects.");
 				} else {
 					setError(null);
@@ -1011,6 +1014,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			const failSetup = (error: unknown): void => {
 				ac.abort(error instanceof Error ? error.message : String(error));
 				runner.endRun(lease);
+				// The activity row was shown before setup began: without this it runs for good.
+				updateStreaming(() => null, true);
 				setError(error instanceof Error ? error.message : String(error));
 				const queued = runner.steeringQueue.drain();
 				if (queued.length > 0)
@@ -1057,41 +1062,51 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					setError(`Prompt blocked by hook: ${submitResult.reason ?? "no reason given"}`);
 					ac.abort("Prompt blocked by hook");
 					runner.endRun(lease);
+					updateStreaming(() => null, true);
 					return;
 				}
 				const hookContext = hookPromptContext(submitResult);
 				if (hookContext) text = `${text}\n\n<hook-context>${hookContext}</hook-context>`;
 			}
 
-			// Ensure the session row exists before appending its checkpoint
-			// (session_checkpoints has an FK to sessions) — the first turn of a
-			// fresh session has no row yet otherwise.
-			saveSession(session);
-			chk = await createCheckpoint(cwd);
-			if (!session.checkpoints) session.checkpoints = [];
-			session.checkpoints.push(chk);
-			// Persist alongside the in-memory array (session.checkpoints isn't in
-			// the session row — see session.ts) so /undo survives a restart.
-			appendCheckpoint(session.id, chk);
+			// Everything from here to the loop can throw (a full disk, a locked database, a missing tmp
+			// folder): the run must end and say so, not stay 'running' with every later message queued.
+			let userContent: Message["content"];
+			try {
+				// Ensure the session row exists before appending its checkpoint
+				// (session_checkpoints has an FK to sessions) — the first turn of a
+				// fresh session has no row yet otherwise.
+				saveSession(session);
+				chk = await createCheckpoint(cwd);
+				if (!session.checkpoints) session.checkpoints = [];
+				session.checkpoints.push(chk);
+				// Persist alongside the in-memory array (session.checkpoints isn't in
+				// the session row — see session.ts) so /undo survives a restart.
+				appendCheckpoint(session.id, chk);
 
-			const userContent =
-				images && images.length > 0
-					? [
-							{ type: "text" as const, text },
-							...images.map((img) => ({
-								type: "image_url" as const,
-								image_url: { url: img.dataUrl },
-							})),
-						]
-					: text;
-			appendMessage(session, { role: "user", content: userContent });
-			// Saved now (the daemon does the same) so the checkpoint can name this
-			// message: rewind and fork-with-files find a snapshot by it.
-			saveSession(session);
-			const turnStartSeq = seqOfMessage(session.id, session.messages[session.messages.length - 1] as Message);
-			if (turnStartSeq !== undefined) {
-				chk.userSeq = turnStartSeq;
-				updateLastCheckpoint(session.id, chk);
+				userContent =
+					images && images.length > 0
+						? [
+								{ type: "text" as const, text },
+								...images.map((img) => ({
+									type: "image_url" as const,
+									image_url: { url: img.dataUrl },
+								})),
+							]
+						: text;
+				appendMessage(session, { role: "user", content: userContent });
+				// Saved now (the daemon does the same) so the checkpoint can name this
+				// message: rewind and fork-with-files find a snapshot by it.
+				saveSession(session);
+				const turnStartSeq = seqOfMessage(session.id, session.messages[session.messages.length - 1] as Message);
+				if (turnStartSeq !== undefined) {
+					chk.userSeq = turnStartSeq;
+					updateLastCheckpoint(session.id, chk);
+				}
+			} catch (error) {
+				updateStreaming(() => null, true);
+				failSetup(error);
+				return;
 			}
 			// Append directly rather than refresh()'s rebuild-from-session.messages —
 			// an aborted or errored run doesn't merge its (possibly partial)
@@ -1530,6 +1545,43 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		});
 	}, [submit, backgroundTasks]);
 
+	// What the daemon says about the turn when this client attaches or reconnects. Streamed events are only
+	// delivered while attached, so the screen has to be made to match: a turn in progress gets somewhere to
+	// stream to, and one that ended while detached (or died with the daemon) leaves no half-turn, spinner or
+	// "queued" rows behind.
+	// A turn that was already running when this client attached, or that another client started: what streams here
+	// is only what came after (or a preview), so its text is not what the session kept. The streamed blocks are
+	// shown while it runs and dropped when it ends, and the history is read again from the saved session.
+	const watchingTurnRef = useRef(false);
+	const finishWatchedTurn = (): boolean => {
+		if (!watchingTurnRef.current) return false;
+		watchingTurnRef.current = false;
+		updateStreaming(() => null, true);
+		refresh();
+		return true;
+	};
+	const finishWatchedTurnRef = useRef(finishWatchedTurn);
+	finishWatchedTurnRef.current = finishWatchedTurn;
+	const applyDaemonStatusRef = useRef<(pending: { status?: AgentStatus; startedAt?: number }) => void>(() => {});
+	applyDaemonStatusRef.current = (pending) => {
+		if (!pending.status) return;
+		backendStartRef.current = pending.startedAt ?? null;
+		setStatus(pending.status);
+		if (pending.status === "running") {
+			if (!streamingRef.current) {
+				watchingTurnRef.current = true;
+				updateStreaming(() => ({ blocks: [] }), true);
+			}
+			return;
+		}
+		if (!finishWatchedTurnRef.current() && streamingRef.current) {
+			promoteStreamingToHistory();
+			updateStreaming(() => null, true);
+		}
+		setPendingSteers([]);
+		setPendingQueue([]);
+	};
+
 	// SSE only carries events emitted after this client attaches. Rehydrate
 	// decisions already persisted by the daemon so reconnecting does not lose
 	// a question or plan-approval picker that was waiting before the TUI opened.
@@ -1542,10 +1594,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				setPendingQuestion(pending.question);
 				setPendingPlanTransition(pending.planTransition);
 				if (pending.bashConfirm) askDaemonConfirmRef.current(pending.bashConfirm);
-				if (pending.status) {
-					backendStartRef.current = pending.startedAt ?? null;
-					setStatus(pending.status);
-				}
+				applyDaemonStatusRef.current(pending);
 			})
 			.catch(() => {});
 		return () => {
@@ -1662,10 +1711,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						setPendingQuestion(pending.question);
 						setPendingPlanTransition(pending.planTransition);
 						if (pending.bashConfirm) askDaemonConfirmRef.current(pending.bashConfirm);
-						if (pending.status) {
-							backendStartRef.current = pending.startedAt ?? null;
-							setStatus(pending.status);
-						}
+						applyDaemonStatusRef.current(pending);
 					})
 					.catch(() => {});
 			}
@@ -1750,8 +1796,15 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					if (typeof event.startedAt === "number") backendStartRef.current = event.startedAt;
 					setStatus(event.status);
 					if (event.status === "running") {
+						// Nothing streaming here yet means the turn is not this client's own (it did not show the
+						// spinner itself): see watchingTurnRef.
+						if (!streamingRef.current) watchingTurnRef.current = true;
 						updateStreaming(() => ({ blocks: [] }), true);
-					} else {
+					} else if (!finishWatchedTurnRef.current() && streamingRef.current) {
+						// The turn is over, and an error ends it without a session_end: commit what had streamed and
+						// stop the spinner, or it runs for good beside an idle status.
+						promoteStreamingToHistory();
+						updateStreaming(() => null, true);
 					}
 					break;
 				case "decision_state":
@@ -1835,7 +1888,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					break;
 				}
 				case "assistant_message":
-					promoteStreamingToHistory();
+					// A watched turn's blocks are only a preview: start the next one empty, history comes from the save.
+					if (watchingTurnRef.current) updateStreaming(() => ({ blocks: [] }), true);
+					else promoteStreamingToHistory();
 					break;
 				case "steering_injected":
 				case "followup_injected": {
@@ -1875,8 +1930,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				case "turn_meta":
 					break;
 				case "session_end": {
-					promoteStreamingToHistory();
-					updateStreaming(() => null, true);
+					if (!finishWatchedTurnRef.current()) {
+						promoteStreamingToHistory();
+						updateStreaming(() => null, true);
+					}
 					// The daemon ran the turn, so its totals and messages are what the status row's token and
 					// context figures need; nothing else brings them over to this side.
 					if (event.usage) {
