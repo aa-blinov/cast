@@ -5163,6 +5163,42 @@ describe("runAgentLoop — compaction", () => {
 		}
 	});
 
+	it("does not compact before every model call when compaction cannot get under the threshold", async () => {
+		// The prompt the provider measures stays at 1500 tokens against a trigger of 1350: the system prompt and
+		// tools alone are over it, so each compaction left the next prompt over it again, and one ran per call.
+		const events: AgentEvent[] = [];
+		const warnings: string[] = [];
+		const toolTurn = async () => ({
+			content: "",
+			thinking: "",
+			finishReason: "stop",
+			usage: { promptTokens: 1500, completionTokens: 10, totalTokens: 1510 },
+			toolCalls: [{ id: `t${Math.random()}`, name: "bash", arguments: JSON.stringify({ command: "echo hi" }) }],
+		});
+		const mock = vi.mocked(streamAndCollect);
+		mock.mockReset();
+		mock.mockImplementation(async (...args: unknown[]) => {
+			const purpose = (args[12] as { purpose?: string } | undefined)?.purpose;
+			if (purpose === "compaction") return { content: "SUMMARY", thinking: "", finishReason: "stop" };
+			return toolTurn();
+		});
+
+		await runAgentLoop([...seedHistory(6), { role: "user", content: "keep calling a tool" }], {
+			config: tinyBudgetConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			maxOuterIterations: 6,
+			lastPromptTokens: 1500,
+			sessionId: "futile-compaction",
+			onEvent: (e) => events.push(e),
+			onWarning: (w) => warnings.push(w),
+		});
+
+		expect(events.filter((e) => e.type === "compaction").length).toBeLessThanOrEqual(1);
+		expect(warnings.filter((w) => w.includes("cannot get this conversation below its threshold")).length).toBe(1);
+	});
+
 	it("mid-turn context guard compacts after a large tool result, before the next model call", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-compact-"));
 		try {

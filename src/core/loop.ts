@@ -125,6 +125,7 @@ import {
 } from "./review.ts";
 import {
 	commitCheckpointWatermark,
+	compactionTriggerTokens,
 	compactMessages,
 	createSession,
 	estimateTokens,
@@ -484,6 +485,9 @@ const DESTRUCTIVE_WRITE_TOOLS = new Set(["write", "edit", "patch", "apply_patch"
 /** What the goal's completion check reads of the session: the latest tool
  *  results, each cut short — enough to see what the checks returned. */
 const GOAL_JUDGE_TOOL_RESULTS = 10;
+
+/** After a compaction that could not get under the threshold, the next waits for this share of the input budget. */
+const COMPACTION_RETRY_MARGIN = 0.15;
 const GOAL_JUDGE_RESULT_CHARS = 1500;
 
 export const PARALLEL_SAFE_TOOL_NAMES = new Set([
@@ -2790,6 +2794,40 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// from `overflowCompacted` so we still try LLM-based compaction if the
 		// in-place shrink wasn't enough.
 		let toolResultTrimmed = false;
+		// Compaction that cannot help. When the system prompt and tool schemas alone sit above the compaction
+		// threshold (a small window), every compaction leaves the next prompt over it again, so one ran before
+		// every model call, each paying for a summary and folding the last summary into a newer one. After a
+		// compaction the next measured prompt says whether it worked; if not, further compactions wait until the
+		// context has grown a real margin past where it landed, and the person is told once.
+		let compactedSinceLastCall = false;
+		let compactionFloor: number | undefined;
+		let futileCompactionWarned = false;
+		// Until the provider measures a prompt again, the numbers this is given (the last measurement, the index it was
+		// taken at) describe the history from before the compaction, so nothing is due: that stale reading made a second
+		// compaction run straight after the first.
+		const compactionDue = (tokens: number | undefined): boolean =>
+			!compactedSinceLastCall &&
+			shouldCompact(messages, config, tokens) &&
+			(compactionFloor === undefined || (tokens ?? 0) > compactionFloor);
+		const settleCompaction = (promptTokens: number): void => {
+			compactedSinceLastCall = false;
+			const trigger = compactionTriggerTokens(config);
+			if (promptTokens < trigger) {
+				compactionFloor = undefined;
+				return;
+			}
+			const budget = inputTokenBudget(config);
+			// Never past 90% of the budget: beyond that the provider would refuse the request before another try.
+			compactionFloor = Math.min(
+				promptTokens + Math.ceil(budget * COMPACTION_RETRY_MARGIN),
+				Math.floor(budget * 0.9),
+			);
+			if (futileCompactionWarned) return;
+			futileCompactionWarned = true;
+			loopConfig.onWarning?.(
+				`Compaction cannot get this conversation below its threshold: the system prompt and tools alone take about ${Math.round(promptTokens / 1000)}k tokens of the ${Math.round(trigger / 1000)}k that triggers it. It will run less often now. A larger contextWindow (or compactionThreshold) fits this setup better.`,
+			);
+		};
 		// Goal-mode iteration budget (maxOuterIterations), enforced in the loop.
 		let outerIteration = 0;
 		// The main agent turn loop is inherently sequential: each iteration
@@ -2810,10 +2848,13 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			syncSystemPrompt(true);
 
 			// Compaction (suppressed for short-lived system agents)
-			if (!loopConfig.skipCompaction && shouldCompact(messages, config, loopConfig.lastPromptTokens)) {
+			if (!loopConfig.skipCompaction && compactionDue(loopConfig.lastPromptTokens)) {
 				// biome-ignore lint/performance/noAwaitInLoops: sequential agent turn loop
 				const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
-				if (result.compacted) appendMemoryRebuildBoundary();
+				if (result.compacted) {
+					compactedSinceLastCall = true;
+					appendMemoryRebuildBoundary();
+				}
 				if (!result.compacted && result.error) {
 					onEvent({ type: "compaction_failed", reason: result.error });
 				}
@@ -3165,6 +3206,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				if (completion.usage) {
 					loopConfig.lastPromptTokens = completion.usage.promptTokens;
 					measuredAt = requestLength;
+					if (compactedSinceLastCall) settleCompaction(completion.usage.promptTokens);
 					onEvent({
 						type: "usage",
 						usage: completion.usage,
@@ -3378,14 +3420,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					measuredAt !== undefined && loopConfig.lastPromptTokens !== undefined
 						? loopConfig.lastPromptTokens + estimateTokens(messages.slice(measuredAt))
 						: estimateTokens(messages) + Math.ceil(JSON.stringify(tools).length / 3.8);
-				if (
-					toolCalls &&
-					toolCalls.length > 0 &&
-					!loopConfig.skipCompaction &&
-					shouldCompact(messages, config, contextEstimate)
-				) {
+				if (toolCalls && toolCalls.length > 0 && !loopConfig.skipCompaction && compactionDue(contextEstimate)) {
 					const result = await performCompaction(messages, config, currentModel, signal, loopConfig, onEvent);
-					if (result.compacted) appendMemoryRebuildBoundary();
+					if (result.compacted) {
+						compactedSinceLastCall = true;
+						appendMemoryRebuildBoundary();
+					}
 					if (!result.compacted && result.error) {
 						onEvent({ type: "compaction_failed", reason: result.error });
 					}
