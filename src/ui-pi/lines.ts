@@ -1,5 +1,4 @@
-import { truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { DEFAULT_BASH_TIMEOUT_MS } from "../core/config.ts";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { type OpenFence, type RenderedLine, renderMarkdownLines, trailingOpenFence } from "../ui/markdown-terminal.ts";
 import { spanProps } from "../ui/span-style.ts";
 import { theme } from "../ui/themes/index.ts";
@@ -16,6 +15,8 @@ import { sanitize } from "./sanitize.ts";
 
 export const INDENT = 4;
 const CODE_INDENT = 4;
+/** "  * ": the margin that tells a tool row from the text around it. */
+const MARGIN_WIDTH = 4;
 const SYSTEM_PREFIX = "[system] ";
 const THINK_TAG_RE = /<\/?think[^>]*>/g;
 
@@ -84,8 +85,9 @@ function summaryPieces(call: ToolCallEntry): Array<{ text: string; style: "summa
 		case "bash":
 			return [
 				{ text: flat(model.command), style: "summary" },
-				...(model.timeoutMs !== undefined && model.timeoutMs !== DEFAULT_BASH_TIMEOUT_MS
-					? [{ text: ` (timeout ${formatTimeout(model.timeoutMs)})`, style: "meta" as const }]
+				// The deadline that will apply, default or chosen: the reason a command is cut off is worth seeing before it happens.
+				...(model.timeoutMs !== undefined
+					? [{ text: ` * timeout ${formatTimeout(model.timeoutMs)}`, style: "meta" as const }]
 					: []),
 			];
 		case "read":
@@ -124,18 +126,32 @@ export function toolRowLines(call: ToolCallEntry, width: number): string[] {
 			)
 		: "";
 	const tone = { color: failed ? colors.error : colors.muted };
-	const summary = summaryPieces(call)
-		.map((piece) => {
-			if (piece.style === "added") return paint(piece.text, { color: colors.success });
-			if (piece.style === "removed") return paint(piece.text, { color: colors.error });
-			if (piece.style === "meta") return paint(piece.text, { color: colors.muted });
-			return paint(piece.text, tone);
-		})
+	const render = (piece: ReturnType<typeof summaryPieces>[number]) => {
+		if (piece.style === "added") return paint(piece.text, { color: colors.success });
+		if (piece.style === "removed") return paint(piece.text, { color: colors.error });
+		if (piece.style === "meta") return paint(piece.text, { color: colors.muted });
+		return paint(piece.text, tone);
+	};
+	const pieces = summaryPieces(call);
+	// The note after the command (its deadline) is kept apart so a running row, which is cut to one line, trims the
+	// command and not the note.
+	const summary = pieces
+		.filter((piece) => piece.style !== "meta")
+		.map(render)
+		.join("");
+	const note = pieces
+		.filter((piece) => piece.style === "meta")
+		.map(render)
 		.join("");
 	const failure = failed ? paint(" failed", { color: colors.error }) : "";
-	const row = margin + name + badge + summary + failure;
-	if (running) return [truncateToWidth(row, width, "…")];
-	return wrapTextWithAnsi(row, width).map((line) => truncateToWidth(line, width, "…"));
+	const tail = note + failure;
+	if (running) {
+		const room = Math.max(1, width - visibleWidth(tail));
+		return [truncateToWidth(margin + name + badge + summary, room, "…") + tail];
+	}
+	// A finished command wraps in full, its continuation under the text and not under the margin.
+	const body = wrapTextWithAnsi(name + badge + summary + tail, Math.max(1, width - MARGIN_WIDTH));
+	return body.map((line, i) => truncateToWidth((i === 0 ? margin : " ".repeat(MARGIN_WIDTH)) + line, width, "…"));
 }
 
 /** One ordered block of an assistant turn. */
