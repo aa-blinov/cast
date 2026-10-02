@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { EventSource } from "undici";
 import type { SessionState } from "../core/session.ts";
 import { API_V1_PREFIX } from "./api-v1.ts";
+import { canBind, rememberedBind, type ServerBind } from "./daemon-bind.ts";
 import {
 	acquireStartLock,
 	clearServerState,
@@ -98,6 +99,11 @@ export async function ensureServerClient(): Promise<ServerClient | undefined> {
  * Mirrors index.ts's spawn: this module is inlined into dist/index.js by
  * esbuild, so import.meta.url resolves to the CLI entry in both modes.
  */
+/** The remembered address when it can be listened on right now, else a private random port. */
+export function spawnBind(saved: ServerBind | undefined, free: boolean): ServerBind {
+	return saved && free ? saved : { host: "127.0.0.1", port: 0 };
+}
+
 async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 	const logFile = join(homedir(), ".cast", "server.log");
 	const selfPath = fileURLToPath(import.meta.url);
@@ -106,9 +112,22 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 	// levels up; in release it is inlined into dist/index.js → repo root is
 	// one level up from dist/. Match index.ts's spawnCwd accordingly.
 	const spawnCwd = isRelease ? join(dirname(selfPath), "..") : join(dirname(selfPath), "..", "..");
+	// The address the person chose for their daemon (`--public`), when it is free: a screen that lost its daemon (an
+	// upgrade, a crash) must bring it back where it was, not on a private port that takes the web address down.
+	const saved = rememberedBind();
+	const bind = spawnBind(saved, saved ? await canBind(saved) : false);
 	const args = isRelease
-		? [join(spawnCwd, "dist", "index.js"), "server", "start", "--port", "0"]
-		: ["--import", "tsx", "./src/server/index.ts", "--port", "0", "--host", "127.0.0.1"];
+		? [
+				join(spawnCwd, "dist", "index.js"),
+				"server",
+				"start",
+				"--port",
+				String(bind.port),
+				"--host",
+				bind.host,
+				"--no-remember",
+			]
+		: ["--import", "tsx", "./src/server/index.ts", "--port", String(bind.port), "--host", bind.host];
 	const { openSync } = await import("node:fs");
 	const logFd = openSync(logFile, "a");
 	const child = spawn(process.execPath, args, {
@@ -118,8 +137,8 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 		env: {
 			...process.env,
 			CAST_CWD: homedir(),
-			CAST_SERVER_PORT: "0",
-			CAST_SERVER_HOST: "127.0.0.1",
+			CAST_SERVER_PORT: String(bind.port),
+			CAST_SERVER_HOST: bind.host,
 			CAST_SERVER_FOREGROUND: "0",
 			CAST_VERSION: process.env.CAST_VERSION ?? "0.0.0",
 		},
