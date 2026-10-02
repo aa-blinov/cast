@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.52.13
 
 ### Fixed
 - **A bash row shows its timeout again, and keeps it.** Since the move to the new screen the deadline was hidden unless the model had chosen one, so a command cut off after the default 3 minutes gave no warning. Every foreground bash row now ends with ` * timeout 3m` (dim, after the command; the word stays so it is not read as how long the command took), and a long command that is still running is trimmed in the middle of the command, not at the end where the deadline sits. A finished command that wraps now continues under its text instead of at column 0.
