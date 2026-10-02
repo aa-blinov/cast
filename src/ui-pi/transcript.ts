@@ -44,6 +44,7 @@ export class Transcript implements Component {
 	private state: TranscriptState = { messages: [], streaming: null, error: null, retry: null, showReasoning: false };
 	private fences: Array<OpenFence | null> = [];
 	private cache = new WeakMap<ChatMessage, { key: string; lines: string[] }>();
+	private streamCache = new WeakMap<StreamingState["blocks"][number], { key: string; lines: string[] }>();
 
 	set(state: TranscriptState): void {
 		if (state.messages !== this.state.messages) {
@@ -65,6 +66,7 @@ export class Transcript implements Component {
 
 	invalidate(): void {
 		this.cache = new WeakMap();
+		this.streamCache = new WeakMap();
 	}
 
 	render(width: number): string[] {
@@ -99,7 +101,15 @@ export class Transcript implements Component {
 			let fence: OpenFence | null = null;
 			let runningTool = false;
 			for (const block of streaming.blocks) {
-				for (const line of blockLines(block, { width: content, showReasoning, openFence: fence })) out.push(line);
+				// A frame with no new token (the dots ticking) lays out nothing again: a block is replaced, not
+				// edited, when text arrives, so the same object is the same text.
+				const key = `${content}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;
+				let hit = this.streamCache.get(block);
+				if (!hit || hit.key !== key) {
+					hit = { key, lines: blockLines(block, { width: content, showReasoning, openFence: fence }) };
+					this.streamCache.set(block, hit);
+				}
+				for (const line of hit.lines) out.push(line);
 				if (block.kind === "tool") {
 					if (block.call.status === "running") runningTool = true;
 				} else fence = trailingOpenFence(String(block.text ?? ""), fence);

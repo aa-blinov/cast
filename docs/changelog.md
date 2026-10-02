@@ -5,6 +5,9 @@ All notable user-facing changes to cast, newest first.
 ## Unreleased
 
 ### Fixed
+- **A table with many columns stays inside the screen.** Columns of a wide table were given their minimum width and the rest shrunk by one common factor, so the sum could exceed the room; the room is now shared out in proportion to how much wider than the minimum each column is. A fuzz test over thousands of random documents at every width from 24 columns up now guards this.
+- **Ctrl+X writes the draft to a file only you can read** (it may hold a secret), says so when it cannot write it, and says when the editor was stopped by a signal instead of "exited with code null".
+- **Lighter frames while a long answer streams.** A frame with no new token (the dots ticking) no longer lays the streamed blocks out again.
 - **A message the composer refuses stays in it.** Pressing Enter on a command during a turn (or while the daemon was away) emptied the composer and, in the same breath, said the text was kept; it also was not in the Up-arrow history. It now goes back into the composer. Ctrl+L, Ctrl+G, Ctrl+X and PageUp no longer act on the draft behind an open question, and Esc can stop a turn while a progress box is up. A first Ctrl+C is forgotten when you type something else, and a first Esc when the turn ends.
 - **Commands.** The command word is case-insensitive (`/HELP`, `/Steer ...`); `/compact keep auth` says the command did not take that instead of "Unknown command /compact. Did you mean /compact?"; a command that throws says so instead of leaving a cleared composer and silence.
 - **Two questions at once no longer lose one.** A permission asked while another picker or `/settings` was open replaced it, and the replaced command waited for ever (a turn could hang). Questions now stack: the new one is shown at once, the older comes back after it, and answering the same question twice does nothing.

@@ -324,10 +324,10 @@ export class PiApp {
 		this.pending.setText(rows.join("\n"));
 		const { agent, session, config } = model;
 		const ctx: SegmentContext = {
-			persona: model.currentPersona.label,
+			persona: sanitize(model.currentPersona.label),
 			planMode: model.planMode,
-			activeModel: model.activeModel,
-			configuredModel: session.model,
+			activeModel: sanitize(model.activeModel),
+			configuredModel: sanitize(session.model),
 			planModel: model.planModel,
 			usage: agent.usage ?? undefined,
 			lastTurnUsage: agent.lastTurnUsage ?? undefined,
@@ -339,7 +339,7 @@ export class PiApp {
 			maxResponseTokens: config.maxResponseTokens,
 			messages: session.messages,
 			sessionId: session.id,
-			cwd: model.cwd,
+			cwd: sanitize(model.cwd),
 			worktree: model.cwd.includes("/.cast/worktrees/")
 				? model.cwd.split("/.cast/worktrees/")[1]?.split("/")[0]
 				: undefined,
@@ -368,7 +368,7 @@ export class PiApp {
 			version: this.version,
 			folder: tildePath(model.cwd),
 		});
-		this.transcript.header = (width) => bannerRows(parts, width);
+		this.transcript.header = (width) => bannerRows(parts.map(sanitize), width);
 		this.syncCommands(model);
 		this.syncHistory(model.session.id, model.promptHistory);
 		this.paintFooter(model);

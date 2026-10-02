@@ -277,9 +277,15 @@ function renderTable(rows: string[][], width: number, indent: string, headerless
 	const floor = Math.max(1, Math.min(3, Math.floor(available / columns)));
 	const total = widths.reduce((a, b) => a + b, 0);
 	if (total > available) {
-		// Shrink the widest columns first so short ones stay readable.
-		const scale = available / total;
-		for (let c = 0; c < columns; c++) widths[c] = Math.max(floor, Math.floor(widths[c]! * scale));
+		// Every column keeps its floor, and what is left of the room goes to the wider ones in proportion to how
+		// much wider than the floor they are: shrinking all by one factor and then lifting the narrow ones back
+		// to the floor made the sum exceed the room.
+		const spare = available - floor * columns;
+		const excess = widths.map((w) => Math.max(0, w - floor));
+		const totalExcess = excess.reduce((x, y) => x + y, 0);
+		for (let c = 0; c < columns; c++) {
+			widths[c] = Math.min(widths[c]!, floor) + Math.floor((excess[c]! * Math.max(0, spare)) / totalExcess);
+		}
 	}
 
 	const lines: RenderedLine[] = [];
