@@ -10,6 +10,7 @@ import {
 	createServerSession,
 	ensureServerSession,
 	followUpServerSession,
+	spawnBind,
 	steerServerSession,
 	submitServerChat,
 	subscribeServerEvents,
@@ -222,5 +223,17 @@ describe("ensureServerClient", () => {
 
 		const { ensureServerClient } = await import("../src/server/client.ts");
 		await expect(ensureServerClient()).rejects.toThrow("Daemon protocol mismatch");
+	});
+});
+
+describe("spawnBind", () => {
+	it("brings a lost daemon back on the remembered address while it is free", () => {
+		const saved = { host: "0.0.0.0", port: 1337 };
+		expect(spawnBind(saved, true)).toEqual(saved);
+	});
+
+	it("goes private when the address is taken or none was chosen", () => {
+		expect(spawnBind({ host: "0.0.0.0", port: 1337 }, false)).toEqual({ host: "127.0.0.1", port: 0 });
+		expect(spawnBind(undefined, true)).toEqual({ host: "127.0.0.1", port: 0 });
 	});
 });

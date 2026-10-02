@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **A screen that loses its daemon brings it back on the address you chose.** An open terminal screen restarts the daemon when it goes away (an upgrade, a crash), and it always did so on a private random port, so the public web address stayed down until you restarted it by hand. It now starts it on the remembered address while that is free, and no longer touches the remembered choice.
+
 ## 0.52.13
 
 ### Fixed
