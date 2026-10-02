@@ -1154,6 +1154,31 @@ describe("runAgentLoop — abort vs. error", () => {
 		expect(events.some((e) => e.type === "interrupt_reminder")).toBe(true);
 	});
 
+	it("ends the turn as aborted when the abort lands during a tool batch", async () => {
+		const controller = new AbortController();
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+			content: "",
+			finishReason: "tool_calls" as const,
+			toolCalls: [{ id: "slow-1", name: "bash", arguments: '{"command":"echo hi"}' }],
+		}));
+
+		await runAgentLoop([{ role: "user", content: "hi" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			signal: controller.signal,
+			onEvent: (event) => {
+				events.push(event);
+				if (event.type === "tool_start") controller.abort();
+			},
+		});
+
+		expect(vi.mocked(streamAndCollect)).toHaveBeenCalledTimes(1);
+		expect(events.find((e) => e.type === "end")).toEqual({ type: "end", reason: "aborted" });
+	});
+
 	it("reports 'aborted' when a mid-stream abort ends the stream cleanly (no exception)", async () => {
 		const controller = new AbortController();
 		const events: AgentEvent[] = [];

@@ -2,6 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **Stop during a subagent now stops the turn.** An abort sent while a `task` was running let the parent call the model again (often starting a second `task`) and take up to a minute to settle; it now ends as aborted right after the tool batch.
+- **A read-only subagent's refused command says so.** The message named plan mode even when no plan was active; it now says the agent is read-only.
+- **A subagent's thread in the web is view-only:** Fork and Rewind are hidden there, and an open subagent no longer shows up in the session list.
+
 ## 0.53.0
 
 ### Added

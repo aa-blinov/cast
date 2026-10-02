@@ -2007,6 +2007,8 @@ function App() {
 	// between sessions that don't share one.
 	// The goal rides in the sidebar's summary of the session (refreshed as turns start and end).
 	const activeGoal = sessions.find((s) => s.id === activeId)?.goal;
+	// A subagent's thread is shown to be read: nothing in it is forked or rewound from here.
+	const isSubagentView = session?.sessionKind === "subagent";
 	const activePersonaLabel = session
 		? (personas.find((p) => p.name === session.persona)?.label ?? session.persona)
 		: null;
@@ -2330,7 +2332,7 @@ function App() {
 									onRetry: loadOlderMessages,
 								})
 							}
-							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${forkBeforeMessage} onForkAfter=${!running && activeId && isForkableAnswer(msg, msg === shownMessages[shownMessages.length - 1]) ? forkAfterMessage : undefined} onRewind=${!running && activeId && rewindSeqs.has(msg.seq) ? rewindToMessage : undefined} />`)}
+							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${isSubagentView ? undefined : forkBeforeMessage} onForkAfter=${!isSubagentView && !running && activeId && isForkableAnswer(msg, msg === shownMessages[shownMessages.length - 1]) ? forkAfterMessage : undefined} onRewind=${!isSubagentView && !running && activeId && rewindSeqs.has(msg.seq) ? rewindToMessage : undefined} />`)}
 							${
 								!running &&
 								(messages[messages.length - 1]?.notice === "error" ||

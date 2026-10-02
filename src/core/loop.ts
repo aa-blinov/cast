@@ -2393,7 +2393,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			if (!verdict.ok) {
 				const where = name === "ssh" ? "on a remote host " : "";
 				return Promise.resolve({
-					content: `Plan mode allows read-only commands only — rejected ${where}: ${verdict.reason}. Inspect with ls/cat/grep/find/git log|show|diff|status|blame.`,
+					content: `${loopConfig.planState?.enabled ? "Plan mode allows read-only commands only" : "This agent is read-only, so commands can only inspect"} — rejected ${where}: ${verdict.reason}. Inspect with ls/cat/grep/find/git log|show|diff|status|blame.`,
 					isError: true,
 				});
 			}
@@ -3404,6 +3404,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 
 				onEvent({ type: "turn_end", toolResults });
+
+				// An abort that landed during the batch (a long `task`, whose results are
+				// substituted after the grace period) must end the turn here; otherwise the
+				// loop samples the model again with a signal that is already aborted.
+				if (toolCalls?.length && signal?.aborted) {
+					endAborted();
+					return;
+				}
 
 				// ── Post-tool-results context guard ──
 				// Tool results (especially web_fetch, read of large files, grep)

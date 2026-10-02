@@ -3008,8 +3008,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const out: SessionSummary[] = [];
 		const seen = new Set<string>();
 		for (const ws of sessions.values()) {
-			out.push(summaryFor(ws.session, ws.status));
 			seen.add(ws.id);
+			// A subagent's thread is open in memory while someone views it, but it is part of its parent's history,
+			// not a conversation of its own: the cold listing leaves it out, and so must this one.
+			if (ws.session.sessionKind && ws.session.sessionKind !== "conversation") continue;
+			out.push(summaryFor(ws.session, ws.status));
 		}
 		// Every other session that's ever been saved to disk (any project,
 		// any prior process) — cold, not yet hydrated into a live runner, but
