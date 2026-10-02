@@ -59,9 +59,14 @@ vi.mock("../src/core/config.ts", async (importOriginal) => {
 // to overlap and assert they serialize instead of racing.
 const mockResolveMcpForCwd = vi.fn();
 const mockConnectMcpServers = vi.fn();
+const mockSyncMcpServers = vi.fn();
 vi.mock("../src/core/mcp.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/mcp.ts")>();
-	return { ...actual, connectMcpServers: (...args: unknown[]) => mockConnectMcpServers(...args) };
+	return {
+		...actual,
+		connectMcpServers: (...args: unknown[]) => mockConnectMcpServers(...args),
+		syncMcpServers: (...args: unknown[]) => mockSyncMcpServers(...args),
+	};
 });
 
 vi.mock("../src/core/project.ts", async (importOriginal) => {
@@ -133,6 +138,8 @@ describe("web bridge", () => {
 		mockProbeProvider.mockClear();
 		mockResolveMcpForCwd.mockReset();
 		mockResolveMcpForCwd.mockResolvedValue({ ...emptyMcp, allServerNames: ["srv"] });
+		mockSyncMcpServers.mockReset();
+		mockSyncMcpServers.mockResolvedValue(undefined);
 		mockFetchModels.mockResolvedValue({
 			ok: true,
 			models: [{ id: "gpt-4o" }, { id: "hy3" }],
@@ -3550,12 +3557,11 @@ describe("web bridge", () => {
 			releaseFirst = resolve;
 		});
 		let calls = 0;
-		mockResolveMcpForCwd.mockImplementation(async () => {
+		mockSyncMcpServers.mockImplementation(async () => {
 			calls++;
 			// Only the first call blocks — if the second one starts before this
 			// resolves, it proves the two overlapped instead of serializing.
 			if (calls === 1) await firstGate;
-			return { ...emptyMcp, allServerNames: ["srv"] };
 		});
 
 		const first = bridge.executeCommand(ws.id, "/mcp disable srv");
@@ -3565,7 +3571,7 @@ describe("web bridge", () => {
 		const second = bridge.executeCommand(ws.id, "/mcp enable srv");
 		await new Promise((r) => setTimeout(r, 0));
 		// The second call is queued behind the lock, not racing the first —
-		// its resolveMcpForCwd hasn't been reached yet.
+		// its sync hasn't been reached yet.
 		expect(calls).toBe(1);
 
 		releaseFirst();

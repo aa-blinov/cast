@@ -30,6 +30,15 @@ All notable user-facing changes to cast, newest first.
 - **Compaction no longer runs before every model call on a small window.** When the system prompt and tool schemas alone sit above the compaction threshold (a 30k window with a 13k trigger, say), each compaction left the next prompt over it again, so one ran per call, each paying for a summary and folding the previous summary into a newer one. After a compaction the next measured prompt now says whether it worked; if not, further compactions wait until the context has grown a margin past where it landed, and the run says so once. Checked on a long goal (three modules, three test files, 18 compactions before): 3 compactions, a faster run, the same correct result.
 - **A compaction right after a compaction.** The reading that decides it (the last measured prompt, and the index it was taken at) described the history from before the compaction, so a second compaction could follow at once. Nothing is due again until the provider measures a prompt.
 
+## Unreleased
+
+### Fixed
+- **`/mcp` in the web UI started an untrusted project's servers.** `/mcp reconnect`, `enable`, `disable`, `uninstall` and `/reload` read the MCP config of the *session's* folder under the *daemon's* trust decision, so from a session in a folder you had never trusted, that folder's `.cast/mcp.json` commands were run, and its servers then showed up in every other session's tool list. The shared set is now resolved from the daemon's own folder under its own trust; another folder's project servers are connected only if that folder is trusted, and stay in that folder's sessions.
+- **A server that dropped twice stayed dead.** After a manual or automatic reconnect, the new connection's disconnect handlers tended a private copy of the server set, so the first drop was healed and the second was not: the live set kept a dead connection and every call said "no longer connected" until `/mcp reconnect`. Reconnects now connect into the live set.
+- **Switching one MCP server restarted all of them.** `/mcp enable`, `disable`, `uninstall`, `reconnect` and `/reload` closed and reconnected every server, so a browser server lost its page whenever any other server was toggled, in the terminal and in the daemon. Only the servers that differ are touched now.
+- **`/reload` did not apply an edited server.** It reconnected only when the set of names changed, so editing a server's command, arguments or address and reloading did nothing. It compares each server's config now. `/mcp reconnect` also picks up a corrected config for a server that never started.
+- **A disabled project server vanished from `/mcp list`,** so it could not be switched back on from the list. Every configured name is listed, disabled ones included.
+
 ## 0.52.15
 
 ### Fixed

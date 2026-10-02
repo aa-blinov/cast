@@ -317,19 +317,19 @@ export function mcpHttpFetch(url: string | URL | Request, init?: RequestInit): P
 export async function connectMcpServers(
 	servers: Record<string, McpServerConfig>,
 	connectTimeoutMs = CONNECT_TIMEOUT_MS,
+	/** Connect into this live result instead of a new one: the disconnect handlers then act on the set the caller
+	 *  holds. Reconnecting through a separate result left the handlers of the new connection tending that copy, so a
+	 *  server that dropped a second time was never brought back in the real one. */
+	target?: McpSetupResult,
 ): Promise<McpSetupResult> {
-	const toolIndex = new Map<string, McpToolHandle>();
-	const toolDefinitions: Tool[] = [];
-	const connections: McpConnection[] = [];
-	const diagnostics: string[] = [];
 	// Built before the connects so a server's disconnect handler can hand the
 	// live result to the reconnect scheduler — it swaps that server's tools in
 	// place, which every holder of this object then picks up.
-	const setupResult: McpSetupResult = {
-		toolIndex,
-		toolDefinitions,
-		connections,
-		diagnostics,
+	const setupResult: McpSetupResult = target ?? {
+		toolIndex: new Map<string, McpToolHandle>(),
+		toolDefinitions: [],
+		connections: [],
+		diagnostics: [],
 		allServerNames: Object.keys(servers),
 		serverSources: {},
 	};
@@ -354,7 +354,7 @@ export async function connectMcpServers(
 					cwd: cfg.cwd,
 				});
 			} else {
-				diagnostics.push(
+				setupResult.diagnostics.push(
 					`mcp server "${serverName}": needs either "command" (local) or "url" (remote) in its config`,
 				);
 				return;
@@ -424,18 +424,18 @@ export async function connectMcpServers(
 					// silently routed to whichever server happened to connect
 					// last: non-deterministic between runs, with no diagnostic.
 					// Keep the first and say what was dropped.
-					const clash = toolIndex.get(name);
+					const clash = setupResult.toolIndex.get(name);
 					if (clash) {
 						const owner = MCP_DESCRIPTION_SERVER_RE.exec(clash.definition.function.description ?? "")?.[1];
-						diagnostics.push(
+						setupResult.diagnostics.push(
 							`mcp tool name collision: "${serverName}"/"${t.name}" maps to "${name}", already provided by ${
 								owner ? `"${owner}"` : "another server"
 							} — keeping the first; the second is unavailable.`,
 						);
 						continue;
 					}
-					toolDefinitions.push(definition);
-					toolIndex.set(name, {
+					setupResult.toolDefinitions.push(definition);
+					setupResult.toolIndex.set(name, {
 						definition,
 						call: async (args, signal): Promise<ToolResult> => {
 							if (!connectionRef.value?.alive) {
@@ -535,9 +535,11 @@ export async function connectMcpServers(
 				client.onerror = (error: unknown) =>
 					markDead(error instanceof Error ? error.message : String(error) || "transport error");
 				connectionRef.value = connection;
-				connections.push(connection);
+				setupResult.connections.push(connection);
 			} catch (error) {
-				diagnostics.push(`mcp server "${serverName}": ${error instanceof Error ? error.message : String(error)}`);
+				setupResult.diagnostics.push(
+					`mcp server "${serverName}": ${error instanceof Error ? error.message : String(error)}`,
+				);
 				await closeClient(client);
 			}
 		}),
@@ -628,47 +630,95 @@ function isNonRetryableMcpFailure(reason: string): boolean {
  *  startup would otherwise be respawned in a tight loop. */
 const MCP_RECONNECT_BASE_MS = 1000;
 
-/**
- * Rebuilds one dropped server's connection in place, leaving every other
- * server alone.
- *
- * The existing `/mcp reconnect` closes and re-resolves *all* servers, which is
- * fine as a user-initiated action but far too blunt for an automatic retry:
- * one flaky server would take the rest down with it on every attempt.
- *
- * Returns true when the server is connected again. The result object is
- * mutated in place — its tool index, definitions and connection entry are all
- * swapped over — so every holder of it (the system prompt builder, the tool
- * dispatcher) sees the new tools without being re-plumbed.
- */
-export async function reconnectMcpServer(result: McpSetupResult, serverName: string): Promise<boolean> {
-	const index = result.connections.findIndex((c) => c.serverName === serverName);
-	const previous = result.connections[index];
-	if (!previous) return false;
-	previous.closing = true;
-	if (previous.retry?.timer) clearTimeout(previous.retry.timer);
-	await closeClient(previous.client);
-
-	const fresh = await connectMcpServers({ [serverName]: previous.config });
-	const connection = fresh.connections[0];
-	if (!connection) {
-		// Keep the dead entry so the failure stays visible in /mcp rather than
-		// the server quietly vanishing from the list.
-		previous.closing = false;
-		result.diagnostics.push(...fresh.diagnostics);
-		return false;
+/** Take one server out of a live result: close it and forget its tools, its diagnostics and its connection. */
+async function dropMcpServer(result: McpSetupResult, serverName: string): Promise<McpConnection | undefined> {
+	const previous = result.connections.find((c) => c.serverName === serverName);
+	if (previous) {
+		previous.closing = true;
+		if (previous.retry?.timer) clearTimeout(previous.retry.timer);
+		await closeClient(previous.client);
+		result.connections.splice(result.connections.indexOf(previous), 1);
 	}
-
-	// Swap this server's tools; leave the others untouched.
 	const prefix = `[${serverName}]`;
 	for (const [name, handle] of [...result.toolIndex]) {
 		if (handle.definition.function.description?.startsWith(prefix)) result.toolIndex.delete(name);
 	}
 	result.toolDefinitions = result.toolDefinitions.filter((t) => !t.function.description?.startsWith(prefix));
-	for (const [name, handle] of fresh.toolIndex) result.toolIndex.set(name, handle);
-	result.toolDefinitions.push(...fresh.toolDefinitions);
-	result.connections[index] = connection;
-	return true;
+	const diagnosticPrefix = `mcp server "${serverName}": `;
+	for (let i = result.diagnostics.length - 1; i >= 0; i--) {
+		if (result.diagnostics[i]!.startsWith(diagnosticPrefix)) result.diagnostics.splice(i, 1);
+	}
+	return previous;
+}
+
+/** Whether this server is up in the result right now. */
+function isMcpServerUp(result: McpSetupResult, serverName: string): boolean {
+	return result.connections.some((c) => c.serverName === serverName && c.alive !== false);
+}
+
+/**
+ * Bring a live result in line with what the config now says, touching only the servers that differ: a server that
+ * is up on the same config is left running (restarting a stateful one, a browser say, because another changed
+ * would lose its state), one that is no longer wanted (disabled, removed) is closed, one that is new, changed,
+ * down or named in `force` is connected afresh. The result is mutated in place, so everything holding it sees the
+ * change.
+ *
+ * @param desired the servers that should be running: enabled ones, as the config files give them now
+ * @param allNames every configured name, disabled ones too, for the list
+ */
+export async function syncMcpServers(
+	result: McpSetupResult,
+	desired: Record<string, McpServerConfig>,
+	allNames: string[],
+	serverSources: Record<string, "global" | "project">,
+	force: ReadonlySet<string> = new Set(),
+	connectTimeoutMs = CONNECT_TIMEOUT_MS,
+): Promise<void> {
+	const known = new Set([...result.connections.map((c) => c.serverName), ...Object.keys(desired)]);
+	const toDrop: string[] = [];
+	const toConnect: Record<string, McpServerConfig> = {};
+	for (const name of known) {
+		const cfg = desired[name];
+		const live = result.connections.find((c) => c.serverName === name);
+		if (!cfg) {
+			toDrop.push(name);
+		} else if (
+			!live ||
+			live.alive === false ||
+			force.has(name) ||
+			JSON.stringify(live.config) !== JSON.stringify(cfg)
+		) {
+			toDrop.push(name);
+			toConnect[name] = cfg;
+		}
+	}
+	for (const name of toDrop) {
+		// biome-ignore lint/performance/noAwaitInLoops: a handful of servers, closed one after another
+		await dropMcpServer(result, name);
+	}
+	if (Object.keys(toConnect).length > 0) await connectMcpServers(toConnect, connectTimeoutMs, result);
+	result.allServerNames = [...allNames].sort((a, b) => a.localeCompare(b));
+	result.serverSources = serverSources;
+}
+
+/**
+ * Reconnect one server in place (a manual `/mcp reconnect` or an automatic retry), on the config it was connected
+ * with. The result is mutated in place — its tool index, definitions and connection entry are all swapped over —
+ * so every holder of it (the system prompt builder, the tool dispatcher) sees the new tools without being
+ * re-plumbed.
+ */
+export async function reconnectMcpServer(result: McpSetupResult, serverName: string): Promise<boolean> {
+	const previous = result.connections.find((c) => c.serverName === serverName);
+	if (!previous) return false;
+	const index = result.connections.indexOf(previous);
+	await dropMcpServer(result, serverName);
+	await connectMcpServers({ [serverName]: previous.config }, CONNECT_TIMEOUT_MS, result);
+	if (isMcpServerUp(result, serverName)) return true;
+	// Keep the dead entry so the failure stays visible in /mcp rather than the server quietly vanishing from the
+	// list; its own retry state carries on from here.
+	previous.closing = false;
+	result.connections.splice(Math.min(index, result.connections.length), 0, previous);
+	return false;
 }
 
 /**
