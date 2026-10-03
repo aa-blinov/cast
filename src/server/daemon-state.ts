@@ -16,6 +16,7 @@
 import {
 	closeSync,
 	existsSync,
+	mkdirSync,
 	openSync,
 	readFileSync,
 	renameSync,
@@ -24,7 +25,7 @@ import {
 	writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { API_V1_PREFIX } from "./api-v1.ts";
 
 /** Increment only when a daemon/client wire contract becomes incompatible. */
@@ -243,6 +244,9 @@ function startLockPath(): string {
 // and taken over instead of wedging every later start forever.
 export function acquireStartLock(): boolean {
 	const path = startLockPath();
+	// A fresh machine (a CI container, a new HOME) has no ~/.cast yet; without it every attempt failed with ENOENT,
+	// which read as "someone else holds the lock", and the caller spun for the whole startup budget in silence.
+	mkdirSync(dirname(path), { recursive: true });
 	try {
 		const fd = openSync(path, "wx");
 		try {

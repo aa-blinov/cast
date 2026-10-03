@@ -1675,6 +1675,17 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			return;
 		}
 
+		// A daemon started on a machine with no provider yet (a fresh CI container) accepts the turn and then fails inside
+		// the SDK with "Missing credentials ... OPENAI_API_KEY", which names a variable cast does not read.
+		if (!(ws.session.providerUrl || config.baseURL)) {
+			failSetup(
+				new Error(
+					"No provider is configured. Run `cast` once to choose one, or add one to ~/.cast/settings.json (see docs/configuration.md).",
+				),
+			);
+			return;
+		}
+
 		const sessionCwd = ws.session.cwd ?? cwd;
 		// Persona files can be created or edited by the agent itself. Re-scan this
 		// session's persona sources before every new turn so an override written in

@@ -28,6 +28,7 @@ if [ "$#" -eq 1 ] && { [ "$1" = "--version" ] || [ "$1" = "-v" ]; }; then
 	fi
 fi
 
+# UNDICI-ES is Node's "EventSource is experimental" notice, printed on stderr by every `cast run`.
 # DEP0040 comes from OpenAI's unused bundled node-fetch fallback. node:sqlite
 # is intentionally used by cast but remains experimental in Node 22. Keep
 # other warnings visible instead of suppressing the process-wide warning stream.
@@ -36,4 +37,4 @@ fi
 # NODE_COMPILE_CACHE keeps V8's compiled code for dist/index.js between runs
 # (Node 22.1+; older ones ignore it): compiling the 5MB bundle was a quarter
 # of every start, ~0.4s. The daemon the TUI starts inherits it.
-exec env CAST_CWD="$ORIGINAL_CWD" NODE_COMPILE_CACHE="${NODE_COMPILE_CACHE:-$HOME/.cast/cache/compile}" node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --max-semi-space-size=64 "$SCRIPT_DIR/../dist/index.js" "$@"
+exec env CAST_CWD="$ORIGINAL_CWD" NODE_COMPILE_CACHE="${NODE_COMPILE_CACHE:-$HOME/.cast/cache/compile}" node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --disable-warning=UNDICI-ES --max-semi-space-size=64 "$SCRIPT_DIR/../dist/index.js" "$@"
