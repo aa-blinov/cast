@@ -22,6 +22,10 @@ the project. It keeps those files out of your repository and out of a shared `/t
   empty.
 - A sandbox session has none apart from its working folder: that folder is throwaway already, so it is the scratchpad.
 - Show it with the `scratchpad` status bar segment (`/statusbar`, off by default) or `/current` in the web.
+- A refused write to a system temp folder (`/tmp`, `/var/tmp`) tells the agent to use the scratchpad instead.
+- A folder whose session no longer exists, and that nothing has touched for a day, is removed when the daemon starts.
+- Turn it off with `"scratchpad": false` in `settings.json`: the agent is then told nothing and no folder is made. The folder is
+  also not named to the agent when it could not be created.
 
 It is a convenience and not a security boundary: `bash` is not confined to it.
 

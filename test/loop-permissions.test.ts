@@ -117,6 +117,41 @@ describe("the scratchpad in the system prompt", () => {
 		expect(existsSync(path)).toBe(true);
 	});
 
+	it("does not tell a run that cannot write to put files there: a read-only subagent, plan mode", async () => {
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+			content: "ok",
+			thinking: "",
+			finishReason: "stop",
+		}));
+		await runAgentLoop([{ role: "user", content: "look" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: join(dir, "proj"),
+			systemPrompt: "BASE PROMPT",
+			onEvent: () => {},
+			sessionId: "sess5",
+			readOnlyBash: true,
+			allowedTools: ["read", "glob", "grep", "bash"],
+			disabledTools: new Set(["write", "edit"]),
+		});
+		expect(systemPromptSent()).not.toContain("Your scratchpad");
+	});
+
+	it("does not name a scratchpad it could not make", async () => {
+		// A file where the scratch root should be: the folder cannot be created under it.
+		writeFileSync(join(dir, "home", ".cast", "scratch"), "in the way");
+		await talk(join(dir, "proj"), "sess3");
+		expect(systemPromptSent()).not.toContain("Your scratchpad");
+	});
+
+	it("is off when the settings say so: no block, no folder", async () => {
+		rules({});
+		writeFileSync(join(dir, "home", ".cast", "settings.json"), JSON.stringify({ scratchpad: false }));
+		await talk(join(dir, "proj"), "sess4");
+		expect(systemPromptSent()).not.toContain("Your scratchpad");
+		expect(existsSync(join(dir, "home", ".cast", "scratch", "sess4"))).toBe(false);
+	});
+
 	it("says nothing, and makes nothing, for a run that is not a session (no id)", async () => {
 		await talk(join(dir, "proj"));
 		expect(systemPromptSent()).not.toContain("scratchpad");
@@ -287,6 +322,17 @@ describe("permission rules in the loop", () => {
 			oneCall("read", { path: join(home, ".cast", "scratch", "other", "theirs.txt") });
 			expect(await run(confirm, { sessionId: "mine" })).toContain("outside the project");
 			expect(confirm).toHaveBeenCalledTimes(1);
+		});
+
+		it("a refused write to /tmp says where a temporary file may go", async () => {
+			oneCall("write", { path: "/tmp/cast-test-never-written.txt", content: "x" });
+			const content = await run(
+				vi.fn(async () => false),
+				{ sessionId: "mine" },
+			);
+			expect(content).toContain("declined");
+			expect(content).toContain(join(dir, "home", ".cast", "scratch", "mine"));
+			expect(existsSync("/tmp/cast-test-never-written.txt")).toBe(false);
 		});
 
 		it("with nobody to ask (bypass) it runs; inside the project it never asks", async () => {

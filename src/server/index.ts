@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { closeMcpConnections } from "../core/mcp.ts";
 import { drainAutomaticMemoryMaintenance, drainProjectCheckpointWriters } from "../core/memory.ts";
 import { resolveMcpForCwd } from "../core/project.ts";
-import { deleteSession, pruneBackgroundSessions, pruneSessionEvents } from "../core/session.ts";
+import { deleteSession, pruneBackgroundSessions, pruneOrphanScratchpads, pruneSessionEvents } from "../core/session.ts";
 import { isBypassPermissionsFlag, loadSettings, updateSettings } from "../core/settings.ts";
 import type { ParsedArgs } from "../core/startup.ts";
 import { runStartup } from "../core/startup.ts";
@@ -296,6 +296,8 @@ export async function runServerMain(args: string[], options: { foreground: boole
 				if (pruned > 0) console.log(`[cast server] pruned ${pruned} expired background session(s)`);
 				// Same sweep point, same reasoning: execution telemetry that
 				// nothing reads back after the fact, and had no delete path.
+				const scratchpads = pruneOrphanScratchpads();
+				if (scratchpads > 0) console.log(`[cast server] removed ${scratchpads} orphaned scratchpad folder(s)`);
 				const events = pruneSessionEvents();
 				if (events > 0) console.log(`[cast server] pruned ${events} expired session event(s)`);
 			} catch (err) {
