@@ -422,7 +422,10 @@ describe("bash — run_in_background", () => {
 			const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
 			const started = await exec("bash", { command: "echo hi", run_in_background: true });
 			const taskId = started.content.match(/bg-\d+/)?.[0];
-			await new Promise((r) => setTimeout(r, 300));
+			// Wait for the event, not a fixed time: a loaded runner takes longer than any guess. The short pause after
+			// it is what would show a second notification from the trailing 'close'.
+			await vi.waitFor(() => expect(wake).toHaveBeenCalled(), { timeout: 10_000 });
+			await new Promise((r) => setTimeout(r, 100));
 
 			expect(wake).toHaveBeenCalledTimes(1);
 			expect(String(wake.mock.calls[0]?.[0])).toContain("failed to start");
