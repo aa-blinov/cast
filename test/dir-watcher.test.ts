@@ -93,6 +93,26 @@ describe("watchDirectories", () => {
 		expect(start(dirs, () => false, 5).size()).toBe(5);
 	});
 
+	// A change is reported only after a stat says whether it is a file or a folder, and that answer can come back after
+	// close(). Closing from inside the ignore check is a way to land exactly between the event and its answer.
+	it("reports nothing for an event that was in flight when it was closed", async () => {
+		const target = join(root, "late.txt");
+		const w = watchDirectories(
+			root,
+			[],
+			(path) => {
+				if (path === target) w.close();
+				return false;
+			},
+			(kind, path) => changes.push({ kind, path }),
+			() => {},
+		);
+		open.push(w);
+		writeFileSync(target, "x");
+		await sleep(500);
+		expect(changes).toEqual([]);
+	});
+
 	it("stops reporting once closed", async () => {
 		const watcher = start([]);
 		watcher.close();
