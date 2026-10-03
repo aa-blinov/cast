@@ -8,6 +8,7 @@ All notable user-facing changes to cast, newest first.
 - **`/goal resume`** continues a goal that was paused by an interruption or a failure. Until now the word became a new goal called "resume".
 
 ### Changed
+- **`cast --version` answers at once.** The launcher prints the version itself instead of loading the whole bundle first: about 40 ms instead of 0.9 s on macOS and Linux (the Windows launcher is unchanged).
 - **The terminal shows its first screen without waiting for MCP servers.** Servers are connected in the background right after it appears, as the web already did, so a config with a browser or remote server no longer adds seconds before you can type. `/mcp list` says `connecting` until they are up, and a first message sent in that window just runs without their tools.
 
 ### Fixed
