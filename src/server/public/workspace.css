@@ -50,6 +50,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 	background: var(--bg-surface);
 	gap: 8px;
 }
+/* The tab's panel: the column the tab's content used to fill as the panel's own child. */
+.diff-tabpanel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .diff-tabs {
 	display: flex;
 	gap: 2px;

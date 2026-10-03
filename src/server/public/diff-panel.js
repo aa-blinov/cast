@@ -2,7 +2,7 @@ import htm from "htm";
 import { h } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { api } from "./api.js";
-import { pressable } from "./modal-focus.js";
+import { pressable, rovingRows } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
@@ -72,12 +72,12 @@ export function DiffPanel({
 		<div class="diff-header">
 			<div class="diff-tabs" role="tablist" aria-label="Workspace" onKeyDown=${onTabKeyDown}>
 				${tabs.map(
-					([id, label]) => html`<button role="tab" aria-selected=${tab === id} tabIndex=${tab === id ? 0 : -1} class="diff-tab${tab === id ? " active" : ""}" onClick=${() => onTabChange(id)}>${label}</button>`,
+					([id, label]) => html`<button role="tab" id=${`workspace-tab-${id}`} aria-controls="workspace-tabpanel" aria-selected=${tab === id} tabIndex=${tab === id ? 0 : -1} class="diff-tab${tab === id ? " active" : ""}" onClick=${() => onTabChange(id)}>${label}</button>`,
 				)}
 			</div>
 		</div>
 	`;
-	const shell = (children) => html`<${PanelShell} openClass=${openClass} open=${open} resizeHandleProps=${resizeHandleProps} header=${header}>${children}<//>`;
+	const shell = (children) => html`<${PanelShell} tab=${tab} openClass=${openClass} open=${open} resizeHandleProps=${resizeHandleProps} header=${header}>${children}<//>`;
 
 	// A draft session (nothing sent yet) has no cwd on the server to diff or
 	// browse — show that plainly instead of either tab's normal content
@@ -129,12 +129,12 @@ export function DiffPanel({
 }
 
 // The one frame of every tab, so the landmark and its name are written once.
-function PanelShell({ openClass, open, resizeHandleProps, header, children }) {
+function PanelShell({ tab, openClass, open, resizeHandleProps, header, children }) {
 	return html`
 		<aside class="diff-panel${openClass}" aria-label="Workspace panel" inert=${!open}>
 			<div class="diff-resize-handle" ...${resizeHandleProps} />
 			${header}
-			${children}
+			<div class="diff-tabpanel" id="workspace-tabpanel" role="tabpanel" aria-labelledby=${`workspace-tab-${tab}`}>${children}</div>
 		</aside>
 	`;
 }
@@ -210,7 +210,7 @@ function ChangesView({ data, activeFile, onSelectFile, activeId }) {
 	}
 
 	return html`
-			<div class="diff-file-list">
+			<div class="diff-file-list" ...${rovingRows(".diff-file-item")}>
 				${sections.map(
 					(sec) => html`
 					<div key=${sec.key}>

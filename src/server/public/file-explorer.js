@@ -5,7 +5,7 @@ import { api } from "./api.js";
 import { FilePreviewModal } from "./file-preview.js";
 import { humanSize } from "./file-size.js";
 import { icons } from "./icons.js";
-import { pressable } from "./modal-focus.js";
+import { pressable, rovingRows } from "./modal-focus.js";
 
 const html = htm.bind(h);
 
@@ -516,7 +516,7 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 					? html`<div class="fs-upload" role="status"><span class="fs-upload-name">${upload.name}</span><progress max="100" value=${upload.percent}></progress><span>${upload.percent}%</span></div>`
 					: null
 			}
-			<div class="fs-tree${dropTarget === "" ? " drop" : ""}" ...${dropProps("")}>
+			<div class="fs-tree${dropTarget === "" ? " drop" : ""}" ...${dropProps("")} ...${rovingRows(".fs-row-main")}>
 				${error ? html`<div class="fs-error" role="alert"><span>${error}</span><button type="button" class="fs-error-dismiss" aria-label="Dismiss" onClick=${() => setError(null)}><${icons.xMark} /></button></div>` : null}
 				${
 					creating

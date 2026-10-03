@@ -299,9 +299,16 @@ export function Sidebar({
 							placeholder="Search sessions…"
 							value=${search}
 							onInput=${(e) => setSearch(e.target.value)}
+							onKeyDown=${(e) => {
+								if (e.key === "Escape" && search) {
+									e.preventDefault();
+									setSearch("");
+								}
+							}}
 						/>
 					`
 					}
+					${isSearching && !searching ? html`<div class="sr-only" role="status">${filtered.length === 1 ? "1 session found" : `${filtered.length} sessions found`}</div>` : null}
 					${isSearching ? filtered.map(renderItem) : sessionGroups.map(renderGroup)}
 					${!sessionsLoaded && html`<div class="sidebar-empty" role="status">Loading</div>`}
 					${sessionsLoaded && searching && html`<div class="sidebar-empty" role="status">Searching…</div>`}
