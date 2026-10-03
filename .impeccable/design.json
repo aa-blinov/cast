@@ -261,7 +261,7 @@
       },
       {
         "name": "The Flat-By-Default Rule",
-        "body": "Surfaces are flat at rest; state is shown by tone and a mark, not by shadow.",
+        "body": "Surfaces are flat at rest; state is shown by tone and a mark, not by shadow. Only a layer floating above the page (menus, the modal) carries a soft offset shadow.",
         "section": "elevation"
       }
     ],
