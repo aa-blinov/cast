@@ -536,7 +536,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		// One event can be a megabyte (a tool call that writes a large file, sent whole), so two of them in a row used to
 		// exceed the old 1 MB limit for a client that was merely a moment behind, and its stream was cut mid-turn. This
 		// still bounds what a client that has stopped reading can make the process hold.
-		const maxPendingBytes = 16 * 1024 * 1024;
+		// CAST_SSE_BACKLOG_KB lowers it for the soak test, which needs streams to be cut to exercise the reconnect path.
+		const maxPendingBytes = Number(process.env.CAST_SSE_BACKLOG_KB) * 1024 || 16 * 1024 * 1024;
 		let closed = false;
 		let blocked = false;
 		let endRequested = false;

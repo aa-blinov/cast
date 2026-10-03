@@ -39,7 +39,12 @@ const LAG_BUDGET_MS = Number(option("lag-budget", 250));
 const HEAP_BUDGET_MB = Number(option("heap-budget", 60));
 const SLOPE_BUDGET_MB = Number(option("slope-budget", 12));
 const KEEP = flag("keep");
-const EDIT_KB = Number(option("edit-kb", 256));
+// The daemon cuts a client that falls this far behind; a low limit makes it cut the TUI mid-turn on large events, which
+// is how the reconnect path (and a stale state fetch landing after the turn has ended) gets exercised.
+const FORCE_DROPS = flag("force-stream-drops");
+const SNAPSHOT_DIR = option("snapshots", "");
+const EDIT_KB = Number(option("edit-kb", FORCE_DROPS ? 1024 : 256));
+const CYCLES = Number(option("cycles", QUICK ? 3 : 5));
 const JSON_OUT = option("json", "");
 const COLS = 100;
 const ROWS = 40;
@@ -251,12 +256,15 @@ async function connectInspector(port) {
 	});
 	let id = 0;
 	const pending = new Map();
+	const listeners = new Map();
 	ws.onmessage = (m) => {
 		const d = JSON.parse(m.data);
 		const done = d.id && pending.get(d.id);
 		if (done) {
 			pending.delete(d.id);
 			done(d);
+		} else if (d.method) {
+			listeners.get(d.method)?.(d.params);
 		}
 	};
 	const send = (method, params = {}) =>
@@ -288,6 +296,15 @@ async function connectInspector(port) {
 				"(() => { const h = globalThis.__eld; const r = { p50: h.percentile(50) / 1e6, p99: h.percentile(99) / 1e6, max: h.max / 1e6 }; h.reset(); return r; })()",
 			);
 		},
+		/** Writes a V8 heap snapshot (after a GC) to `path`, to diff two of them and see what accumulates. */
+		async heapSnapshot(path) {
+			const chunks = [];
+			listeners.set("HeapProfiler.addHeapSnapshotChunk", (params) => chunks.push(params.chunk));
+			await send("HeapProfiler.collectGarbage");
+			await send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+			listeners.delete("HeapProfiler.addHeapSnapshotChunk");
+			writeFileSync(path, chunks.join(""));
+		},
 		/** Start/stop the CPU profiler; `stopProfile` returns the profile as an object. */
 		startProfile: async () => {
 			await send("Profiler.enable");
@@ -302,6 +319,18 @@ async function connectInspector(port) {
 // ── Driving the TUI ───────────────────────────────────────────────────────────────────────────────────────────────
 
 const IDLE = "ask cast to do anything";
+
+/** How many messages the daemon holds for the project's session, asked of the daemon itself (not the TUI's copy). */
+async function daemonMessageCount() {
+	const state = JSON.parse(readFileSync(join(home, ".cast", "server.json"), "utf-8"));
+	const headers = { authorization: `Bearer ${state.token}` };
+	const base = `http://127.0.0.1:${state.port}`;
+	const list = await (await fetch(`${base}/api/sessions`, { headers })).json();
+	const mine = list.filter((x) => x.cwd === project).sort((x, y) => String(y.updatedAt).localeCompare(String(x.updatedAt)))[0];
+	if (!mine) return -1;
+	const full = await (await fetch(`${base}/api/sessions/${mine.id}`, { headers })).json();
+	return Array.isArray(full.messages) ? full.messages.length : -1;
+}
 
 async function runTurn(prompt) {
 	const before = stats.completed;
@@ -427,7 +456,13 @@ async function main() {
 	execFileSync("git", ["init", "-q"], { cwd: project });
 	writeFileSync(join(project, ".gitignore"), "*.out\n");
 
-	const env = { ...process.env, HOME: home, CAST_CWD: project, CAST_NO_MOUSE: "" };
+	const env = {
+		...process.env,
+		HOME: home,
+		CAST_CWD: project,
+		CAST_NO_MOUSE: "",
+		...(FORCE_DROPS ? { CAST_SSE_BACKLOG_KB: "1024" } : {}),
+	};
 	const daemonLog = openSync(join(home, "daemon.log"), "a");
 	const DAEMON_PORT = 9400 + (process.pid % 300);
 	const TUI_PORT = DAEMON_PORT + 300;
@@ -559,9 +594,15 @@ async function main() {
 	const beforeEdits = await snapshot("before file edits");
 	const EDITS = QUICK ? 6 : 16;
 	const PROFILE_EDITS = option("profile-edits", "");
-	if (PROFILE_EDITS) await tuiInspector.startProfile();
+	if (PROFILE_EDITS) {
+		await tuiInspector.startProfile();
+		await daemonInspector.startProfile();
+	}
 	for (let i = 0; i < EDITS; i++) await runTurn(`SOAK_EDIT:${EDIT_KB}`);
-	if (PROFILE_EDITS) writeFileSync(PROFILE_EDITS, JSON.stringify(await tuiInspector.stopProfile()));
+	if (PROFILE_EDITS) {
+		writeFileSync(PROFILE_EDITS, JSON.stringify(await tuiInspector.stopProfile()));
+		writeFileSync(`${PROFILE_EDITS}.daemon`, JSON.stringify(await daemonInspector.stopProfile()));
+	}
 	const afterEdits = await snapshot(`${EDITS} edits of a ${EDIT_KB} KB file`);
 	report.perEditMb = {
 		tui: (afterEdits.tui.heapMb - beforeEdits.tui.heapMb) / EDITS,
@@ -570,7 +611,8 @@ async function main() {
 
 	// 7. Does memory come back? Identical cycles of fill + /clear: the heap after each /clear must not climb.
 	const afterClear = [];
-	for (let cycle = 0; cycle < (QUICK ? 3 : 5); cycle++) {
+	const daemonAfterClear = [];
+	for (let cycle = 0; cycle < CYCLES; cycle++) {
 		for (let i = 0; i < 3; i++) await runTurn(`SOAK_TEXT:${LINES_PER_TURN}`);
 		await runTurn("SOAK_TOOL:512");
 		press("C-u");
@@ -578,8 +620,15 @@ async function main() {
 		press("Enter");
 		await waitScreen((s) => !s.includes("SOAK_"), 20_000, "the transcript to clear");
 		await sleep(500);
+		// The TUI emptied its own view, but the conversation the model is sent is the daemon's: /clear used to leave it whole.
+		daemonAfterClear.push(await daemonMessageCount());
 		const row = await snapshot(`clear cycle ${cycle + 1}`);
 		afterClear.push(row);
+		if (SNAPSHOT_DIR && (cycle === 2 || cycle === CYCLES - 1)) {
+			mkdirSync(SNAPSHOT_DIR, { recursive: true });
+			await daemonInspector.heapSnapshot(join(SNAPSHOT_DIR, `daemon-cycle-${cycle + 1}.heapsnapshot`));
+			await tuiInspector.heapSnapshot(join(SNAPSHOT_DIR, `tui-cycle-${cycle + 1}.heapsnapshot`));
+		}
 	}
 
 	// ── Verdicts ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -604,6 +653,17 @@ async function main() {
 	// printed for reference.
 	console.log(
 		`\nundo copies: the TUI holds ${report.perEditMb.tui.toFixed(1)} MB and the daemon ${report.perEditMb.daemon.toFixed(1)} MB per edit of a ${EDIT_KB} KB ignored file, until the 64 MB cap`,
+	);
+	for (const [name, pick] of [
+		["TUI", (r) => r.tui.rssMb],
+		["daemon", (r) => r.daemon.rssMb],
+	]) {
+		const rssSlope = (pick(afterClear.at(-1)) - pick(afterClear[Math.min(1, afterClear.length - 1)])) / Math.max(1, afterClear.length - 2);
+		verdict(rssSlope <= SLOPE_BUDGET_MB, `${name} RSS grows ${rssSlope.toFixed(2)} MB per identical cycle after /clear (budget ${SLOPE_BUDGET_MB})`);
+	}
+	verdict(
+		daemonAfterClear.every((n) => n === 0),
+		`the daemon holds no messages right after /clear (saw ${daemonAfterClear.join(", ")})`,
 	);
 	const worstLag = Math.max(...report.phases.map((p) => p.tui.lag.max));
 	verdict(worstLag <= LAG_BUDGET_MS, `worst TUI event-loop stall ${worstLag.toFixed(0)} ms (budget ${LAG_BUDGET_MS})`);

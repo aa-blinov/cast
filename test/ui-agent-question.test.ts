@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
 	canSendToDaemon,
+	isFreshDaemonStatus,
 	loadDaemonPendingState,
 	parseDaemonPendingState,
 	parseQuestionToolResult,
@@ -127,5 +128,21 @@ describe("parseDaemonPendingState", () => {
 		} finally {
 			vi.unstubAllGlobals();
 		}
+	});
+});
+
+describe("isFreshDaemonStatus", () => {
+	// After the daemon cuts the event stream mid-turn the TUI asks for the session's state; the turn can end (and the
+	// stream say so) before that answer arrives, and the older answer ("running") must not put the screen back.
+	it("applies an answer when the stream said nothing since it was asked for", () => {
+		expect(isFreshDaemonStatus(3, 3)).toBe(true);
+	});
+
+	it("drops an answer when the stream delivered a status change in the meantime", () => {
+		expect(isFreshDaemonStatus(3, 5)).toBe(false);
+	});
+
+	it("applies an answer that was not tied to a request", () => {
+		expect(isFreshDaemonStatus(undefined, 9)).toBe(true);
 	});
 });

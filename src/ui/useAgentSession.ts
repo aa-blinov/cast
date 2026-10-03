@@ -246,6 +246,15 @@ export function parseDaemonPendingState(state: Record<string, unknown>): {
 }
 
 /** A local loop has no daemon transport to gate; thin-client sends require its SSE proof. */
+/**
+ * Whether a status fetched from the daemon is still the latest word on the turn. `askedAt` is the count of status
+ * changes the event stream had delivered when the request went out, `delivered` the count now: if the stream said
+ * anything since, the answer describes a moment that is over and must not be applied on top of it.
+ */
+export function isFreshDaemonStatus(askedAt: number | undefined, delivered: number): boolean {
+	return askedAt === undefined || askedAt === delivered;
+}
+
 export function canSendToDaemon(isClient: boolean, connected: boolean): boolean {
 	return !isClient || connected;
 }
@@ -1577,7 +1586,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	>(() => {});
 	applyDaemonStatusRef.current = (pending, askedAt) => {
 		if (!pending.status) return;
-		if (askedAt !== undefined && askedAt !== statusSeqRef.current) return;
+		if (!isFreshDaemonStatus(askedAt, statusSeqRef.current)) return;
 		backendStartRef.current = pending.startedAt ?? null;
 		setStatus(pending.status);
 		if (pending.status === "running") {

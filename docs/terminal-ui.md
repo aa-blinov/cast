@@ -147,5 +147,19 @@ closes pickers, rewrites a 256 KB file (`--edit-kb 1024` for an extreme one) and
 live heap after a forced GC (read over the inspector, so a leak shows as memory that does not come back), RSS, the
 longest the event loop stalled, and how long a typed character takes to appear while a turn streams. It exits non-zero
 when the heap does not return to near its start after `/clear`, grows across identical cycles, or the loop stalls for
-more than 250 ms (`--lag-budget`, `--heap-budget`, `--slope-budget`, `--turns`, `--lines`, `--edit-kb` and `--keep`
-adjust it).
+more than 250 ms (`--lag-budget`, `--heap-budget`, `--slope-budget`, `--turns`, `--lines`, `--cycles` for more
+fill-and-clear cycles, `--edit-kb` and `--keep` adjust it). `--force-stream-drops` makes the daemon cut the TUI's event
+stream mid-turn, to check that the screen comes back to idle after reconnecting. CI runs it weekly
+(`.github/workflows/soak.yml`) and on demand, not on every push: it needs tmux and a few minutes.
+
+What is deliberately left as it is, with the numbers behind it:
+
+- **The whole transcript is held and walked once per frame.** A frame costs about 2 ms at a thousand messages and about
+  60 ms at ten thousand (325,000 rows); pi-tui's scroll view needs every row to size itself. Older messages cannot be
+  dropped from memory safely, because the rows on screen carry no sequence number to load them back by.
+- **A turn's end re-reads the session from SQLite** (to refresh what `/copy` and the status row use): 11 ms for a 2 MB
+  session, 59 ms for 8 MB, 283 ms for 63 MB.
+- **The daemon builds each model request from the whole history**, so a turn pays for the size of the session in JSON
+  serialization (about 170 ms per megabyte of tool arguments in the history in the soak test).
+- **`/clear` keeps the `/undo` copies** (within the 64 MB cap): undoing a turn's file changes does not depend on the
+  conversation text.

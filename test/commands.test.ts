@@ -400,6 +400,60 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("cleared");
 	});
 
+	// The conversation the model sees is the daemon's. Clearing only this process's copy left it intact: a secret
+	// word given before /clear was still answered after it (verified against a real model).
+	it("/clear on a daemon clears the daemon's conversation first, and only then this side's", async () => {
+		const { deps, calls } = createFakeDeps();
+		const order: string[] = [];
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async (command) => {
+			order.push(`daemon ${command}`);
+			return "Context cleared";
+		};
+		const clearContext = deps.agent.clearContext;
+		(deps.agent as { clearContext: () => void }).clearContext = () => {
+			order.push("local clear");
+			clearContext();
+		};
+		await handleInput("/clear", undefined, deps);
+		expect(order).toEqual(["daemon /clear", "local clear"]);
+		expect(noticeText(calls)).toContain("cleared");
+	});
+
+	it("/compact on a daemon is the daemon's to do (its history, its hooks), not a compaction of this side's copy", async () => {
+		const { deps, calls } = createFakeDeps();
+		const sent: string[] = [];
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async (command) => {
+			sent.push(command);
+			return "Compacting…";
+		};
+		await handleInput("/compact", undefined, deps);
+		expect(sent).toEqual(["/compact"]);
+		expect(noticeText(calls)).toContain("Compacting…");
+	});
+
+	it("/compact on a daemon that refuses says it was not compacted", async () => {
+		const { deps, calls } = createFakeDeps();
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async () => {
+			throw new Error("Agent running");
+		};
+		await handleInput("/compact", undefined, deps);
+		expect(noticeText(calls)).toContain("Not compacted: Agent running");
+	});
+
+	it("/clear on a daemon that refuses (a turn is running) changes nothing here and says why", async () => {
+		const { deps, calls } = createFakeDeps();
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async () => {
+			throw new Error("Agent running");
+		};
+		await handleInput("/clear", undefined, deps);
+		expect(calls["agent.clearContext"]).toBeUndefined();
+		expect(noticeText(calls)).toContain("Not cleared: Agent running");
+	});
+
 	it("/older loads a history page and repaints", async () => {
 		const { deps, calls } = createFakeDeps();
 		const repaint = vi.fn().mockResolvedValue(undefined);
