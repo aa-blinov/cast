@@ -447,17 +447,34 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 		}
 	};
 
+	// The tree keys: Right opens a folder (and steps into an open one), Left closes it (or steps out to its parent), on
+	// top of Enter and Space from `pressable` and the Up and Down of the list.
+	const onTreeKey = (e, fullPath, isDir, isOpen) => {
+		if (e.target !== e.currentTarget) return;
+		const rows = [...e.currentTarget.closest(".fs-tree").querySelectorAll(".fs-row-main")];
+		if (e.key === "ArrowRight" && isDir) {
+			e.preventDefault();
+			if (!isOpen) toggleDir(fullPath);
+			else rows[rows.indexOf(e.currentTarget) + 1]?.focus();
+		} else if (e.key === "ArrowLeft") {
+			e.preventDefault();
+			if (isDir && isOpen) toggleDir(fullPath);
+			else rows.find((r) => r.dataset.path === parentOf(fullPath))?.focus();
+		}
+	};
+
 	const renderEntry = (parentPath, entry, depth) => {
 		const fullPath = joinPath(parentPath, entry.name);
 		const isDir = entry.type === "dir";
 		const isOpen = expanded.has(fullPath);
 		const isLoading = loadingDirs.has(fullPath);
 		const isBusy = busyPath === fullPath;
+		const press = pressable((e) => onRowActivate(e, fullPath, isDir));
 		const rowClass = `fs-row${picked.has(fullPath) ? " picked" : ""}${dropTarget === fullPath ? " drop" : ""}${selectedDir === fullPath ? " current" : ""}`;
 		return html`
 			<div key=${fullPath}>
 				<div class=${rowClass} draggable="true" onDragStart=${(e) => e.dataTransfer.setData("application/x-cast-path", fullPath)} ...${isDir ? dropProps(fullPath) : {}}>
-					<div class="fs-row-main${entry.ignored ? " ignored" : ""}" style=${{ paddingLeft: `${depth * 16}px` }} aria-expanded=${isDir ? isOpen : undefined} ...${pressable((e) => onRowActivate(e, fullPath, isDir))}>
+					<div class="fs-row-main${entry.ignored ? " ignored" : ""}" data-path=${fullPath} style=${{ paddingLeft: `${depth * 16}px` }} aria-expanded=${isDir ? isOpen : undefined} ...${press} onKeyDown=${(e) => { press.onKeyDown(e); onTreeKey(e, fullPath, isDir, isOpen); }}>
 						${
 							isDir
 								? html`<span class="fs-chevron${isOpen ? " open" : ""}"><${icons.chevronRight} /></span>`
@@ -496,7 +513,11 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 	return html`
 		<div class="fs-explorer">
 			<div class="fs-toolbar">
-				<input class="fs-search" aria-label="Search files" placeholder="Search files…" value=${query} onInput=${(e) => onSearchInput(e.target.value)} />
+				<input class="fs-search" aria-label="Search files" placeholder="Search files…" value=${query} onInput=${(e) => onSearchInput(e.target.value)} onKeyDown=${(e) => {
+					if (e.key !== "Escape" || !query) return;
+					e.preventDefault();
+					onSearchInput("");
+				}} />
 				<button class="fs-collapse-btn" title="Collapse all folders" aria-label="Collapse all folders" onClick=${collapseAll}><${icons.chevronUp} /></button>
 			</div>
 			<div class="fs-toolbar fs-toolbar-actions">
