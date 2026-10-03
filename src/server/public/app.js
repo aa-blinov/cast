@@ -2148,15 +2148,11 @@ function App() {
 				activeId=${activeId}
 				selectingId=${selectingId}
 				personas=${personas}
-				cwd=${cwd}
-				defaultCwd=${defaultCwd}
 				quickSessionPersona=${quickSessionPersona}
 				onSelectSession=${selectSession}
 				onCreateSession=${startDraft}
 				onOpenNewSession=${() => setNewSessionOpen(true)}
 				onDeleteSession=${deleteSessionPermanently}
-				onOpenDirPicker=${() => setDirPickerOpen(true)}
-				onSetCwd=${setSelectedCwd}
 				onRenameSession=${renameSession}
 				onPinSession=${pinSession}
 				onShareSession=${setShareModalSession}

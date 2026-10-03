@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { SidebarSessionItem } from "./sidebar-session-item.js";
-import { groupSessionsByDate, SANDBOX_CWD, shortPath, sortSessionsByActivity, visibleSessions } from "./sidebar-utils.js";
+import { groupSessionsByDate, SANDBOX_CWD, sortSessionsByActivity, visibleSessions } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
 
@@ -13,15 +13,11 @@ export function Sidebar({
 	activeId,
 	selectingId,
 	personas,
-	cwd,
-	defaultCwd,
 	quickSessionPersona,
 	onSelectSession,
 	onCreateSession,
 	onOpenNewSession,
 	onDeleteSession,
-	onOpenDirPicker,
-	onSetCwd,
 	onRenameSession,
 	onPinSession,
 	onShareSession,
@@ -38,7 +34,6 @@ export function Sidebar({
 	onLoadMore,
 	loadingMore,
 }) {
-	const [personaOpen, setPersonaOpen] = useState(false);
 	const [search, setSearch] = useState("");
 	// null when there's no active search (show `sessions` as-is); an array
 	// once a query has resolved, already filtered and ranked server-side by
@@ -182,7 +177,6 @@ export function Sidebar({
 	const searching = isSearching && searchResults === null;
 	const filtered = isSearching ? (searchResults ?? []) : visibleSessions(sessions, activeId);
 	const sessionGroups = isSearching ? [] : groupSessionsByDate(filtered);
-	const isSandbox = cwd === SANDBOX_CWD;
 
 	useEffect(() => {
 		if (!hasMore || !onLoadMore || isSearching) return;
@@ -287,43 +281,12 @@ export function Sidebar({
 						class="new-session-btn-quick"
 						title=${`Quick session — ${personas.find((p) => p.name === quickSessionPersona)?.label ?? quickSessionPersona}, fresh sandbox directory (configurable in Settings > Tools)`}
 						aria-label="Quick session"
-						onClick=${() => {
-							setPersonaOpen(false);
-							onCreateSession(quickSessionPersona, SANDBOX_CWD);
-						}}
+						onClick=${() => onCreateSession(quickSessionPersona, SANDBOX_CWD)}
 					><${icons.bolt} /></button>
 				</div>
 			</div>
 			<div class="sidebar-divider" />
 			<div class="sidebar-scroll">
-				<div class="persona-list${personaOpen ? " open" : ""}">
-					<div class="dir-row">
-						<span class="dir-row-label">Directory</span>
-						<div class="dir-toggle">
-							<button
-								aria-pressed=${Boolean(!isSandbox)} class="dir-toggle-btn${!isSandbox ? " active" : ""}"
-								title=${isSandbox ? defaultCwd : cwd}
-								onClick=${isSandbox ? () => onSetCwd(null) : onOpenDirPicker}
-							>${shortPath(isSandbox ? defaultCwd : cwd)}</button>
-							<button
-								aria-pressed=${Boolean(isSandbox)} class="dir-toggle-btn dir-toggle-sandbox${isSandbox ? " active" : ""}"
-								title="Create a fresh sandbox directory for a throwaway session"
-								onClick=${() => onSetCwd(SANDBOX_CWD)}
-							>sandbox</button>
-						</div>
-					</div>
-					${personas.map(
-						(p) => html`
-						<div key=${p.name} class="persona-item" onClick=${() => {
-							onCreateSession(p.name, cwd);
-							setPersonaOpen(false);
-						}}>
-							${p.label}
-							<span class="persona-label">${p.source}</span>
-						</div>
-					`,
-					)}
-				</div>
 				<div class="sidebar-section">
 					<h2 class="sidebar-section-title">Sessions</h2>
 					${

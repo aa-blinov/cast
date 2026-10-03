@@ -591,64 +591,6 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 }
 .new-session-btn-quick:hover { border-color: var(--cyan); color: var(--cyan); background: var(--bg-hover); }
 .new-session-btn-quick svg { width: 15px; height: 15px; }
-/* Lives inside .sidebar-scroll (not .sidebar-new-section) precisely so it
-   scrolls as part of the same single region as the session list below it —
-   at high page zoom or with many personas this can grow taller than the
-   sidebar itself, and a separate inner scrollbar here would just mean two
-   scrollbars fighting for attention in one narrow column. */
-.persona-list { display: none; padding: 0 12px 12px; }
-.persona-list.open { display: block; }
-.persona-item {
-	padding: 6px 10px;
-	border-radius: var(--radius-sm);
-	cursor: pointer;
-	font-size: var(--fs-ui);
-	color: var(--text-dim);
-	transition: background var(--dur-instant), color var(--dur-instant);
-}
-.persona-item:hover { background: var(--bg-hover); color: var(--text); }
-.persona-item.selected { color: var(--cyan); }
-.dir-row {
-	display: flex; align-items: center; gap: 8px;
-	padding: 4px 10px 10px;
-	margin-bottom: 4px;
-	border-bottom: 1px solid var(--border);
-}
-.dir-row-label {
-	font-size: var(--fs-micro); font-weight: 600;
-	text-transform: uppercase; letter-spacing: .05em;
-	color: var(--text-muted);
-	flex-shrink: 0;
-}
-.dir-toggle {
-	display: flex;
-	flex: 1;
-	min-width: 0;
-	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
-	overflow: hidden;
-}
-.dir-toggle-btn {
-	background: none; border: none;
-	color: var(--text-muted);
-	font-family: var(--font-mono);
-	font-size: var(--fs-ui);
-	cursor: pointer;
-	padding: 5px 8px;
-	transition: color var(--dur-instant), background var(--dur-instant);
-}
-.dir-toggle-btn:not(:first-child) { border-left: 1px solid var(--border); }
-.dir-toggle-btn:hover { color: var(--text); background: var(--bg-hover); }
-.dir-toggle-btn.active { color: var(--cyan); background: var(--bg-hover); }
-.dir-toggle-btn:first-child {
-	flex: 1;
-	min-width: 0;
-	text-align: left;
-	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.dir-toggle-sandbox { flex-shrink: 0; }
-.persona-label { color: var(--text-muted); font-size: var(--fs-micro); margin-left: 4px; }
-
 /* ── Composer ─────────────────────────────────────────────────────── */
 .composer-role {
 	display: flex; align-items: center; justify-content: space-between;
@@ -1589,7 +1531,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	/* Stand-alone controls grow to a real 44px target. */
 	.header-btn, .menu-toggle, .composer-send, .composer-abort, .composer-attach,
 	.modal-close, .verify-btn, .sidebar-logout, .new-session-btn, .new-session-btn-quick,
-	.scroll-bottom-btn, .dash-pager-btn, .fs-collapse-btn, .fs-action, .dir-toggle-btn {
+	.scroll-bottom-btn, .dash-pager-btn, .fs-collapse-btn, .fs-action {
 		min-width: 44px; min-height: 44px;
 	}
 	/* Panel tabs, settings controls and modal buttons grow to the same target. */

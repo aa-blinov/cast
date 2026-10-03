@@ -7,10 +7,7 @@
  * calls `onCreate({ persona, cwd, worktree, model })` when the user clicks
  * Create. The caller is responsible for the actual `startDraft` /
  * `commitSession` dance — this modal is just a form, not a session
- * lifecycle owner. The old sidebar persona-row + dir-toggle stay around
- * only as a fallback for /new slash command and the bootstrap "first
- * session" auto-pick; the user-facing new-session entry point is this
- * modal.
+ * lifecycle owner. It is the one new-session form; the sidebar only has the quick button.
  */
 
 import htm from "htm";
