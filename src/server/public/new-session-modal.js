@@ -219,6 +219,7 @@ export function NewSessionModal({
 	// the other, matching the server-side guard. The UI's job is just
 	// to make the conflict obvious to the user so they don't fill the
 	// form and then get a 400 at submit.
+	// Called with true only: the pair is two modes, and pressing the active one again would leave no directory chosen.
 	const onSandboxChange = (next) => {
 		setSandbox(next);
 		if (next) setWorktreeEnabled(false);
@@ -350,8 +351,8 @@ export function NewSessionModal({
 						<button
 							type="button"
 							aria-pressed=${Boolean(sandbox)} class=${`modal-btn new-session-cwd-toggle${sandbox ? " active" : ""}`}
-							title=${cwd && !sandbox ? `Selected: ${cwd}` : "Create a fresh sandbox directory for a throwaway session"}
-							onClick=${() => onSandboxChange(!sandbox)}
+							title="Create a fresh sandbox directory for a throwaway session"
+							onClick=${() => onSandboxChange(true)}
 						>Sandbox</button>
 					</div>
 					${
@@ -373,6 +374,7 @@ export function NewSessionModal({
 							<span class="new-session-cwd-preview-label">Sandbox session</span>
 							<code class="new-session-cwd-preview-path">~/.cast/sandbox/cast-[id]</code>
 						</div>
+						<p class="modal-hint">Deleted with the session.</p>
 					`
 					}
 

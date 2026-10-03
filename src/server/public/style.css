@@ -629,7 +629,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	font-family: var(--font-mono);
 	font-size: var(--fs-ui);
 	cursor: pointer;
-	padding: 3px 8px;
+	padding: 5px 8px;
 	transition: color var(--dur-instant), background var(--dur-instant);
 }
 .dir-toggle-btn:not(:first-child) { border-left: 1px solid var(--border); }

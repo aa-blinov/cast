@@ -16,6 +16,10 @@ colors:
   success: "#a9b665"
   warning: "#e78a4e"
   error: "#ea6962"
+  scrim: "rgba(0,0,0,.6)"
+  scrim-strong: "rgba(0,0,0,.85)"
+  shadow-menu: "rgba(0,0,0,.35)"
+  shadow-modal: "rgba(0,0,0,.4)"
 typography:
   body:
     fontFamily: "JetBrains Mono, Fira Code, SF Mono, Consolas, monospace"
@@ -35,6 +39,7 @@ rounded:
   xs: "4px"
   sm: "6px"
   md: "8px"
+  pill: "999px"
 spacing:
   row: "44px"
 components:
@@ -99,7 +104,7 @@ Restrained: neutrals plus one accent. Every theme can supply these roles; the st
 
 ## Typography
 
-**Font:** the terminal's own in the terminal; JetBrains Mono (with Fira Code, SF Mono, Consolas) in the browser. The browser can switch among bundled monospace and sans faces in Settings.
+**Font:** the terminal's own in the terminal; JetBrains Mono (with Fira Code, SF Mono, Consolas) in the browser. The browser can switch in Settings among the bundled faces: JetBrains Mono, Fira Code, IBM Plex Mono, and the sans faces Inter, IBM Plex Sans and Work Sans.
 
 **Character:** a manual, set in one voice. Hierarchy is bold, capitals and indent only; there is no display face.
 
@@ -121,14 +126,14 @@ Tool rows (terminal) sit at the same margin: `  * ` done, `  … ` running (acce
 
 ## Elevation & Depth
 
-Flat. Depth is tonal layering (ink, surface, raised, hover) and hairline rules; there are no shadows and no glow. The connection dot is colour plus its tooltip, with a pulse only when the connection is genuinely lost. A recording indicator may pulse while recording is live, and stops under reduced motion.
+Flat. Depth is tonal layering (ink, surface, raised, hover) and hairline rules; there is no glow. The one exception is a layer that floats above the page (the menus and the modal), which carries a soft offset shadow so it reads as lifted. The connection dot is colour plus its tooltip, with a pulse only when the connection is genuinely lost. A recording indicator may pulse while recording is live, and stops under reduced motion.
 
 ### Named Rules
 **The Flat-By-Default Rule.** Surfaces are flat at rest; state is shown by tone and a mark, not by shadow.
 
 ## Shapes
 
-Hairline boxes. Terminal modals are a muted box with a bold title, centred on the screen and at most 104 columns wide. Small inline things (code chips, scrollbar thumbs, tags) use a 4px radius, browser fields and rows 6px, panels 8px; the one pill is the warning badge. No nested cards. Modal backdrops are a translucent black scrim, the only non-palette colour.
+Hairline boxes. Terminal modals are a muted box with a bold title, centred on the screen and at most 104 columns wide. Small inline things (code chips, scrollbar thumbs, tags) use a 4px radius, browser fields and rows 6px, panels 8px; the one pill is the warning badge. No nested cards. Modal and sidebar backdrops, and the remove button on a composer image, are translucent black, the only non-palette colour.
 
 ## Components
 

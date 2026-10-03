@@ -310,7 +310,7 @@ export function Sidebar({
 								aria-pressed=${Boolean(isSandbox)} class="dir-toggle-btn dir-toggle-sandbox${isSandbox ? " active" : ""}"
 								title="Create a fresh sandbox directory for a throwaway session"
 								onClick=${() => onSetCwd(SANDBOX_CWD)}
-							>new</button>
+							>sandbox</button>
 						</div>
 					</div>
 					${personas.map(
