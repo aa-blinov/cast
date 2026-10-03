@@ -2,10 +2,13 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.54.0
 
 ### Added
 - **A scratchpad for every session.** The agent is given a folder of its own, `~/.cast/scratch/<session id>`, for temporary files (intermediate results, throwaway scripts, saved command output), tells it where it is in the system prompt, and may read and write it without a permission prompt. Temporary files stop landing in your repository or in a shared `/tmp`, and two sessions cannot collide. It goes with the session when it is deleted; subagents share their parent's; a sandbox session's working folder serves as its own. A `scratchpad` status bar segment (off by default) and `/current` in the web show the path; `"scratchpad": false` in settings turns it off; a refused write to `/tmp` points the agent at it; a folder whose session is gone is swept when the daemon starts; it is not mentioned to a run that cannot write (plan mode, a read-only subagent) nor when it could not be made. See `docs/sessions.md`. `/scratchpad` shows what is in it and `/scratchpad clear` empties it (terminal and web); the daemon also removes a folder with no activity for 30 days, and the root is private. Two evals (`scratchpad-keeps-the-project-clean`, `scratchpad-leaves-a-requested-file-in-the-project`) guard the behaviour with a real model.
+
+### Fixed
+- **The directory watcher reports nothing once it is closed.** A change is reported only after a stat says whether it is a file or a folder, and that answer could come back after `close()`; it was then reported anyway (to a session that was already closed, and, in the suite, to the next test: a rare failure of `dir-watcher.test.ts` that stopped a release push).
 
 ## 0.53.3
 
