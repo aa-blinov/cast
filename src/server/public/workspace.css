@@ -136,7 +136,7 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .memory-badge-critical { border-color: color-mix(in srgb, var(--rose) 40%, var(--border)); color: var(--rose); background: var(--danger-subtle); }
 .memory-badge-high { border-color: color-mix(in srgb, var(--green) 40%, var(--border)); color: var(--green); background: var(--success-subtle); }
 .memory-badge-medium { border-color: color-mix(in srgb, var(--amber) 40%, var(--border)); color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, transparent); }
-.memory-badge-low { color: var(--text-muted); background: var(--bg-hover); }
+.memory-badge-low { color: var(--text-dim); background: var(--bg-hover); }
 .memory-content { margin: 8px 0 9px; color: var(--text); font-size: var(--fs-ui); line-height: 1.45; overflow-wrap: anywhere; }
 .memory-meta { display: flex; gap: 9px; color: var(--text-muted); font-size: var(--fs-micro); }
 .memory-meta span + span::before { content: '·'; margin-right: 9px; color: var(--border-active); }
@@ -670,7 +670,8 @@ body.resizing-diff .diff-resize-handle::after { background: var(--cyan); }
 .fs-row.picked { background: var(--accent-subtle); }
 .fs-row.drop, .fs-tree.drop { outline: 1px dashed var(--cyan); outline-offset: -2px; }
 .fs-row.current .fs-name { color: var(--cyan); }
-.fs-row-main.ignored { opacity: .5; }
+/* Said in words (the tag) and a muted colour, not by fading: the dimmed name fell to 2.7:1. */
+.fs-row-main.ignored .fs-name { color: var(--text-muted); }
 .fs-tag { flex-shrink: 0; margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-muted); font-size: var(--fs-micro); }
 .fs-empty-dir { color: var(--text-muted); font-size: var(--fs-ui); padding: 3px 0; }
 .fs-more, .fs-more-note { color: var(--text-muted); font-size: var(--fs-ui); }

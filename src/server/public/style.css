@@ -1592,6 +1592,10 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	.settings-toggle, .modal-btn, .modal select, .login-form input, .login-form button { min-height: 44px; }
 	/* Palette rows are tapped, not arrowed, on a phone. */
 	.cmd-item, .turn-retry .modal-btn { min-height: 44px; }
+	/* The workspace panel's rows and controls: its tree and change list are tapped, not pointed at. */
+	.diff-file-item, .fs-row, .fs-row-main, .fs-tool-btn, .fs-tool-toggle, .fs-more, .fs-search, .memory-search { min-height: 44px; }
+	.fs-error-dismiss { position: relative; }
+	.fs-error-dismiss::after { content: ""; position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 	/* The session row is the thing tapped most; the search field and "Load more" sit in the same list. */
 	.sidebar-item, .sidebar-load-more, .sidebar-search { min-height: 44px; }
 	.sidebar-search { margin-bottom: 12px; }
