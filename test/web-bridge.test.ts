@@ -3684,7 +3684,9 @@ describe("web bridge", () => {
 	// without asking anyone — including for a TUI attached as a thin client,
 	// whose picker never got a say.
 	describe("dangerous-command confirmation", () => {
-		function confirmFromLoop(): (command: string, reason: string) => Promise<boolean> {
+		// The loop is started by an async submit; wait for it to be called instead of guessing how many ticks that takes.
+		async function confirmFromLoop(): Promise<(command: string, reason: string) => Promise<boolean>> {
+			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
 			const opts = runAgentLoop.mock.calls.at(-1)![1] as {
 				confirmBash?: (command: string, reason: string) => Promise<boolean>;
 			};
@@ -3700,10 +3702,9 @@ describe("web bridge", () => {
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
 			await bridge.submit(ws.id, "clean up");
-			await new Promise<void>((resolve) => setImmediate(resolve));
 
-			const pending = confirmFromLoop()("rm -rf build", "recursive/force delete (rm -rf)");
-			await new Promise<void>((resolve) => setImmediate(resolve));
+			const pending = (await confirmFromLoop())("rm -rf build", "recursive/force delete (rm -rf)");
+			await vi.waitFor(() => expect(bridge.getBashConfirm(ws.id)).toBeDefined());
 
 			const asked = events.find((e) => e.type === "bash_confirm");
 			expect(asked?.command).toBe("rm -rf build");
@@ -3724,10 +3725,9 @@ describe("web bridge", () => {
 			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 			await bridge.submit(ws.id, "push it");
-			await new Promise<void>((resolve) => setImmediate(resolve));
 
-			const pending = confirmFromLoop()("git push --force", "force push (rewrites remote history)");
-			await new Promise<void>((resolve) => setImmediate(resolve));
+			const pending = (await confirmFromLoop())("git push --force", "force push (rewrites remote history)");
+			await vi.waitFor(() => expect(bridge.getBashConfirm(ws.id)).toBeDefined());
 			const id = events.find((e) => e.type === "bash_confirm")!.id!;
 
 			expect(bridge.answerBashConfirm(ws.id, "not-the-pending-id", true)).toBe(false);
@@ -3742,11 +3742,14 @@ describe("web bridge", () => {
 			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 			await bridge.submit(ws.id, "publish");
-			await new Promise<void>((resolve) => setImmediate(resolve));
 
-			const confirm = confirmFromLoop() as (command: string, reason: string, rule?: string) => Promise<boolean>;
+			const confirm = (await confirmFromLoop()) as (
+				command: string,
+				reason: string,
+				rule?: string,
+			) => Promise<boolean>;
 			const pending = confirm("write notes.md", "permission rule write(*.md)", "write(notes.md)");
-			await new Promise<void>((resolve) => setImmediate(resolve));
+			await vi.waitFor(() => expect(bridge.getBashConfirm(ws.id)).toBeDefined());
 			const asked = events.find((e) => e.type === "bash_confirm")!;
 			expect(asked.rule).toBe("write(notes.md)");
 			expect(bridge.answerBashConfirm(ws.id, asked.id!, true, true)).toBe(true);
@@ -3762,11 +3765,14 @@ describe("web bridge", () => {
 			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 			await bridge.submit(ws.id, "write it");
-			await new Promise<void>((resolve) => setImmediate(resolve));
 
-			const confirm = confirmFromLoop() as (command: string, reason: string, rule?: string) => Promise<boolean>;
+			const confirm = (await confirmFromLoop()) as (
+				command: string,
+				reason: string,
+				rule?: string,
+			) => Promise<boolean>;
 			const pending = confirm("write a.md", "permission rule write(*.md)", "write(a.md)");
-			await new Promise<void>((resolve) => setImmediate(resolve));
+			await vi.waitFor(() => expect(bridge.getBashConfirm(ws.id)).toBeDefined());
 			const asked = bridge.getBashConfirm(ws.id);
 			expect(asked).toMatchObject({ command: "write a.md", rule: "write(a.md)" });
 
@@ -3823,9 +3829,8 @@ describe("web bridge", () => {
 			const ws = bridge.createSession();
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 			await bridge.submit(ws.id, "delete things");
-			await new Promise<void>((resolve) => setImmediate(resolve));
 
-			await expect(confirmFromLoop()("sudo rm -rf /", "elevated privileges (sudo)")).resolves.toBe(false);
+			await expect((await confirmFromLoop())("sudo rm -rf /", "elevated privileges (sudo)")).resolves.toBe(false);
 		});
 	});
 
