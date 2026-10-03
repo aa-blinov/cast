@@ -410,13 +410,14 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 		<div class="fs-row-actions">
 			${
 				type !== "dir"
-					? html`<a class="fs-action" href=${downloadHref(fullPath)} download title="Download" onClick=${(e) => e.stopPropagation()}><${icons.arrowDownTray} /></a>`
+					? html`<a class="fs-action" href=${downloadHref(fullPath)} download title="Download" aria-label=${`Download ${name}`} onClick=${(e) => e.stopPropagation()}><${icons.arrowDownTray} /></a>`
 					: null
 			}
 			<button
 				class="fs-action"
 				disabled=${isBusy}
 				title="Rename"
+				aria-label=${`Rename ${name}`}
 				onClick=${(e) => {
 					e.stopPropagation();
 					startRename(fullPath, name);
@@ -426,6 +427,7 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 				class="fs-action"
 				disabled=${isBusy}
 				title=${type === "dir" ? "Delete folder" : "Delete file"}
+				aria-label=${`Delete ${name}`}
 				onClick=${(e) => {
 					e.stopPropagation();
 					doDelete(fullPath, type);
@@ -463,6 +465,7 @@ export function FileExplorer({ activeId, cwd, confirm, refreshNonce }) {
 						}
 						<span class="fs-icon">${isDir ? html`<${icons.folder} />` : html`<${icons.docFile} />`}</span>
 						${renderName(fullPath, entry.name)}
+						${entry.ignored ? html`<span class="fs-tag">ignored</span>` : null}
 						${entry.link ? html`<span class="fs-tag">${entry.broken ? "broken link" : "link"}</span>` : null}
 						${!isDir && entry.size != null ? html`<span class="fs-size">${humanSize(entry.size)}</span>` : null}
 					</div>

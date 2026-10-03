@@ -24,6 +24,15 @@ export function numberHunkLines(hunk) {
 	});
 }
 
+// Arrows wrap, Home/End jump: the keys of a tab strip. -1 means the key is not ours.
+export function nextTabIndex(key, at, count) {
+	if (key === "ArrowRight") return (at + 1) % count;
+	if (key === "ArrowLeft") return (at - 1 + count) % count;
+	if (key === "Home") return 0;
+	if (key === "End") return count - 1;
+	return -1;
+}
+
 export function DiffPanel({
 	InputsExplorer,
 	FileExplorer: FileExplorerModule,
@@ -45,16 +54,30 @@ export function DiffPanel({
 }) {
 	const openClass = open ? " open" : "";
 
+	const tabs = [
+		["inputs", "Inputs"],
+		["fs", "Files"],
+		...(memoryEnabled ? [["memory", "Memory"]] : []),
+		["changes", "Changes"],
+	];
+	const onTabKeyDown = (event) => {
+		const next = nextTabIndex(event.key, tabs.findIndex(([id]) => id === tab), tabs.length);
+		if (next < 0) return;
+		event.preventDefault();
+		onTabChange(tabs[next][0]);
+		event.currentTarget.querySelectorAll('[role="tab"]')[next]?.focus();
+	};
+
 	const header = html`
 		<div class="diff-header">
-			<div class="diff-tabs">
-				<button aria-pressed=${Boolean(tab === "inputs")} class="diff-tab${tab === "inputs" ? " active" : ""}" onClick=${() => onTabChange("inputs")}>Inputs</button>
-				<button aria-pressed=${Boolean(tab === "fs")} class="diff-tab${tab === "fs" ? " active" : ""}" onClick=${() => onTabChange("fs")}>Files</button>
-				${memoryEnabled && html`<button aria-pressed=${Boolean(tab === "memory")} class="diff-tab${tab === "memory" ? " active" : ""}" onClick=${() => onTabChange("memory")}>Memory</button>`}
-				<button aria-pressed=${Boolean(tab === "changes")} class="diff-tab${tab === "changes" ? " active" : ""}" onClick=${() => onTabChange("changes")}>Changes</button>
+			<div class="diff-tabs" role="tablist" aria-label="Workspace" onKeyDown=${onTabKeyDown}>
+				${tabs.map(
+					([id, label]) => html`<button role="tab" aria-selected=${tab === id} tabIndex=${tab === id ? 0 : -1} class="diff-tab${tab === id ? " active" : ""}" onClick=${() => onTabChange(id)}>${label}</button>`,
+				)}
 			</div>
 		</div>
 	`;
+	const shell = (children) => html`<${PanelShell} openClass=${openClass} open=${open} resizeHandleProps=${resizeHandleProps} header=${header}>${children}<//>`;
 
 	// A draft session (nothing sent yet) has no cwd on the server to diff or
 	// browse — show that plainly instead of either tab's normal content
@@ -64,61 +87,34 @@ export function DiffPanel({
 	// this must say "Loading", not "No session yet" (which read as wrong the
 	// instant a real session's data landed a moment later).
 	if (!activeId) {
-		return html`
-			<aside class="diff-panel${openClass}" inert=${!open}>
-				<div class="diff-resize-handle" ...${resizeHandleProps} />
-				${header}
-				${
-					bootstrapping
-						? html`<div class="diff-empty">Loading</div>`
-						: html`
-						<div class="diff-empty diff-empty-hint">
-							<div>
-								<p class="diff-empty-title">No session yet</p>
-								<p>Send a message to start this thread, then its changes and files show up here.</p>
-							</div>
+		return shell(
+			bootstrapping
+				? html`<div class="diff-empty" role="status">Loading</div>`
+				: html`
+					<div class="diff-empty diff-empty-hint">
+						<div>
+							<p class="diff-empty-title">No session yet</p>
+							<p>Send a message to start this thread, then its changes and files show up here.</p>
 						</div>
-					`
-				}
-			</aside>
-		`;
+					</div>
+				`,
+		);
 	}
 
 	if (tab === "inputs") {
-		return html`
-			<aside class="diff-panel${openClass}" inert=${!open}>
-				<div class="diff-resize-handle" ...${resizeHandleProps} />
-				${header}
-				<${InputsExplorer} activeId=${activeId} confirm=${confirm} refreshNonce=${inputsRefreshNonce} />
-			</aside>
-		`;
+		return shell(html`<${InputsExplorer} activeId=${activeId} confirm=${confirm} refreshNonce=${inputsRefreshNonce} />`);
 	}
 
 	if (tab === "fs") {
-		return html`
-			<aside class="diff-panel${openClass}" inert=${!open}>
-				<div class="diff-resize-handle" ...${resizeHandleProps} />
-				${header}
-				<${FileExplorerModule} activeId=${activeId} cwd=${cwd} confirm=${confirm} refreshNonce=${fsRefreshNonce} />
-			</aside>
-		`;
+		return shell(html`<${FileExplorerModule} activeId=${activeId} cwd=${cwd} confirm=${confirm} refreshNonce=${fsRefreshNonce} />`);
 	}
 
 	if (tab === "memory" && memoryEnabled) {
-		return html`
-			<aside class="diff-panel${openClass}" inert=${!open}>
-				<div class="diff-resize-handle" ...${resizeHandleProps} />
-				${header}
-				<${MemoryExplorerModule} activeId=${activeId} />
-			</aside>
-		`;
+		return shell(html`<${MemoryExplorerModule} activeId=${activeId} />`);
 	}
 
 	if (!data)
-		return html`
-		<aside class="diff-panel${openClass}" inert=${!open}>
-			<div class="diff-resize-handle" ...${resizeHandleProps} />
-			${header}
+		return shell(html`
 			<div class="fs-skeleton" style="padding:12px">
 				<div class="fs-skeleton-row"></div>
 				<div class="fs-skeleton-row"></div>
@@ -126,19 +122,20 @@ export function DiffPanel({
 				<div class="fs-skeleton-row"></div>
 				<div class="fs-skeleton-row"></div>
 			</div>
+		`);
+
+	return html`<${ChangesView} data=${data} activeFile=${activeFile} onSelectFile=${onSelectFile} shell=${shell} activeId=${activeId} />`;
+}
+
+// The one frame of every tab, so the landmark and its name are written once.
+function PanelShell({ openClass, open, resizeHandleProps, header, children }) {
+	return html`
+		<aside class="diff-panel${openClass}" aria-label="Workspace panel" inert=${!open}>
+			<div class="diff-resize-handle" ...${resizeHandleProps} />
+			${header}
+			${children}
 		</aside>
 	`;
-
-	return html`<${ChangesView}
-		data=${data}
-		activeFile=${activeFile}
-		onSelectFile=${onSelectFile}
-		header=${header}
-		openClass=${openClass}
-		open=${open}
-		resizeHandleProps=${resizeHandleProps}
-		activeId=${activeId}
-	/>`;
 }
 
 /**
@@ -146,7 +143,7 @@ export function DiffPanel({
  * files with the list; any other file's diff is fetched when it is opened (a
  * diff costs a git process each, and `git clean` can change 20,000 files).
  */
-function ChangesView({ data, activeFile, onSelectFile, header, openClass, open, resizeHandleProps, activeId }) {
+function ChangesView({ data, activeFile, onSelectFile, shell, activeId }) {
 	const [lazy, setLazy] = useState({});
 	const [loading, setLoading] = useState(null);
 	const allFiles = data.files || [];
@@ -211,10 +208,7 @@ function ChangesView({ data, activeFile, onSelectFile, header, openClass, open, 
 		diffContent = file.hunks.map((hunk, hi) => ({ hi, hunk, lines: numberHunkLines(hunk) }));
 	}
 
-	return html`
-		<aside class="diff-panel${openClass}" inert=${!open}>
-			<div class="diff-resize-handle" ...${resizeHandleProps} />
-			${header}
+	return shell(html`
 			<div class="diff-file-list">
 				${sections.map(
 					(sec) => html`
@@ -265,9 +259,9 @@ function ChangesView({ data, activeFile, onSelectFile, header, openClass, open, 
 					`,
 							)
 						: file?.stub && loading === activePath
-							? html`<div class="diff-empty">Loading diff</div>`
+							? html`<div class="diff-empty" role="status">Loading diff</div>`
 							: file?.stub
-								? html`<div class="diff-empty">No textual diff for this file</div>`
+								? html`<div class="diff-empty" role="status">No textual diff for this file</div>`
 								: data.noRepo
 							? html`
 						<div class="diff-empty diff-empty-hint">
@@ -278,10 +272,9 @@ function ChangesView({ data, activeFile, onSelectFile, header, openClass, open, 
 						</div>
 					`
 							: data.error
-								? html`<div class="diff-empty diff-empty-error">${data.error}</div>`
-								: html`<div class="diff-empty">No changes</div>`
+								? html`<div class="diff-empty diff-empty-error" role="alert">${data.error}</div>`
+								: html`<div class="diff-empty" role="status">No changes</div>`
 				}
 			</div>
-		</aside>
-	`;
+	`);
 }
