@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.53.3
 
 ### Added
 - **`npm run soak:tui`** (also run weekly in CI, `.github/workflows/soak.yml`) fills the terminal's transcript, scrolls, resizes, opens pickers and rewrites a large file against a fake streaming provider, and reports the live heap, RSS and longest event-loop stall of the TUI and the daemon, failing when memory does not come back after `/clear` or the screen stalls. See `docs/terminal-ui.md`.
