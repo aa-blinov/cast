@@ -114,6 +114,7 @@ You never need to quit cast or start a new session for these changes. The curren
 | Command | Description |
 |---------|-------------|
 | `/rules` | List loaded rules with their apply mode, globs, and scope |
+| `/scratchpad` | Show this session's scratchpad folder (see [Sessions](sessions.md#scratchpad)) and its biggest files; `/scratchpad clear` empties it |
 | `/rule:<name>` | Invoke a rule by name (loads its full content into context) |
 
 See [Rules](rules.md) for rule types and creation.

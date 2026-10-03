@@ -454,6 +454,25 @@ describe("handleInput", () => {
 		expect(noticeText(calls)).toContain("Not cleared: Agent running");
 	});
 
+	it("/scratchpad names the folder and lists what is in it; /scratchpad clear empties it", async () => {
+		const { deps, calls } = createFakeDeps();
+		const { ensureScratchpad, scratchpadFor } = await import("../src/core/scratchpad.ts");
+		const { writeFileSync, existsSync } = await import("node:fs");
+		const { join } = await import("node:path");
+		const dir = scratchpadFor("test-session", deps.cwd);
+		ensureScratchpad(dir);
+		writeFileSync(join(dir, "notes.txt"), "hello");
+
+		await handleInput("/scratchpad", undefined, deps);
+		expect(displayMessageText(calls)).toContain(dir);
+		expect(displayMessageText(calls)).toContain("notes.txt");
+
+		await handleInput("/scratchpad clear", undefined, deps);
+		expect(noticeText(calls)).toContain("Scratchpad emptied");
+		expect(existsSync(join(dir, "notes.txt"))).toBe(false);
+		expect(existsSync(dir)).toBe(true);
+	});
+
 	it("/older loads a history page and repaints", async () => {
 		const { deps, calls } = createFakeDeps();
 		const repaint = vi.fn().mockResolvedValue(undefined);

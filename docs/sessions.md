@@ -21,13 +21,19 @@ the project. It keeps those files out of your repository and out of a shared `/t
 - It is made on the first turn and removed with the session, together with its attachments. A fork gets a scratchpad of its own,
   empty.
 - A sandbox session has none apart from its working folder: that folder is throwaway already, so it is the scratchpad.
-- Show it with the `scratchpad` status bar segment (`/statusbar`, off by default) or `/current` in the web.
+- Look inside with `/scratchpad` (the path, the biggest files and their sizes) and empty it with `/scratchpad clear`, in the
+  terminal and the web. Listing works while a turn runs; emptying waits for it. In a sandbox session `clear` is refused: the
+  scratchpad is the working folder there.
+- Show the path with the `scratchpad` status bar segment (`/statusbar`, off by default) or `/current` in the web.
 - A refused write to a system temp folder (`/tmp`, `/var/tmp`) tells the agent to use the scratchpad instead.
-- A folder whose session no longer exists, and that nothing has touched for a day, is removed when the daemon starts.
+- When the daemon starts it removes a folder whose session no longer exists and that nothing has touched for a day, and any
+  folder, session or not, with no activity anywhere inside for 30 days. They are temporary files: that bounds the disk the
+  folders of sessions that are never deleted can take.
 - Turn it off with `"scratchpad": false` in `settings.json`: the agent is then told nothing and no folder is made. The folder is
   also not named to the agent when it could not be created.
 
-It is a convenience and not a security boundary: `bash` is not confined to it.
+It is a convenience and not a security boundary: `bash` is not confined to it. The folder is private to the user (`0700`, root
+included). A fork's scratchpad starts empty, so a file the original session wrote there is outside the project for the fork.
 
 ## Request Log
 

@@ -565,6 +565,32 @@ describe("web bridge", () => {
 		}
 	});
 
+	it("/scratchpad lists the folder, /scratchpad clear empties it, and a bad argument says how it is used", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const { ensureScratchpad, scratchpadFor } = await import("../src/core/scratchpad.ts");
+		const dir = scratchpadFor(ws.id, ws.session.cwd ?? process.cwd());
+		ensureScratchpad(dir);
+		writeFileSync(join(dir, "tmp.txt"), "x");
+
+		const listed = (await bridge.executeCommand(ws.id, "/scratchpad")).result as { text: string; files: unknown[] };
+		expect(listed.text).toContain(dir);
+		expect(listed.files).toHaveLength(1);
+
+		await expect(bridge.executeCommand(ws.id, "/scratchpad clear")).resolves.toMatchObject({ ok: true });
+		expect(existsSync(join(dir, "tmp.txt"))).toBe(false);
+		await expect(bridge.executeCommand(ws.id, "/scratchpad nope")).resolves.toMatchObject({
+			ok: false,
+			error: "Usage: /scratchpad [clear]",
+		});
+	});
+
+	it("/scratchpad is allowed while a turn runs, but emptying it is not", async () => {
+		const { isCommandBlocking } = await import("../src/server/commands.ts");
+		expect(isCommandBlocking("/scratchpad")).toBe(false);
+		expect(isCommandBlocking("/scratchpad clear")).toBe(true);
+	});
+
 	it("/current names the session's scratchpad", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

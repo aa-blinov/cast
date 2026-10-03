@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -11,7 +11,13 @@ import { clearGoal } from "./goal.ts";
 import type { Message, Usage } from "./llm.ts";
 import { sessionMemoryDir } from "./memory-files.ts";
 import type { PlanQuestion, PlanTransition } from "./plan.ts";
-import { isSandboxCwd, removeScratchpadFor, scratchpadRoot } from "./scratchpad.ts";
+import {
+	isSandboxCwd,
+	lastActivityMs,
+	removeScratchpadFor,
+	SCRATCHPAD_RETENTION_DAYS,
+	scratchpadRoot,
+} from "./scratchpad.ts";
 import { deriveSessionTitle } from "./session-title.ts";
 import { queryReadOnly } from "./sqlite-reader.ts";
 import { extractSystemReminders } from "./system-reminder.ts";
@@ -1935,7 +1941,10 @@ function removeSandboxDirFor(id: string, cwd: string | undefined): void {
  * folder behind (the same thing happened to sandbox, attachment and memory folders). Only folders untouched for a day, so
  * one made a moment ago by a session that has not been saved yet is left alone.
  */
-export function pruneOrphanScratchpads(minAgeMs = 24 * 60 * 60 * 1000): number {
+export function pruneOrphanScratchpads(
+	minAgeMs = 24 * 60 * 60 * 1000,
+	retentionMs = SCRATCHPAD_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+): number {
 	const root = scratchpadRoot();
 	let ids: string[];
 	try {
@@ -1948,7 +1957,10 @@ export function pruneOrphanScratchpads(minAgeMs = 24 * 60 * 60 * 1000): number {
 	for (const id of ids) {
 		try {
 			const path = join(root, id);
-			if (Date.now() - statSync(path).mtimeMs < minAgeMs || exists.get(id)) continue;
+			const idle = Date.now() - lastActivityMs(path);
+			// Gone with its session once a day idle; kept for its session for a month idle, which is a bound on the disk
+			// the folders of sessions that are never deleted can take (they are temporary files by contract).
+			if (idle < minAgeMs || (exists.get(id) && idle < retentionMs)) continue;
 			rmSync(path, { recursive: true, force: true });
 			removed += 1;
 		} catch {

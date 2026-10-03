@@ -140,6 +140,12 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true, blocking: false },
 	{ name: "/rules", description: "List loaded rules", blocking: false },
 	{
+		name: "/scratchpad",
+		description: "Show this session's scratchpad folder, or /scratchpad clear to empty it",
+		takesArgs: true,
+		blocking: false,
+	},
+	{
 		name: "/agents",
 		description: "List this session's subagents, or /agents stop <id>",
 		takesArgs: true,
@@ -274,6 +280,8 @@ export function isCommandBlocking(input: string): boolean {
 	// Starting a goal needs an idle session, but reading it, rewording it and calling it off are exactly what you want
 	// during a long autonomous run, and take effect on the agent's next step.
 	if (name === "/goal") return !GOAL_LIVE_SUBCOMMANDS.has(rest[0] ?? "");
+	// Looking at the scratchpad is always fine; emptying it under a running turn pulls files from under it.
+	if (name === "/scratchpad") return rest[0] === "clear";
 	// "/provider" (bare, or explicit "list") only reads the configured
 	// providers — it's just "/provider <name>"/"add"/"delete" that mutate the
 	// active endpoint. Reading it is what the web UI's status popover does on
