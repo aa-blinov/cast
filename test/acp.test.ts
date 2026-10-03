@@ -30,6 +30,9 @@ vi.mock("../src/core/session.ts", () => ({
 	deleteSession: vi.fn(() => true),
 	loadSession: vi.fn(() => null),
 	recordCompaction: vi.fn(),
+	clearSessionMessages: vi.fn((s: { messages: unknown[] }) => {
+		s.messages.length = 0;
+	}),
 	appendMessage: vi.fn(),
 	saveSession: vi.fn(),
 }));
@@ -492,13 +495,22 @@ describe("ACP adapter", () => {
 		const cmds = calls.find((c: unknown[]) => (c[1] as any).update?.sessionUpdate === "available_commands_update");
 		expect(cmds).toBeDefined();
 		const commands = (cmds![1] as any).update.availableCommands as Array<{ name: string; description: string }>;
-		// First slash commands from src/ui/commands.ts
-		expect(commands.length).toBeGreaterThan(10);
-		// Names are stripped of leading /
-		expect(commands.find((c) => c.name === "abort")).toBeDefined();
-		expect(commands.find((c) => c.name === "compact")).toBeDefined();
+		// Only what a prompt actually runs: advertising the rest sent them to the model as plain text.
+		expect(commands.map((c) => c.name).sort()).toEqual(["abort", "build", "clear", "plan"]);
 		// None should start with `/`
 		expect(commands.every((c) => !c.name.startsWith("/"))).toBe(true);
+	});
+
+	it("runs /plan, /build and /clear from a prompt instead of sending them to the model", async () => {
+		const { session } = makeSession();
+		const opts = { version: "test", permissionMode: "default" as const };
+		await adapter.submitPrompt("sid", [{ type: "text", text: "/plan" }], session, mockClient as any, opts);
+		expect(session.planState.enabled).toBe(true);
+		await adapter.submitPrompt("sid", [{ type: "text", text: "/build" }], session, mockClient as any, opts);
+		expect(session.planState.enabled).toBe(false);
+		session.state.messages.push({ role: "user", content: "earlier" } as never);
+		await adapter.submitPrompt("sid", [{ type: "text", text: "/clear" }], session, mockClient as any, opts);
+		expect(session.state.messages.some((m) => m.content === "earlier")).toBe(false);
 	});
 
 	it("submitPrompt emits available_commands_update only on the first prompt", async () => {

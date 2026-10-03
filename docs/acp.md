@@ -66,6 +66,12 @@ Advertised in `initialize`:
   something cast enables by default.
 - `promptCapabilities.image` is `true` because cast supports image attachments.
 
+## Slash commands
+
+A prompt that is exactly `/plan`, `/build`, `/clear` or `/abort` is run by cast and not sent to the model; the
+`available_commands_update` notification lists just those four. Every other command belongs to the terminal and web
+front ends.
+
 ## Notifications the agent sends
 
 | Method                | Payload                                                       |
