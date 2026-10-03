@@ -565,6 +565,16 @@ describe("web bridge", () => {
 		}
 	});
 
+	it("/clear empties the session's messages and forgets the size they measured", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		ws.session.messages.push({ role: "user", content: "remember PINEAPPLE42" } as never);
+		ws.session.lastPromptTokens = 123_456;
+		await expect(bridge.executeCommand(ws.id, "/clear")).resolves.toMatchObject({ ok: true });
+		expect(ws.session.messages).toEqual([]);
+		expect(ws.session.lastPromptTokens).toBeUndefined();
+	});
+
 	it("/memory cancel with an unknown run id says nothing was cancelled, instead of printing the usage", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

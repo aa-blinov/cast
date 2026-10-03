@@ -882,6 +882,9 @@ const commandHandlers: Record<string, CommandHandler> = {
 	},
 	"/clear": ({ ws, saveSession }) => {
 		clearSessionMessages(ws.session);
+		// The size it measured belonged to the context just dropped: left in place, the first turn after clearing a long
+		// session ran a pointless compaction over an almost-empty conversation.
+		ws.session.lastPromptTokens = undefined;
 		saveSession(ws.session);
 		return { ok: true, result: "Context cleared" };
 	},

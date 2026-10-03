@@ -1865,6 +1865,17 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	{
 		match: (input) => input === "/clear",
 		run: async ({ deps, agent, showNotice }) => {
+			// Attached to the daemon, the conversation the model sees is held there; clearing only this process's copy
+			// left it intact (a secret word given before /clear was still known after it), and the daemon kept every
+			// cleared turn in memory. Ask it first, and keep everything as it is when it refuses (a turn is running).
+			if (agent.daemonMode) {
+				try {
+					await agent.runCommand("/clear");
+				} catch (error) {
+					showNotice(`[Not cleared: ${error instanceof Error ? error.message : String(error)}]`);
+					return;
+				}
+			}
 			agent.clearContext();
 			await deps.onRepaintHistory?.();
 			showNotice("[Context cleared]");
@@ -1874,6 +1885,16 @@ const COMMAND_ROUTES: CommandRoute[] = [
 	{
 		match: (input) => input === "/compact",
 		run: async ({ deps, agent, session, config, showNotice }) => {
+			// Attached to the daemon, the conversation being compacted is its, and so are the hooks: compacting this
+			// process's copy left the daemon's full history in place, still sent on every turn.
+			if (agent.daemonMode) {
+				try {
+					showNotice(`[${String((await agent.runCommand("/compact")) ?? "Compacting...")}]`);
+				} catch (error) {
+					showNotice(`[Not compacted: ${error instanceof Error ? error.message : String(error)}]`);
+				}
+				return;
+			}
 			// The same hooks the web /compact and the automatic threshold fire.
 			// This path fired neither, so a PreCompact guard written to protect a
 			// long transcript was honoured everywhere except here, and a

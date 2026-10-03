@@ -1,0 +1,44 @@
+name: TUI soak
+
+# Fills the terminal's transcript, scrolls, resizes and rewrites large files against a fake streaming provider and
+# checks that memory comes back and the screen does not stall (scripts/soak-tui.mjs, docs/terminal-ui.md). It needs
+# tmux and a few minutes, and a shared runner's timing is noisy, so it is not part of CI on every push: it runs weekly
+# and on demand, with budgets loose enough for a loaded runner.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      cycles:
+        description: "Identical fill-and-clear cycles (more finds slower leaks)"
+        default: "20"
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Soak
+        run: npm run soak:tui -- --cycles "${{ github.event.inputs.cycles || '20' }}" --lag-budget 800 --json soak.json
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-report
+          path: soak.json
