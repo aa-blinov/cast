@@ -565,6 +565,15 @@ describe("web bridge", () => {
 		}
 	});
 
+	it("/memory cancel with an unknown run id says nothing was cancelled, instead of printing the usage", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		await expect(bridge.executeCommand(ws.id, "/memory cancel nosuch")).resolves.toEqual({
+			ok: true,
+			result: { cancelled: false },
+		});
+	});
+
 	it("/goal resume needs an open goal and is not stored as one called resume", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

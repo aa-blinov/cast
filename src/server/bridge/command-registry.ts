@@ -41,7 +41,7 @@ const MEMORY_CHECKPOINT_RESERVED_COMMAND_RE = /^checkpoint\s+reserved\s+(\d+)$/;
 const MEMORY_CHECKPOINT_CAPS_COMMAND_RE = /^checkpoint\s+caps\s+(.+)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^(dream|distill)\s+(on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^(dream|distill)\s+interval\s+(\d+)$/;
-const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+([a-f0-9-]+)$/;
+const MEMORY_CANCEL_RUN_COMMAND_RE = /^cancel\s+(\S+)$/;
 
 // /worktree remove <name> [--force] — sub-verb parsing. The remove
 // dispatch is a single regex; --force is opt-in because it discards

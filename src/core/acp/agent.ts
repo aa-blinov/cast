@@ -7,6 +7,8 @@
  */
 
 import * as acp from "@agentclientprotocol/sdk";
+import { shutdownAllLspServers } from "../lsp/index.ts";
+import { closeMcpConnections } from "../mcp.ts";
 import type { StartupResult } from "../startup.ts";
 import { type AcpAdapterSession, createAcpAdapter } from "./bridge.ts";
 
@@ -145,5 +147,12 @@ export function runAcpAgent(
 		},
 	});
 	const stream = acp.ndJsonStream(input, output);
-	app.connect(stream);
+	const connection = app.connect(stream);
+	// The editor closing stdin is the end of the conversation. Without this the MCP and language-server child
+	// processes keep the event loop alive and `cast acp` never exits.
+	void connection.closed.then(async () => {
+		await closeMcpConnections(startup.mcpResult.connections);
+		await shutdownAllLspServers();
+		process.exit(0);
+	});
 }

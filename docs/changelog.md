@@ -8,6 +8,9 @@ All notable user-facing changes to cast, newest first.
 - **`/goal resume`** continues a goal that was paused by an interruption or a failure. Until now the word became a new goal called "resume".
 
 ### Fixed
+- **`cast acp` exits when the editor closes stdin,** as `docs/acp.md` says. It used to stay alive on its MCP and language-server child processes.
+- **ACP advertises only the slash commands it runs.** It listed ~90, none of which ran: `/compact` reached the model as plain text. A prompt of `/plan`, `/build`, `/clear` or `/abort` now does what it says, and those four are what the editor is offered.
+- **`/memory cancel <id>` with an id that is not a run says so** ("not found or already finished") instead of printing the whole `/memory` usage.
 - **`/review` and `/code-review` show as typed.** The thread (terminal and web) and the session title showed the whole instruction page as if you had written it; it is now `/review` or `/code-review <range>`.
 - **`/goal`, `/review` and `/code-review` no longer print the command twice** in the terminal.
 - **Web commands refuse names they do not know.** `/mcp enable|disable`, `/skills enable|disable` and `/subagent-model-provider`, `/plan-model-provider` answered "enabled" or stored the name for a server, skill or provider that does not exist; they now say it is unknown, as the terminal already did.

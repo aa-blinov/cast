@@ -24,7 +24,13 @@ import { formatRulesForTurn, matchAutoRules, type Rule, selectMentionedRules, un
 import type { AgentRunner } from "../runner.ts";
 import { createAgentRunner } from "../runner.ts";
 import type { SessionState } from "../session.ts";
-import { listSessionSummaries, loadSession, recordCompaction, saveSession as saveSessionState } from "../session.ts";
+import {
+	clearSessionMessages,
+	listSessionSummaries,
+	loadSession,
+	recordCompaction,
+	saveSession as saveSessionState,
+} from "../session.ts";
 import { getProjectTrust, loadSettings } from "../settings.ts";
 import type { StartupResult } from "../startup.ts";
 import { escapeSystemReminderTags, extractSystemReminders } from "../system-reminder.ts";
@@ -161,7 +167,7 @@ export interface AcpAdapter {
 export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 	const { version } = options;
 
-	return {
+	const adapter: AcpAdapter = {
 		initialize: () => ({
 			protocolVersion: 1,
 			agentCapabilities: {
@@ -440,6 +446,15 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 				runner.abort("acp /abort");
 				return { stopReason: "cancelled" };
 			}
+			const typed = text.trim();
+			if (typed === "/plan" || typed === "/build") {
+				adapter.setSessionMode(typed.slice(1), session, client);
+				return { stopReason: "end_turn" };
+			}
+			if (typed === "/clear" && !runner.isRunning) {
+				clearSessionMessages(session.state);
+				return { stopReason: "end_turn" };
+			}
 			if (runner.isRunning) {
 				runner.followUpQueue.enqueue(message);
 				// Re-emit the last usage snapshot so the editor's running-cost
@@ -525,6 +540,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			session.runner.steeringQueue.enqueue({ role: "user", content: reminder });
 		},
 	};
+	return adapter;
 }
 
 // ---------------------------------------------------------------------------
@@ -1015,12 +1031,14 @@ function toAcpTool(event: Extract<AgentEvent, { type: "tool_start" }>) {
 
 // Strip leading `/` — ACP `name` is a verb like `compact`, not `/compact`.
 const SLASH_PREFIX_RE = /^\//;
+/** The slash commands a prompt can run here; advertising the rest sent them to the model as plain text. */
+const ACP_COMMANDS = new Set(["/abort", "/plan", "/build", "/clear"]);
 
 function emitAvailableCommands(
 	session: AcpAdapterSession,
 	client: { notify(method: string, params: unknown): Promise<void> },
 ): void {
-	const availableCommands = SLASH_COMMANDS.map((cmd) => {
+	const availableCommands = SLASH_COMMANDS.filter((cmd) => ACP_COMMANDS.has(cmd.name)).map((cmd) => {
 		// Strip leading `/` — ACP `name` is a verb like `compact`, not `/compact`.
 		const name = cmd.name.replace(SLASH_PREFIX_RE, "");
 		// Subcommand variants like `/hooks disable` get exposed as parent command

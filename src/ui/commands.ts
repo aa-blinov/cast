@@ -193,7 +193,7 @@ const MEMORY_CHECKPOINT_RESERVED_COMMAND_RE = /^\/memory checkpoint reserved (\d
 const MEMORY_CHECKPOINT_CAPS_COMMAND_RE = /^\/memory checkpoint caps (.+)$/;
 const MEMORY_AUTO_TOGGLE_COMMAND_RE = /^\/memory (dream|distill) (on|off)$/;
 const MEMORY_AUTO_INTERVAL_COMMAND_RE = /^\/memory (dream|distill) interval (\d+)$/;
-const MEMORY_CANCEL_RUN_COMMAND_RE = /^\/memory cancel ([a-f0-9-]+)$/;
+const MEMORY_CANCEL_RUN_COMMAND_RE = /^\/memory cancel (\S+)$/;
 
 /**
  * Slash commands shown in the the composer's autocomplete palette.
