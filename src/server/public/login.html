@@ -49,11 +49,12 @@ try {
 <body class="login-page">
 <main class="login-shell">
 	<section class="login-card" aria-label="Sign in to Cast">
+		<h1 class="sr-only">Sign in to Cast</h1>
 		<div id="login-logo" class="login-logo" role="img" aria-label="cast"></div>
-		<form id="login-form" class="login-form">
+		<form id="login-form" class="login-form" method="post">
 			<label>
 				<span>Username</span>
-				<input id="username" name="username" autocomplete="username" value="cast" required>
+				<input id="username" name="username" autocomplete="username" value="cast" autocapitalize="none" autocorrect="off" spellcheck="false" required>
 			</label>
 			<label>
 				<span>Password</span>
@@ -64,6 +65,6 @@ try {
 		</form>
 	</section>
 </main>
-<script src="/login.js"></script>
+<script type="module" src="/login.js"></script>
 </body>
 </html>
