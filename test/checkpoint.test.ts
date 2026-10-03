@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	backupFileForCheckpoint,
+	capCheckpointBackups,
 	createCheckpoint,
 	filesLostByRestore,
 	releaseCheckpointRefs,
@@ -300,5 +301,43 @@ describe("checkpoints outside a git repository", () => {
 		expect(res.message).toContain("changes made by shell commands are not undone");
 		expect(readFileSync(join(TEST_DIR, "edited.txt"), "utf8")).toBe("E0\n");
 		expect(readFileSync(join(TEST_DIR, "shell.txt"), "utf8")).toBe("S1\n");
+	});
+});
+
+describe("capCheckpointBackups", () => {
+	const turn = (id: string, ...sizes: number[]) => ({
+		id,
+		timestamp: "t",
+		cwd: "/p",
+		backups: sizes.map((size, i) => ({
+			relPath: `f${i}.out`,
+			existedBefore: true,
+			content: "x".repeat(size),
+			encoding: "base64" as const,
+		})),
+	});
+
+	it("keeps the newest copies up to the limit and marks the older ones omitted, as a file too big to copy is", () => {
+		const checkpoints = [turn("a", 100), turn("b", 100), turn("c", 100)];
+		capCheckpointBackups(checkpoints, 250);
+		expect(checkpoints[2]?.backups?.[0]?.content).toHaveLength(100);
+		expect(checkpoints[1]?.backups?.[0]?.content).toHaveLength(100);
+		expect(checkpoints[0]?.backups?.[0]).toMatchObject({ omitted: true });
+		expect(checkpoints[0]?.backups?.[0]?.content).toBeUndefined();
+	});
+
+	it("leaves everything alone under the limit, and entries with no copy (a file that did not exist) as they are", () => {
+		const fresh = { id: "n", timestamp: "t", cwd: "/p", backups: [{ relPath: "new.out", existedBefore: false }] };
+		const checkpoints = [turn("a", 10), fresh];
+		capCheckpointBackups(checkpoints, 1000);
+		expect(checkpoints[0]?.backups?.[0]?.content).toHaveLength(10);
+		expect(fresh.backups[0]).toEqual({ relPath: "new.out", existedBefore: false });
+	});
+
+	it("counts across turns from the newest back, so one huge old copy cannot push newer ones out", () => {
+		const checkpoints = [turn("old", 500), turn("new", 50)];
+		capCheckpointBackups(checkpoints, 100);
+		expect(checkpoints[1]?.backups?.[0]?.content).toHaveLength(50);
+		expect(checkpoints[0]?.backups?.[0]).toMatchObject({ omitted: true });
 	});
 });

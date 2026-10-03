@@ -2,6 +2,18 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+- **`npm run soak:tui`** fills the terminal's transcript, scrolls, resizes, opens pickers and rewrites a large file against a fake streaming provider, and reports the live heap, RSS and longest event-loop stall of the TUI and the daemon, failing when memory does not come back after `/clear` or the screen stalls. See `docs/terminal-ui.md`.
+
+### Fixed
+- **Resizing the window no longer freezes the terminal on a long conversation.** Every width change laid the whole history out again in one go (about a second at a few hundred messages, seconds past that). It is now redone a little per frame, newest messages first, so the screen stays live: the worst stall in the soak test went from 519 ms to under 110 ms.
+- **A tool call with a huge payload no longer freezes the terminal.** A multi-megabyte heredoc, or the arguments of a tool with no summary of its own, was measured and wrapped in full on every layout (12 seconds for a 1 MB write). The row now shows the first 1,500 characters and how many more there are.
+- **The terminal could stay on "running" after the turn had ended.** After the daemon dropped the event stream mid-turn, the state fetched on reconnecting could arrive after the stream had already reported the end of the turn and put the screen back to "running" for good. A fetched state is now applied only if the stream said nothing in between.
+- **The daemon no longer cuts an event stream over one large event.** A tool call carrying a megabyte of arguments, followed by a second large event, exceeded a 1 MB backlog limit for a client that was only a moment behind; the limit is 16 MB, and a cut is now logged.
+- **The copies kept for `/undo` of rewritten files git does not track are capped** at 64 MB per session (oldest dropped first; `/undo` names the files it could not restore). They grew with every turn for as long as the session was open.
+
 ## 0.53.2
 
 ### Added

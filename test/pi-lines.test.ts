@@ -14,6 +14,35 @@ const bash = (status: ToolCallEntry["status"], command = LONG): ToolCallEntry =>
 	status,
 });
 
+describe("toolRowLines: a call with a huge payload", () => {
+	// A heredoc writing a file, or the arguments of a tool with no summary of its own, can be megabytes. They used to
+	// be measured and wrapped in full (seconds per layout, repeated on every resize); the row now stops and counts.
+	const huge = (name: string, args: string): ToolCallEntry => ({ id: "t", name, args, status: "ok" }) as ToolCallEntry;
+
+	it("shows the start of a megabyte of arguments and says how much more there is, in milliseconds", () => {
+		const args = JSON.stringify({ file_path: "ignored.out", content: "y".repeat(1024 * 1024) });
+		const started = performance.now();
+		const rows = toolRowLines(huge("write", args), 100);
+		expect(performance.now() - started).toBeLessThan(1000);
+		const text = rows.map(plain).join("\n");
+		expect(text).toContain("more characters)");
+		expect(rows.length).toBeLessThan(40);
+		for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(100);
+	});
+
+	it("does the same for a command that is a very long heredoc", () => {
+		const command = `cat > big.txt <<'EOF'\n${"line of the file\n".repeat(60_000)}EOF`;
+		const rows = toolRowLines(huge("bash", JSON.stringify({ command })), 100);
+		expect(rows.map(plain).join("\n")).toContain("more characters)");
+		expect(rows.length).toBeLessThan(40);
+	});
+
+	it("leaves an ordinary long command whole", () => {
+		const rows = toolRowLines(huge("bash", JSON.stringify({ command: LONG })), 60);
+		expect(rows.map(plain).join(" ")).not.toContain("more characters");
+	});
+});
+
 describe("toolRowLines", () => {
 	it("is one row while the tool runs, however long its command, and never wider than the screen", () => {
 		const rows = toolRowLines(bash("running"), 60);

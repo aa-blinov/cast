@@ -533,7 +533,10 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	} {
 		const pending: string[] = [];
 		let pendingBytes = 0;
-		const maxPendingBytes = 1024 * 1024;
+		// One event can be a megabyte (a tool call that writes a large file, sent whole), so two of them in a row used to
+		// exceed the old 1 MB limit for a client that was merely a moment behind, and its stream was cut mid-turn. This
+		// still bounds what a client that has stopped reading can make the process hold.
+		const maxPendingBytes = 16 * 1024 * 1024;
 		let closed = false;
 		let blocked = false;
 		let endRequested = false;
@@ -573,6 +576,9 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				if (pendingBytes + eventBytes > maxPendingBytes) {
 					// A hidden or slow client reconnects and recovers history instead
 					// of retaining an unbounded token backlog in this process.
+					console.log(
+						`[cast server] event stream dropped: client is ${Math.round((pendingBytes + eventBytes) / 1024)} KB behind (limit ${maxPendingBytes / 1024} KB)`,
+					);
 					res.end();
 					close();
 					return;

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // both runtimes.
 import { EventSource } from "undici";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
-import { backupFileForCheckpoint, createCheckpoint } from "../core/checkpoint.ts";
+import { backupFileForCheckpoint, capCheckpointBackups, createCheckpoint } from "../core/checkpoint.ts";
 import type { AppConfig } from "../core/config.ts";
 import { resolveProvider } from "../core/config.ts";
 import { initialAnnouncedLocalDate } from "../core/date-rollover-reminder.ts";
@@ -1084,6 +1084,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				chk = await createCheckpoint(cwd);
 				if (!session.checkpoints) session.checkpoints = [];
 				session.checkpoints.push(chk);
+				capCheckpointBackups(session.checkpoints);
 				// Persist alongside the in-memory array (session.checkpoints isn't in
 				// the session row — see session.ts) so /undo survives a restart.
 				appendCheckpoint(session.id, chk);
@@ -1566,9 +1567,17 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	};
 	const finishWatchedTurnRef = useRef(finishWatchedTurn);
 	finishWatchedTurnRef.current = finishWatchedTurn;
-	const applyDaemonStatusRef = useRef<(pending: { status?: AgentStatus; startedAt?: number }) => void>(() => {});
-	applyDaemonStatusRef.current = (pending) => {
+	// Counts the status changes the event stream has delivered. A status fetched from the daemon (after a reconnect)
+	// describes the moment it was asked for: by the time the answer arrives the stream may already have said the turn
+	// ended, and applying the older answer on top put the screen back to "running" for good (seen when a large event
+	// made the daemon drop the stream mid-turn). An answer is applied only if the stream said nothing in between.
+	const statusSeqRef = useRef(0);
+	const applyDaemonStatusRef = useRef<
+		(pending: { status?: AgentStatus; startedAt?: number }, askedAt?: number) => void
+	>(() => {});
+	applyDaemonStatusRef.current = (pending, askedAt) => {
 		if (!pending.status) return;
+		if (askedAt !== undefined && askedAt !== statusSeqRef.current) return;
 		backendStartRef.current = pending.startedAt ?? null;
 		setStatus(pending.status);
 		if (pending.status === "running") {
@@ -1592,13 +1601,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	useEffect(() => {
 		if (!isClient || !serverClient) return;
 		let disposed = false;
+		const askedAt = statusSeqRef.current;
 		void loadDaemonPendingState(serverClient, session.id)
 			.then((pending) => {
 				if (disposed) return;
 				setPendingQuestion(pending.question);
 				setPendingPlanTransition(pending.planTransition);
 				if (pending.bashConfirm) askDaemonConfirmRef.current(pending.bashConfirm);
-				applyDaemonStatusRef.current(pending);
+				applyDaemonStatusRef.current(pending, askedAt);
 			})
 			.catch(() => {});
 		return () => {
@@ -1709,13 +1719,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		const hydrate = () => {
 			void refresh();
 			if (serverClient) {
+				const askedAt = statusSeqRef.current;
 				void loadDaemonPendingState(serverClient, session.id)
 					.then((pending) => {
 						if (disposed) return;
 						setPendingQuestion(pending.question);
 						setPendingPlanTransition(pending.planTransition);
 						if (pending.bashConfirm) askDaemonConfirmRef.current(pending.bashConfirm);
-						applyDaemonStatusRef.current(pending);
+						applyDaemonStatusRef.current(pending, askedAt);
 					})
 					.catch(() => {});
 			}
@@ -1794,6 +1805,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					});
 					break;
 				case "status":
+					statusSeqRef.current += 1;
 					// The daemon's startedAt is authoritative for the elapsed
 					// counter — take it over the local clock (fresh reconnect
 					// resume, not a reset to zero).
@@ -1934,6 +1946,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				case "turn_meta":
 					break;
 				case "session_end": {
+					statusSeqRef.current += 1;
 					if (!finishWatchedTurnRef.current()) {
 						promoteStreamingToHistory();
 						updateStreaming(() => null, true);

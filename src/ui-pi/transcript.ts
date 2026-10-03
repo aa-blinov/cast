@@ -7,6 +7,13 @@ import { blockLines, fenceAfter, INDENT, messageLines } from "./lines.ts";
 import { paint } from "./paint.ts";
 import { sanitize } from "./sanitize.ts";
 
+/**
+ * How long one frame may spend laying messages out again after the width (or the theme) changed. Laying out a whole
+ * long history at once froze the screen for as long as that took (a second at a few hundred messages) on every step
+ * of a window resize; past the budget the remaining messages keep the layout they had, and the next frame goes on.
+ */
+const LAYOUT_BUDGET_MS = 12;
+
 /** The text follows the terminal's width and stops here: a line of prose is hard to read much past it, so on a wider terminal the rest stays empty. */
 export const MAX_MEASURE = 120;
 
@@ -44,6 +51,12 @@ export class Transcript implements Component {
 	private state: TranscriptState = { messages: [], streaming: null, error: null, retry: null, showReasoning: false };
 	private fences: Array<OpenFence | null> = [];
 	private cache = new WeakMap<ChatMessage, { key: string; lines: string[] }>();
+	/** Bumped by `invalidate`: the cached layouts are out of date, but still there to show until they are redone. */
+	private generation = 0;
+	/** Per-frame layout budget; a test sets it to Infinity to get the finished layout in one render. */
+	layoutBudgetMs = LAYOUT_BUDGET_MS;
+	/** Called when a frame left messages on their old layout: the owner draws again soon, and the rest is laid out. */
+	onStale: (() => void) | undefined;
 	private streamCache = new WeakMap<StreamingState["blocks"][number], { key: string; lines: string[] }>();
 
 	set(state: TranscriptState): void {
@@ -65,7 +78,8 @@ export class Transcript implements Component {
 	}
 
 	invalidate(): void {
-		this.cache = new WeakMap();
+		// Not a fresh cache: the old layouts stay as what a frame shows while the new ones are being made.
+		this.generation += 1;
 		this.streamCache = new WeakMap();
 	}
 
@@ -75,17 +89,32 @@ export class Transcript implements Component {
 		const content = Math.min(w, MAX_MEASURE);
 		const header = typeof this.header === "function" ? this.header(w) : this.header;
 		const out: string[] = header.map((line) => truncateToWidth(line, w, "…"));
-		messages.forEach((message, i) => {
+		// Newest first, so what is on screen (the end of the conversation) is the first to be laid out again. A message
+		// that was never laid out has nothing to fall back on and is always done; one that only changed its layout
+		// (width, theme) is skipped once the budget is spent and keeps what it had.
+		const laid: string[][] = new Array(messages.length);
+		const deadline = performance.now() + this.layoutBudgetMs;
+		let stale = false;
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i]!;
 			const fence = this.fences[i] ?? null;
-			const key = `${content}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;
+			const key = `${this.generation}|${content}|${showReasoning}|${fence ? `fence:${fence.language ?? ""}` : ""}`;
 			let entry = this.cache.get(message);
 			if (!entry || entry.key !== key) {
-				entry = { key, lines: safeMessageLines(message, { width: content, showReasoning, openFence: fence }) };
-				this.cache.set(message, entry);
+				if (entry && performance.now() > deadline) {
+					stale = true;
+				} else {
+					entry = { key, lines: safeMessageLines(message, { width: content, showReasoning, openFence: fence }) };
+					this.cache.set(message, entry);
+				}
 			}
+			laid[i] = entry!.lines;
+		}
+		for (const lines of laid) {
 			// Not push(...lines): a message of a few hundred thousand rows would overflow the stack.
-			for (const line of entry.lines) out.push(line);
-		});
+			for (const line of lines) out.push(line);
+		}
+		if (stale) this.onStale?.();
 		const colors = theme();
 		if (error) out.push("", ...wrapTextWithAnsi(paint(`  ✗ ${sanitize(error)}`, { color: colors.error }), content));
 		if (retry) {

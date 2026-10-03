@@ -91,6 +91,7 @@ export class PiApp {
 	private lastCtrlC = 0;
 	private lastEsc = 0;
 	private hintTimer: NodeJS.Timeout | undefined;
+	private staleDraw: NodeJS.Immediate | undefined;
 	private clock: NodeJS.Timeout | undefined;
 	private spinner: NodeJS.Timeout | undefined;
 	private historySeen = 0;
@@ -122,6 +123,15 @@ export class PiApp {
 		);
 		this.modals = new ModalHost(tui);
 		this.editor.onSubmit = (text) => this.submit(text);
+		// A frame that left some messages on their old layout (it stops at its time budget) asks for another, between
+		// the input events that arrive meanwhile.
+		this.transcript.onStale = () => {
+			if (this.staleDraw) return;
+			this.staleDraw = setImmediate(() => {
+				this.staleDraw = undefined;
+				this.tui.requestRender();
+			});
+		};
 		this.scrollView = new ScrollView(this.transcript, {
 			follow: "end",
 			primary: true,
@@ -426,6 +436,7 @@ export class PiApp {
 	dispose(): void {
 		process.stdout.write(FOCUS_REPORTING_OFF);
 		this.stopClocks();
+		if (this.staleDraw) clearImmediate(this.staleDraw);
 		if (this.hintTimer) clearTimeout(this.hintTimer);
 		this.modals.dispose();
 	}
