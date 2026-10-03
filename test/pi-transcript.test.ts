@@ -1,5 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../src/ui/useAgentSession.ts";
 import { MAX_MEASURE, Transcript } from "../src/ui-pi/transcript.ts";
 
@@ -101,5 +101,71 @@ describe("Transcript", () => {
 		const rows = transcript.render(80).map(plain);
 		expect(rows).toContain("  ✗ provider down");
 		expect(rows).toContain("    Retrying (attempt 2): timeout");
+	});
+});
+
+describe("Transcript: laying out again after a resize or a theme change", () => {
+	const long = (n: number): ChatMessage[] =>
+		Array.from({ length: n }, (_, i) => ({
+			role: "assistant" as const,
+			content: "",
+			blocks: [{ kind: "content" as const, text: `message ${i} ${"word ".repeat(60)}` }],
+		}));
+
+	it("serves the old layout once the frame's budget is spent, and says it is not finished", () => {
+		const transcript = new Transcript();
+		let asked = 0;
+		transcript.onStale = () => {
+			asked += 1;
+		};
+		transcript.set({ ...base, messages: long(6) });
+		const wide = transcript.render(100);
+		transcript.layoutBudgetMs = 0;
+		const during = transcript.render(40);
+		// Nothing was laid out again, so the rows are still the wide ones, and the owner was told to draw again.
+		expect(during).toEqual(wide);
+		expect(asked).toBe(1);
+		transcript.layoutBudgetMs = Number.POSITIVE_INFINITY;
+		const after = transcript.render(40);
+		expect(after.length).toBeGreaterThan(wide.length);
+		expect(asked).toBe(1);
+		for (const row of after) expect(visibleWidth(row)).toBeLessThanOrEqual(40);
+	});
+
+	it("lays the newest messages out first, so what is on screen changes before what is far above", () => {
+		const transcript = new Transcript();
+		const messages = long(4);
+		transcript.set({ ...base, messages });
+		const wide = transcript.render(100);
+		const clock = vi.spyOn(performance, "now");
+		// deadline = 0 + 10; the first check (the newest message) is in time, every later one is not
+		clock.mockReturnValueOnce(0).mockReturnValueOnce(0).mockReturnValue(100);
+		transcript.layoutBudgetMs = 10;
+		const narrow = transcript.render(40).map(plain);
+		clock.mockRestore();
+		const asText = (rows: string[]) => rows.join("\n");
+		expect(asText(narrow)).not.toBe(asText(wide.map(plain)));
+		// The last message follows the narrow width; the first is still wide.
+		const lastRows = narrow.slice(-4);
+		for (const row of lastRows) expect(visibleWidth(row)).toBeLessThanOrEqual(40);
+		expect(narrow.slice(0, 6).some((row) => visibleWidth(row) > 40)).toBe(true);
+	});
+
+	it("never leaves a message with no layout at all: one it has not seen is laid out whatever the budget", () => {
+		const transcript = new Transcript();
+		transcript.layoutBudgetMs = 0;
+		transcript.set({ ...base, messages: long(3) });
+		expect(transcript.render(60).map(plain).join("\n")).toContain("message 0");
+	});
+
+	it("keeps the old layout on screen while a theme change is laid out again", () => {
+		const transcript = new Transcript();
+		transcript.set({ ...base, messages: long(3) });
+		const before = transcript.render(80);
+		transcript.invalidate();
+		transcript.layoutBudgetMs = 0;
+		expect(transcript.render(80)).toEqual(before);
+		transcript.layoutBudgetMs = Number.POSITIVE_INFINITY;
+		expect(transcript.render(80)).toHaveLength(before.length);
 	});
 });

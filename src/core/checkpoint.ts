@@ -277,6 +277,32 @@ async function lostFiles(checkpoint: TurnCheckpoint, env?: NodeJS.ProcessEnv): P
 	return removed;
 }
 
+/**
+ * Most the copies kept for /undo may hold in memory, per session. Every turn that rewrites a file git does not
+ * cover keeps a copy of what it replaced (up to MAX_SHADOW_BACKUP_BYTES each), for as long as the session is open,
+ * so a long session working on large generated files grew by their size on every turn.
+ */
+export const MAX_RETAINED_BACKUP_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Drops the oldest copies once the session's checkpoints hold more than `maxBytes` of them, newest kept. A dropped
+ * copy is marked `omitted`, which is how a file too big to copy is already recorded: /undo says it could not put that
+ * one back, and restores the rest.
+ */
+export function capCheckpointBackups(checkpoints: TurnCheckpoint[], maxBytes = MAX_RETAINED_BACKUP_BYTES): void {
+	let kept = 0;
+	for (let i = checkpoints.length - 1; i >= 0; i--) {
+		for (const backup of checkpoints[i]?.backups ?? []) {
+			if (backup.content === undefined) continue;
+			kept += backup.content.length;
+			if (kept > maxBytes) {
+				delete backup.content;
+				backup.omitted = true;
+			}
+		}
+	}
+}
+
 /** Puts back the files saved by backupFileForCheckpoint. */
 async function applyBackups(checkpoint: TurnCheckpoint): Promise<{ restored: number; skipped: string[] }> {
 	let restored = 0;

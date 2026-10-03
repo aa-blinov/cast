@@ -11,7 +11,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import { type AgentActorNotification, agentActorRegistry } from "../core/actors.ts";
-import { backupFileForCheckpoint, createCheckpoint } from "../core/checkpoint.ts";
+import { backupFileForCheckpoint, capCheckpointBackups, createCheckpoint } from "../core/checkpoint.ts";
 import { fetchModels, type ModelInfo, probeProvider, resolveProvider } from "../core/config.ts";
 import {
 	formatContextFilesForPrompt,
@@ -1808,6 +1808,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			if (turnStartSeq !== undefined) chk.userSeq = turnStartSeq;
 			if (!ws.session.checkpoints) ws.session.checkpoints = [];
 			ws.session.checkpoints.push(chk);
+			capCheckpointBackups(ws.session.checkpoints);
 			// Persist alongside the in-memory array (session.checkpoints isn't in
 			// the session row — see session.ts) so /undo survives a daemon restart.
 			appendCheckpoint(ws.session.id, chk);

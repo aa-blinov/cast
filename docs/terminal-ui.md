@@ -125,3 +125,27 @@ then open a new terminal. The function runs the real `cast` and, when a session 
 | Text is hard to read | try `/theme`; a light terminal wants `cast-light` |
 | A command says `Unknown command` | check the spelling; `/help` lists the commands |
 | The screen looks garbled after a resize | resize the window once more; cast redraws on every size change |
+
+## Speed and memory in long sessions
+
+The conversation is laid out once per message and kept, so a frame costs little however long the session is. Two
+things are done on purpose so that a long history never freezes the screen:
+
+- **A resize or a theme change is laid out a little at a time.** Each frame re-lays-out the newest messages first, up
+  to about 12 ms, and the older ones keep their previous layout until the following frames reach them; typing and
+  scrolling stay live meanwhile.
+- **A tool call's summary stops at 1,500 characters** and says how many more there are. A heredoc that writes a file, or
+  the arguments of a tool with no summary of its own, can be megabytes.
+
+The copies kept for `/undo` of files git does not track (ignored or outside the repository) are capped at 64 MB per
+session; the oldest are dropped first, and `/undo` says which files it could not put back.
+
+To check all of this on your machine, run the soak test: `npm run build && npm run soak:tui` (`-- --quick` for a short
+run). It starts a throwaway daemon and a TUI in tmux against a fake provider that streams text, reasoning and tool
+calls, then fills the transcript, scrolls (wheel and keys, also while a turn streams), resizes the window, opens and
+closes pickers, rewrites a 256 KB file (`--edit-kb 1024` for an extreme one) and clears the session, over and over. For the TUI and the daemon it reports the
+live heap after a forced GC (read over the inspector, so a leak shows as memory that does not come back), RSS, the
+longest the event loop stalled, and how long a typed character takes to appear while a turn streams. It exits non-zero
+when the heap does not return to near its start after `/clear`, grows across identical cycles, or the loop stalls for
+more than 250 ms (`--lag-budget`, `--heap-budget`, `--slope-budget`, `--turns`, `--lines`, `--edit-kb` and `--keep`
+adjust it).

@@ -304,6 +304,17 @@ describe("bash", () => {
 // bash — run_in_background / bash_output / bash_kill
 // ============================================================================
 
+/** Waits for a background task to end, by its own exit promise, not for a guess at how long it takes. settle() runs in
+ *  the same tick that promise resolves, so one macrotask later its notification has been delivered. */
+async function backgroundTaskEnded(
+	registry: { get(id: string): { exitPromise: Promise<void> } | undefined },
+	started: { content: string },
+) {
+	const id = started.content.match(/bg-\d+/)?.[0];
+	await registry.get(id!)!.exitPromise;
+	await new Promise((resolve) => setImmediate(resolve));
+}
+
 function makeBackgroundDeps(running = false) {
 	const registry = new BackgroundTaskRegistry();
 	const followUpQueue = new MessageQueue();
@@ -377,10 +388,9 @@ describe("bash — run_in_background", () => {
 	});
 
 	it("delivers completion onto followUpQueue while the runner is still marked running", async () => {
-		const { deps, followUpQueue } = makeBackgroundDeps(true);
+		const { deps, registry, followUpQueue } = makeBackgroundDeps(true);
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
-		await exec("bash", { command: "echo from-bg", run_in_background: true });
-		await new Promise((r) => setTimeout(r, 300));
+		await backgroundTaskEnded(registry, await exec("bash", { command: "echo from-bg", run_in_background: true }));
 		const drained = followUpQueue.drain();
 		expect(drained).toHaveLength(1);
 		expect(drained[0]?.role).toBe("user");
@@ -393,8 +403,7 @@ describe("bash — run_in_background", () => {
 		const wake = vi.fn();
 		registry.setOnIdleWake(wake);
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
-		await exec("bash", { command: "echo idle-wake", run_in_background: true });
-		await new Promise((r) => setTimeout(r, 300));
+		await backgroundTaskEnded(registry, await exec("bash", { command: "echo idle-wake", run_in_background: true }));
 		expect(wake).toHaveBeenCalledTimes(1);
 		expect(String(wake.mock.calls[0]?.[0])).toContain("idle-wake");
 		expect(followUpQueue.drain()).toHaveLength(0);
@@ -600,7 +609,7 @@ describe("bash_output", () => {
 
 describe("bash_kill", () => {
 	it("kills a running background task", async () => {
-		const { deps } = makeBackgroundDeps();
+		const { deps, registry } = makeBackgroundDeps();
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
 		const started = await exec("bash", { command: "sleep 30", run_in_background: true });
 		const taskId = started.content.match(/bg-\d+/)?.[0];
@@ -608,17 +617,17 @@ describe("bash_kill", () => {
 		const killed = await exec("bash_kill", { task_id: taskId });
 		expect(killed.content).toContain("killed");
 
-		await new Promise((r) => setTimeout(r, 300));
+		await backgroundTaskEnded(registry, started);
 		const status = await exec("bash_output", { task_id: taskId });
 		expect(status.content).toContain("killed");
 	});
 
 	it("reports already-done on a second kill instead of erroring", async () => {
-		const { deps } = makeBackgroundDeps();
+		const { deps, registry } = makeBackgroundDeps();
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
 		const started = await exec("bash", { command: "echo quick", run_in_background: true });
 		const taskId = started.content.match(/bg-\d+/)?.[0];
-		await new Promise((r) => setTimeout(r, 300));
+		await backgroundTaskEnded(registry, started);
 
 		const result = await exec("bash_kill", { task_id: taskId });
 		expect(result.isError).toBeFalsy();

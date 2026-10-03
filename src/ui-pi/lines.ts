@@ -69,11 +69,23 @@ function toolLabel(name: string): string {
 	return isMcpTool(name) ? mcpToolLabel(name) : name;
 }
 
+/**
+ * A summary is a glance at what was asked, not the payload: a heredoc that writes a file, or the arguments of a tool
+ * the row has no summary for, can be megabytes, and laying that out (every character is measured and wrapped, again
+ * on every width change) froze the screen for seconds at a time. Past this the row says how much more there is.
+ */
+const MAX_SUMMARY_CHARS = 1500;
+
+function clipSummary(text: string): string {
+	if (text.length <= MAX_SUMMARY_CHARS) return text;
+	return `${text.slice(0, MAX_SUMMARY_CHARS)}… (+${(text.length - MAX_SUMMARY_CHARS).toLocaleString("en-US")} more characters)`;
+}
+
 /** What the summary says, as plain text plus the paint each piece takes. */
 function summaryPieces(call: ToolCallEntry): Array<{ text: string; style: "summary" | "added" | "removed" | "meta" }> {
 	const model = parseToolSummary(call.name, call.args ?? "");
 	// One row either way: a command or a path with line breaks would otherwise leave its continuation under the margin.
-	const flat = (text: string) => sanitize(oneLineSummary(text));
+	const flat = (text: string) => sanitize(oneLineSummary(clipSummary(text)));
 	switch (model.kind) {
 		case "edit":
 			return [
