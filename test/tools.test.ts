@@ -400,17 +400,12 @@ describe("bash — run_in_background", () => {
 		expect(followUpQueue.drain()).toHaveLength(0);
 	});
 
-	it("reports a spawn failure as a single 'error' status, not overwritten by a later 'close'", async () => {
-		// Node fires 'close' right behind 'error' for a failed spawn (ENOENT).
-		// Without a guard, close's handler downgraded status "error" back to
-		// "exited" with a meaningless exit code and re-ran settle(), both
-		// losing the real error message and delivering two completion
-		// notifications for one failure. An empty PATH makes the OS-level
-		// lookup for "bash" fail at spawn time — resolveBash()'s own
-		// process-wide cache (already warmed to a real "bash" by earlier
-		// tests in this file) is irrelevant here since it just returns the
-		// literal string "bash" on non-win32; PATH resolution happens fresh
-		// on every spawn() call, not at resolveBash() time.
+	it("reports a spawn failure as a single 'error' status with one completion notification", async () => {
+		// An empty PATH makes the OS-level lookup for "bash" fail at spawn time (resolveBash()'s cache is irrelevant:
+		// PATH is resolved on every spawn). The failure must end the task as "error", with its real message, and
+		// notify once. Nothing here waits on the clock: the task's own exit promise says when it has ended, and
+		// settle() runs in the same tick as that promise resolves, so one macrotask later every notification that
+		// is going to happen has happened.
 		const originalPath = process.env.PATH;
 		const emptyPathDir = join(TEST_DIR, "__empty_path_for_bg_spawn_test__");
 		mkdirSync(emptyPathDir, { recursive: true });
@@ -422,10 +417,8 @@ describe("bash — run_in_background", () => {
 			const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
 			const started = await exec("bash", { command: "echo hi", run_in_background: true });
 			const taskId = started.content.match(/bg-\d+/)?.[0];
-			// Wait for the event, not a fixed time: a loaded runner takes longer than any guess. The short pause after
-			// it is what would show a second notification from the trailing 'close'.
-			await vi.waitFor(() => expect(wake).toHaveBeenCalled(), { timeout: 10_000 });
-			await new Promise((r) => setTimeout(r, 100));
+			await registry.get(taskId!)!.exitPromise;
+			await new Promise((resolve) => setImmediate(resolve));
 
 			expect(wake).toHaveBeenCalledTimes(1);
 			expect(String(wake.mock.calls[0]?.[0])).toContain("failed to start");
