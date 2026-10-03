@@ -689,6 +689,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	margin: 0 auto;
 }
 .composer {
+	position: relative;
 	padding: 10px 12px;
 	margin-bottom: max(12px, env(safe-area-inset-bottom));
 	margin-left: max(16px, env(safe-area-inset-left));
@@ -716,7 +717,8 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 }
 .composer:focus-within { border-color: var(--cyan); }
 .composer-input::placeholder { color: var(--text-muted); }
-.composer-input:disabled { opacity: .55; cursor: wait; }
+/* Not faded: while it is disabled the placeholder (Connecting…) is the only thing saying why. */
+.composer-input:disabled { cursor: wait; }
 .composer-send {
 	background: var(--cyan);
 	border: 1px solid var(--cyan);
@@ -780,7 +782,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	background: rgba(0,0,0,.6);
 	border: none;
 	border-radius: 50%;
-	color: #fff;
+	color: var(--on-scrim);
 	cursor: pointer;
 	padding: 0;
 }
@@ -822,8 +824,25 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	max-width: 220px;
 }
 .composer-doc-chip-error { border-color: var(--danger-border-strong); color: var(--status-error-fg); }
+.composer-doc-text { display: flex; flex-direction: column; min-width: 0; }
 .composer-doc-name {
 	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The reason a file was refused, in words: the chip's colour alone told nothing, and a tooltip is not there on a phone. */
+.composer-doc-error { font-size: var(--fs-micro); line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
+.composer-notice {
+	margin: 0 max(16px, env(safe-area-inset-left)) 6px;
+	font-size: var(--fs-ui);
+	color: var(--amber);
+}
+.composer-drop-hint {
+	position: absolute; inset: 0;
+	display: flex; align-items: center; justify-content: center;
+	border-radius: inherit;
+	background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+	color: var(--cyan);
+	font-size: var(--fs-body); font-weight: 600;
+	pointer-events: none;
 }
 .composer-doc-remove {
 	display: flex; align-items: center; justify-content: center;

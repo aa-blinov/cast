@@ -18,6 +18,7 @@ colors:
   error: "#ea6962"
   scrim: "rgba(0,0,0,.6)"
   scrim-strong: "rgba(0,0,0,.85)"
+  on-scrim: "#ffffff"
   shadow-menu: "rgba(0,0,0,.35)"
   shadow-modal: "rgba(0,0,0,.4)"
 typography:

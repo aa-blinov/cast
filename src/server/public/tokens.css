@@ -19,6 +19,8 @@
 		--text-muted: #8a8f98;
 		--cyan: #d8a657;
 		--accent-fg: var(--bg);
+		/* Text on the fixed black scrim (the remove button on a thumbnail): it does not follow the theme. */
+		--on-scrim: #fff;
 		--violet: #d8a657;
 		--teal: #7daea3;
 		--purple: #c8c8c8;
