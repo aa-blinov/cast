@@ -4,9 +4,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
 import {
+	clearScratchpad,
+	describeScratchpad,
 	ensureScratchpad,
+	formatBytes,
+	formatScratchpadListing,
 	isSandboxCwd,
 	isTemporaryPath,
+	lastActivityMs,
 	removeScratchpadFor,
 	sandboxDirFor,
 	scratchpadFor,
@@ -112,7 +117,7 @@ describe("scratchpadPromptBlock", () => {
 describe("the hint on a refusal to write to a system temp folder", () => {
 	it("recognises a system temp path and nothing else", () => {
 		for (const path of ["/tmp/x.txt", "/var/tmp/a/b", "/tmp"]) expect(isTemporaryPath(path), path).toBe(true);
-		for (const path of ["/tmpfoo/x", "/home/u/tmp/x", "/etc/hosts", "/work/project/tmp.txt"]) {
+		for (const path of ["/tmpfoo/x", "/home/u/tmp/x", "/etc/hosts", "/work/project/tmp.txt", "/tmp/../etc/hosts"]) {
 			expect(isTemporaryPath(path), path).toBe(false);
 		}
 	});
@@ -148,5 +153,96 @@ describe("pruneOrphanScratchpads", () => {
 
 	it("does nothing when there is no scratch folder at all", () => {
 		expect(pruneOrphanScratchpads()).toBe(0);
+	});
+});
+
+describe("describing and clearing a scratchpad", () => {
+	it("lists the biggest files first, with sizes and the total, and says when there is more", () => {
+		const dir = scratchpadFor("abc123", "/work/project");
+		ensureScratchpad(dir);
+		mkdirSync(join(dir, "sub"));
+		writeFileSync(join(dir, "small.txt"), "x");
+		writeFileSync(join(dir, "sub", "big.txt"), "y".repeat(3000));
+		writeFileSync(join(dir, "mid.txt"), "z".repeat(200));
+		const listing = describeScratchpad(dir, 2);
+		expect(listing.files.map((f) => f.name)).toEqual([join("sub", "big.txt"), "mid.txt"]);
+		expect(listing.totalBytes).toBe(3201);
+		expect(listing.truncated).toBe(true);
+		const text = formatScratchpadListing(listing);
+		expect(text).toContain(dir);
+		expect(text).toContain("2.9 KB");
+		expect(text).toContain("and more");
+	});
+
+	it("says so for a folder that is empty and for one that has not been made", () => {
+		const dir = scratchpadFor("abc123", "/work/project");
+		expect(formatScratchpadListing(describeScratchpad(dir))).toContain("Not made yet");
+		ensureScratchpad(dir);
+		expect(formatScratchpadListing(describeScratchpad(dir))).toContain("Empty");
+	});
+
+	it("empties the folder and keeps it", () => {
+		const dir = scratchpadFor("abc123", "/work/project");
+		ensureScratchpad(dir);
+		mkdirSync(join(dir, "sub"));
+		writeFileSync(join(dir, "sub", "a.txt"), "x");
+		writeFileSync(join(dir, "b.txt"), "x");
+		expect(clearScratchpad(dir)).toBe(true);
+		expect(existsSync(dir)).toBe(true);
+		expect(describeScratchpad(dir).files).toEqual([]);
+	});
+
+	it("will not empty a folder that is not under the scratch root: a sandbox session's working folder, a project", () => {
+		const sandbox = sandboxDirFor("abc123");
+		mkdirSync(sandbox, { recursive: true });
+		writeFileSync(join(sandbox, "work.txt"), "the user's work");
+		expect(clearScratchpad(sandbox)).toBe(false);
+		expect(clearScratchpad(scratchpadRoot())).toBe(false);
+		expect(clearScratchpad(join(scratchpadRoot(), "..", "elsewhere"))).toBe(false);
+		expect(existsSync(join(sandbox, "work.txt"))).toBe(true);
+	});
+
+	it("formats sizes plainly", () => {
+		expect(formatBytes(12)).toBe("12 B");
+		expect(formatBytes(2048)).toBe("2.0 KB");
+		expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
+	});
+});
+
+describe("the scratch root is private, and retention follows real activity", () => {
+	it("makes the root private along with the folder", () => {
+		ensureScratchpad(scratchpadFor("abc123", "/work/project"));
+		expect(statSync(scratchpadRoot()).mode & 0o077).toBe(0);
+	});
+
+	it("takes work in a subfolder for activity: a folder's own time only moves when an entry is added to it directly", () => {
+		const dir = scratchpadFor("abc123", "/work/project");
+		ensureScratchpad(dir);
+		mkdirSync(join(dir, "deep"));
+		writeFileSync(join(dir, "deep", "f.txt"), "x");
+		const longAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+		utimesSync(dir, longAgo, longAgo);
+		utimesSync(join(dir, "deep"), longAgo, longAgo);
+		utimesSync(join(dir, "deep", "f.txt"), new Date(), new Date());
+		expect(Date.now() - lastActivityMs(dir)).toBeLessThan(60_000);
+	});
+
+	it("removes a scratchpad idle past the retention even though its session still exists, and keeps one in use", () => {
+		const idle = createSession("m", "/work/project");
+		const busy = createSession("m", "/work/project");
+		saveSession(idle);
+		saveSession(busy);
+		const idleDir = scratchpadFor(idle.id, "/work/project");
+		const busyDir = scratchpadFor(busy.id, "/work/project");
+		for (const dir of [idleDir, busyDir]) {
+			ensureScratchpad(dir);
+			writeFileSync(join(dir, "f.txt"), "x");
+		}
+		const longAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+		for (const path of [idleDir, join(idleDir, "f.txt")]) utimesSync(path, longAgo, longAgo);
+
+		expect(pruneOrphanScratchpads()).toBe(1);
+		expect(existsSync(idleDir)).toBe(false);
+		expect(existsSync(busyDir)).toBe(true);
 	});
 });

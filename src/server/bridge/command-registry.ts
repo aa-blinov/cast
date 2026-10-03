@@ -75,7 +75,7 @@ import {
 import { setModelsCache } from "../../core/readline.ts";
 import { REWIND_MODES, type RewindMode } from "../../core/rewind.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
-import { scratchpadFor } from "../../core/scratchpad.ts";
+import { clearScratchpad, describeScratchpad, formatScratchpadListing, scratchpadFor } from "../../core/scratchpad.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
 import {
 	addUsage,
@@ -1257,6 +1257,22 @@ const commandHandlers: Record<string, CommandHandler> = {
 				sticky: stickyIds.has(r.id),
 			})),
 		};
+	},
+	"/scratchpad": ({ ws, cwd, arg }) => {
+		const dir = scratchpadFor(ws.id, ws.session.cwd ?? cwd);
+		const sub = arg.trim();
+		if (sub === "clear") {
+			if (!clearScratchpad(dir)) {
+				return {
+					ok: false,
+					error: "This session's working folder is its scratchpad: empty it by hand if you want it empty",
+				};
+			}
+			return { ok: true, result: { cleared: true, path: dir } };
+		}
+		if (sub) return { ok: false, error: "Usage: /scratchpad [clear]" };
+		const listing = describeScratchpad(dir);
+		return { ok: true, result: { ...listing, text: formatScratchpadListing(listing) } };
 	},
 	"/rule:": ({ ws, cwd, cmd, rulesForSessionCwd, fireUserPromptExpansion, submit }) => {
 		const ruleId = cmd.slice("/rule:".length);

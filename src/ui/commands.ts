@@ -59,6 +59,7 @@ import {
 } from "../core/review.ts";
 import { listRewindPoints, type RewindMode, rewindSession } from "../core/rewind.ts";
 import { formatRuleInvocation, type Rule } from "../core/rules.ts";
+import { clearScratchpad, describeScratchpad, formatScratchpadListing, scratchpadFor } from "../core/scratchpad.ts";
 import {
 	addUsage,
 	countTurnMessages,
@@ -308,6 +309,8 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/rules", description: "List loaded rules" },
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
+	{ name: "/scratchpad", description: "Show this session's scratchpad folder and what is in it" },
+	{ name: "/scratchpad clear", description: "Empty this session's scratchpad" },
 	{ name: "/sessions", description: "This directory's sessions (or all of them): switch / delete" },
 	{ name: "/settings", description: "Model, provider, persona, permissions, theme and the rest, in one menu" },
 	{ name: "/skills", description: "Toggle skills on/off" },
@@ -3542,6 +3545,29 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				content: `No context files loaded. Create AGENTS.md in the project root to add project instructions.${issuesBlock}`,
 			});
 			return;
+		},
+	},
+	{
+		match: (input) => input === "/scratchpad",
+		whileRunning: "submit",
+		run: ({ input, deps, session }) => {
+			echoCommand(deps, input);
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: formatScratchpadListing(describeScratchpad(scratchpadFor(session.id, deps.cwd))),
+			});
+		},
+	},
+	{
+		match: (input) => input === "/scratchpad clear",
+		run: ({ input, deps, session, showNotice }) => {
+			echoCommand(deps, input);
+			const dir = scratchpadFor(session.id, deps.cwd);
+			showNotice(
+				clearScratchpad(dir)
+					? `[Scratchpad emptied: ${dir}]`
+					: "[This session's working folder is its scratchpad: empty it by hand if you want it empty]",
+			);
 		},
 	},
 	{
