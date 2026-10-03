@@ -1,3 +1,5 @@
+import { loginDestination, waitText } from "/login-helpers.js";
+
 const form = document.querySelector("#login-form");
 const username = document.querySelector("#username");
 const password = document.querySelector("#password");
@@ -50,11 +52,7 @@ async function renderLogo() {
 	} catch {}
 }
 
-// Back to where the person was headed, but only to a path on this site: a `next` of "//evil.test" or a URL is ignored.
-function destination() {
-	const next = new URLSearchParams(window.location.search).get("next");
-	return next?.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
-}
+const destination = () => loginDestination(window.location.search, window.location.origin);
 
 async function redirectIfAuthenticated() {
 	try {
@@ -64,26 +62,56 @@ async function redirectIfAuthenticated() {
 	} catch {}
 }
 
+const OFFLINE = "Can't reach the server. Check the connection and try again.";
+let lockTimer = null;
+
+function showError(message) {
+	error.hidden = false;
+	// Shown first and filled a frame later: a live region that appears already full is not always announced.
+	error.textContent = "";
+	requestAnimationFrame(() => {
+		error.textContent = message;
+	});
+	password.setAttribute("aria-invalid", "true");
+	password.setAttribute("aria-describedby", "login-error");
+	password.focus();
+}
+
 form.addEventListener("submit", async (event) => {
 	event.preventDefault();
 	error.hidden = true;
+	password.removeAttribute("aria-invalid");
+	password.removeAttribute("aria-describedby");
 	submit.disabled = true;
 	submit.textContent = "Signing in…";
 	try {
-		const response = await fetch("/api/auth/login", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ username: username.value, password: password.value }),
-		});
+		let response;
+		try {
+			response = await fetch("/api/auth/login", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ username: username.value, password: password.value }),
+			});
+		} catch {
+			throw new Error(OFFLINE);
+		}
 		const result = await response.json().catch(() => null);
+		if (response.status === 429) {
+			const seconds = Number(response.headers.get("Retry-After"));
+			// Pressing again only earns another 429: the button waits out what the server asked for.
+			if (seconds > 0) lockTimer = setTimeout(() => {
+				lockTimer = null;
+				submit.disabled = false;
+				error.hidden = true;
+			}, seconds * 1000);
+			throw new Error(`Too many sign-in attempts. Try again in ${waitText(seconds)}.`);
+		}
 		if (!response.ok) throw new Error(result?.error || "Could not sign in");
 		window.location.replace(destination());
 	} catch (err) {
-		error.textContent = err instanceof Error ? err.message : "Could not sign in";
-		error.hidden = false;
-		password.focus();
+		showError(err instanceof Error ? err.message : "Could not sign in");
 	} finally {
-		submit.disabled = false;
+		if (!lockTimer) submit.disabled = false;
 		submit.textContent = "Sign in";
 	}
 });

@@ -22,7 +22,8 @@ body.login-page {
 	text-align: center;
 }
 
-.login-logo { width: 100%; margin: 0 auto 28px; line-height: 0; }
+/* The logo arrives after the form (it is fetched); its box is the grid's own 53 x 7 so the fields do not move when it lands. */
+.login-logo { width: 100%; aspect-ratio: 53 / 7; margin: 0 auto 28px; line-height: 0; }
 .login-logo svg { display: block; width: 100%; height: auto; }
 
 .login-form {
@@ -74,6 +75,11 @@ body.login-page {
 	background: var(--danger-subtle);
 	color: var(--status-error-fg);
 	font-size: var(--fs-ui);
+}
+
+/* Same specificity as the touch rule in style.css and loaded after it, so the 38px above would win there. */
+@media (pointer: coarse) {
+	.login-form input, .login-form button { min-height: 44px; }
 }
 
 @media (max-width: 480px) {
