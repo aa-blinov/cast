@@ -78,7 +78,6 @@ export function Sidebar({
 	}, [search]);
 	useEffect(() => () => searchAbortRef.current?.abort(), []);
 	const [editingId, setEditingId] = useState(null);
-	const [editValue, setEditValue] = useState("");
 	const editInputRef = useRef(null);
 	const loadMoreRef = useRef(null);
 	// One shared menu (Rename/Delete) rather than per-row state — opened by
@@ -202,20 +201,22 @@ export function Sidebar({
 	const startEdit = useCallback((s) => {
 		cancelledEditRef.current = false;
 		setEditingId(s.id);
-		setEditValue(s.title || "");
 	}, []);
 	const cancelEdit = useCallback(() => {
 		cancelledEditRef.current = true;
 		setEditingId(null);
 	}, []);
-	const commitEdit = useCallback(() => {
-		if (cancelledEditRef.current) {
-			cancelledEditRef.current = false;
-			return;
-		}
-		if (editingId) onRenameSession(editingId, editValue);
-		setEditingId(null);
-	}, [editingId, editValue, onRenameSession]);
+	const commitEdit = useCallback(
+		(value) => {
+			if (cancelledEditRef.current) {
+				cancelledEditRef.current = false;
+				return;
+			}
+			if (editingId) onRenameSession(editingId, value);
+			setEditingId(null);
+		},
+		[editingId, onRenameSession],
+	);
 
 	// Focus only when entering edit mode (a stable ref + effect keyed on
 	// editingId), not on every keystroke — a callback ref re-invoked each
@@ -245,8 +246,6 @@ export function Sidebar({
 		onPin=${onPinSession}
 		editingId=${editingId}
 		editInputRef=${editInputRef}
-		editValue=${editValue}
-		setEditValue=${setEditValue}
 		commitEdit=${commitEdit}
 		cancelEdit=${cancelEdit}
 		startEdit=${startEdit}
@@ -276,7 +275,7 @@ export function Sidebar({
 	};
 
 	return html`
-		<nav class="sidebar${open ? " open" : ""}" inert=${collapsed}>
+		<nav class="sidebar${open ? " open" : ""}" aria-label="Sessions" inert=${collapsed}>
 			<div class="sidebar-new-section">
 				<div class="sidebar-new-buttons">
 					<button
@@ -334,16 +333,16 @@ export function Sidebar({
 							class="sidebar-search"
 							type="text"
 							aria-label="Search sessions"
-							placeholder="Search sessions..."
+							placeholder="Search sessions…"
 							value=${search}
 							onInput=${(e) => setSearch(e.target.value)}
 						/>
 					`
 					}
 					${isSearching ? filtered.map(renderItem) : sessionGroups.map(renderGroup)}
-					${!sessionsLoaded && html`<div class="sidebar-empty">Loading</div>`}
-					${sessionsLoaded && searching && html`<div class="sidebar-empty">Searching…</div>`}
-					${sessionsLoaded && !searching && (isSearching ? filtered.length === 0 : sessionGroups.length === 0) && html`<div class="sidebar-empty">No sessions match "${search}"</div>`}
+					${!sessionsLoaded && html`<div class="sidebar-empty" role="status">Loading</div>`}
+					${sessionsLoaded && searching && html`<div class="sidebar-empty" role="status">Searching…</div>`}
+					${sessionsLoaded && !searching && (isSearching ? filtered.length === 0 : sessionGroups.length === 0) && html`<div class="sidebar-empty" role="status">${isSearching ? `No sessions match "${search}"` : "No sessions yet"}</div>`}
 					${!isSearching && hasMore && sessionsLoaded && html`<button ref=${loadMoreRef} class="sidebar-load-more" onClick=${onLoadMore} disabled=${loadingMore} aria-busy=${loadingMore ? "true" : "false"}>${loadingMore ? html`<${icons.spinner} class="sidebar-load-more-spinner" />` : "Load more"}</button>`}
 				</div>
 			</div>

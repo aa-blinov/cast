@@ -104,6 +104,12 @@ describe("session label and meta", () => {
 		expect(sessionMeta({ cwd: "/home/u/.cast/sandbox/x", updatedAt: "2026-09-30T12:00:00Z" }, now)).toBe(
 			"sandbox · 2d",
 		);
+		expect(sessionMeta({ cwd: "/home/u/proj", status: "running", updatedAt: "2026-10-02T11:30:00Z" }, now)).toBe(
+			"running · proj · 30m",
+		);
+		expect(sessionMeta({ cwd: "/home/u/proj", status: "idle", updatedAt: "2026-10-02T11:30:00Z" }, now)).toBe(
+			"proj · 30m",
+		);
 		expect(relativeAge("2026-10-02T11:59:50Z", now)).toBe("now");
 		expect(relativeAge("garbage", now)).toBe("");
 	});

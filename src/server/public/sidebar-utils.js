@@ -74,7 +74,9 @@ export function relativeAge(updatedAt, now = Date.now()) {
 
 export function sessionMeta(session, now = Date.now()) {
 	const folder = session.cwd ? session.cwd.split("/").filter(Boolean).pop() : "";
-	return [isSandboxSessionCwd(session.cwd) ? "sandbox" : folder, relativeAge(session.updatedAt, now)].filter(Boolean).join(" · ");
+	// The status dot is a colour; running and error are also said in words.
+	const state = session.status === "running" || session.status === "error" ? session.status : "";
+	return [state, isSandboxSessionCwd(session.cwd) ? "sandbox" : folder, relativeAge(session.updatedAt, now)].filter(Boolean).join(" · ");
 }
 
 // A session nobody wrote in is clutter once another one is open; the one you are in stays so it does not vanish under you.
