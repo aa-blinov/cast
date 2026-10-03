@@ -123,7 +123,13 @@ import {
 	readReviewState,
 	verifyFindingsForSession,
 } from "./review.ts";
-import { ensureScratchpad, isSandboxCwd, scratchpadFor, scratchpadPromptBlock } from "./scratchpad.ts";
+import {
+	ensureScratchpad,
+	isSandboxCwd,
+	scratchpadFor,
+	scratchpadPromptBlock,
+	scratchpadRefusalHint,
+} from "./scratchpad.ts";
 import {
 	commitCheckpointWatermark,
 	compactionTriggerTokens,
@@ -1896,10 +1902,16 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// The session's scratchpad: told to the model, open to its file tools, made on first use. A sandbox session's
 	// working folder is its scratch space already, so it gets no second folder and no prompt block. A subagent runs
 	// with its parent's session id, so it shares the parent's.
-	const scratchpadDir = loopConfig.sessionId ? scratchpadFor(loopConfig.sessionId, cwd) : undefined;
-	const ownScratchpad = loopConfig.sessionId !== undefined && !isSandboxCwd(loopConfig.sessionId, cwd);
-	const scratchpadBlock = ownScratchpad && scratchpadDir ? `\n\n${scratchpadPromptBlock(scratchpadDir)}` : "";
-	if (ownScratchpad && scratchpadDir) ensureScratchpad(scratchpadDir);
+	const scratchpadDir =
+		loopConfig.sessionId && loadSettings().scratchpad !== false
+			? scratchpadFor(loopConfig.sessionId, cwd)
+			: undefined;
+	const ownScratchpad = scratchpadDir !== undefined && !isSandboxCwd(loopConfig.sessionId ?? "", cwd);
+	const scratchpadHint = (path: string): string => scratchpadRefusalHint(path, scratchpadDir);
+	const scratchpadBlock =
+		ownScratchpad && scratchpadDir && ensureScratchpad(scratchpadDir)
+			? `\n\n${scratchpadPromptBlock(scratchpadDir)}`
+			: "";
 	const promptCacheStrategy = resolvePromptCacheStrategy(
 		loopConfig.modelProvider?.baseURL ?? config.baseURL,
 		loopConfig.sessionId,
@@ -2247,7 +2259,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		const verdict = evaluatePermission(loadSettings().permissions, EXTERNAL_DIRECTORY, { path: target.path }, cwd);
 		if (verdict?.action === "deny") {
 			return {
-				content: `Denied: ${target.path} is outside the project, and the rule "${verdict.rule}" blocks it. Don't retry it or work around it (another path, a shell command); tell the user and ask what they want.`,
+				content: `Denied: ${target.path} is outside the project, and the rule "${verdict.rule}" blocks it. Don't retry it or work around it (another path, a shell command); tell the user and ask what they want.${scratchpadHint(target.path)}`,
 				isError: true,
 			};
 		}
@@ -2255,7 +2267,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		const rule = `${EXTERNAL_DIRECTORY}(${target.dir === "/" ? "" : target.dir}/**)`;
 		if (!(await askUser(`${name} ${target.path}`, "outside the project", rule))) {
 			return {
-				content: `Not run: the user declined ${name} on ${target.path}, which is outside the project. Don't retry it or work around it (another path, a shell command); ask the user what they want instead.`,
+				content: `Not run: the user declined ${name} on ${target.path}, which is outside the project. Don't retry it or work around it (another path, a shell command); ask the user what they want instead.${scratchpadHint(target.path)}`,
 				isError: true,
 			};
 		}
@@ -2683,7 +2695,13 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 			}
 		}
-		prompt = `${prompt}${memoryBlockForTurn}${scratchpadBlock}`;
+		// Not to a run that cannot write: plan mode, or a read-only subagent (explore, review), would be told to put
+		// files somewhere it has no way to put them.
+		const canWrite =
+			!loopConfig.planState?.enabled &&
+			!loopConfig.readOnlyBash &&
+			(advertisedNames.has("write") || advertisedNames.has("bash"));
+		prompt = `${prompt}${memoryBlockForTurn}${canWrite ? scratchpadBlock : ""}`;
 		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
 		// (always active in the TUI) replaces `prompt` wholesale and would
 		// silently drop a block added earlier. The restriction must be the

@@ -243,6 +243,8 @@ export interface Settings {
 	 */
 	showReasoning?: boolean;
 	/** Whether durable project memory is active across TUI and Web UI. */
+	/** A scratchpad for each session (default on): a folder for the agent's temporary files, named in its prompt. */
+	scratchpad?: boolean;
 	memoryEnabled?: boolean;
 	/** Whether background memory extraction, checkpoint writing, and maintenance may write. */
 	memoryWriteEnabled?: boolean;

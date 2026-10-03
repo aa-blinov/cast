@@ -28,6 +28,7 @@ import {
 import { findPersona } from "../../src/core/personas.ts";
 import { createPlanState, modeDisabledTools } from "../../src/core/plan.ts";
 import { buildSystemPrompt, personaOptionsForCwd, resolvePersonasForCwd } from "../../src/core/project.ts";
+import { removeScratchpadFor, scratchpadFor } from "../../src/core/scratchpad.ts";
 import { builtinSkillsDir, formatSkillsForPrompt, loadSkills } from "../../src/core/skills.ts";
 import { loadSubagentPrompts } from "../../src/core/subagents.ts";
 import type { TodoItem } from "../../src/core/todo.ts";
@@ -67,6 +68,8 @@ export interface VerifyContext {
 	trace: TraceTurn[];
 	/** Final state of the case's durable goal, when `EvalCase.goal` was set. */
 	goal?: { status: string; continuations: number; note?: string };
+	/** The scratchpad folder, when `EvalCase.scratchpad` was set. */
+	scratchpad?: string;
 }
 
 export interface EvalCase {
@@ -98,6 +101,8 @@ export interface EvalCase {
 	 * case exercise the same fresh-context contract as an approved `/plan`
 	 * transition without relying on a live client picker. */
 	initialTodos?: TodoItem[];
+	/** Run the case as a session, so it has a scratchpad (as a real one does); `verify` gets its path. */
+	scratchpad?: boolean;
 	/** Start the case under a durable goal: the loop then continues on its own
 	 * where a turn would have stopped, up to `maxContinuations`. */
 	goal?: { objective: string; maxContinuations?: number };
@@ -365,6 +370,7 @@ async function runAttempt(
 	let mcpSetup: McpSetupResult | undefined;
 	// runCase (verify, cleanup) needs this too, so it rides back in the return.
 	let goalSessionId: string | undefined;
+	let sessionId: string | undefined;
 
 	try {
 		await evalCase.setup?.();
@@ -412,14 +418,17 @@ async function runAttempt(
 		if (evalCase.goal && goalSessionId) {
 			startGoal(goalSessionId, evalCase.goal.objective, evalCase.goal.maxContinuations ?? 2);
 		}
+		sessionId =
+			goalSessionId ??
+			(subagentPrompts ? `eval-task-${evalCase.id}-${randomUUID().slice(0, 8)}` : undefined) ??
+			(evalCase.scratchpad ? `eval-scratch-${evalCase.id}-${randomUUID().slice(0, 8)}` : undefined);
 		await runAgentLoop([{ role: "user", content: evalCase.prompt }], {
 			config,
 			model,
 			cwd,
 			// Subagents are saved as child sessions of this one, which is what a
 			// task_id follow-up continues; the eval HOME keeps them throwaway.
-			sessionId:
-				goalSessionId ?? (subagentPrompts ? `eval-task-${evalCase.id}-${randomUUID().slice(0, 8)}` : undefined),
+			sessionId,
 			systemPrompt,
 			disabledTools: planState ? new Set(modeDisabledTools(planState.enabled)) : undefined,
 			personas,
@@ -519,7 +528,7 @@ async function runAttempt(
 	if (temporaryCwd) rmSync(temporaryCwd, { recursive: true, force: true });
 
 	clearTimeout(timer);
-	return { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage, goalSessionId };
+	return { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage, goalSessionId, sessionId };
 }
 
 export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promise<RunResult> {
@@ -542,7 +551,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		retries++;
 		attempt = await runAttempt(evalCase, options, config, model);
 	}
-	const { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage, goalSessionId } = attempt;
+	const { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage, goalSessionId, sessionId } = attempt;
 
 	const duration = Date.now() - startTime;
 
@@ -652,6 +661,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 				turns,
 				trace,
 				goal: goalSessionId ? readGoal(goalSessionId) : undefined,
+				scratchpad: evalCase.scratchpad && sessionId ? scratchpadFor(sessionId, evalCase.cwd ?? options.cwd) : undefined,
 			});
 			if (verifyError) failedChecks.push(`Verify failed: ${verifyError}`);
 		} catch (error) {
@@ -661,6 +671,7 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 
 	// The goal file lives in ~/.cast/goals and would otherwise outlive the run.
 	if (goalSessionId) clearGoal(goalSessionId);
+	if (evalCase.scratchpad && sessionId) removeScratchpadFor(sessionId);
 
 	const passed = failedChecks.length === 0;
 

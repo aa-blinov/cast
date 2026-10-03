@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -11,7 +11,7 @@ import { clearGoal } from "./goal.ts";
 import type { Message, Usage } from "./llm.ts";
 import { sessionMemoryDir } from "./memory-files.ts";
 import type { PlanQuestion, PlanTransition } from "./plan.ts";
-import { isSandboxCwd, removeScratchpadFor } from "./scratchpad.ts";
+import { isSandboxCwd, removeScratchpadFor, scratchpadRoot } from "./scratchpad.ts";
 import { deriveSessionTitle } from "./session-title.ts";
 import { queryReadOnly } from "./sqlite-reader.ts";
 import { extractSystemReminders } from "./system-reminder.ts";
@@ -1928,6 +1928,34 @@ function removeSandboxDirFor(id: string, cwd: string | undefined): void {
 		// Best-effort: a directory we cannot remove must not fail the delete or
 		// stall the prune. It stays as an orphan, which is what it already was.
 	}
+}
+
+/**
+ * Removes scratchpads whose session is gone: a delete that was cut short, or a database removed by hand, leaves its
+ * folder behind (the same thing happened to sandbox, attachment and memory folders). Only folders untouched for a day, so
+ * one made a moment ago by a session that has not been saved yet is left alone.
+ */
+export function pruneOrphanScratchpads(minAgeMs = 24 * 60 * 60 * 1000): number {
+	const root = scratchpadRoot();
+	let ids: string[];
+	try {
+		ids = readdirSync(root);
+	} catch {
+		return 0;
+	}
+	const exists = getDb().prepare("SELECT 1 FROM sessions WHERE id = ?");
+	let removed = 0;
+	for (const id of ids) {
+		try {
+			const path = join(root, id);
+			if (Date.now() - statSync(path).mtimeMs < minAgeMs || exists.get(id)) continue;
+			rmSync(path, { recursive: true, force: true });
+			removed += 1;
+		} catch {
+			// Best-effort, like every sweep here.
+		}
+	}
+	return removed;
 }
 
 export function listSessions(): SessionState[] {
