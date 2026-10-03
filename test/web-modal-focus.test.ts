@@ -149,6 +149,29 @@ describe("pressable", () => {
 	});
 });
 
+describe("rovingRows ref", () => {
+	it("makes the first row the only tab stop and keeps that true as rows are added", () => {
+		let mutate: () => void = () => {};
+		vi.stubGlobal(
+			"MutationObserver",
+			class {
+				constructor(cb: () => void) {
+					mutate = cb;
+				}
+				observe() {}
+			},
+		);
+		const rows = [0, 1].map(() => ({ tabIndex: 0 }));
+		const container = { querySelectorAll: () => rows };
+		(rovingRows(".ref-row") as { ref: (el: unknown) => void }).ref(container);
+		expect(rows.map((r) => r.tabIndex)).toEqual([0, -1]);
+		rows.push({ tabIndex: 0 });
+		mutate();
+		expect(rows.map((r) => r.tabIndex)).toEqual([0, -1, -1]);
+		vi.unstubAllGlobals();
+	});
+});
+
 describe("rovingRows", () => {
 	const makeList = () => {
 		const rows = [0, 1, 2].map((i) => ({

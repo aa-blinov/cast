@@ -76,14 +76,38 @@ export function useModalFocusTrap(active, initialFocusSelector) {
 	return ref;
 }
 
-// A long list is one tab stop, not one per row: arrows move between its rows, and Tab leaves the list from the row
-// that was focused last. Done on the DOM because the rows come from several loops with their own state; a row added
-// later starts as a tab stop again until it is next focused past.
+// A long list is one tab stop, not one per row: the row last focused (the first, before any) is tabbable, arrows move
+// between rows, and Tab leaves the list. Done on the DOM because the rows come from several loops with their own
+// state; the observer keeps it true as rows come and go (a folder opened, a file created).
+const lastFocused = new WeakMap();
+const watched = new WeakSet();
+const refs = new Map();
+
+function settle(container, selector) {
+	const rows = [...container.querySelectorAll(selector)];
+	const kept = rows.includes(lastFocused.get(container)) ? lastFocused.get(container) : rows[0];
+	for (const row of rows) row.tabIndex = row === kept ? 0 : -1;
+}
+
+function watch(selector) {
+	if (!refs.has(selector)) {
+		refs.set(selector, (container) => {
+			if (!container || watched.has(container)) return;
+			watched.add(container);
+			settle(container, selector);
+			new MutationObserver(() => settle(container, selector)).observe(container, { childList: true, subtree: true });
+		});
+	}
+	return refs.get(selector);
+}
+
 export function rovingRows(selector) {
 	return {
+		ref: watch(selector),
 		onFocusCapture: (e) => {
 			if (!e.target.matches?.(selector)) return;
-			for (const row of e.currentTarget.querySelectorAll(selector)) row.tabIndex = row === e.target ? 0 : -1;
+			lastFocused.set(e.currentTarget, e.target);
+			settle(e.currentTarget, selector);
 		},
 		onKeyDown: (e) => {
 			if (!e.target.matches?.(selector)) return;
