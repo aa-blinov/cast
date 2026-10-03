@@ -18,7 +18,7 @@ vi.mock(
 	{ virtual: true },
 );
 
-import { FOCUSABLE_SELECTOR, pressable, useModalFocusTrap } from "../src/server/public/modal-focus.js";
+import { FOCUSABLE_SELECTOR, pressable, rovingRows, useModalFocusTrap } from "../src/server/public/modal-focus.js";
 
 type Listener = (e: unknown) => void;
 
@@ -146,5 +146,52 @@ describe("pressable", () => {
 		props.onKeyDown(keyEvent("Enter", true));
 
 		expect(onPress).not.toHaveBeenCalled();
+	});
+});
+
+describe("rovingRows", () => {
+	const makeList = () => {
+		const rows = [0, 1, 2].map((i) => ({
+			i,
+			tabIndex: 0,
+			focus: vi.fn(),
+			matches: (selector: string) => selector === ".row",
+		}));
+		const container = { querySelectorAll: () => rows };
+		return { rows, container };
+	};
+	const keydown = (container: unknown, target: unknown, key: string) => {
+		const e = { target, currentTarget: container, key, preventDefault: vi.fn() };
+		(rovingRows(".row") as { onKeyDown: (e: unknown) => void }).onKeyDown(e);
+		return e;
+	};
+
+	it("makes the focused row the list's only tab stop", () => {
+		const { rows, container } = makeList();
+		(rovingRows(".row") as { onFocusCapture: (e: unknown) => void }).onFocusCapture({
+			target: rows[1],
+			currentTarget: container,
+		});
+		expect(rows.map((r) => r.tabIndex)).toEqual([-1, 0, -1]);
+	});
+
+	it("moves focus with the arrows, Home and End, and stops at the ends", () => {
+		const { rows, container } = makeList();
+		keydown(container, rows[0], "ArrowDown");
+		expect(rows[1].focus).toHaveBeenCalled();
+		keydown(container, rows[0], "End");
+		expect(rows[2].focus).toHaveBeenCalled();
+		const atTop = keydown(container, rows[0], "ArrowUp");
+		expect(atTop.preventDefault).not.toHaveBeenCalled();
+		const other = keydown(container, rows[0], "a");
+		expect(other.preventDefault).not.toHaveBeenCalled();
+	});
+
+	it("leaves keys alone when the target is not a row", () => {
+		const { rows, container } = makeList();
+		const input = { matches: () => false };
+		const e = keydown(container, input, "ArrowDown");
+		expect(e.preventDefault).not.toHaveBeenCalled();
+		expect(rows.every((r) => r.focus.mock.calls.length === 0)).toBe(true);
 	});
 });

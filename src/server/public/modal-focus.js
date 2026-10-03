@@ -76,6 +76,27 @@ export function useModalFocusTrap(active, initialFocusSelector) {
 	return ref;
 }
 
+// A long list is one tab stop, not one per row: arrows move between its rows, and Tab leaves the list from the row
+// that was focused last. Done on the DOM because the rows come from several loops with their own state; a row added
+// later starts as a tab stop again until it is next focused past.
+export function rovingRows(selector) {
+	return {
+		onFocusCapture: (e) => {
+			if (!e.target.matches?.(selector)) return;
+			for (const row of e.currentTarget.querySelectorAll(selector)) row.tabIndex = row === e.target ? 0 : -1;
+		},
+		onKeyDown: (e) => {
+			if (!e.target.matches?.(selector)) return;
+			const rows = [...e.currentTarget.querySelectorAll(selector)];
+			const at = rows.indexOf(e.target);
+			const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: rows.length - 1 }[e.key];
+			if (to === undefined || !rows[to]) return;
+			e.preventDefault();
+			rows[to].focus();
+		},
+	};
+}
+
 // Keyboard parity for a clickable row that can't be a <button> (it nests
 // buttons of its own). Only the row's own keydown counts, so Enter inside a
 // nested input or button keeps its own meaning.
