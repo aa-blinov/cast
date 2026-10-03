@@ -256,3 +256,13 @@ describe("folder segment", () => {
 		expect(seg.formatValue(emptyCtx())).toBeNull();
 	});
 });
+
+describe("the scratchpad segment", () => {
+	it("shows the session's scratchpad folder, off by default", () => {
+		const seg = getStatusBarSegments().find((s) => s.id === "scratchpad")!;
+		expect(seg.defaultOn).toBe(false);
+		const ctx = { sessionId: "abc123", cwd: "/work/project" } as never;
+		expect(seg.formatValue(ctx)).toMatch(/\.cast\/scratch\/abc123$/);
+		expect(seg.formatValue({ sessionId: "abc123", cwd: undefined } as never)).toBeNull();
+	});
+});

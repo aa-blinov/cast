@@ -8,6 +8,23 @@ Sessions are stored in a single SQLite database at `~/.cast/sessions/sessions.db
 
 Sessions saved by older versions of cast (individual `.json`/`.jsonl` files under `~/.cast/sessions/<encoded-cwd>/`) are imported into the database automatically on first run after upgrading. The original files are left on disk untouched.
 
+## Scratchpad
+
+Every session in a project has a scratchpad: a folder of its own, `~/.cast/scratch/<session id>`, for temporary files such as
+intermediate results, throwaway scripts and saved command output. The agent is told its path in the system prompt and uses it
+on its own when a task needs a file that is a means rather than the result; what is the result (a program you asked for) goes in
+the project. It keeps those files out of your repository and out of a shared `/tmp`, so two sessions never collide.
+
+- The file tools read and write it without asking (no `external_directory` prompt), and only this session's folder: another
+  session's scratchpad is outside the project like any other path.
+- Subagents work in their parent's scratchpad.
+- It is made on the first turn and removed with the session, together with its attachments. A fork gets a scratchpad of its own,
+  empty.
+- A sandbox session has none apart from its working folder: that folder is throwaway already, so it is the scratchpad.
+- Show it with the `scratchpad` status bar segment (`/statusbar`, off by default) or `/current` in the web.
+
+It is a convenience and not a security boundary: `bash` is not confined to it.
+
 ## Request Log
 
 Messages say what was said; the request log says what the model was actually sent. Every request cast makes for a session (turns, compaction, the goal check, memory upkeep) is stored with its full body: the system prompt of that moment, reminders added to that request only, the history after compaction, the tool set, the model parameters, plus its retries, how it ended, its token usage and the raw answer. A body rebuilt from the log serializes to exactly the bytes that went out, so a bad turn or an eval can be replayed as it happened.

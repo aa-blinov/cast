@@ -2,7 +2,7 @@
  * Permission rules from settings, enforced by the agent loop on real tool
  * calls. Only the LLM call is stubbed; HOME and the session DB are throwaway.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -86,6 +86,51 @@ async function run(
 	const tool = messages.find((m) => m.role === "tool") as { content: string } | undefined;
 	return tool?.content ?? "";
 }
+
+describe("the scratchpad in the system prompt", () => {
+	const systemPromptSent = (): string => {
+		const messages = vi.mocked(streamAndCollect).mock.calls[0]?.[2] as Array<{ role: string; content: unknown }>;
+		return String(messages.find((m) => m.role === "system")?.content ?? "");
+	};
+	const talk = async (cwd: string, sessionId?: string) => {
+		vi.mocked(streamAndCollect).mockImplementationOnce(async () => ({
+			content: "ok",
+			thinking: "",
+			finishReason: "stop",
+		}));
+		await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd,
+			systemPrompt: "BASE PROMPT",
+			onEvent: () => {},
+			...(sessionId ? { sessionId } : {}),
+		});
+	};
+
+	it("tells a session in a project where its scratchpad is, and makes the folder", async () => {
+		await talk(join(dir, "proj"), "sess1");
+		const prompt = systemPromptSent();
+		const path = join(dir, "home", ".cast", "scratch", "sess1");
+		expect(prompt).toContain("BASE PROMPT");
+		expect(prompt).toContain(`Your scratchpad for this session is ${path}`);
+		expect(existsSync(path)).toBe(true);
+	});
+
+	it("says nothing, and makes nothing, for a run that is not a session (no id)", async () => {
+		await talk(join(dir, "proj"));
+		expect(systemPromptSent()).not.toContain("scratchpad");
+		expect(existsSync(join(dir, "home", ".cast", "scratch"))).toBe(false);
+	});
+
+	it("gives a sandbox session no second folder: its working folder is the scratch space", async () => {
+		const sandbox = join(dir, "home", ".cast", "sandbox", "cast-sess2");
+		mkdirSync(sandbox, { recursive: true });
+		await talk(sandbox, "sess2");
+		expect(systemPromptSent()).not.toContain("Your scratchpad");
+		expect(existsSync(join(dir, "home", ".cast", "scratch", "sess2"))).toBe(false);
+	});
+});
 
 describe("permission rules in the loop", () => {
 	it("deny stops the call before it runs, even in bypass mode", async () => {
@@ -220,6 +265,28 @@ describe("permission rules in the loop", () => {
 				if (realMem === undefined) delete process.env.CAST_MEMORY_DIR;
 				else process.env.CAST_MEMORY_DIR = realMem;
 			}
+		});
+
+		it("never asks about the session's scratchpad, but still asks about another session's", async () => {
+			const home = join(dir, "home");
+			// The paths are the ones the loop derives from HOME and the session id.
+			mkdirSync(join(home, ".cast", "scratch", "mine"), { recursive: true });
+			mkdirSync(join(home, ".cast", "scratch", "other"), { recursive: true });
+			writeFileSync(join(home, ".cast", "scratch", "other", "theirs.txt"), "their notes");
+
+			oneCall("write", { path: join(home, ".cast", "scratch", "mine", "tmp.txt"), content: "mine" });
+			const confirm = vi.fn(async () => false);
+			await run(confirm, { sessionId: "mine" });
+			expect(confirm).not.toHaveBeenCalled();
+			expect(readFileSync(join(home, ".cast", "scratch", "mine", "tmp.txt"), "utf-8")).toBe("mine");
+
+			oneCall("read", { path: join(home, ".cast", "scratch", "mine", "tmp.txt") });
+			expect(await run(confirm, { sessionId: "mine" })).toContain("mine");
+			expect(confirm).not.toHaveBeenCalled();
+
+			oneCall("read", { path: join(home, ".cast", "scratch", "other", "theirs.txt") });
+			expect(await run(confirm, { sessionId: "mine" })).toContain("outside the project");
+			expect(confirm).toHaveBeenCalledTimes(1);
 		});
 
 		it("with nobody to ask (bypass) it runs; inside the project it never asks", async () => {

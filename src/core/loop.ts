@@ -123,6 +123,7 @@ import {
 	readReviewState,
 	verifyFindingsForSession,
 } from "./review.ts";
+import { ensureScratchpad, isSandboxCwd, scratchpadFor, scratchpadPromptBlock } from "./scratchpad.ts";
 import {
 	commitCheckpointWatermark,
 	compactionTriggerTokens,
@@ -1892,6 +1893,13 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promise<void> {
 	const { config, model: initialModel, cwd, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+	// The session's scratchpad: told to the model, open to its file tools, made on first use. A sandbox session's
+	// working folder is its scratch space already, so it gets no second folder and no prompt block. A subagent runs
+	// with its parent's session id, so it shares the parent's.
+	const scratchpadDir = loopConfig.sessionId ? scratchpadFor(loopConfig.sessionId, cwd) : undefined;
+	const ownScratchpad = loopConfig.sessionId !== undefined && !isSandboxCwd(loopConfig.sessionId, cwd);
+	const scratchpadBlock = ownScratchpad && scratchpadDir ? `\n\n${scratchpadPromptBlock(scratchpadDir)}` : "";
+	if (ownScratchpad && scratchpadDir) ensureScratchpad(scratchpadDir);
 	const promptCacheStrategy = resolvePromptCacheStrategy(
 		loopConfig.modelProvider?.baseURL ?? config.baseURL,
 		loopConfig.sessionId,
@@ -2221,12 +2229,13 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// memory files in place: those are cast's own, open to every tool.
 	const readableDirs = [
 		toolOutputDir(),
+		...(scratchpadDir ? [scratchpadDir] : []),
 		join(homedir(), ".cast", "inputs"),
 		builtinSkillsDir,
 		ccMemoryRoot(),
 		...(loopConfig.skills ?? []).map((skill) => skill.baseDir),
 	];
-	const writableDirs = [memoryRoot()];
+	const writableDirs = [memoryRoot(), ...(scratchpadDir ? [scratchpadDir] : [])];
 	/** A file tool reaching outside the project: `external_directory` rules
 	 * decide, and with none matching the user is asked. */
 	const gateExternalDirectory = async (
@@ -2674,7 +2683,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 			}
 		}
-		prompt = `${prompt}${memoryBlockForTurn}`;
+		prompt = `${prompt}${memoryBlockForTurn}${scratchpadBlock}`;
 		// Plan mode: prepended AFTER any rebuild — the per-turn rebuild path
 		// (always active in the TUI) replaces `prompt` wholesale and would
 		// silently drop a block added earlier. The restriction must be the

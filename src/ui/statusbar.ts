@@ -1,4 +1,5 @@
 import { inputTokenBudget } from "../core/config.ts";
+import { scratchpadFor } from "../core/scratchpad.ts";
 import type { SessionUsage } from "../core/session.ts";
 import { estimateTokens } from "../core/session.ts";
 import type { StatusBarConfig } from "../core/settings.ts";
@@ -72,6 +73,7 @@ export function getStatusBarSegments(): readonly StatusBarSegment[] {
  * A segment not listed (a plugin's) goes before all of these.
  */
 export const SEGMENT_DROP_ORDER = [
+	"scratchpad",
 	"session",
 	"subagent",
 	"speed",
@@ -133,6 +135,7 @@ export const SEGMENT_MAX_WIDTH: Record<string, number> = {
 	worktree: 16,
 	folder: 28,
 	session: 16,
+	scratchpad: 34,
 	context: 22,
 	usage: 35,
 	cost: 8,
@@ -207,6 +210,14 @@ registerStatusBarSegment({
 	defaultOn: false,
 	side: "left",
 	formatValue: (ctx) => ctx.sessionId,
+});
+
+registerStatusBarSegment({
+	id: "scratchpad",
+	label: "Scratchpad",
+	defaultOn: false,
+	side: "left",
+	formatValue: (ctx) => (ctx.sessionId && ctx.cwd ? tildePath(scratchpadFor(ctx.sessionId, ctx.cwd)) : null),
 });
 
 /** How much of the input budget the conversation takes; null before there is one or without a known window. */
