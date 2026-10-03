@@ -59,7 +59,7 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 	loadTheme(args.settings.theme);
 
 	startup.progress("Starting cast...");
-	const result = await runStartup(args, pickers, startup.progress);
+	const result = await runStartup({ ...args, deferMcp: true }, pickers, startup.progress);
 	startup.done();
 
 	// Background bash tasks are spawned detached (their own process group, see

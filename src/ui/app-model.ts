@@ -391,6 +391,24 @@ export function useAppModel(props: AppModelProps) {
 		planMode,
 	]);
 
+	// Startup shows the screen first and connects MCP here: npx resolution, browser launches and remote handshakes took
+	// seconds before the first frame. A /mcp change that landed meanwhile has already connected its own set, so a late
+	// result for the initial one is dropped instead of overwriting it.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: once, at mount
+	useEffect(() => {
+		if (!result.mcpResult.connectPending) return;
+		void resolveMcpForCwd(projectDeps, cwd, projectTrusted, loadSettings().disabledMcpServers ?? []).then(
+			async (connected) => {
+				let kept = false;
+				setMcpResult((current) => {
+					kept = current.connectPending === true;
+					return kept ? connected : current;
+				});
+				if (!kept) await closeMcpConnections(connected.connections);
+			},
+		);
+	}, []);
+
 	// A persona the agent saved with activate: applied through /persona once
 	// the turn it was saved in is over, the same as switching by hand.
 	const pendingPersonaRef = useRef<{ name: string; mode: "new" | "here" } | null>(null);
