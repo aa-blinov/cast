@@ -14,7 +14,13 @@ vi.mock(
 );
 vi.mock("../src/server/public/api.js", () => ({ api: vi.fn() }));
 
-import { atTokenAt, Composer, canSubmitAttachments, voiceErrorMessage } from "../src/server/public/composer.js";
+import {
+	atTokenAt,
+	Composer,
+	canSubmitAttachments,
+	imageNotice,
+	voiceErrorMessage,
+} from "../src/server/public/composer.js";
 
 describe("Composer", () => {
 	it("is exported as the isolated composer component", () => {
@@ -41,5 +47,15 @@ describe("voiceErrorMessage", () => {
 		expect(voiceErrorMessage({ name: "NotAllowedError" })).toBe("Microphone access was denied");
 		expect(voiceErrorMessage({ name: "NotReadableError" })).toBe("The microphone is in use by another app");
 		expect(voiceErrorMessage({ name: "Other" })).toBe("Could not start recording");
+	});
+});
+
+describe("imageNotice", () => {
+	it("says how many images were left out and which could not be read", () => {
+		expect(imageNotice(0, 6, [])).toBe("");
+		expect(imageNotice(1, 6, [])).toBe("1 image left out: up to 6 per message");
+		expect(imageNotice(3, 6, [])).toBe("3 images left out: up to 6 per message");
+		expect(imageNotice(0, 6, ["a.png", "b.png"])).toBe("Couldn't read a.png, b.png");
+		expect(imageNotice(2, 6, ["a.png"])).toBe("2 images left out: up to 6 per message. Couldn't read a.png");
 	});
 });

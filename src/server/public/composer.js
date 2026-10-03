@@ -49,6 +49,14 @@ function keepComposerFocus(event) {
 	event.preventDefault();
 }
 
+/** What to tell the person when images were left out: over the limit, or ones that could not be read. */
+export function imageNotice(skipped, limit, failedNames) {
+	const parts = [];
+	if (skipped > 0) parts.push(`${skipped} image${skipped > 1 ? "s" : ""} left out: up to ${limit} per message`);
+	if (failedNames.length > 0) parts.push(`Couldn't read ${failedNames.join(", ")}`);
+	return parts.join(". ");
+}
+
 export function canSubmitAttachments(docs) {
 	return docs.every((doc) => !doc.uploading && !doc.error);
 }
@@ -84,6 +92,15 @@ export function Composer({
 	const recorderRef = useRef(null);
 	const [, setTick] = useState(0);
 	const [dragOver, setDragOver] = useState(false);
+	// Said once, then it goes: why a file or image did not make it into the message.
+	const [notice, setNotice] = useState(null);
+	const noticeTimerRef = useRef(null);
+	const showNotice = useCallback((message) => {
+		clearTimeout(noticeTimerRef.current);
+		setNotice(message || null);
+		if (message) noticeTimerRef.current = setTimeout(() => setNotice(null), 8000);
+	}, []);
+	useEffect(() => () => clearTimeout(noticeTimerRef.current), []);
 	const textareaRef = useRef(null);
 	const pickerRef = useRef(null);
 	const fileInputRef = useRef(null);
@@ -155,13 +172,23 @@ export function Composer({
 		if (files.length === 0) return;
 		// Enforce server limit client-side with immediate feedback
 		const allowed = Math.max(0, MAX_IMAGES - images.length - resizingImages);
-		if (allowed === 0) return;
 		const sliced = files.slice(0, allowed);
+		const failed = [];
+		showNotice(imageNotice(files.length - sliced.length, MAX_IMAGES, []));
+		if (sliced.length === 0) return;
 		setResizingImages((n) => n + sliced.length);
-		const resized = await Promise.all(sliced.map((f) => resizeImageToDataUrl(f).catch(() => null)));
+		const resized = await Promise.all(
+			sliced.map((f) =>
+				resizeImageToDataUrl(f).catch(() => {
+					failed.push(f.name);
+					return null;
+				}),
+			),
+		);
 		setImages((prev) => [...prev, ...resized.filter(Boolean).slice(0, MAX_IMAGES - prev.length)]);
 		setResizingImages((n) => Math.max(0, n - sliced.length));
-	}, [images.length, resizingImages]);
+		if (failed.length > 0) showNotice(imageNotice(files.length - sliced.length, MAX_IMAGES, failed));
+	}, [images.length, resizingImages, showNotice]);
 
 	const addDocFiles = useCallback(
 		async (files) => {
@@ -504,6 +531,15 @@ export function Composer({
 					pickerSelect(pickerItems[clampedIndex].value);
 					return;
 				}
+				// Tab completes the text and leaves running it to Enter: a command with no arguments would otherwise run.
+				if (e.key === "Tab" && !e.shiftKey && (cmdVisible || personaMatch)) {
+					e.preventDefault();
+					const item = pickerItems[clampedIndex];
+					setValue(personaMatch ? `/persona ${item.value} ` : `${item.name} `);
+					setCmdVisible(false);
+					resize();
+					return;
+				}
 				if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
 					const item = pickerItems[clampedIndex];
 					const disabled = item && "blocking" in item && item.blocking && running;
@@ -520,7 +556,7 @@ export function Composer({
 			}
 		},
 		// biome-ignore lint/correctness/useExhaustiveDependencies: pickerItems/pickerSelect are plain values recomputed every render (not memoized) — already fine since this callback is rebuilt on every keystroke (`value` is a dep) regardless.
-		[pickerItems, clampedIndex, pickerSelect, running, handleSubmit, onAbort, atToken],
+		[pickerItems, clampedIndex, pickerSelect, running, handleSubmit, onAbort, atToken, cmdVisible, personaMatch, resize],
 	);
 
 	return html`
@@ -534,7 +570,7 @@ export function Composer({
 			</div>
 			${
 				resizingImages > 0 &&
-				html`<div class="composer-images"><div class="fs-loading">Resizing ${resizingImages} image${resizingImages > 1 ? "s" : ""}…</div></div>`
+				html`<div class="composer-images"><div class="fs-loading" role="status">Resizing ${resizingImages} image${resizingImages > 1 ? "s" : ""}…</div></div>`
 			}
 			${
 				images.length > 0 &&
@@ -548,7 +584,7 @@ export function Composer({
 								type="button"
 								class="composer-image-remove"
 								onClick=${() => setImages((prev) => prev.filter((_, j) => j !== i))}
-								aria-label="Remove image"
+								aria-label="Remove image ${i + 1}"
 							><${icons.xMark} /></button>
 						</div>
 					`,
@@ -559,19 +595,21 @@ export function Composer({
 			${
 				(recordingSince !== null || voice || voiceStatus) &&
 				html`
-				<div class="composer-voice" role="status">
+				<div class="composer-voice">
+					<span class="sr-only" role="status">${recordingSince !== null ? "Recording" : voice ? "Voice message recorded" : voiceStatus}</span>
 					${
 						recordingSince !== null
-							? html`<span class="composer-voice-live">Recording ${clock((Date.now() - recordingSince) / 1000)} / ${clock(MAX_VOICE_SECONDS)}</span>
+							? html`<span class="composer-voice-live" aria-hidden="true">Recording ${clock((Date.now() - recordingSince) / 1000)} / ${clock(MAX_VOICE_SECONDS)}</span>
 								<button type="button" class="composer-doc-remove" onClick=${cancelRecording} aria-label="Discard recording"><${icons.xMark} /></button>`
 							: voice
 								? html`<audio class="composer-voice-player" controls src=${voice.dataUrl}></audio>
 									<button type="button" class="composer-doc-remove" onClick=${() => setVoice(null)} aria-label="Remove voice message"><${icons.xMark} /></button>`
-								: html`<span class="composer-voice-status">${voiceStatus}</span>`
+								: html`<span class="composer-voice-status" aria-hidden="true">${voiceStatus}</span>`
 					}
 				</div>
 			`
 			}
+			${notice && html`<div class="composer-notice" role="status">${notice}</div>`}
 			${
 				docs.length > 0 &&
 				html`
@@ -579,7 +617,10 @@ export function Composer({
 					${docs.map(
 						(d) => html`
 						<div key=${d.id} class="composer-doc-chip${d.error ? " composer-doc-chip-error" : ""}" title=${d.error ?? d.name}>
-							<span class="composer-doc-name">${d.uploading ? "Uploading… " : ""}${d.name}</span>
+							<span class="composer-doc-text">
+								<span class="composer-doc-name">${d.uploading ? "Uploading… " : ""}${d.name}</span>
+								${d.error && html`<span class="composer-doc-error" role="alert">${d.error}</span>`}
+							</span>
 							<button
 								type="button"
 								class="composer-doc-remove"
@@ -598,16 +639,18 @@ export function Composer({
 					e.preventDefault();
 					setDragOver(true);
 				}}
-				onDragLeave=${() => setDragOver(false)}
+				onDragLeave=${(e) => {
+					if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false);
+				}}
 				onDrop=${handleDrop}
 			>
+				${dragOver && html`<div class="composer-drop-hint" aria-hidden="true">Drop to attach</div>`}
 				<input
 					ref=${fileInputRef}
 					type="file"
 					multiple
 					style="display:none"
 					onChange=${handleFilePick}
-					accept="image/*,.txt,.md,.json,.yaml,.yml,.toml,.ini,.sh,.py,.js,.ts,.tsx,.css,.html,.xml,.csv,.pdf"
 				/>
 				<button
 					type="button"
@@ -634,6 +677,8 @@ export function Composer({
 					ref=${textareaRef}
 					class="composer-input"
 					aria-label="Message"
+					spellcheck=${false}
+					enterkeyhint="send"
 					aria-autocomplete="list"
 					aria-controls=${pickerOpen ? PICKER_LIST_ID : undefined}
 					aria-activedescendant=${pickerOpen ? pickerOptionId(clampedIndex) : undefined}
