@@ -94,21 +94,24 @@ export function watchDirectories(
 			return;
 		}
 		const path = join(dir, filename.toString());
-		if (isIgnored(path)) return;
+		if (isIgnored(path) || closed) return;
 		if (event !== "rename") {
 			onChange("change", path);
 			return;
 		}
 		// A rename is a create or a delete; only a stat says which, and whether
 		// what appeared is a folder that needs watching too.
+		// The answer can arrive after close(): a closed watcher reports nothing, however late the stat comes back.
 		stat(path).then(
 			(info) => {
+				if (closed) return;
 				if (info.isDirectory()) {
 					onChange("addDir", path);
 					void addTree(path);
 				} else onChange("change", path);
 			},
 			() => {
+				if (closed) return;
 				drop(path);
 				onChange("change", path);
 			},
