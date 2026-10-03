@@ -909,7 +909,8 @@ function formatMcpList(deps: CommandDeps): string {
 		.map((name) => {
 			const count = toolCounts[name];
 			const origin = ownership.get(name) ?? "cli";
-			const status = disabled.has(name) ? "disabled" : count !== undefined ? `${count} tools` : "disconnected";
+			const notUp = deps.mcpResult.connectPending ? "connecting" : "disconnected";
+			const status = disabled.has(name) ? "disabled" : count !== undefined ? `${count} tools` : notUp;
 			return `${disabled.has(name) ? "off" : "on "} ${name} (${origin}, ${status})`;
 		});
 	return `MCP\n${lines.join("\n")}`;

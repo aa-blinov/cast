@@ -1062,6 +1062,14 @@ describe("handleInput", () => {
 		expect(String(last?.content ?? "")).toContain("No MCP servers");
 	});
 
+	it("/mcp list says connecting, not disconnected, while the startup connect is still running", async () => {
+		const { deps, calls } = createFakeDeps();
+		(deps.mcpResult as any).allServerNames = ["context7"];
+		(deps.mcpResult as any).connectPending = true;
+		await handleInput("/mcp list", undefined, deps);
+		expect(displayMessageText(calls)).toContain("context7 (cli, connecting)");
+	});
+
 	it("/mcp reports none connected when empty", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("/mcp", undefined, deps);

@@ -7,6 +7,9 @@ All notable user-facing changes to cast, newest first.
 ### Added
 - **`/goal resume`** continues a goal that was paused by an interruption or a failure. Until now the word became a new goal called "resume".
 
+### Changed
+- **The terminal shows its first screen without waiting for MCP servers.** Servers are connected in the background right after it appears, as the web already did, so a config with a browser or remote server no longer adds seconds before you can type. `/mcp list` says `connecting` until they are up, and a first message sent in that window just runs without their tools.
+
 ### Fixed
 - **`cast acp` exits when the editor closes stdin,** as `docs/acp.md` says. It used to stay alive on its MCP and language-server child processes.
 - **ACP advertises only the slash commands it runs.** It listed ~90, none of which ran: `/compact` reached the model as plain text. A prompt of `/plan`, `/build`, `/clear` or `/abort` now does what it says, and those four are what the editor is offered.
