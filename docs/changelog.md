@@ -2,6 +2,22 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.54.1
+
+### Added
+- **Arrow keys in the web workspace panel.** The file tree and the list of changes are now one tab stop each, with Up, Down, Home and End moving between rows; in the tree, Right opens a folder (or steps into an open one) and Left closes it (or steps out to its parent). The panel's tabs are a real tab strip (arrows, Home and End, with the content in a tab panel), and the panel is named for screen readers. Escape clears the session search and the file search, and the session search says how many sessions it found.
+- **The composer says why something was left out.** A seventh image, an image that could not be read, and a file that was refused each get a line under the box; a refused file shows its reason inside its chip instead of only in a tooltip. Dragging over the box shows "Drop to attach", Tab completes a slash command or persona without running it, and the attach dialog no longer greys out types that drag and drop accepts (`.go`, `.rs`, `.sql` and the like).
+
+### Fixed
+- **Signing in could send you to another site, and could put the password in the address.** The `next` address was checked as text, so a tab in it (`/%09/evil.test`) passed and was read as `//evil.test` the moment the password was accepted; it is now resolved the way the browser resolves it and only the same site is kept. The form had no method, so with the script not loaded it submitted by GET and left the password in the URL; it posts. A dropped connection no longer reads "Failed to fetch", a lockout says how long to wait (from `Retry-After`) and holds the button until then, the password field is marked invalid and points at the message, the fields and button are 44px on a touch screen, the username is not capitalised or spell-checked on a phone, and the logo's space is reserved so the form does not jump when it loads.
+- **The sandbox choice in the new-session form no longer switches itself off.** A second press on Sandbox left a form with neither a directory nor a sandbox and a Create button that was off for no visible reason. Its tooltip named the folder picked for the other mode, and the sidebar called the same thing "new". It now says the folder is deleted with the session.
+- **Workspace panel on a touch screen and for the keyboard.** The tree and change rows and the toolbar buttons are 44px under touch; git-ignored files are no longer faded to 2.7:1 (they are muted text with an "ignored" tag); the row actions name their file ("Delete a.txt"); the loading and empty states are announced. Switching to the Changes tab no longer dropped the focus from the tab strip.
+- **Session history sidebar.** A row no longer holds the pin and More buttons inside a button; running and failed sessions say so in words and not only by the colour of a dot; an empty history reads "No sessions yet" instead of `No sessions match ""`; renaming no longer re-renders every row on each keystroke; the menu items are 44px on touch.
+- **Composer.** A recording is announced once ("Recording") rather than every second as the timer ticks; the image remove buttons are numbered; the disabled box keeps its "Connecting…" placeholder readable; spell-check is off for paths and code and Enter is labelled Send on a phone.
+
+### Changed
+- **The web sidebar's hidden persona and directory block is gone.** It had been unreachable since the new-session form replaced it.
+
 ## 0.54.0
 
 ### Added
