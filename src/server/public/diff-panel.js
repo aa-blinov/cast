@@ -124,7 +124,8 @@ export function DiffPanel({
 			</div>
 		`);
 
-	return html`<${ChangesView} data=${data} activeFile=${activeFile} onSelectFile=${onSelectFile} shell=${shell} activeId=${activeId} />`;
+	// Inside the shell like every other tab: a different root here remounted the header, and the focused tab with it.
+	return shell(html`<${ChangesView} data=${data} activeFile=${activeFile} onSelectFile=${onSelectFile} activeId=${activeId} />`);
 }
 
 // The one frame of every tab, so the landmark and its name are written once.
@@ -143,7 +144,7 @@ function PanelShell({ openClass, open, resizeHandleProps, header, children }) {
  * files with the list; any other file's diff is fetched when it is opened (a
  * diff costs a git process each, and `git clean` can change 20,000 files).
  */
-function ChangesView({ data, activeFile, onSelectFile, shell, activeId }) {
+function ChangesView({ data, activeFile, onSelectFile, activeId }) {
 	const [lazy, setLazy] = useState({});
 	const [loading, setLoading] = useState(null);
 	const allFiles = data.files || [];
@@ -208,7 +209,7 @@ function ChangesView({ data, activeFile, onSelectFile, shell, activeId }) {
 		diffContent = file.hunks.map((hunk, hi) => ({ hi, hunk, lines: numberHunkLines(hunk) }));
 	}
 
-	return shell(html`
+	return html`
 			<div class="diff-file-list">
 				${sections.map(
 					(sec) => html`
@@ -276,5 +277,5 @@ function ChangesView({ data, activeFile, onSelectFile, shell, activeId }) {
 								: html`<div class="diff-empty" role="status">No changes</div>`
 				}
 			</div>
-	`);
+	`;
 }
