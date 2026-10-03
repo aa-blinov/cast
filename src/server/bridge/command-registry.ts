@@ -75,6 +75,7 @@ import {
 import { setModelsCache } from "../../core/readline.ts";
 import { REWIND_MODES, type RewindMode } from "../../core/rewind.ts";
 import { formatRuleInvocation } from "../../core/rules.ts";
+import { scratchpadFor } from "../../core/scratchpad.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
 import {
 	addUsage,
@@ -372,6 +373,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 	"/current": (ctx) => {
 		const {
 			ws,
+			cwd,
 			config,
 			loadSettings,
 			sessionReasoningLevel,
@@ -389,6 +391,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 				persona: ws.session.persona,
 				model: ws.session.model,
 				providerUrl: ws.session.providerUrl ?? config.baseURL,
+				scratchpad: scratchpadFor(ws.id, ws.session.cwd ?? cwd),
 				providerName:
 					ws.session.providerName ??
 					(loadSettings().providers ?? []).find(

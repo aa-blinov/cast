@@ -11,6 +11,7 @@ import { clearGoal } from "./goal.ts";
 import type { Message, Usage } from "./llm.ts";
 import { sessionMemoryDir } from "./memory-files.ts";
 import type { PlanQuestion, PlanTransition } from "./plan.ts";
+import { isSandboxCwd, removeScratchpadFor } from "./scratchpad.ts";
 import { deriveSessionTitle } from "./session-title.ts";
 import { queryReadOnly } from "./sqlite-reader.ts";
 import { extractSystemReminders } from "./system-reminder.ts";
@@ -1858,6 +1859,7 @@ export function deleteSession(id: string, cwd?: string): boolean {
 	// Their commits are only kept alive by a ref each; let git collect them.
 	void releaseCheckpointRefs(checkpointsToRelease).catch(() => {});
 	removeSandboxDirFor(id, cwd);
+	removeScratchpadFor(id);
 	removeInputsDirFor(id);
 	removeSessionMemoryDirFor(id);
 	// A goal is session state kept beside the store (~/.cast/goals/<id>.json);
@@ -1919,7 +1921,7 @@ function removeInputsDirFor(id: string): void {
 }
 
 function removeSandboxDirFor(id: string, cwd: string | undefined): void {
-	if (!cwd || cwd !== join(homedir(), ".cast", "sandbox", `cast-${id}`)) return;
+	if (!cwd || !isSandboxCwd(id, cwd)) return;
 	try {
 		rmSync(cwd, { recursive: true, force: true });
 	} catch {

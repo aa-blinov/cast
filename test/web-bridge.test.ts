@@ -565,6 +565,13 @@ describe("web bridge", () => {
 		}
 	});
 
+	it("/current names the session's scratchpad", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const result = (await bridge.executeCommand(ws.id, "/current")).result as { scratchpad?: string };
+		expect(result.scratchpad).toMatch(new RegExp(`/\\.cast/scratch/${ws.id}$`));
+	});
+
 	it("/clear empties the session's messages and forgets the size they measured", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
