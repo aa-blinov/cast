@@ -7,7 +7,7 @@ import { runAcpAgent } from "./core/acp/agent.ts";
 import { printHelp } from "./core/help.ts";
 import { formatLspStatus, lspStatus, shutdownAllLspServers } from "./core/lsp/index.ts";
 import { listLoggedRequests, loadLoggedRequest } from "./core/request-log.ts";
-import { runInteractive, runNonInteractive } from "./core/run.ts";
+import { CliUsageError, runInteractive, runNonInteractive } from "./core/run.ts";
 import { loadSessionMeta } from "./core/session.ts";
 import { isBypassPermissionsFlag, loadSettings } from "./core/settings.ts";
 import type { ParsedArgs } from "./core/startup.ts";
@@ -297,6 +297,41 @@ async function ensureDaemon(): Promise<string | undefined> {
 	}
 }
 
+/** Reasoning levels a provider can accept; which of them a given model takes depends on the model (see docs/reasoning.md). */
+const RUN_REASONING_LEVELS = ["off", "on", "low", "medium", "high", "max"];
+
+const RUN_HELP = `Usage: cast run [options] <message>
+       cast run [options] < prompt.txt        (the prompt from stdin when there is no <message>, or <message> is -)
+       cast run --interactive [options]
+
+Options:
+  -c, --continue         Continue the most recent session in this directory (an error when there is none)
+  -s, --session <id>     Continue a specific session by ID
+  -m, --model <model>    Model to use (provider/model)
+  -r, --reasoning <lvl>  Reasoning level: ${RUN_REASONING_LEVELS.join(", ")}
+  -p, --persona <name>   Persona to use
+  -w, --worktree <name>  Run in an isolated git worktree (cast/.cast/worktrees/<name>)
+  --format <default|json>  Output format
+  --interactive          Persistent JSONL session protocol on stdin/stdout
+  --keep-background      Leave background tasks this run started running after it exits
+  --bypass-permissions   Skip destructive-action confirmations (bash + write);
+                         also --dangerously-skip-permissions
+  --                     End of options; everything after it is the message
+
+Exit codes: 0 success, 1 the run failed, 2 the command was written wrong, 130/143/129 stopped by SIGINT/SIGTERM/SIGHUP.`;
+
+function runUsageError(message: string): never {
+	console.error(`cast run: ${message}`);
+	console.error("Run 'cast run --help' for options.");
+	process.exit(2);
+}
+
+async function readStdinText(): Promise<string> {
+	const chunks: Buffer[] = [];
+	for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+	return Buffer.concat(chunks).toString("utf-8");
+}
+
 async function handleRunCommand(args: string[], version: string): Promise<void> {
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
 
@@ -316,83 +351,86 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 	let worktree: string | undefined;
 	const messageParts: string[] = [];
 
+	// A flag's value is the next argument; a missing one (or another flag in its place) used to be read as `undefined`
+	// and dropped, so `cast run -m` ran with the default model without a word.
+	const flagValue = (flag: string, i: number): string => {
+		const value = args[i + 1];
+		if (value === undefined || value.startsWith("-")) runUsageError(`${flag} requires a value`);
+		return value;
+	};
+
 	for (let i = 0; i < args.length; i++) {
-		if (args[i] === "--continue" || args[i] === "-c") {
+		const arg = args[i]!;
+		if (arg === "--continue" || arg === "-c") {
 			resumeRequested = true;
-		} else if (args[i] === "--session" || args[i] === "-s") {
+		} else if (arg === "--session" || arg === "-s") {
 			resumeRequested = true;
-			resumeId = args[i + 1];
+			resumeId = flagValue(arg, i);
 			i++;
-		} else if (args[i] === "--model" || args[i] === "-m") {
-			cliModel = args[i + 1];
+		} else if (arg === "--model" || arg === "-m") {
+			cliModel = flagValue(arg, i);
 			i++;
-		} else if (args[i] === "--reasoning" || args[i] === "-r") {
-			cliReasoning = args[i + 1];
+		} else if (arg === "--reasoning" || arg === "-r") {
+			cliReasoning = flagValue(arg, i);
+			if (!RUN_REASONING_LEVELS.includes(cliReasoning)) {
+				runUsageError(`unknown reasoning level "${cliReasoning}". Use one of: ${RUN_REASONING_LEVELS.join(", ")}`);
+			}
 			i++;
-		} else if (args[i] === "--persona" || args[i] === "-p") {
-			cliPersona = args[i + 1];
+		} else if (arg === "--persona" || arg === "-p") {
+			cliPersona = flagValue(arg, i);
 			i++;
-		} else if (args[i] === "--format") {
-			const f = args[i + 1];
-			if (f === "json") format = "json";
+		} else if (arg === "--format") {
+			const f = flagValue(arg, i);
+			if (f !== "json" && f !== "default") runUsageError(`--format must be default or json, not "${f}"`);
+			format = f;
 			i++;
-		} else if (args[i] === "--interactive") {
+		} else if (arg === "--interactive") {
 			interactive = true;
-		} else if (args[i] === "--keep-background") {
+		} else if (arg === "--keep-background") {
 			keepBackground = true;
-		} else if (isBypassPermissionsFlag(args[i])) {
+		} else if (isBypassPermissionsFlag(arg)) {
 			cliBypassPermissions = true;
-		} else if (args[i] === "--skill") {
-			const path = args[i + 1];
-			if (path) cliSkillPaths.push(path);
+		} else if (arg === "--skill") {
+			cliSkillPaths.push(flagValue(arg, i));
 			i++;
-		} else if (args[i] === "--no-skills") {
+		} else if (arg === "--no-skills") {
 			noSkills = true;
-		} else if (args[i] === "--mcp") {
-			const path = args[i + 1];
-			if (path) cliMcpPaths.push(path);
+		} else if (arg === "--mcp") {
+			cliMcpPaths.push(flagValue(arg, i));
 			i++;
-		} else if (args[i] === "--no-mcp") {
+		} else if (arg === "--no-mcp") {
 			noMcp = true;
-		} else if (args[i] === "--worktree" || args[i] === "-w") {
+		} else if (arg === "--worktree" || arg === "-w") {
 			const next = args[i + 1];
 			if (next && !next.startsWith("-")) {
 				worktree = next;
 				i++;
 			} else {
-				console.error('--worktree requires a name: cast run --worktree <name> "..."');
-				process.exit(2);
+				runUsageError('--worktree requires a name: cast run --worktree <name> "..."');
 			}
-		} else if (args[i]?.startsWith("--worktree=")) {
-			worktree = args[i]!.slice("--worktree=".length);
-		} else if (args[i] === "--help" || args[i] === "-h") {
-			console.log(`Usage: cast run [options] <message>
-       cast run --interactive [options]
-
-Options:
-  -c, --continue         Continue the most recent session
-  -s, --session <id>     Continue a specific session by ID
-  -m, --model <model>    Model to use (provider/model)
-  -r, --reasoning <lvl>  Reasoning level
-  -p, --persona <name>   Persona to use
-  -w, --worktree <name>  Run in an isolated git worktree (cast/.cast/worktrees/<name>)
-  --format <default|json>  Output format
-  --interactive          Persistent JSONL session protocol on stdin/stdout
-  --keep-background      Leave background tasks this run started running after it exits
-  --bypass-permissions   Skip destructive-action confirmations (bash + write);
-                         also --dangerously-skip-permissions`);
+		} else if (arg.startsWith("--worktree=")) {
+			worktree = arg.slice("--worktree=".length);
+		} else if (arg === "--help" || arg === "-h") {
+			console.log(RUN_HELP);
 			return;
+		} else if (arg === "--") {
+			messageParts.push(...args.slice(i + 1));
+			break;
+		} else if (arg.startsWith("-") && arg !== "-") {
+			// It used to be taken as the start of the message, so a misspelt flag was sent to the model as the prompt.
+			runUsageError(`unknown option ${arg} (to start the message with a dash, put -- before it)`);
 		} else {
 			messageParts.push(...args.slice(i));
 			break;
 		}
 	}
 
-	const message = messageParts.join(" ").trim();
-	if (!interactive && !message) {
-		console.error("Usage: cast run [options] <message>");
-		console.error("Run 'cast run --help' for options.");
-		process.exit(1);
+	let message = messageParts.join(" ").trim();
+	if (!interactive && (!message || message === "-")) {
+		// Only an empty message reads stdin: a script that passes a message and leaves stdin open must not wait on it.
+		if (process.stdin.isTTY) runUsageError("a message is required (cast run <message>, or pipe the prompt in)");
+		message = (await readStdinText()).trim();
+		if (!message) runUsageError("the prompt from stdin is empty");
 	}
 
 	const settings = loadSettings();
@@ -416,11 +454,17 @@ Options:
 		version,
 	};
 
-	if (interactive) {
-		await runInteractive(parsedArgs);
-		return;
+	try {
+		if (interactive) {
+			await runInteractive(parsedArgs);
+			return;
+		}
+		await runNonInteractive(parsedArgs, { message, format, keepBackground });
+	} catch (error) {
+		// A one-line error and a code, not a stack trace: an unknown session id, an old daemon, a refused connection.
+		console.error(`cast run: ${error instanceof Error ? error.message : String(error)}`);
+		process.exit(error instanceof CliUsageError ? 2 : 1);
 	}
-	await runNonInteractive(parsedArgs, { message, format, keepBackground });
 }
 
 async function handleAcpCommand(args: string[], version: string): Promise<void> {

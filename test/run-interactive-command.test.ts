@@ -236,6 +236,42 @@ async function runInteractive(
 	});
 }
 
+/** A `cast run --interactive` process the test can talk to while it runs: lines go in one at a time, and events are
+ *  waited for as they arrive, so an `abort` can be sent exactly when a turn is in flight. */
+function startInteractive(extraEnv: Record<string, string> = {}) {
+	const child = spawn("node", [DIST_ENTRY, "run", "--interactive"], {
+		cwd: repo,
+		env: { ...process.env, HOME: testHome!, CAST_CWD: "", ...extraEnv },
+		stdio: ["pipe", "pipe", "pipe"],
+	});
+	const events: Array<Record<string, unknown>> = [];
+	let buffered = "";
+	child.stdout.on("data", (chunk: Buffer) => {
+		buffered += chunk.toString("utf8");
+		const lines = buffered.split("\n");
+		buffered = lines.pop() ?? "";
+		for (const line of lines) if (line.startsWith("{")) events.push(JSON.parse(line) as Record<string, unknown>);
+	});
+	const closed = once(child, "close") as Promise<[number | null]>;
+	return {
+		events,
+		send: (line: string | Record<string, unknown>) =>
+			child.stdin.write(`${typeof line === "string" ? line : JSON.stringify(line)}\n`),
+		endInput: () => child.stdin.end(),
+		kill: () => child.kill("SIGKILL"),
+		exitCode: async () => (await closed)[0],
+		waitFor: async (match: (event: Record<string, unknown>) => boolean, ms = 20_000) => {
+			const deadline = Date.now() + ms;
+			while (Date.now() < deadline) {
+				const found = events.find(match);
+				if (found) return found;
+				await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+			throw new Error(`no matching event in ${ms}ms; saw ${events.map((e) => String(e.type)).join(", ")}`);
+		},
+	};
+}
+
 function daemonClient(): { baseUrl: string; headers: Record<string, string> } {
 	const state = JSON.parse(readFileSync(join(testHome!, ".cast", "server.json"), "utf8")) as {
 		port: number;
@@ -404,5 +440,63 @@ describe("JSONL protocol — command action", () => {
 			expect.arrayContaining([expect.objectContaining({ role: "user", content: "Reply with the word forked." })]),
 		);
 		expect(events.some((event) => event.type === "error")).toBe(false);
+	}, 60_000);
+});
+
+describe("JSONL protocol — session control", () => {
+	it("sends the startup state, echoes ids, ignores blank lines, and reports bad input without stopping", async () => {
+		const session = startInteractive();
+		try {
+			await session.waitFor((e) => e.type === "state");
+			session.send("this is not json");
+			session.send("");
+			session.send({ type: "nosuch" });
+			session.send({ id: "s1", type: "state" });
+			await session.waitFor((e) => e.type === "action_done" && e.id === "s1");
+			session.send({ id: "bye", type: "exit" });
+			await session.waitFor((e) => e.type === "action_done" && e.id === "bye");
+			expect(await session.exitCode()).toBe(0);
+			const errors = session.events.filter((e) => e.type === "error").map((e) => String(e.message));
+			expect(errors).toHaveLength(2);
+			expect(errors[1]).toContain("unknown action type: nosuch");
+			expect(session.events.at(-1)?.type).toBe("action_done");
+		} finally {
+			session.kill();
+		}
+	}, 60_000);
+
+	it("lets abort reach a turn in progress, instead of waiting behind it", async () => {
+		const session = startInteractive();
+		try {
+			await session.waitFor((e) => e.type === "state");
+			// The mock holds this request for 10s; an abort that waited for the prompt to finish would take that long.
+			const startedAt = Date.now();
+			session.send({ id: "p1", type: "prompt", text: "chaos-hang" });
+			const sessionId = String(session.events.find((e) => e.type === "state")?.sessionID);
+			const { baseUrl, headers } = daemonClient();
+			await waitForSessionStatus(baseUrl, headers, sessionId, "running");
+			session.send({ id: "x1", type: "abort" });
+			await session.waitFor((e) => e.type === "action_done" && e.id === "x1");
+			await session.waitFor((e) => e.type === "action_done" && e.id === "p1");
+			expect(Date.now() - startedAt).toBeLessThan(9000);
+			session.endInput();
+			expect(await session.exitCode()).toBe(0);
+		} finally {
+			session.kill();
+		}
+	}, 60_000);
+
+	it("finishes the actions already sent when stdin closes, then exits 0", async () => {
+		const session = startInteractive();
+		try {
+			session.send({ id: "p1", type: "prompt", text: "Reply with the word done." });
+			session.endInput();
+			expect(await session.exitCode()).toBe(0);
+			// The turn's own `state` snapshot is written before its `action_done`, and both before the process exits.
+			expect(session.events.at(-1)).toMatchObject({ type: "action_done", id: "p1" });
+			expect(session.events.at(-2)?.type).toBe("state");
+		} finally {
+			session.kill();
+		}
 	}, 60_000);
 });

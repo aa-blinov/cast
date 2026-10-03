@@ -1,7 +1,9 @@
 import { EOL } from "node:os";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
+import type { WebEvent } from "../server/bridge.ts";
 import {
+	abortServerSession,
 	answerServerBashConfirm,
 	answerServerQuestion,
 	ensureServerClient,
@@ -11,6 +13,7 @@ import {
 	resolveServerPlanTransition,
 	runServerCommand,
 	type ServerClient,
+	serverFetch,
 	setServerMode,
 	submitServerChat,
 	subscribeServerEvents,
@@ -21,6 +24,12 @@ import type { ParsedArgs } from "./startup.ts";
 // ============================================================================
 // Non-interactive runner — `cast run "message"`
 // ============================================================================
+
+/**
+ * A mistake in how the command was written (an unknown persona, a bad flag value). The launcher exits 2 for these, so a
+ * script can tell "I called it wrong" from "the run failed" (1).
+ */
+export class CliUsageError extends Error {}
 
 /**
  * Flags the daemon path cannot honour.
@@ -58,14 +67,29 @@ type InteractiveAction =
 	| { type: "plan_review"; choice: "continue" | "implement" | "clean" }
 	| { type: "command"; name: string; args: string }
 	| { type: "state" }
+	| { type: "abort" }
 	| { type: "exit" };
 
 export function parseInteractiveAction(line: string): InteractiveAction {
+	return parseInteractiveRequest(line).action;
+}
+
+/**
+ * One line of the JSONL protocol: the action, plus the caller's own `id` when it sent one. The id comes back on the
+ * `action_done` (or `error`) event for that action, which is how a client that has several in flight matches replies.
+ */
+export function parseInteractiveRequest(line: string): { id?: string; action: InteractiveAction } {
 	const value: unknown = JSON.parse(line);
 	if (!value || typeof value !== "object" || !("type" in value) || typeof value.type !== "string") {
 		throw new Error("action.type is required");
 	}
 	const action = value as Record<string, unknown>;
+	const rawId = action.id;
+	const id = typeof rawId === "string" || typeof rawId === "number" ? String(rawId) : undefined;
+	return { ...(id !== undefined ? { id } : {}), action: parseAction(action) };
+}
+
+function parseAction(action: Record<string, unknown>): InteractiveAction {
 	if (action.type === "prompt") {
 		if (typeof action.text !== "string") throw new Error("prompt.text must be a string");
 		return { type: "prompt", text: action.text };
@@ -97,13 +121,105 @@ export function parseInteractiveAction(line: string): InteractiveAction {
 		if (typeof action.args !== "string") throw new Error("command.args must be a string");
 		return { type: "command", name: action.name, args: action.args };
 	}
-	if (action.type === "state" || action.type === "exit") return { type: action.type };
+	if (action.type === "state" || action.type === "abort" || action.type === "exit") return { type: action.type };
 	throw new Error(`unknown action type: ${action.type}`);
 }
 
-/** JSONL protocol for a persistent, scriptable agent session. The ordinary
- * `cast run "…"` remains a one-shot command; this mode exists for evaluators
- * and agents that must observe a picker before deciding the next action. */
+/**
+ * The turn is over for this client. `session_end` is what a normal turn ends with; a failed one (no credentials, a
+ * provider error before the loop starts) only sends `error` and then `status: error`, and the old predicate waited
+ * for a `session_end` that never came, so the process hung until something killed it.
+ *
+ * The first `status` a subscription sees is the daemon's snapshot of the session as it is now, and a session whose
+ * last turn failed is still `error`: only a status seen after `running` belongs to this turn.
+ */
+export function turnOverPredicate(): (event: WebEvent) => boolean {
+	let running = false;
+	return (event) => {
+		if (event.type === "status") {
+			if (event.status === "running") running = true;
+			else if (event.status === "error" && running) return true;
+		}
+		return (
+			event.type === "session_end" ||
+			event.type === "session_closed" ||
+			(event.type === "end" && event.reason !== "stop" && event.reason !== "aborted")
+		);
+	};
+}
+
+const DISCONNECTED_MESSAGE =
+	"Lost the connection to the cast daemon before the turn finished; the output above may be incomplete.";
+
+/**
+ * The turn lives in the daemon, not in this process: dying on SIGINT/SIGTERM/SIGHUP alone left it running (and spending)
+ * with nobody reading — verified, a `sleep 47` kept going after the run was killed. So stop the turn first, then exit
+ * with the conventional 128+signal code. A second signal exits at once. A closed stdout (`cast run … | head -1`) is the
+ * same situation: nobody is reading any more.
+ */
+function stopTurnOnSignal(client: ServerClient, getSessionId: () => string, cleanup?: () => Promise<void>): void {
+	let stopping = false;
+	const stop = (code: number, message: string) => {
+		if (stopping) process.exit(code);
+		stopping = true;
+		if (message) process.stderr.write(`${EOL}${message}${EOL}`);
+		const within = (promise: Promise<unknown>) =>
+			Promise.race([promise.catch(() => {}), new Promise((done) => setTimeout(done, 3000))]);
+		void (async () => {
+			await within(abortServerSession(client, getSessionId()));
+			if (cleanup) await within(cleanup());
+			process.exit(code);
+		})();
+	};
+	for (const [signal, code] of [
+		["SIGINT", 130],
+		["SIGTERM", 143],
+		["SIGHUP", 129],
+	] as const) {
+		process.on(signal, () => stop(code, "Interrupted: stopping the turn."));
+	}
+	process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+		if (error.code === "EPIPE") stop(141, "");
+		else throw error;
+	});
+}
+
+/**
+ * The daemon is usually already up; when it is not, starting it takes seconds (and up to a minute on a slow machine),
+ * which looked like a hang in a CI log. Say so after a moment, and when it never comes up say that, not that daemons
+ * are unsupported.
+ */
+async function connectToDaemon(what: string): Promise<ServerClient> {
+	const notice = setTimeout(() => process.stderr.write(`Starting the cast daemon...${EOL}`), 4000);
+	try {
+		const client = await ensureServerClient();
+		if (client) return client;
+	} finally {
+		clearTimeout(notice);
+	}
+	throw new Error(
+		process.env.CAST_NO_DAEMON === "1"
+			? `${what} needs the cast daemon, and CAST_NO_DAEMON=1 turns it off.`
+			: `${what} could not reach the cast daemon: it did not start (see ~/.cast/server.log).`,
+	);
+}
+
+async function checkPersona(client: ServerClient, name: string | undefined): Promise<void> {
+	if (!name) return;
+	let known: string[];
+	try {
+		const { status, data } = await serverFetch(client, "/api/personas");
+		if (status !== 200 || !Array.isArray(data)) return;
+		known = (data as Array<{ name?: unknown }>).flatMap((p) => (typeof p.name === "string" ? [p.name] : []));
+	} catch {
+		// Can't ask: the daemon decides when the session is created.
+		return;
+	}
+	if (known.length > 0 && !known.includes(name)) {
+		throw new CliUsageError(`unknown persona "${name}". Available: ${known.join(", ")}`);
+	}
+}
+
 /** JSONL protocol for a persistent, scriptable agent session, running on the
  * shared server daemon. The ordinary `cast run "…"` remains a one-shot; this
  * mode exists for evaluators and agents that must observe a picker before
@@ -111,11 +227,8 @@ export function parseInteractiveAction(line: string): InteractiveAction {
  * /command, /mode, /question, /plan-transition) and events stream over SSE —
  * so the session lives in the same store the TUI and web UI use. */
 export async function runInteractive(args: ParsedArgs): Promise<void> {
-	const client = await ensureServerClient();
-	if (!client) {
-		console.error("cast run --interactive requires the server daemon (unset CAST_NO_DAEMON to disable the check).");
-		process.exit(1);
-	}
+	const client = await connectToDaemon("cast run --interactive");
+	await checkPersona(client, args.cliPersona);
 	const settings = loadSettings();
 	const cwd = process.env.CAST_CWD ? resolve(process.env.CAST_CWD) : resolve(".");
 	warnUnsupportedDaemonFlags(args);
@@ -125,18 +238,20 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		cwd,
 		resumeId: args.resumeId,
 		resumeRequested: args.resumeRequested,
+		requireResume: args.resumeRequested && !args.resumeId,
 		worktree: args.worktree,
 		permissionMode: args.cliBypassPermissions ? "bypass" : undefined,
 		noSkills: args.noSkills,
 		noMcp: args.noMcp,
 		reasoningLevel: args.cliReasoning,
 	});
+	stopTurnOnSignal(client, () => sessionId);
 
 	const emit = (type: string, data: Record<string, unknown> = {}) => {
 		process.stdout.write(JSON.stringify({ type, timestamp: Date.now(), sessionID: sessionId, ...data }) + EOL);
 	};
 	// Server events → JSONL, mirroring the old local handleEvent shape.
-	const onEvent = (event: import("../server/bridge.ts").WebEvent) => {
+	const onEvent = (event: WebEvent) => {
 		switch (event.type) {
 			case "token":
 				emit("token", { text: event.text });
@@ -190,15 +305,14 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 		}
 	};
 
-	// Wait-for-turn: resolve when the server says the session is idle again.
-	const waitForIdle = (): Promise<void> => {
-		const { done } = subscribeServerEvents(
-			client,
-			sessionId,
-			onEvent,
-			(event) => event.type === "session_end" || event.type === "session_closed",
-		);
-		return done;
+	// Wait-for-turn: resolve when the server says the turn is over. A dropped connection is an error, not an end:
+	// the caller would otherwise read the next `state` as the turn's result.
+	const waitForIdle = async (): Promise<() => Promise<void>> => {
+		const { done, ready } = subscribeServerEvents(client, sessionId, onEvent, turnOverPredicate());
+		await ready;
+		return async () => {
+			if ((await done) === "closed") throw new Error(DISCONNECTED_MESSAGE);
+		};
 	};
 
 	const emitState = async (): Promise<void> => {
@@ -244,9 +358,9 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 			// answerServerQuestion resolves the pending question AND submits the
 			// rendered answer on the server (bridge.answerQuestion → submit) —
 			// don't submit again, just wait for the turn to settle.
+			const idle = await waitForIdle();
 			await answerServerQuestion(client, sessionId, action.values);
-			const idle = waitForIdle();
-			await idle;
+			await idle();
 			await emitState();
 			return true;
 		}
@@ -259,7 +373,7 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 			// Approving switches the session to build mode (the local runner did
 			// the same: session.mode = "build") so the model can edit real files.
 			await setServerMode(client, sessionId, "build");
-			const idle = waitForIdle();
+			const idle = await waitForIdle();
 			await submitServerChat(
 				client,
 				sessionId,
@@ -267,29 +381,65 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 					? "<system-reminder>Clean build context. Use the approved plan as the task definition.</system-reminder>\n\nThe plan is approved. Implement it step by step."
 					: "The plan is approved. Implement it step by step.",
 			);
-			await idle;
+			await idle();
 			await emitState();
 			return true;
 		}
-		const idle = waitForIdle();
+		if (action.type === "abort") return true;
+		const idle = await waitForIdle();
 		await submitServerChat(client, sessionId, action.text);
-		await idle;
+		await idle();
 		await emitState();
 		return true;
 	};
 
+	// Lines are read while a turn runs, so `abort` can reach a turn in progress; every other action waits its turn
+	// in order. (Reading one line at a time and awaiting each made an abort unreachable exactly when it was needed.)
 	const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
-	for await (const line of input) {
+	let queue: Promise<void> = emitState().catch((error) => {
+		emit("error", { message: error instanceof Error ? error.message : String(error) });
+	});
+	let closing = false;
+	input.on("line", (line) => {
+		if (!line.trim()) return;
+		let request: { id?: string; action: InteractiveAction };
 		try {
-			const action = parseInteractiveAction(line);
-			const keepGoing = await handleAction(action);
-			if (!keepGoing) break;
+			request = parseInteractiveRequest(line);
 		} catch (error) {
 			emit("error", { message: error instanceof Error ? error.message : String(error) });
+			return;
 		}
-	}
+		const { id, action } = request;
+		const tag = id !== undefined ? { id } : {};
+		if (action.type === "abort") {
+			void abortServerSession(client, sessionId)
+				.then(() => emit("action_done", { ...tag, action: "abort", ok: true }))
+				.catch((error) =>
+					emit("error", { ...tag, message: error instanceof Error ? error.message : String(error) }),
+				);
+			return;
+		}
+		queue = queue.then(async () => {
+			if (closing) return;
+			try {
+				const keepGoing = await handleAction(action);
+				emit("action_done", { ...tag, action: action.type, ok: true });
+				if (!keepGoing) {
+					closing = true;
+					input.close();
+				}
+			} catch (error) {
+				emit("error", { ...tag, message: error instanceof Error ? error.message : String(error) });
+			}
+		});
+	});
+	await new Promise<void>((done) => input.on("close", done));
+	await queue;
+	// Exiting straight after a write can cut it off when stdout is a pipe: the last `state` is the one a caller waits for.
+	await new Promise<void>((flushed) => process.stdout.write("", () => flushed()));
 	process.exit(0);
 }
+
 /**
  * Run a single prompt non-interactively: ensure the server daemon is up,
  * create a session on it, submit the prompt, stream events to stdout, exit.
@@ -298,14 +448,8 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
  * TUI and web UI share, and continue running there after this process exits.
  */
 export async function runNonInteractive(args: ParsedArgs, options: RunOptions): Promise<void> {
-	const client = await ensureServerClient();
-	if (!client) {
-		console.error(
-			"cast run requires the server daemon (set CAST_NO_DAEMON=1 to disable, but then run cannot attach).",
-		);
-		process.exit(1);
-	}
-
+	const client = await connectToDaemon("cast run");
+	await checkPersona(client, args.cliPersona);
 	// Resolve model/persona/cwd the same way the TUI launcher does, then let
 	// the daemon create/resume the session (it applies its own provider settings).
 	const settings = loadSettings();
@@ -317,12 +461,23 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		cwd,
 		resumeId: args.resumeId,
 		resumeRequested: args.resumeRequested,
+		// `-c` asked to continue something: starting an empty session instead would answer without the context the
+		// caller is relying on, and say nothing.
+		requireResume: args.resumeRequested && !args.resumeId,
 		worktree: args.worktree,
 		permissionMode: args.cliBypassPermissions ? "bypass" : undefined,
 		noSkills: args.noSkills,
 		noMcp: args.noMcp,
 		reasoningLevel: args.cliReasoning,
 	});
+	const keepBackground = options.keepBackground === true;
+	stopTurnOnSignal(
+		client,
+		() => sessionId,
+		async () => {
+			if (!resumed && !keepBackground) await killServerBackgroundTasks(client, sessionId);
+		},
+	);
 
 	let failed = false;
 	const format = options.format;
@@ -334,7 +489,8 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 		return false;
 	};
 
-	const { done } = subscribeServerEvents(
+	const turnOver = turnOverPredicate();
+	const { done, ready } = subscribeServerEvents(
 		client,
 		sessionId,
 		(event) => {
@@ -427,17 +583,19 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 					break;
 			}
 		},
-		(event) =>
-			event.type === "session_end" ||
-			event.type === "session_closed" ||
-			(event.type === "end" && event.reason !== "stop" && event.reason !== "aborted"),
+		turnOver,
 	);
 
+	await ready;
 	await submitServerChat(client, sessionId, options.message);
-	await done;
+	if ((await done) === "closed") {
+		failed = true;
+		if (!emit("error", { message: DISCONNECTED_MESSAGE }))
+			process.stderr.write(`Error: ${DISCONNECTED_MESSAGE}${EOL}`);
+	}
 	await settleBackgroundTasks(client, sessionId, emit, {
 		ownsSession: !resumed,
-		keepBackground: options.keepBackground === true,
+		keepBackground,
 	});
 	if (failed) process.exitCode = 1;
 }

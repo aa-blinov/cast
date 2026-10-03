@@ -6,12 +6,19 @@ All notable user-facing changes to cast, newest first.
 
 ### Added
 - **`/goal resume`** continues a goal that was paused by an interruption or a failure. Until now the word became a new goal called "resume".
+- **`cast run` reads the prompt from stdin** when there is no message (`git diff | cast run "review this"` still takes the message from its argument; `cast run` alone, or `cast run -`, takes the whole prompt from the pipe), and `--` ends the options so a message can start with a dash.
+- **`cast run --interactive` gains `abort`, ids and `action_done`.** `abort` now reaches a turn in progress (lines used to be read one at a time, so it could not arrive while one ran), an optional `id` on an action comes back on its `action_done` or `error`, and the startup `state` snapshot that the docs promised is actually sent.
 
 ### Changed
 - **`cast --version` answers at once.** The launcher prints the version itself instead of loading the whole bundle first: about 40 ms instead of 0.9 s on macOS and Linux (the Windows launcher is unchanged).
 - **The terminal shows its first screen without waiting for MCP servers.** Servers are connected in the background right after it appears, as the web already did, so a config with a browser or remote server no longer adds seconds before you can type. `/mcp list` says `connecting` until they are up, and a first message sent in that window just runs without their tools.
 
 ### Fixed
+- **`cast run` on a fresh machine no longer hangs.** With no `~/.cast` (a CI container) it spun for a minute in silence taking the daemon start lock, and with no provider configured it then waited forever for a turn that had already failed. It now fails in seconds with `No provider is configured`, and `docs/non-interactive-mode.md` shows the settings file to write.
+- **Stopping `cast run` stops the turn.** SIGINT, SIGTERM, SIGHUP and a closed pipe (`| head -1`) used to kill only the client, leaving the turn (a running `sleep`, a model call) going in the daemon; they now abort it, kill the background tasks the run started, and exit 130, 143, 129 or 141.
+- **A wrong command line is an error, not a prompt.** An unknown option was sent to the model as the message; a bad `--format`, `-r` or `--persona`, or a flag with no value, was ignored. They now exit 2 with one line saying what is wrong, an unknown session id no longer prints a stack trace, and `-c` with nothing to continue says so instead of starting an empty session.
+- **A dropped daemon connection is a failure.** `cast run` exited 0 with a half-written answer when the daemon went away mid-turn; it now exits 1 and says the output may be incomplete. A turn that failed instantly (the event stream was not open yet) is no longer missed.
+- **No more `EventSource is experimental` line on stderr** of every `cast run`.
 - **`cast acp` exits when the editor closes stdin,** as `docs/acp.md` says. It used to stay alive on its MCP and language-server child processes.
 - **ACP advertises only the slash commands it runs.** It listed ~90, none of which ran: `/compact` reached the model as plain text. A prompt of `/plan`, `/build`, `/clear` or `/abort` now does what it says, and those four are what the editor is offered.
 - **`/memory cancel <id>` with an id that is not a run says so** ("not found or already finished") instead of printing the whole `/memory` usage.

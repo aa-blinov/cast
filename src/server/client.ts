@@ -250,6 +250,8 @@ export async function ensureServerSession(
 		cwd?: string;
 		resumeId?: string;
 		resumeRequested?: boolean;
+		/** With `resumeRequested`, fail when there is nothing to continue instead of starting a new session. */
+		requireResume?: boolean;
 		/** `--worktree <name>`: the daemon creates (or reuses) the worktree and
 		 *  runs the session there. Dropped on the floor before — `cast run -w`
 		 *  silently ran in the project root instead. */
@@ -284,6 +286,7 @@ export async function ensureServerSession(
 				.sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")))[0];
 			if (match) return { id: match.id, resumed: true };
 		}
+		if (options.requireResume) throw new Error("no previous session in this directory to continue");
 	}
 	const id = await createServerSession(client, {
 		persona: options.persona,
@@ -451,18 +454,29 @@ export async function getServerSession(client: ServerClient, sessionId: string):
 /**
  * Subscribe to a session's WebEvent stream until the given predicate resolves
  * (e.g. the turn ended). Calls onEvent for each parsed event. Resolves once
- * the predicate returns true or the stream closes.
+ * the predicate returns true ("until") or the stream closes ("closed"): a caller that treated the second as the
+ * first took a dropped connection for a finished turn.
  */
 export function subscribeServerEvents(
 	client: ServerClient,
 	sessionId: string,
 	onEvent: (event: import("./bridge.ts").WebEvent) => void,
 	until: (event: import("./bridge.ts").WebEvent) => boolean,
-): { done: Promise<void>; close: () => void } {
+): { done: Promise<"until" | "closed">; ready: Promise<void>; close: () => void } {
 	const params = client.token ? `?token=${encodeURIComponent(client.token)}` : "";
 	const source = new EventSource(`${client.baseUrl}${API_V1_PREFIX}/sessions/${sessionId}/events${params}`);
 	let resolved = false;
-	const done = new Promise<void>((resolve) => {
+	// EventSource connects asynchronously. A caller that sends its message right after subscribing can have the whole
+	// turn happen before the stream is open (a turn that fails at once does), and then it only ever sees the daemon's
+	// snapshot of the finished session. `ready` says the stream is open; the cap keeps a stream that never opens from
+	// holding the caller, which then relies on `done` as before.
+	let markReady: () => void = () => {};
+	const ready = new Promise<void>((resolve) => {
+		markReady = resolve;
+		setTimeout(resolve, 5000).unref();
+	});
+	source.onopen = () => markReady();
+	const done = new Promise<"until" | "closed">((resolve) => {
 		source.onmessage = (ev) => {
 			let event: import("./bridge.ts").WebEvent;
 			try {
@@ -474,19 +488,21 @@ export function subscribeServerEvents(
 			if (!resolved && until(event)) {
 				resolved = true;
 				source.close();
-				resolve();
+				resolve("until");
 			}
 		};
 		source.onerror = () => {
+			markReady();
 			if (!resolved) {
 				resolved = true;
 				source.close();
-				resolve();
+				resolve("closed");
 			}
 		};
 	});
 	return {
 		done,
+		ready,
 		close: () => {
 			resolved = true;
 			source.close();
