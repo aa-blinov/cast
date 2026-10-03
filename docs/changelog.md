@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.53.2
 
 ### Added
 - **`/goal resume`** continues a goal that was paused by an interruption or a failure. Until now the word became a new goal called "resume".
