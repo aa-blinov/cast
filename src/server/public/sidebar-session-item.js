@@ -1,10 +1,27 @@
 import htm from "htm";
 import { h } from "preact";
+import { useState } from "preact/hooks";
 import { icons } from "./icons.js";
-import { pressable } from "./modal-focus.js";
 import { sessionLabel, sessionMeta } from "./sidebar-utils.js";
 
 const html = htm.bind(h);
+
+// The draft lives here, not in the sidebar: a keystroke would otherwise re-render every row of the history.
+function RenameInput({ inputRef, initial, onCommit, onCancel }) {
+	const [value, setValue] = useState(initial);
+	return html`<input ref=${inputRef} class="sidebar-item-name-input" aria-label="Session name" value=${value} onClick=${(e) => e.stopPropagation()} onInput=${(e) => setValue(e.target.value)} onKeyDown=${(
+		e,
+	) => {
+		if (e.key === "Enter") {
+			e.preventDefault();
+			onCommit(value);
+		}
+		if (e.key === "Escape") {
+			e.preventDefault();
+			onCancel();
+		}
+	}} onBlur=${() => onCommit(value)} />`;
+}
 
 export function SidebarSessionItem({
 	session,
@@ -15,8 +32,6 @@ export function SidebarSessionItem({
 	onPin,
 	editingId,
 	editInputRef,
-	editValue,
-	setEditValue,
 	commitEdit,
 	cancelEdit,
 	startEdit,
@@ -46,20 +61,15 @@ export function SidebarSessionItem({
 			key=${s.id}
 			class="sidebar-item${isActive ? " active" : ""}${menuOpen ? " menu-open" : ""}"
 			title=${s.cwd}
-			aria-current=${isActive ? "true" : undefined}
-			...${pressable(() => onSelect(s.id))}
+			onClick=${() => onSelect(s.id)}
 			onContextMenu=${(e) => {
 				e.preventDefault();
 				e.stopPropagation();
 				openMenu(s.id, e.currentTarget);
 			}}
 		>
-			<span
-				class="sidebar-item-status ${s.status || "idle"}"
-				role=${s.status && s.status !== "idle" ? "img" : undefined}
-				aria-label=${s.status && s.status !== "idle" ? s.status : undefined}
-			/>
-			<button class="sidebar-item-pin${s.pinned ? " pinned" : ""}" title=${s.pinned ? "Unpin" : "Pin to top"} aria-label=${s.pinned ? "Unpin" : "Pin to top"} aria-pressed=${Boolean(s.pinned)} onClick=${(
+			<span class="sidebar-item-status ${s.status || "idle"}" aria-hidden="true" />
+			<button type="button" class="sidebar-item-pin${s.pinned ? " pinned" : ""}" title=${s.pinned ? "Unpin" : "Pin to top"} aria-label=${s.pinned ? "Unpin" : "Pin to top"} aria-pressed=${Boolean(s.pinned)} onClick=${(
 				e,
 			) => {
 				e.stopPropagation();
@@ -69,22 +79,11 @@ export function SidebarSessionItem({
 			</button>
 			${
 				editingId === s.id
-					? html`<input ref=${editInputRef} class="sidebar-item-name-input" value=${editValue} onClick=${(e) => e.stopPropagation()} onInput=${(e) => setEditValue(e.target.value)} onKeyDown=${(
-							e,
-						) => {
-							if (e.key === "Enter") {
-								e.preventDefault();
-								commitEdit();
-							}
-							if (e.key === "Escape") {
-								e.preventDefault();
-								cancelEdit();
-							}
-						}} onBlur=${commitEdit} />`
-					: html`<span class="sidebar-item-text" onDblClick=${(e) => {
+					? html`<${RenameInput} inputRef=${editInputRef} initial=${s.title || ""} onCommit=${commitEdit} onCancel=${cancelEdit} />`
+					: html`<button type="button" class="sidebar-item-text" aria-current=${isActive ? "true" : undefined} onDblClick=${(e) => {
 							e.stopPropagation();
 							startEdit(s);
-						}}><span class="sidebar-item-name">${sessionLabel(s)}</span><span class="sidebar-item-meta">${sessionMeta(s)}</span></span>`
+						}}><span class="sidebar-item-name">${sessionLabel(s)}</span><span class="sidebar-item-meta">${sessionMeta(s)}</span></button>`
 			}
 			<div class="sidebar-item-menu-anchor">
 				<button class="sidebar-item-more" title="More" aria-label="More" aria-haspopup="menu" aria-expanded=${menuOpen} onClick=${(e) => {

@@ -456,7 +456,12 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	color: var(--text);
 	border-color: var(--border);
 }
-.sidebar-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* A button that looks like the text it holds: the row's one keyboard stop, so Pin and More are not nested inside it. */
+.sidebar-item-text {
+	flex: 1; min-width: 0; display: flex; flex-direction: column;
+	padding: 0; border: none; background: none;
+	color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
 .sidebar-item-meta { font-size: var(--fs-micro); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-item-name-input {
@@ -1597,7 +1602,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	.fs-error-dismiss { position: relative; }
 	.fs-error-dismiss::after { content: ""; position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 	/* The session row is the thing tapped most; the search field and "Load more" sit in the same list. */
-	.sidebar-item, .sidebar-load-more, .sidebar-search { min-height: 44px; }
+	.sidebar-item, .sidebar-load-more, .sidebar-search, .sidebar-item-menu-item { min-height: 44px; }
 	.sidebar-search { margin-bottom: 12px; }
 	.verify-btn { flex-basis: 44px; }
 
