@@ -68,6 +68,8 @@ export interface VerifyContext {
 	trace: TraceTurn[];
 	/** Final state of the case's durable goal, when `EvalCase.goal` was set. */
 	goal?: { status: string; continuations: number; note?: string };
+	/** Where the agent was working when it stopped: `cwd`, or the worktree it moved into (`EvalCase.worktree`). */
+	finalCwd: string;
 	/** The scratchpad folder, when `EvalCase.scratchpad` was set. */
 	scratchpad?: string;
 }
@@ -103,6 +105,8 @@ export interface EvalCase {
 	initialTodos?: TodoItem[];
 	/** Run the case as a session, so it has a scratchpad (as a real one does); `verify` gets its path. */
 	scratchpad?: boolean;
+	/** Offer the worktree tool, as a daemon does (the case's `cwd` must be a git repository); `verify` gets `finalCwd`. */
+	worktree?: boolean;
 	/** Start the case under a durable goal: the loop then continues on its own
 	 * where a turn would have stopped, up to `maxContinuations`. */
 	goal?: { objective: string; maxContinuations?: number };
@@ -370,6 +374,7 @@ async function runAttempt(
 	let mcpSetup: McpSetupResult | undefined;
 	// runCase (verify, cleanup) needs this too, so it rides back in the return.
 	let goalSessionId: string | undefined;
+	let finalCwd: string | undefined;
 	let sessionId: string | undefined;
 
 	try {
@@ -426,6 +431,13 @@ async function runAttempt(
 			config,
 			model,
 			cwd,
+			...(evalCase.worktree
+				? {
+						onWorkingDirectoryChange: (path: string) => {
+							finalCwd = path;
+						},
+					}
+				: {}),
 			// Subagents are saved as child sessions of this one, which is what a
 			// task_id follow-up continues; the eval HOME keeps them throwaway.
 			sessionId,
@@ -528,7 +540,19 @@ async function runAttempt(
 	if (temporaryCwd) rmSync(temporaryCwd, { recursive: true, force: true });
 
 	clearTimeout(timer);
-	return { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage, goalSessionId, sessionId };
+	return {
+		toolsCalled,
+		toolCalls,
+		trace,
+		response,
+		thinking,
+		turns,
+		errors,
+		usage,
+		goalSessionId,
+		sessionId,
+		finalCwd,
+	};
 }
 
 export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promise<RunResult> {
@@ -551,7 +575,19 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		retries++;
 		attempt = await runAttempt(evalCase, options, config, model);
 	}
-	const { toolsCalled, toolCalls, trace, response, thinking, turns, errors, usage, goalSessionId, sessionId } = attempt;
+	const {
+		toolsCalled,
+		toolCalls,
+		trace,
+		response,
+		thinking,
+		turns,
+		errors,
+		usage,
+		goalSessionId,
+		sessionId,
+		finalCwd,
+	} = attempt;
 
 	const duration = Date.now() - startTime;
 
@@ -657,11 +693,13 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 			const verifyError = await expect.verify({
 				response,
 				cwd: evalCase.cwd ?? options.cwd,
+				finalCwd: finalCwd ?? evalCase.cwd ?? options.cwd,
 				toolCalls,
 				turns,
 				trace,
 				goal: goalSessionId ? readGoal(goalSessionId) : undefined,
-				scratchpad: evalCase.scratchpad && sessionId ? scratchpadFor(sessionId, evalCase.cwd ?? options.cwd) : undefined,
+				scratchpad:
+					evalCase.scratchpad && sessionId ? scratchpadFor(sessionId, evalCase.cwd ?? options.cwd) : undefined,
 			});
 			if (verifyError) failedChecks.push(`Verify failed: ${verifyError}`);
 		} catch (error) {

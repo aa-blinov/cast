@@ -544,6 +544,18 @@ export async function gateDestructiveWrite(
 	};
 }
 
+/** Making a worktree writes into the repository (a folder and a branch): it asks where a write asks. */
+export async function gateWorktreeCreate(
+	name: string,
+	args: Record<string, unknown>,
+	confirm: ConfirmWrite | undefined,
+): Promise<ToolResult | undefined> {
+	if (name !== "worktree" || args.action !== "enter" || !confirm) return undefined;
+	const target = join(".cast", "worktrees", String(args.name ?? ""));
+	if (await confirm(name, target, `create a git worktree at ${target}`)) return undefined;
+	return { content: `Permission denied: worktree create ${target}`, isError: true };
+}
+
 // Prompts for the LLM call that summarizes old messages during compaction —
 // content, not code, so they live in prompts/ alongside the persona files
 // instead of as inline strings here. Two variants (matching pi): a fresh
@@ -985,6 +997,11 @@ export interface LoopConfig {
 	/** Enables persona_create. Called with the saved persona; `activate` asks
 	 *  the host to switch this session to it from the next turn. */
 	onPersonaCreated?: (persona: Persona, activate: PersonaActivation | undefined) => void;
+	/**
+	 * Enables the worktree tool. Called after the agent moved into a worktree (or out of one): the host records the
+	 * new working directory (the session, its prompt, the clients). The run carries on in it from the next tool call.
+	 */
+	onWorkingDirectoryChange?: (path: string, previous: string) => void | Promise<void>;
 	/** Restrict bash to the read-only allowlist without the rest of plan mode.
 	 * Used for subagents spawned from a plan-mode parent: they inherit the
 	 * inspection-only bash but not the authoring tools or the plan prompt
@@ -1898,7 +1915,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 }
 
 async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promise<void> {
-	const { config, model: initialModel, cwd, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+	const { config, model: initialModel, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+	// Moves when the agent enters a worktree: everything below that reads it (permission rules, hooks, paths) follows.
+	let cwd = loopConfig.cwd;
 	// The session's scratchpad: told to the model, open to its file tools, made on first use. A sandbox session's
 	// working folder is its scratch space already, so it gets no second folder and no prompt block. A subagent runs
 	// with its parent's session id, so it shares the parent's.
@@ -1962,6 +1981,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// Same gate: saving a persona writes outside the project.
 	const personaToolAllowed =
 		Boolean(loopConfig.onPersonaCreated) && !loopConfig.planState?.enabled && loopConfig.readOnlyBash !== true;
+	// Moving the working directory is a write: not in plan mode, not for a read-only run, and only where a host
+	// records the move (a subagent has none, so it cannot leave its parent's directory).
+	const worktreeToolAllowed =
+		Boolean(loopConfig.onWorkingDirectoryChange) &&
+		!loopConfig.planState?.enabled &&
+		loopConfig.readOnlyBash !== true;
 	// With install available the skill tool has to exist even when nothing is
 	// installed yet, or the skill just installed could not be loaded.
 	const allowedSkills = loopConfig.skills
@@ -2028,6 +2053,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		Boolean(activeReview),
 		skillInstallAllowed,
 		personaToolAllowed,
+		worktreeToolAllowed,
 	);
 	const mcpTools = loopConfig.mcpTools ?? [];
 	const allTools = [...builtinTools, ...mcpTools];
@@ -2370,6 +2396,16 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 			: undefined,
 		loopConfig.memory?.sessionId ?? loopConfig.sessionId,
+		worktreeToolAllowed
+			? {
+					sessionId: loopConfig.sessionId,
+					projectTrusted: loopConfig.projectTrusted === true,
+					switchTo: async (path, previous) => {
+						cwd = path;
+						await loopConfig.onWorkingDirectoryChange!(path, previous);
+					},
+				}
+			: undefined,
 	);
 	const executeTool = async (
 		name: string,
@@ -2542,7 +2578,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				}
 				return { content: JSON.stringify({ todos, remaining: remainingTodoCount(todos) }) };
 			}
-			const writeDenial = await gateDestructiveWrite(name, finalArgs, loopConfig.confirmWrite);
+			const writeDenial =
+				(await gateDestructiveWrite(name, finalArgs, loopConfig.confirmWrite)) ??
+				(await gateWorktreeCreate(name, finalArgs, loopConfig.confirmWrite));
 			if (writeDenial) return writeDenial;
 			const mcpTool = mcpToolIndex?.get(name);
 			if (mcpTool) return mcpTool.call(finalArgs, toolSignal);

@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -276,6 +276,30 @@ describe("ensureSessionWorktree — happy path", () => {
 		expect(samePath(second.repoRoot, gitPath(repo))).toBe(true);
 		expect(samePath(second.path, join(gitPath(repo), ".cast", "worktrees", "inner"))).toBe(true);
 		expect(existsSync(second.path)).toBe(true);
+	});
+});
+
+describe("ensureSessionWorktree — keeps .cast/worktrees out of git status", () => {
+	beforeEach(() => initRepo(tmpRoot));
+
+	it("leaves the main checkout clean, with no tracked file changed, and says the line once", async () => {
+		await ensureSessionWorktree("a", tmpRoot);
+		await ensureSessionWorktree("b", tmpRoot);
+		await ensureSessionWorktree("a", tmpRoot);
+		expect(git(tmpRoot, ["status", "--short"])).toBe("");
+		const exclude = readFileSync(join(gitPath(tmpRoot), ".git", "info", "exclude"), "utf8");
+		expect(exclude.split("\n").filter((l) => l === "/.cast/worktrees/")).toHaveLength(1);
+	});
+
+	it("adds the line for a worktree an earlier cast made, and keeps what the file already said", async () => {
+		const wt = await ensureSessionWorktree("old", tmpRoot);
+		const file = join(gitPath(tmpRoot), ".git", "info", "exclude");
+		writeFileSync(file, "# mine\n*.log");
+		await ensureSessionWorktree("old", tmpRoot);
+		const exclude = readFileSync(file, "utf8");
+		expect(exclude).toContain("# mine");
+		expect(exclude).toContain("*.log\n/.cast/worktrees/\n");
+		expect(existsSync(wt.path)).toBe(true);
 	});
 });
 

@@ -43,6 +43,7 @@ import { execSkill, execSkillInstall, SKILL_INSTALL_TOOL_DESCRIPTION, type Skill
 import { execSsh } from "./tools/ssh.ts";
 import { execTask, type TaskExecutorDeps } from "./tools/task.ts";
 import { execWebFetch, execWebSearch } from "./tools/web.ts";
+import { execWorktree, WORKTREE_TOOL_DESCRIPTION, type WorktreeToolDeps } from "./tools/worktree.ts";
 
 export type { BashBackgroundDeps } from "./tools/bash-background.ts";
 // Re-export the public tool types so existing importers of "./tools.ts"
@@ -70,6 +71,7 @@ export function getToolDefinitions(
 	reviewActive = false,
 	includeSkillInstallTool = false,
 	includePersonaTool = false,
+	includeWorktreeTool = false,
 ): Tool[] {
 	const personaList =
 		personaNames && personaNames.length > 0
@@ -825,6 +827,28 @@ export function getToolDefinitions(
 					},
 				]
 			: []),
+		...(includeWorktreeTool
+			? [
+					{
+						type: "function" as const,
+						function: {
+							name: "worktree",
+							description: WORKTREE_TOOL_DESCRIPTION,
+							parameters: {
+								type: "object",
+								properties: {
+									action: { type: "string", enum: ["enter", "exit", "list"], description: "What to do" },
+									name: {
+										type: "string",
+										description: "The worktree's name, for enter: a short slug such as feature-x (no spaces)",
+									},
+								},
+								required: ["action"],
+							},
+						},
+					},
+				]
+			: []),
 		...(includePersonaTool
 			? [
 					{
@@ -922,6 +946,7 @@ export function createToolExecutor(
 	beforeFileWrite?: (path: string) => void,
 	personaDeps?: PersonaToolDeps,
 	currentSessionId?: string,
+	worktreeDeps?: Omit<WorktreeToolDeps, "cwd">,
 ): ToolExecutor {
 	// One executor serves one turn. A weaker model that can't find what it is
 	// after keeps rewording the query: 50 searches in a row on a real store,
@@ -1068,6 +1093,17 @@ export function createToolExecutor(
 					case "skill_install":
 						if (!skillDeps?.reload) return { content: "Skill install not available.", isError: true };
 						return execSkillInstall(args, skillDeps, confirmBash);
+					case "worktree":
+						if (!worktreeDeps) return { content: "Worktrees are not available here.", isError: true };
+						// The executor's own cwd moves with the agent: every tool after this one runs in the worktree.
+						return await execWorktree(args, {
+							...worktreeDeps,
+							cwd: () => cwd,
+							switchTo: async (path, previous) => {
+								cwd = path;
+								await worktreeDeps.switchTo(path, previous);
+							},
+						});
 					case "persona_create":
 						if (!personaDeps) return { content: "Persona creation not available.", isError: true };
 						return await execPersonaCreate(args, personaDeps);

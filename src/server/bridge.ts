@@ -2051,6 +2051,20 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				saveSession(ws.session);
 				broadcaster.broadcastSessionUpdate(ws);
 			},
+			// The agent moved into (or out of) a worktree with its tool: record it the way /worktree does. The run
+			// carries on there; the prompt for the next turn is rebuilt against the new directory.
+			onWorkingDirectoryChange: (path, previous) => {
+				ws.session.cwd = path;
+				saveSession(ws.session);
+				ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, path, ws.session.mode);
+				void runHooksForEvent(resolveHooksForCwd(path, trustForSessionCwd(sessionCwd)), {
+					event: "CwdChanged",
+					cwd: path,
+					sessionId: ws.id,
+					payload: { old_cwd: previous, cwd: path },
+				});
+				broadcaster.broadcastSessionUpdate(ws);
+			},
 			// Read per turn: a session's own project may bring subagents of its own.
 			subagentPrompts: loadSubagentPrompts({ cwd: sessionCwd, projectTrusted: trustForSessionCwd(sessionCwd) }),
 			onSubagentEvent: (taskId, event) => {
