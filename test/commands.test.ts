@@ -358,6 +358,27 @@ describe("handleInput", () => {
 		expect(calls["agent.submit"]).toBeUndefined();
 	});
 
+	it("queues plain text typed while a turn is running when the setting says queue, and /s and /q still do their own thing", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("/running-input queue", undefined, deps);
+		expect(loadSettings().runningInput).toBe("queue");
+		expect(String(calls.showNotice?.at(-1)?.[0])).toContain("waits for it to end");
+		await handleInput("  then run the tests  ", undefined, deps);
+		expect(calls["agent.followUp"]).toEqual([["then run the tests"]]);
+		expect(calls["agent.steer"]).toBeUndefined();
+		await handleInput("!!!important", undefined, deps);
+		expect(calls["agent.followUp"]?.at(-1)).toEqual(["!!important"]);
+		await handleInput("/s change course", undefined, deps);
+		expect(calls["agent.steer"]).toEqual([["change course"]]);
+		await handleInput("/running-input steer", undefined, deps);
+		expect(loadSettings().runningInput).toBeUndefined();
+		await handleInput("back to steering", undefined, deps);
+		expect(calls["agent.steer"]?.at(-1)).toEqual(["back to steering"]);
+		await handleInput("/running-input sideways", undefined, deps);
+		expect(String(calls.showNotice?.at(-1)?.[0])).toContain("Usage: /running-input");
+	});
+
 	// steer carries text only on every path, so an attached image would be
 	// dropped without a word.
 	it("refuses to steer a message with an image instead of dropping the image", async () => {
@@ -922,6 +943,24 @@ describe("handleInput", () => {
 		expect(loadSettings().permissionMode).toBe("bypass");
 		expect(perms.set("default")).toBeUndefined();
 		expect(loadSettings().permissionMode).toBe("default");
+	});
+
+	it("the message-while-running row shows the mode and saves it", async () => {
+		const { loadSettings } = await import("../src/core/settings.ts");
+		const { deps } = createFakeDeps();
+		const form = buildSettingsForm(deps, async () => {});
+		const row = form.rows().find((r) => r.kind === "choice" && r.label === "Message while a turn runs");
+		if (row?.kind !== "choice") throw new Error("no running-input row");
+		expect(row.value).toBe("steer");
+		expect(row.set("queue")).toBeUndefined();
+		expect(loadSettings().runningInput).toBe("queue");
+		expect(
+			buildSettingsForm(deps, async () => {})
+				.rows()
+				.find((r) => r.kind === "choice" && r.label === "Message while a turn runs"),
+		).toMatchObject({ value: "queue" });
+		row.set("steer");
+		expect(loadSettings().runningInput).toBeUndefined();
 	});
 
 	it("the iteration cap row prompts, refuses nonsense, and saves a valid number", async () => {

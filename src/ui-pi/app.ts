@@ -12,7 +12,7 @@ import {
 import { formatGoalSegment, readGoal } from "../core/goal.ts";
 import { mcpPromptCommands } from "../core/mcp.ts";
 import { skillInvocationLabel } from "../core/session-title.ts";
-import type { StatusBarConfig } from "../core/settings.ts";
+import { loadSettings, runningInputMode, type StatusBarConfig } from "../core/settings.ts";
 import type { AppModel } from "../ui/app-model.ts";
 import { SLASH_COMMANDS } from "../ui/commands.ts";
 import { editInExternalEditor } from "../ui/external-editor.ts";
@@ -69,7 +69,16 @@ export function unbracket(text: string): string {
 }
 
 const IDLE_PLACEHOLDER = "ask cast to do anything";
-const RUNNING_PLACEHOLDER = "type to steer * esc esc to stop";
+// The footer repaints on every streamed token, and the mode lives in the settings file: read it at most once a second.
+let hintMode: ReturnType<typeof runningInputMode> = "steer";
+let hintReadAt = 0;
+const runningPlaceholder = () => {
+	if (Date.now() - hintReadAt > 1_000) {
+		hintMode = runningInputMode(loadSettings());
+		hintReadAt = Date.now();
+	}
+	return `type to ${hintMode} * esc esc to stop`;
+};
 const HINT_MS = 2000;
 const SPINNER_MS = 200;
 const MAX_PENDING_ROWS = 3;
@@ -330,7 +339,7 @@ export class PiApp {
 
 	private paintFooter(model: AppModel): void {
 		const colors = theme();
-		this.editor.placeholder = model.running ? RUNNING_PLACEHOLDER : IDLE_PLACEHOLDER;
+		this.editor.placeholder = model.running ? runningPlaceholder() : IDLE_PLACEHOLDER;
 		this.notice.setText(
 			model.notice ? paint(`  ${sanitize(unbracket(model.notice))}`, { color: colors.warning }) : "",
 		);

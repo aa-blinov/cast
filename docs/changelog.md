@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+- **A plain message during a turn can steer it or wait for it.** Steering stays the default. `/running-input queue` (or Settings, "Message while a turn runs", in the terminal and the web UI) makes a message typed while a turn runs wait for the turn to end and run as the next one, the way `/queue` does; `/running-input steer` goes back. `/steer` and `/queue` work as before in either mode.
+
 ## 0.55.0
 
 ### Added

@@ -3577,6 +3577,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			"/provider",
 			"/ssh",
 			"/turn-cap",
+			"/running-input",
 		]);
 		if (!allowed.has(name ?? "")) return { ok: false, error: "Command requires an active session" };
 

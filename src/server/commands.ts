@@ -18,6 +18,7 @@ export const NON_BLOCKING_COMMANDS = new Set([
 	"/help",
 	"/memory",
 	"/usage",
+	"/running-input",
 	"/cost",
 	"/doctor",
 	"/export",
@@ -195,6 +196,12 @@ export const SLASH_COMMANDS: Array<{
 		takesArgs: true,
 		blocking: true,
 		hidden: true,
+	},
+	{
+		name: "/running-input",
+		description: "What a plain message does while a turn runs: steer it, or queue it — steer | queue",
+		takesArgs: true,
+		blocking: false,
 	},
 	{ name: "/theme", description: "Show or change color theme", takesArgs: true, blocking: false, hidden: true },
 	{

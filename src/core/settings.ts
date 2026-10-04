@@ -254,6 +254,8 @@ export interface Settings {
 	memorySearchScoreFloor?: number;
 	/** Safety cap on model calls per turn (loop runaway backstop). Default 500. */
 	maxTurnIterations?: number;
+	/** What a plain message typed while a turn runs does: steer the turn (default) or wait for it to end. */
+	runningInput?: RunningInputMode;
 	/** Reconcile project memory files before search operations. */
 	memoryReconcileOnSearch?: boolean;
 	/** Index Claude Code memory files (~/.claude/projects/<slug>/memory) into search. */
@@ -487,6 +489,18 @@ export function memoryPromptBudget(settings: Settings = loadSettings()): number 
 export function turnIterationCap(settings: Settings = loadSettings()): number {
 	const value = settings.maxTurnIterations;
 	return typeof value === "number" && Number.isFinite(value) ? Math.max(10, Math.min(Math.round(value), 10_000)) : 500;
+}
+
+export type RunningInputMode = "steer" | "queue";
+
+export function runningInputMode(settings: Settings = loadSettings()): RunningInputMode {
+	return settings.runningInput === "queue" ? "queue" : "steer";
+}
+
+export function runningInputText(mode: RunningInputMode): string {
+	return mode === "queue"
+		? "While a turn runs, a message waits for it to end and then runs as the next turn (/steer injects one now)."
+		: "While a turn runs, a message steers it: the agent reads it on its next step (/queue waits for the turn to end).";
 }
 
 export function memorySearchScoreFloor(settings: Settings = loadSettings()): number {

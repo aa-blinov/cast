@@ -188,6 +188,7 @@ These commands work while the agent is running:
 | `/queue <message>` | `/q` | Queue a message for after the current turn |
 | `/queue-reset` | `/qr` | Clear the message queue |
 | `/btw <question>` | | Ask a question on the side: answered from the conversation, kept out of it |
+| `/running-input [steer\|queue]` | | What a plain message does while a turn runs: steer it (default) or queue it |
 | `/abort`, `/stop` | | Stop current agent run |
 
 **`/btw`** asks the model something without touching the work. It sends the conversation so far, with your question, to the model with **no tools**, and shows the answer as a notice (`btw: ...`) in the terminal and the web UI. **Neither the question nor the answer joins the conversation**: it is not saved, not summarised by a compaction, and the model's next turn knows nothing of it. Use it for "what did that flag do again?" or "which file did you change?" in the middle of a long task, without steering it or paying for a new turn of the agent.
@@ -300,7 +301,7 @@ Action ids are the ones in [`keybindings.ts`](https://github.com/aa-blinov/cast/
 
 ## During a Running Agent
 
-Typing a plain message steers the running turn. No command needed. Besides that, these commands are accepted while the agent is executing:
+Typing a plain message steers the running turn by default: no command needed. `/running-input queue` (or Settings, "Message while a turn runs") makes a plain message wait for the turn to end and run as the next one instead; `/running-input steer` goes back. `/steer` and `/queue` do their own thing in either mode, and an attachment cannot ride a queued message. Besides that, these commands are accepted while the agent is executing:
 
 - `/steer` / `/s`: inject context
 - `/btw`: ask on the side, without steering

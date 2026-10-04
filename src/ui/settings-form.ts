@@ -1,5 +1,5 @@
 import type { PermissionMode } from "../core/settings.ts";
-import { loadSettings, turnIterationCap, updateSettings } from "../core/settings.ts";
+import { loadSettings, runningInputMode, turnIterationCap, updateSettings } from "../core/settings.ts";
 import type { SettingFollowUp, SettingRow, SettingsForm } from "../pickers/types.ts";
 import { PERMISSION_MODES } from "../pickers/types.ts";
 import type { CommandDeps } from "./commands.ts";
@@ -166,6 +166,20 @@ export function buildSettingsForm(deps: CommandDeps, runCommand: (input: string)
 					set: (value) => {
 						// Against the form's own value: `deps.agent.showReasoning` is the snapshot from when the screen opened.
 						if (showReasoning !== value) showReasoning = deps.agent.toggleReasoning();
+						return undefined;
+					},
+				},
+				{
+					kind: "choice",
+					label: "Message while a turn runs",
+					description: "steer: the agent reads it on its next step. queue: it runs after the turn ends",
+					value: runningInputMode(s),
+					options: [
+						{ value: "steer", label: "steer" },
+						{ value: "queue", label: "queue" },
+					],
+					set: (value) => {
+						updateSettings({ runningInput: value === "queue" ? "queue" : undefined });
 						return undefined;
 					},
 				},
