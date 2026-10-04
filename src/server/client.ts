@@ -169,14 +169,14 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 export async function serverFetch(
 	client: ServerClient,
 	path: string,
-	init?: { method?: string; body?: unknown },
+	init?: { method?: string; body?: unknown; timeoutMs?: number },
 ): Promise<{ status: number; data: unknown }> {
 	const headers: Record<string, string> = { "Content-Type": "application/json" };
 	if (client.token) headers.Authorization = `Bearer ${client.token}`;
 	const res = await fetch(`${client.baseUrl}${path}`, {
 		method: init?.method ?? "GET",
 		headers,
-		signal: AbortSignal.timeout(DAEMON_REQUEST_TIMEOUT_MS),
+		signal: AbortSignal.timeout(init?.timeoutMs ?? DAEMON_REQUEST_TIMEOUT_MS),
 		...(init?.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
 	});
 	const text = await res.text();
@@ -349,6 +349,28 @@ export async function answerServerMcpElicit(
 		method: "POST",
 		body: { id, action, ...(content ? { content } : {}) },
 	});
+}
+
+/** Run `!command` on a daemon session: it runs there, in the session's folder, and its output joins the conversation. */
+export async function runServerShell(
+	client: ServerClient,
+	sessionId: string,
+	command: string,
+): Promise<{ output: string; failed: boolean; added: boolean }> {
+	// A command may run as long as bash's own timeout; the default request timeout is for quick calls.
+	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/shell`, {
+		method: "POST",
+		body: { command },
+		timeoutMs: 10 * 60_000,
+	});
+	if (status !== 200) {
+		throw new Error(
+			data && typeof data === "object" && "error" in data
+				? String((data as { error: string }).error)
+				: "shell command failed",
+		);
+	}
+	return data as { output: string; failed: boolean; added: boolean };
 }
 
 export async function runServerCommand(client: ServerClient, sessionId: string, command: string): Promise<unknown> {

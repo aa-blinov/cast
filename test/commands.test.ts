@@ -237,6 +237,55 @@ function displayMessageText(calls: Calls, index = 1): string {
 }
 
 describe("handleInput", () => {
+	describe("!command", () => {
+		it("runs it for the person: no model turn, the result goes into the conversation and the screen refreshes", async () => {
+			const { deps, calls } = createFakeDeps();
+			await handleInput("!echo typed-by-the-user", undefined, deps);
+			expect(calls["agent.submit"]).toBeUndefined();
+			const added = (deps.session.messages as Array<{ role: string; content: string }>).at(-1)!;
+			expect(added.role).toBe("user");
+			expect(added.content).toContain('command="echo typed-by-the-user"');
+			expect(added.content).toContain("(you did not run it)");
+			expect(calls["agent.refresh"]).toHaveLength(1);
+		});
+
+		it("sends a message that starts with !! to the model, minus one !", async () => {
+			const { deps, calls } = createFakeDeps();
+			await handleInput("!!important: fix it", undefined, deps);
+			expect(calls["agent.submit"]).toEqual([["!important: fix it", undefined]]);
+		});
+
+		it("says how to use a bare !, and does not run while a turn is running", async () => {
+			const idle = createFakeDeps();
+			await handleInput("!", undefined, idle.deps);
+			expect(noticeText(idle.calls)).toContain("Usage");
+			const busy = createFakeDeps({ running: true });
+			await handleInput("!ls", undefined, busy.deps);
+			expect(noticeText(busy.calls)).toContain("Agent running");
+			expect(busy.deps.session.messages).toHaveLength(0);
+		});
+
+		it("holds to read-only in plan mode, and says why", async () => {
+			const { deps, calls } = createFakeDeps({ planMode: true });
+			await handleInput("!touch /tmp/should-not-exist-tui-plan", undefined, deps);
+			expect(noticeText(calls)).toContain("plan mode allows read-only commands only");
+			expect(deps.session.messages).toHaveLength(0);
+		});
+
+		it("hands it to the daemon when attached to one, and says what the daemon refused", async () => {
+			const { deps, calls } = createFakeDeps();
+			(deps.agent as { daemonMode: boolean }).daemonMode = true;
+			const runShell = vi.fn(async () => ({ output: "x", failed: false, added: true }));
+			(deps.agent as unknown as { runShell: typeof runShell }).runShell = runShell;
+			await handleInput("!ls", undefined, deps);
+			expect(runShell).toHaveBeenCalledWith("ls");
+			expect(deps.session.messages).toHaveLength(0);
+			runShell.mockRejectedValueOnce(new Error("Agent running: wait for it"));
+			await handleInput("!ls", undefined, deps);
+			expect(noticeText(calls)).toContain("Agent running");
+		});
+	});
+
 	it("routes non-slash input to agent.submit", async () => {
 		const { deps, calls } = createFakeDeps();
 		await handleInput("hello world", undefined, deps);

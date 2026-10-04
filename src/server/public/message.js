@@ -1,5 +1,5 @@
 import htm from "htm";
-import { Component, h } from "preact";
+import { Component, Fragment, h } from "preact";
 import { useState } from "preact/hooks";
 import { FilePreviewModal } from "./file-preview.js";
 import { icons } from "./icons.js";
@@ -39,6 +39,22 @@ export function parseSkillInvocation(content) {
 }
 
 const SYSTEM_TAG_RE = /^\[system\]\s+/;
+
+// Port of parseUserShellMessage in src/core/user-shell.ts (a test keeps the two in step): a `!command` the person ran
+// is put in the conversation as a message for the model; the thread shows the command and what it printed.
+const USER_SHELL_PREFIX = "The user ran a shell command themselves (you did not run it):\n";
+const USER_SHELL_OPEN_RE = /^<user-shell command="([^"]*)">\n/;
+const USER_SHELL_CLOSE = "\n</user-shell>";
+export function parseUserShellMessage(content) {
+	if (typeof content !== "string" || !content.startsWith(USER_SHELL_PREFIX)) return null;
+	const rest = content.slice(USER_SHELL_PREFIX.length);
+	const open = USER_SHELL_OPEN_RE.exec(rest);
+	if (!open || !rest.endsWith(USER_SHELL_CLOSE)) return null;
+	return {
+		command: open[1].replace(/&lt;/g, "<").replace(/&quot;/g, '"').replace(/&amp;/g, "&"),
+		output: rest.slice(open[0].length, rest.length - USER_SHELL_CLOSE.length).replace(/<\\\/user-shell>/g, "</user-shell>"),
+	};
+}
 
 // Port of goalPromptDisplay in src/core/goal.ts (a test keeps the two in step): the goal's own prompts are cast
 // talking to the model, so show the command typed and one-line notices, not a page of rules as the user's words.
@@ -258,6 +274,15 @@ export class Message extends Component {
 	}
 
 	render(props) {
+		const shell = props.msg?.role === "user" ? parseUserShellMessage(props.msg.content) : null;
+		if (shell) {
+			return h(
+				Fragment,
+				null,
+				h(MessageView, { ...props, msg: { ...props.msg, content: `!${shell.command}` } }),
+				h(MessageView, { ...props, msg: { role: "warning", content: shell.output || "(no output)" } }),
+			);
+		}
 		const goal = props.msg?.role === "user" ? goalPromptDisplay(props.msg.content) : null;
 		return h(MessageView, goal ? { ...props, msg: { ...props.msg, role: goal.role, content: goal.content } } : props);
 	}

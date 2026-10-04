@@ -132,8 +132,9 @@ pending `question` or `planReview`, and the session `cwd`.
 ```
 
 Actions are `prompt`, `set_mode` (`plan` or `build`), `answer_question`,
-`plan_review` (`continue`, `implement`, or `clean`), `command`, `state`, `abort`,
-and `exit`. `answer_question` and `plan_review` run the next real turn when
+`plan_review` (`continue`, `implement`, or `clean`), `command`, `shell`
+(`{"type":"shell","command":"git status"}` runs it for you, with no model turn; see
+[`!`](interactive-commands.md#running-a-shell-command-)), `state`, `abort`, and `exit`. `answer_question` and `plan_review` run the next real turn when
 appropriate; they do not fake UI state. `clean` retains the visible transcript
 while starting implementation with a fresh model context.
 

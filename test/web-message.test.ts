@@ -5,6 +5,7 @@ vi.mock(
 	"preact",
 	() => ({
 		h: () => null,
+		Fragment: () => null,
 		Component: class {
 			props: Record<string, unknown> = {};
 		},
@@ -23,8 +24,15 @@ import {
 	GOAL_CONTINUATION_PROMPT,
 	GOAL_NUDGE_PROMPT,
 } from "../src/core/goal.ts";
+import { parseUserShellMessage as coreParseUserShellMessage, userShellMessage } from "../src/core/user-shell.ts";
 import { buildGoalPrompt } from "../src/server/commands.ts";
-import { goalPromptDisplay, isForkableAnswer, Message, parseSkillInvocation } from "../src/server/public/message.js";
+import {
+	goalPromptDisplay,
+	isForkableAnswer,
+	Message,
+	parseSkillInvocation,
+	parseUserShellMessage,
+} from "../src/server/public/message.js";
 
 const renderMarkdown = (s: string) => s;
 const escapeHtml = (s: string) => s;
@@ -118,6 +126,21 @@ describe("goalPromptDisplay", () => {
 			"fix the tests please",
 		]) {
 			expect(goalPromptDisplay(text) ?? undefined, text.slice(0, 40)).toEqual(coreGoalPromptDisplay(text));
+		}
+	});
+});
+
+describe("parseUserShellMessage", () => {
+	it("is the web port of the core parser: same command and output, odd characters included, nothing for other text", () => {
+		for (const text of [
+			userShellMessage("ls -la", "total 0\nfile"),
+			userShellMessage('echo "hi" && echo <b> & done', "hi"),
+			userShellMessage("cat x", "before </user-shell> after"),
+			userShellMessage("true", ""),
+			"fix the tests please",
+			"The user ran a shell command themselves (you did not run it):\nnot a block",
+		]) {
+			expect(parseUserShellMessage(text) ?? undefined, text.slice(0, 40)).toEqual(coreParseUserShellMessage(text));
 		}
 	});
 });

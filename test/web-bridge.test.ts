@@ -541,6 +541,46 @@ describe("web bridge", () => {
 		expect(skills.find((skill) => skill.name === "from-amp")).toMatchObject({ skillssh: false });
 	});
 
+	describe("!command (runShell)", () => {
+		it("runs it in the session's folder, adds it and its output to the conversation, and tells the clients", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const events: Array<{ type: string; message?: { content: string } }> = [];
+			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
+			const before = ws.session.messages.length;
+			const result = await bridge.runShell(ws.id, "echo from-the-user");
+			expect(result).toMatchObject({ ok: true, failed: false, added: true });
+			const added = ws.session.messages[before] as { role: string; content: string };
+			expect(added.role).toBe("user");
+			expect(added.content).toContain("(you did not run it)");
+			expect(added.content).toContain('command="echo from-the-user"');
+			expect(events.find((e) => e.type === "user_message")?.message?.content).toBe(added.content);
+		});
+
+		it("does not run while a turn is running, nor in plan mode when it could write, nor for an unknown session", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			expect(await bridge.runShell("nope", "ls")).toEqual({ ok: false, error: "Session not found" });
+			ws.session.mode = "plan";
+			const refused = await bridge.runShell(ws.id, "touch should-not-exist-from-plan");
+			expect(refused.ok).toBe(false);
+			expect(refused.ok === false && refused.error).toContain("plan mode allows read-only commands only");
+			ws.session.mode = "build";
+			ws.status = "running";
+			const busy = await bridge.runShell(ws.id, "ls");
+			expect(busy.ok === false && busy.error).toContain("Agent running");
+		});
+
+		it("asks the clients about a dangerous command and does not run it when none can answer", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const before = ws.session.messages.length;
+			const result = await bridge.runShell(ws.id, "rm -rf /tmp/never-created-runshell-dir");
+			expect(result.ok).toBe(false);
+			expect(ws.session.messages.length).toBe(before);
+		});
+	});
+
 	describe("user-invoked skills", () => {
 		const skillsBridge = () =>
 			createServerBridge(

@@ -13,6 +13,7 @@ import {
 	killServerBackgroundTasks,
 	resolveServerPlanTransition,
 	runServerCommand,
+	runServerShell,
 	type ServerClient,
 	serverFetch,
 	setServerMode,
@@ -67,6 +68,7 @@ type InteractiveAction =
 	| { type: "answer_question"; values: string[] }
 	| { type: "plan_review"; choice: "continue" | "implement" | "clean" }
 	| { type: "command"; name: string; args: string }
+	| { type: "shell"; command: string }
 	| { type: "state" }
 	| { type: "abort" }
 	| { type: "exit" };
@@ -121,6 +123,12 @@ function parseAction(action: Record<string, unknown>): InteractiveAction {
 		}
 		if (typeof action.args !== "string") throw new Error("command.args must be a string");
 		return { type: "command", name: action.name, args: action.args };
+	}
+	if (action.type === "shell") {
+		if (typeof action.command !== "string" || !action.command.trim()) {
+			throw new Error("shell.command must be a non-empty string");
+		}
+		return { type: "shell", command: action.command };
 	}
 	if (action.type === "state" || action.type === "abort" || action.type === "exit") return { type: action.type };
 	throw new Error(`unknown action type: ${action.type}`);
@@ -350,6 +358,17 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 				emit("notice", {
 					text: result && typeof result === "object" ? JSON.stringify(result) : String(result ?? ""),
 				});
+			} catch (e) {
+				emit("error", { message: e instanceof Error ? e.message : String(e) });
+			}
+			await emitState();
+			return true;
+		}
+		if (action.type === "shell") {
+			// `!command`: run for the caller, no model turn; the output also joins the conversation.
+			try {
+				const result = await runServerShell(client, sessionId, action.command);
+				emit("shell", { command: action.command, output: result.output, failed: result.failed });
 			} catch (e) {
 				emit("error", { message: e instanceof Error ? e.message : String(e) });
 			}

@@ -227,6 +227,25 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	// may still be connecting when the new session is ready to accept chat.
 	// Commands wait before dispatch; normal chat waits after its optimistic row
 	// is visible below.
+	// `!command` runs for the person, in the session's folder, with no model turn; `!!text` is a message that
+	// starts with a `!`.
+	if (finalText.startsWith("!!")) {
+		finalText = finalText.slice(1);
+	} else if (finalText.startsWith("!") && !images?.length) {
+		const command = finalText.slice(1).trim();
+		if (!command) {
+			showToast?.("Usage: !<command> runs it yourself; !!text sends a message that starts with !", "error");
+			return false;
+		}
+		await waitForSessionStream?.(id);
+		try {
+			await api("POST", `/api/sessions/${id}/shell`, { command });
+			return true;
+		} catch (err) {
+			showToast?.(err.message, "error");
+			return false;
+		}
+	}
 	if (finalText.startsWith("/")) {
 		// Best effort: a stream that is still opening delays the dispatch, it
 		// does not cancel it. The connect handler refetches the session, so

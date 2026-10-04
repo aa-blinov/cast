@@ -52,6 +52,7 @@ import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/b
 import type { PersonaActivation } from "../core/tools/persona.ts";
 import { type ConfirmBash, completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
 import type { SubagentProgress } from "../core/tools/task.ts";
+import { parseUserShellMessage } from "../core/user-shell.ts";
 import {
 	abortServerSession,
 	answerServerBashConfirm,
@@ -63,6 +64,7 @@ import {
 	getServerSession,
 	resolveServerPlanTransition,
 	runServerCommand,
+	runServerShell,
 	type ServerClient,
 	serverFetch,
 	setServerMode,
@@ -384,6 +386,8 @@ export interface UseAgentSession {
 	daemonMode: boolean;
 	/** Execute a daemon-owned slash command; throws when running locally. */
 	runCommand: (command: string) => Promise<unknown>;
+	/** Run `!command` on the daemon session; throws when running locally. */
+	runShell: (command: string) => Promise<{ output: string; failed: boolean; added: boolean }>;
 	/** Reset the daemon session's context for "implement in clean context"
 	 * (thin-client mode) — resolves with the original task, if the daemon kept
 	 * one, for the reminder prompt. */
@@ -534,6 +538,14 @@ export function messageContentToText(content: unknown): string {
  * saying the reminder's body followed by a bare `</system-reminder>`.
  */
 export function userMessageRows(text: string, clientMessageId?: string): ChatMessage[] {
+	// A `!command` the person ran: the command as typed, then what it printed.
+	const shell = parseUserShellMessage(text);
+	if (shell) {
+		return [
+			{ role: "user", content: `!${shell.command}`, ...(clientMessageId ? { clientMessageId } : {}) },
+			{ role: "warning", content: shell.output || "(no output)" },
+		];
+	}
 	// A /skill command reaches the model as the whole SKILL.md; the thread shows what was typed.
 	const typed = skillInvocationLabel(text);
 	if (typed) return [{ role: "user", content: typed, ...(clientMessageId ? { clientMessageId } : {}) }];
@@ -2229,6 +2241,14 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		[isClient, serverClient, session.id],
 	);
 
+	const runShell = useCallback(
+		async (command: string) => {
+			if (!isClient || !serverClient) throw new Error("No daemon is attached");
+			return runServerShell(serverClient, session.id, command);
+		},
+		[isClient, serverClient, session.id],
+	);
+
 	const forkCurrentSession = useCallback(
 		async (beforeSeq?: number, withFiles = false): Promise<SessionState | undefined> => {
 			if (isClient && effectiveDaemonUrl) {
@@ -2329,6 +2349,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		daemonConnected,
 		daemonMode: isClient,
 		runCommand,
+		runShell,
 		showReasoning,
 		toggleReasoning,
 		turnStartedAt,
