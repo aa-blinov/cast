@@ -47,7 +47,7 @@ import {
 } from "../core/session.ts";
 import { skillInvocationLabel } from "../core/session-title.ts";
 import { loadSettings, type PermissionMode, turnIterationCap, updateSettings } from "../core/settings.ts";
-import { extractSystemReminders } from "../core/system-reminder.ts";
+import { backgroundTaskLine, extractSystemReminders } from "../core/system-reminder.ts";
 import type { BackgroundTaskRegistry, BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import type { PersonaActivation } from "../core/tools/persona.ts";
 import { type ConfirmBash, completedToolCallStatus, type ToolCallStatus } from "../core/tools/shared.ts";
@@ -557,7 +557,7 @@ export function userMessageRows(text: string, clientMessageId?: string): ChatMes
 	const { cleaned, reminders } = extractSystemReminders(text);
 	const rows: ChatMessage[] = [];
 	for (const body of reminders) {
-		if (body) rows.push({ role: "warning", content: `[system] ${body}` });
+		if (body) rows.push({ role: "warning", content: `[system] ${backgroundTaskLine(body) ?? body}` });
 	}
 	const idPart = clientMessageId ? { clientMessageId } : {};
 	if (cleaned) rows.push({ role: "user", content: cleaned, ...idPart });

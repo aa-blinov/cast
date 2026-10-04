@@ -395,10 +395,24 @@ export class BackgroundTaskRegistry {
 		return task;
 	}
 
+	/**
+	 * The model has the task's result in hand (it waited on it, read it, or killed it), so the notice that would tell
+	 * it again is taken back. Left in the queue it arrived as a message of its own, and the model spent a turn on each
+	 * one saying it already knew.
+	 */
+	retractNotice(id: string, deps: BashBackgroundDeps): void {
+		const task = this.tasks.get(id);
+		if (task) task.notifyOnCompletion = false;
+		const head = `<system-reminder>\nBackground task ${id} (`;
+		deps.followUpQueue.removeWhere((m) => typeof m.content === "string" && m.content.startsWith(head));
+	}
+
 	kill(id: string): "killed" | "not-found" | "already-done" {
 		const task = this.tasks.get(id);
 		if (!task) return "not-found";
 		if (task.status !== "running") return "already-done";
+		// Killed by the model's own call: it knows, and no notice follows.
+		task.notifyOnCompletion = false;
 		task.status = "killed";
 		if (task.pty) this.killPty(task.pty);
 		return "killed";
@@ -499,6 +513,7 @@ export async function execBashOutput(
 	}
 
 	const header = `Task ${task.id} (\`${task.command}\`): ${statusLine(task)}`;
+	if (task.status !== "running") deps.registry.retractNotice(task.id, deps);
 	if (task.status === "running") {
 		const output = truncateOutput(task.rawOutput, config.maxToolOutputLines);
 		const truncationNote = task.fullOutputPath
