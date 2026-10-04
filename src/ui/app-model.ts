@@ -427,6 +427,11 @@ export function useAppModel(props: AppModelProps) {
 				setMcpResult(await resolveMcpForCwd(projectDeps, cwd, projectTrusted, disabled));
 			})();
 		},
+		onCwdChanged: (next) => {
+			if (next === cwd) return;
+			session.cwd = next;
+			setCwd(next);
+		},
 		onSkillsChanged: () => {
 			void resolveSkillsForCwd(projectDeps, cwd, projectTrusted).then((next) => {
 				setSkills(next.skills);

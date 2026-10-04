@@ -38,7 +38,7 @@
 | `/distill` | Run memory distill maintenance now |
 | `/rewind [<seq> [both\|conversation\|code] [--force]]` | Rewind to before a chosen message: files and conversation, files only, or conversation only; the TUI asks with pickers, the web with a dialog on a message's Rewind button |
 | `/undo [--force]` | Undo the last turn: restore the folder to how it was before it (git checkpoint, or a hidden snapshot outside git; shell changes are not undone in a folder over 3000 files or 50MB) and remove that turn from the conversation. Asks first when it would delete files created since; `--force` skips the question |
-| `/worktree <name>\|list\|remove <name>` | Create/reuse, list, or remove a git worktree for this session |
+| `/worktree <name>\|list\|remove <name>` | Create/reuse, list, or remove a git worktree for this session (the agent can also enter one itself with its `worktree` tool) |
 | `/evolve` | Let the agent propose/update its own skills based on session experience |
 | `/hooks [enable\|disable <id>]` | List hooks for this project, or enable/disable one by id |
 | `/agents` | This session's subagents: open one's session, or stop a running one |

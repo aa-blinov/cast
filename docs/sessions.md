@@ -107,9 +107,12 @@ Sessions remember which provider their model belongs to. If you've switched prov
 You can run or switch a session inside an isolated git worktree:
 - **CLI**: `cast -w <name>` / `--worktree <name>`
 - **TUI**: `/worktree <name>`
-- **Web UI**: In the New Session modal, check **Run in an isolated git worktree** and specify a name (defaults to `tree-XXXX`).
+- **Web UI**: In the New Session modal, check **Run in an isolated git worktree** and specify a name (defaults to `tree-XXXX`), or type `/worktree <name>` in a session.
+- **The agent**: ask for "an isolated worktree" or "an experiment that does not touch my checkout" and it uses its `worktree` tool (see `docs/tools.md`), which does the same as `/worktree <name>`.
 
 When enabled, cast creates (or reuses) a git worktree at `.cast/worktrees/<name>` on a branch named `cast-<name>`. The session's `cwd` switches to the worktree path, so all tools (`bash`, `read`, `write`, `edit`) operate inside the worktree while leaving your main checkout untouched. The worktree path is saved in the session state (`SessionState.cwd`), so resuming the session with `-c` or `--resume` automatically keeps working inside that worktree.
+
+`.cast/worktrees/` is added to the repository's local `.git/info/exclude` (no tracked file or shared `.gitignore` changes), so the worktrees do not show in `git status` or in the agent's searches of the main checkout. A session that moved into a worktree is still its project's: `cast run -c` from the project continues it, the ACP session list for the project includes it, and the web sidebar groups it with the project and marks it `wt:<name>`. Attached to the daemon, `/worktree` in the terminal is done by the daemon, and the terminal's folder and `wt:` status follow any move of the session, whoever made it.
 
 ### Interactive
 

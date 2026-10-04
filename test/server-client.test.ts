@@ -57,6 +57,8 @@ describe("server client", () => {
 					JSON.stringify([
 						{ id: "old-1", cwd: "/tmp", updatedAt: "2026-01-01T00:00:00.000Z" },
 						{ id: "sess-1", cwd: "/tmp", updatedAt: "2026-02-01T00:00:00.000Z" },
+						{ id: "in-worktree", cwd: "/proj/.cast/worktrees/feature-x", updatedAt: "2026-03-01T00:00:00.000Z" },
+						{ id: "main-proj", cwd: "/proj", updatedAt: "2026-02-15T00:00:00.000Z" },
 					]),
 				);
 				return;
@@ -189,6 +191,17 @@ describe("server client", () => {
 		expect(id).toBe("sess-1"); // newer than old-1
 		expect(resumed).toBe(true);
 		expect(received[0]).toMatchObject({ method: "GET", path: "/api/v1/sessions" });
+	});
+
+	it("ensureServerSession continues a session that moved into a worktree of the project", async () => {
+		const client = { baseUrl, token: "tok" };
+		const { id } = await ensureServerSession(client, { cwd: "/proj", resumeRequested: true });
+		expect(id).toBe("in-worktree");
+		const inside = await ensureServerSession(client, {
+			cwd: "/proj/.cast/worktrees/feature-x",
+			resumeRequested: true,
+		});
+		expect(inside.id).toBe("in-worktree");
 	});
 
 	it("ensureServerSession creates a fresh session without resume flags", async () => {
