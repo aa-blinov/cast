@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.55.0
 
 ### Added
 - **`/init`, `/commit`, `/cost`, `/export`, `/doctor`.** `/init [focus]` has the agent write or refresh `AGENTS.md` from the repository's tracked files, running the commands it writes down; `/commit [hint]` commits the current changes in the repository's message style, with explicit paths, secret-looking files left out and named, one commit per concern, and no push or amend (both show as the typed command in the thread, not as their prompts). `/cost` shows the session's tokens, cache and subagent share, price when the provider reports one, and a line per kind of request from telemetry. `/export` saves the conversation as Markdown under `~/.cast/exports/`. `/doctor` checks Node, the provider and that it serves the session's model, git, ripgrep, the sessions database and each MCP server, and says what is wrong. In the terminal and the web UI. Two evals (`init-writes-agents-md-from-repo`, `commit-stages-explicit-paths`) check the first two with real models.
