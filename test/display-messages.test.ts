@@ -208,6 +208,21 @@ describe("userMessageRows", () => {
 		expect(rows.some((row) => row.content.includes("</system-reminder>"))).toBe(false);
 	});
 
+	it("shows a finished background task as one line: that it came back and how, not its output", () => {
+		const long = `<system-reminder>\nBackground task bg-7 (\`${"du -xh ".repeat(20)}\`) exited with code 0 after 117s.\n\n187G /\n99G /var\n</system-reminder>`;
+		const [row] = userMessageRows(long);
+		expect(row!.content).toMatch(
+			/^\[system\] Background task bg-7 \(`du -xh .{0,60}…`\) exited with code 0 after 117s$/,
+		);
+		expect(row!.content).not.toContain("187G");
+		const [sub] = userMessageRows(
+			"<system-reminder>\nBackground task t1 (explore: find callers) finished. Relay what matters to the user.\n\n<task>long report</task>\n</system-reminder>",
+		);
+		expect(sub!.content).toBe("[system] Background task t1 (explore: find callers) finished");
+		const [other] = userMessageRows("<system-reminder>\nThe date is now 2026-10-05.\n</system-reminder>");
+		expect(other!.content).toBe("[system] The date is now 2026-10-05.");
+	});
+
 	it("keeps what the person typed and lifts the reminder out of it", () => {
 		const rows = userMessageRows(`please look at this\n\n${reminder}`, "cmid-1");
 

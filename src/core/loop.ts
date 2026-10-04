@@ -849,6 +849,14 @@ export class MessageQueue {
 		);
 	}
 
+	/** Drops every queued message `match` accepts; says how many went. */
+	removeWhere(match: (message: Message) => boolean): number {
+		const before = this.messages.length;
+		this.messages = this.messages.filter((m) => !match(m));
+		if (this.messages.length !== before) this.onChange?.();
+		return before - this.messages.length;
+	}
+
 	/** Drops the person's queued message at `index` (0-based, as `texts` lists them); false when there is none there. */
 	removeAt(index: number): boolean {
 		const target = Number.isInteger(index) ? this.people()[index] : undefined;

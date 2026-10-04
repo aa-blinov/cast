@@ -56,6 +56,24 @@ export function extractSystemReminders(text: string): ExtractedReminders {
 	return { cleaned, reminders };
 }
 
+const BACKGROUND_TASK_LINE_RE = /^Background task [^\n]*/;
+const NOTICE_COMMAND_MAX = 60;
+
+/**
+ * A finished background task, as the one line a reader needs: that it came back, and how. The output is for the model
+ * (it is in the message), the way a foreground command's output is for its tool row, not a block of the transcript.
+ * Undefined for any other reminder.
+ */
+export function backgroundTaskLine(body: string): string | undefined {
+	const first = BACKGROUND_TASK_LINE_RE.exec(body)?.[0];
+	if (!first) return undefined;
+	const line = first.replace(/ Relay what matters to the user\.$/, "").replace(/\.$/, "");
+	return line.replace(/\(`([^`]*)`\)/, (_, command: string) => {
+		const flat = command.replace(/\s+/g, " ");
+		return `(\`${flat.length > NOTICE_COMMAND_MAX ? `${flat.slice(0, NOTICE_COMMAND_MAX)}…` : flat}\`)`;
+	});
+}
+
 /** True when the text is nothing but reminder blocks — a message that exists
  * only to talk to the model and has nothing to show a reader. */
 export function isReminderOnly(text: string): boolean {

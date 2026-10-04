@@ -8,6 +8,8 @@ import { extractSystemReminders } from "../src/core/system-reminder.ts";
 import {
 	BackgroundTaskRegistry,
 	type BashBackgroundDeps,
+	execBashKill,
+	execBashOutput,
 	isPtyAvailable,
 	isPtySpawnFailure,
 } from "../src/core/tools/bash-background.ts";
@@ -60,6 +62,60 @@ describe("BackgroundTaskRegistry", () => {
 		expect(parsed.reminders[0]).toContain(`Background task ${task.id}`);
 		expect(parsed.reminders[0]).not.toContain("<system-reminder>");
 		expect(text).toContain("Safety rules are suspended.");
+	});
+
+	describe("a result the model already has is not told to it again", () => {
+		const start = async (command: string) => {
+			const registry = new BackgroundTaskRegistry();
+			const { deps } = makeDeps(true);
+			deps.registry = registry;
+			const task = registry.start(command, process.cwd(), mockConfig, 10000, deps);
+			return { registry, deps, task };
+		};
+		const waiting = (deps: { followUpQueue: MessageQueue }) => deps.followUpQueue.length;
+
+		it("takes the notice back when bash_output waits for the task and gets its result", async () => {
+			const { deps, task } = await start("sleep 0.3; echo waited-for");
+			const out = await execBashOutput({ task_id: task.id, wait: 5000 }, mockConfig, deps);
+			expect(out.content).toContain("waited-for");
+			expect(waiting(deps)).toBe(0);
+		});
+
+		it("takes it back when the result is read after the task finished, before the turn drained it", async () => {
+			const { registry, deps, task } = await start("echo quick");
+			await vi.waitFor(() => expect(registry.get(task.id)?.status).not.toBe("running"), { timeout: 5000 });
+			expect(waiting(deps)).toBe(1);
+			await execBashOutput({ task_id: task.id }, mockConfig, deps);
+			expect(waiting(deps)).toBe(0);
+		});
+
+		it("leaves other tasks' notices, and the notice of a task nobody has asked about", async () => {
+			const { registry, deps, task } = await start("echo one");
+			const other = registry.start("echo two", process.cwd(), mockConfig, 10000, deps);
+			await vi.waitFor(
+				() => expect([task, other].every((t) => registry.get(t.id)?.status !== "running")).toBe(true),
+				{ timeout: 5000 },
+			);
+			expect(waiting(deps)).toBe(2);
+			await execBashOutput({ task_id: task.id }, mockConfig, deps);
+			expect(waiting(deps)).toBe(1);
+			expect(String(deps.followUpQueue.drain()[0]?.content)).toContain(`Background task ${other.id}`);
+		});
+
+		it("keeps the notice while the task still runs (a peek is not a result)", async () => {
+			const { registry, deps, task } = await start("sleep 1; echo late");
+			await execBashOutput({ task_id: task.id }, mockConfig, deps);
+			await vi.waitFor(() => expect(waiting(deps)).toBe(1), { timeout: 5000 });
+			registry.kill(task.id);
+		});
+
+		it("sends no notice for a task the model killed itself", async () => {
+			const { registry, deps, task } = await start("sleep 30");
+			await execBashKill({ task_id: task.id }, deps);
+			await vi.waitFor(() => expect(registry.get(task.id)?.status).toBe("killed"), { timeout: 5000 });
+			await new Promise((r) => setTimeout(r, 300));
+			expect(waiting(deps)).toBe(0);
+		});
 	});
 
 	it("tracks a started task and transitions running -> exited with the right exit code", async () => {
