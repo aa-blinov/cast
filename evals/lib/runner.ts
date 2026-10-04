@@ -89,6 +89,8 @@ export interface EvalCase {
 	persona?: string;
 	/** Load builtin skills and advertise the skill catalog for this case. */
 	withSkills?: boolean;
+	/** Extra skill directories loaded beside the builtin ones (needs `withSkills`). */
+	skillPaths?: string[];
 	/** Local or remote MCP servers made available to this case's agent loop. */
 	mcpServers?: Record<string, McpServerConfig>;
 	/**
@@ -403,7 +405,7 @@ async function runAttempt(
 		const personas = resolvePersonasForCwd(cwd, false, false).personas;
 		const subagentPrompts = persona.subagents ? loadSubagentPrompts() : undefined;
 		const skills = evalCase.withSkills
-			? loadSkills({ builtinDir: builtinSkillsDir, extraPaths: [] }).skills
+			? loadSkills({ builtinDir: builtinSkillsDir, extraPaths: evalCase.skillPaths ?? [] }).skills
 			: undefined;
 		if (evalCase.mcpServers) {
 			mcpSetup = await connectMcpServers(evalCase.mcpServers);

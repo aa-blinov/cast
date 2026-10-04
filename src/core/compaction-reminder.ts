@@ -11,6 +11,7 @@
 import { basename } from "node:path";
 import type { Message } from "./llm.ts";
 import { listOpenPlanSteps, type PlanState, readActivePlan } from "./plan.ts";
+import { escapeSystemReminderTags } from "./system-reminder.ts";
 
 const MAX_OPEN_STEPS = 8;
 const MAX_FILES = 12;
@@ -99,6 +100,43 @@ export function formatPostCompactReminder(state: PostCompactReminderState = {}):
 
 	if (sections.length === 0) return undefined;
 	return `<system-reminder>\n${sections.join("\n\n")}\n</system-reminder>`;
+}
+
+const SKILL_BLOCK_START = '<skill name="';
+const MAX_SKILLS_KEPT = 3;
+const MAX_SKILL_CHARS = 12_000;
+const SKILL_NAME_RE = /^<skill name="([^"]*)"/;
+
+/**
+ * The skills loaded in a conversation, newest last, each once: a skill's instructions arrive as a tool result (or as
+ * the message a `/skill` command sends), which the summary does not carry, so a workflow loaded early would be lost
+ * halfway through. Only the latest few are kept, each cut to a bound.
+ */
+export function collectLoadedSkills(messages: Message[]): Array<{ name: string; block: string }> {
+	const latest = new Map<string, string>();
+	for (const message of messages) {
+		if (message.role !== "tool" && message.role !== "user") continue;
+		if (typeof message.content !== "string" || !message.content.startsWith(SKILL_BLOCK_START)) continue;
+		const name = SKILL_NAME_RE.exec(message.content)?.[1];
+		if (!name) continue;
+		// Re-inserted so a skill loaded twice counts as the more recent load.
+		latest.delete(name);
+		latest.set(name, message.content);
+	}
+	return [...latest.entries()].slice(-MAX_SKILLS_KEPT).map(([name, block]) => ({
+		name,
+		block:
+			block.length > MAX_SKILL_CHARS
+				? `${block.slice(0, MAX_SKILL_CHARS)}\n[…cut; load the skill again for the rest]\n</skill>`
+				: block,
+	}));
+}
+
+/** The reminder that puts loaded skills back after a compaction, for those no longer in the conversation. */
+export function formatLoadedSkillsReminder(skills: Array<{ name: string; block: string }>): string | undefined {
+	if (skills.length === 0) return undefined;
+	const body = skills.map((s) => escapeSystemReminderTags(s.block)).join("\n\n");
+	return `<system-reminder>\nSkills you loaded earlier in this conversation. The conversation was compacted; their instructions still apply:\n\n${body}\n</system-reminder>`;
 }
 
 /**

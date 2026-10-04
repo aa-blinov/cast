@@ -52,6 +52,7 @@ import {
 	resolveProjectTrustForCwd,
 	resolveRulesForCwd,
 	resolveSkillsForCwd,
+	skillDiagnosticsForCwd,
 } from "../core/project.ts";
 import { clearProjectRootCache } from "../core/project-root.ts";
 import { getModelsCache } from "../core/readline.ts";
@@ -93,7 +94,9 @@ import {
 	updateSettings,
 } from "../core/settings.ts";
 import {
+	formatSkillDiagnostics,
 	formatSkillsForPrompt,
+	type InlineCommandGate,
 	isSkillSourceFamily,
 	isUninstallableSkill,
 	listSkillSources,
@@ -326,6 +329,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/skills enable", description: "Enable one skill — name", takesArgs: true },
 	{ name: "/skills help", description: "Show skills command cheat sheet" },
 	{ name: "/skills list", description: "List loaded skills" },
+	{ name: "/skills problems", description: "Skills that failed to load, and why" },
 	{ name: "/skills sources", description: "Turn skill sources on/off (cast, Claude Code, skills.sh, built-in)" },
 	{
 		name: "/skills uninstall",
@@ -554,6 +558,7 @@ const SKILLS_HELP = `Skills — pick a row from the /skills palette, or type:
 
   /skills                      Toggle on/off (multi-select, like /mcp)
   /skills list                 What's loaded (source + enabled)
+  /skills problems             Skills that failed to load, and why
   /skills enable|disable NAME
   /skills uninstall            Pick global/project skill to remove
   /skills uninstall NAME
@@ -587,6 +592,24 @@ const MCP_HELP = `MCP — pick a row from the /mcp palette, or type:
 
 Add servers via ~/.cast/mcp.json, .cast/mcp.json, or --mcp.
 CLI --mcp paths are not removable with /mcp uninstall.`;
+
+/** The gate for a skill's inline commands when a person runs the skill: plan mode reads only, and a dangerous command is asked about. */
+function skillInlineGate(deps: CommandDeps): InlineCommandGate {
+	return {
+		readOnly: deps.planMode,
+		confirm:
+			deps.permissionMode === "bypass"
+				? async () => true
+				: async (command, reason) =>
+						(await deps.pickers.pickOption(
+							[
+								{ value: true, label: "Run it" },
+								{ value: false, label: "Do not run it" },
+							],
+							{ title: `The skill wants to run: ${command} (${reason})` },
+						)) === true,
+	};
+}
 
 async function confirmUninstall(deps: CommandDeps, title: string, yesLabel: string): Promise<boolean> {
 	const confirm = await deps.pickers.pickOption(
@@ -690,7 +713,11 @@ function formatSkillsList(deps: CommandDeps): string {
 			const state = disabled.has(s.name) ? "off" : "on ";
 			return `${state} ${meta.label} — ${s.description}`;
 		});
-	return `Skills\n${lines.join("\n")}`;
+	const problems = formatSkillDiagnostics(
+		skillDiagnosticsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted),
+		homedir(),
+	);
+	return `Skills\n${lines.join("\n")}${problems ? `\n\n${problems}` : ""}`;
 }
 
 async function handleSkillsCommand(input: string, deps: CommandDeps): Promise<void> {
@@ -738,6 +765,14 @@ async function handleSkillsCommand(input: string, deps: CommandDeps): Promise<vo
 	const name = rest.join(" ").trim();
 	if (verb === "list") {
 		deps.agent.addDisplayMessage({ role: "warning", content: formatSkillsList(deps) });
+		return;
+	}
+	if (verb === "problems") {
+		const problems = formatSkillDiagnostics(
+			skillDiagnosticsForCwd(deps.projectDeps, deps.cwd, deps.projectTrusted),
+			homedir(),
+		);
+		deps.agent.addDisplayMessage({ role: "warning", content: problems || "Every skill loaded cleanly." });
 		return;
 	}
 	if (verb === "sources") {
@@ -2741,7 +2776,12 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				return;
 			}
 			fireUserPromptExpansion(deps, skill.name);
-			await agent.submit(await renderSkillInvocation(skill, skillArgs, session.id, { projectDir: deps.cwd }));
+			await agent.submit(
+				await renderSkillInvocation(skill, skillArgs, session.id, {
+					projectDir: deps.cwd,
+					gate: skillInlineGate(deps),
+				}),
+			);
 			return;
 		},
 	},
@@ -4308,7 +4348,12 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 		const skill = deps.skills.find((s) => s.name === skillId && s.userInvocable);
 		if (skill) {
 			fireUserPromptExpansion(deps, skill.name);
-			await agent.submit(await renderSkillInvocation(skill, skillArgs, session.id, { projectDir: deps.cwd }));
+			await agent.submit(
+				await renderSkillInvocation(skill, skillArgs, session.id, {
+					projectDir: deps.cwd,
+					gate: skillInlineGate(deps),
+				}),
+			);
 			return;
 		}
 	}

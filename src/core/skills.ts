@@ -34,6 +34,11 @@ const MAX_DESCRIPTION_LENGTH = 1024;
  * may never use. Only `description` was capped, so a long `when_to_use` rode
  * into the system prompt uncapped. */
 const MAX_LISTING_DESCRIPTION_LENGTH = 1536;
+/** What the skill list may cost in the system prompt, in characters (about 5k tokens). */
+const SKILLS_LISTING_BUDGET = 20_000;
+const MIN_LISTING_DESCRIPTION_LENGTH = 160;
+/** The tags around one listed skill, besides its name and description. */
+const LISTING_ENTRY_OVERHEAD = 70;
 const MAX_COMPATIBILITY_LENGTH = 500;
 const RECOMMENDED_MAX_BODY_LINES = 500;
 
@@ -118,6 +123,24 @@ export interface Skill {
 export interface SkillDiagnostic {
 	message: string;
 	path: string;
+	/** An error kept the skill from loading; a warning left it loaded (or shadowed it by another of the same name). */
+	severity: "error" | "warning";
+}
+
+/** What `/skills problems` says: skills that did not load, then the notes about ones that did. Empty when all is well. */
+export function formatSkillDiagnostics(diagnostics: SkillDiagnostic[], home?: string): string {
+	const show = (d: SkillDiagnostic) =>
+		`  ${home && d.path.startsWith(home) ? `~${d.path.slice(home.length)}` : d.path}: ${d.message}`;
+	const errors = diagnostics.filter((d) => d.severity === "error");
+	const warnings = diagnostics.filter((d) => d.severity === "warning");
+	const blocks: string[] = [];
+	if (errors.length > 0) {
+		blocks.push(
+			`Could not load ${errors.length} skill${errors.length === 1 ? "" : "s"}:\n${errors.map(show).join("\n")}`,
+		);
+	}
+	if (warnings.length > 0) blocks.push(`Notes:\n${warnings.map(show).join("\n")}`);
+	return blocks.join("\n\n");
 }
 
 /**
@@ -164,7 +187,6 @@ function validateSkillName(name: string): string[] {
 
 function validateSkillDescription(description: string | undefined): string[] {
 	if (!description || description.trim() === "") return ["description is required"];
-	if (description.length > MAX_DESCRIPTION_LENGTH) return [`description exceeds ${MAX_DESCRIPTION_LENGTH} characters`];
 	return [];
 }
 
@@ -292,6 +314,25 @@ function validateMetadata(value: unknown): { value: Record<string, string> | und
 // Discovery
 // ============================================================================
 
+const ARGUMENT_HINT_LINE_RE = /^(argument-hint:[ \t]*)(\[.*\])[ \t]*$/m;
+
+/**
+ * `argument-hint: [issue-number]` is how Claude Code's documentation writes the field, and it is a YAML flow list, not
+ * a string (`[file] [format]`, the other form it shows, is not YAML at all). Read as YAML either lost the whole skill,
+ * so a hint written in brackets and left unquoted is read as the text it is.
+ */
+function quoteBracketedArgumentHint(raw: string): string {
+	const end = raw.indexOf("\n---", 4);
+	if (!raw.startsWith("---") || end === -1) return raw;
+	const head = raw
+		.slice(0, end)
+		.replace(
+			ARGUMENT_HINT_LINE_RE,
+			(_, key: string, value: string) => `${key}"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
+		);
+	return head + raw.slice(end);
+}
+
 function loadSkillFromFile(
 	filePath: string,
 	source: SkillSource,
@@ -302,13 +343,17 @@ function loadSkillFromFile(
 	try {
 		raw = readFileSync(filePath, "utf-8");
 	} catch (error) {
-		diagnostics.push({ message: error instanceof Error ? error.message : String(error), path: filePath });
+		diagnostics.push({
+			message: error instanceof Error ? error.message : String(error),
+			path: filePath,
+			severity: "error",
+		});
 		return { skill: null, diagnostics };
 	}
 
-	const { frontmatter, body, errors: yamlErrors } = parseFrontmatter(raw);
+	const { frontmatter, body, errors: yamlErrors } = parseFrontmatter(quoteBracketedArgumentHint(raw));
 	for (const message of yamlErrors)
-		diagnostics.push({ message: `invalid YAML frontmatter: ${message}`, path: filePath });
+		diagnostics.push({ message: `invalid YAML frontmatter: ${message}`, path: filePath, severity: "error" });
 	if (yamlErrors.length > 0) return { skill: null, diagnostics };
 	const parentDirName = basename(dirname(filePath));
 	// Per the Agent Skills spec, `name` is optional and defaults to the
@@ -323,28 +368,47 @@ function loadSkillFromFile(
 		typeof frontmatter.description === "string" && frontmatter.description.trim() !== ""
 			? frontmatter.description
 			: undefined;
-	const description = declaredDescription ?? firstParagraph(body);
+	let description = declaredDescription ?? firstParagraph(body);
+	// Too long is a nuisance, not a reason to lose the skill: it is cut (as the listing cuts it anyway) and said so.
+	if (description && description.length > MAX_DESCRIPTION_LENGTH) {
+		diagnostics.push({
+			message: `description exceeds ${MAX_DESCRIPTION_LENGTH} characters (${description.length}); it was cut`,
+			path: filePath,
+			severity: "warning",
+		});
+		description = description.slice(0, MAX_DESCRIPTION_LENGTH);
+	}
 
-	for (const error of validateSkillDescription(description)) diagnostics.push({ message: error, path: filePath });
-	for (const error of validateSkillName(name)) diagnostics.push({ message: error, path: filePath });
+	for (const error of validateSkillDescription(description))
+		diagnostics.push({ message: error, path: filePath, severity: "error" });
+	for (const error of validateSkillName(name)) diagnostics.push({ message: error, path: filePath, severity: "error" });
 	const argumentHint = validateOptionalString(frontmatter, "argument-hint");
 	const argumentNames = validateNameList(frontmatter, "arguments");
 	const paths = validateGlobList(frontmatter, "paths");
 	const skillHooks = coerceHooksObject(frontmatter.hooks, "project");
 	const license = validateOptionalString(frontmatter, "license");
-	const compatibility = validateOptionalString(frontmatter, "compatibility", MAX_COMPATIBILITY_LENGTH);
+	const compatibility = validateOptionalString(frontmatter, "compatibility");
+	if (compatibility.value && compatibility.value.length > MAX_COMPATIBILITY_LENGTH) {
+		diagnostics.push({
+			message: `compatibility exceeds ${MAX_COMPATIBILITY_LENGTH} characters (${compatibility.value.length}); it was left out`,
+			path: filePath,
+			severity: "warning",
+		});
+		compatibility.value = undefined;
+	}
 	const allowedTools = validateToolList(frontmatter, "allowed-tools");
 	const disallowedTools = validateToolList(frontmatter, "disallowed-tools");
 	const metadata = validateMetadata(frontmatter.metadata);
 	for (const result of [license, compatibility, allowedTools, disallowedTools, argumentHint, paths, metadata]) {
-		for (const message of result.errors) diagnostics.push({ message, path: filePath });
+		for (const message of result.errors) diagnostics.push({ message, path: filePath, severity: "error" });
 	}
-	const hasValidationErrors = diagnostics.length > 0;
+	const hasValidationErrors = diagnostics.some((d) => d.severity === "error");
 
 	if (body.split("\n").length > RECOMMENDED_MAX_BODY_LINES) {
 		diagnostics.push({
 			message: `body exceeds the recommended ${RECOMMENDED_MAX_BODY_LINES}-line progressive-disclosure limit`,
 			path: filePath,
+			severity: "warning",
 		});
 	}
 
@@ -410,7 +474,11 @@ function loadSkillsFromDirInternal(
 	try {
 		entries = readdirSync(dir, { withFileTypes: true });
 	} catch (error) {
-		diagnostics.push({ message: error instanceof Error ? error.message : String(error), path: dir });
+		diagnostics.push({
+			message: error instanceof Error ? error.message : String(error),
+			path: dir,
+			severity: "error",
+		});
 		return { skills, diagnostics };
 	}
 
@@ -468,6 +536,14 @@ export interface LoadSkillsOptions {
 	extraPaths: string[];
 }
 
+function sameRealPath(a: string, b: string): boolean {
+	try {
+		return realpathSync(a) === realpathSync(b);
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Load skills from every configured location. On a name collision the
  * first-loaded skill wins:
@@ -481,10 +557,14 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 	function addAll(result: { skills: Skill[]; diagnostics: SkillDiagnostic[] }) {
 		diagnostics.push(...result.diagnostics);
 		for (const skill of result.skills) {
-			if (skillMap.has(skill.name)) {
+			const taken = skillMap.get(skill.name);
+			if (taken) {
+				// `skills add` links one install into several agents' directories: the same skill seen twice.
+				if (sameRealPath(taken.baseDir, skill.baseDir)) continue;
 				diagnostics.push({
 					message: `skill name "${skill.name}" collision — keeping the first one loaded`,
 					path: skill.filePath,
+					severity: "warning",
 				});
 				continue;
 			}
@@ -505,21 +585,25 @@ export function loadSkills(options: LoadSkillsOptions): { skills: Skill[]; diagn
 
 	for (const rawPath of options.extraPaths) {
 		if (!existsSync(rawPath)) {
-			diagnostics.push({ message: "skill path does not exist", path: rawPath });
+			diagnostics.push({ message: "skill path does not exist", path: rawPath, severity: "error" });
 			continue;
 		}
 		const stats = statSync(rawPath);
 		if (stats.isDirectory()) {
 			const skillPath = join(rawPath, "SKILL.md");
 			if (!existsSync(skillPath)) {
-				diagnostics.push({ message: "skill directory must contain SKILL.md", path: rawPath });
+				diagnostics.push({ message: "skill directory must contain SKILL.md", path: rawPath, severity: "error" });
 				continue;
 			}
 			const result = loadSkillFromFile(skillPath, "path");
 			if (result.skill) addAll({ skills: [result.skill], diagnostics: result.diagnostics });
 			else diagnostics.push(...result.diagnostics);
 		} else {
-			diagnostics.push({ message: "skill path must be a directory containing SKILL.md", path: rawPath });
+			diagnostics.push({
+				message: "skill path must be a directory containing SKILL.md",
+				path: rawPath,
+				severity: "error",
+			});
 		}
 	}
 
@@ -569,13 +653,25 @@ export function formatSkillsForPrompt(
 	}
 	if (visible.length === 0) return "";
 
+	// Every turn pays for this list, so it has a budget: past it each description is cut to an even share, never
+	// below a line's worth, and the names always stay. A hundred skills used to cost the system prompt ~14k tokens.
+	const combined = visible.map((s) => (s.whenToUse ? `${s.description} — ${s.whenToUse}` : s.description));
+	const fixed = visible.reduce((n, s) => n + s.name.length + LISTING_ENTRY_OVERHEAD, 0);
+	const evenShare = Math.max(
+		MIN_LISTING_DESCRIPTION_LENGTH,
+		Math.floor((SKILLS_LISTING_BUDGET - fixed) / visible.length),
+	);
+	const cap = Math.min(MAX_LISTING_DESCRIPTION_LENGTH, evenShare);
 	const lines = ["", "", SKILLS_INSTRUCTIONS, "", "<available_skills>"];
-	for (const skill of visible) {
-		const combined = skill.whenToUse ? `${skill.description} — ${skill.whenToUse}` : skill.description;
+	for (const [index, skill] of visible.entries()) {
+		const full = combined[index]!;
+		// The spec's own cut is plain; the budget's is marked so the model knows the text was shortened.
 		const desc =
-			combined.length > MAX_LISTING_DESCRIPTION_LENGTH
-				? combined.slice(0, MAX_LISTING_DESCRIPTION_LENGTH)
-				: combined;
+			full.length <= cap
+				? full
+				: cap === MAX_LISTING_DESCRIPTION_LENGTH
+					? full.slice(0, cap)
+					: `${full.slice(0, cap - 1).trimEnd()}…`;
 		lines.push("  <skill>");
 		lines.push(`    <name>${escapeXml(skill.name)}</name>`);
 		lines.push(`    <description>${escapeXml(desc)}</description>`);
@@ -622,10 +718,9 @@ function parseArguments(args: string): string[] {
 }
 
 /**
- * Substitute $ARGUMENTS placeholders in content with actual argument values.
- * Supports: $ARGUMENTS (full string), $ARGUMENTS[0]/$0 (indexed), ${CAST_SKILL_DIR},
- * ${CAST_SESSION_ID} (the active session's id, when provided).
- * Returns the substituted content. Caller decides what to do if no placeholders matched.
+ * Substitute placeholders in a skill body with the invocation's arguments and paths: $ARGUMENTS (the full string),
+ * $ARGUMENTS[0] / $0 (indexed), $name (declared in `arguments`), ${CAST_SKILL_DIR}, ${CAST_SESSION_ID} and
+ * ${CAST_PROJECT_DIR} (each also spelled CLAUDE_*).
  */
 export interface SubstitutionContext {
 	/** Project root — the spec's `${CLAUDE_PROJECT_DIR}`. */
@@ -634,15 +729,10 @@ export interface SubstitutionContext {
 	argumentNames?: string[];
 }
 
-/**
- * Literal substitution. `String.replaceAll` treats `$&`, `$'` and `$1` in the
- * replacement as patterns, and every replacement here is data — a path, the
- * session id, whatever the user typed after the command — so a `$&` in one of
- * them expanded into the placeholder it had just replaced.
- */
-function substitute(text: string, placeholder: string, value: string): string {
-	return text.split(placeholder).join(value);
-}
+// One pass over the body, so a value that was just put in (a path, whatever the user typed) is never read again as a
+// placeholder: an argument of "$ARGUMENTS x" or "costs $5" came out garbled when each placeholder had its own pass.
+const PLACEHOLDER_RE =
+	/\$\{(?:CAST|CLAUDE)_(SKILL_DIR|SESSION_ID|PROJECT_DIR)\}|\$ARGUMENTS\[(\d+)\]|\$(\d+)(?![A-Za-z0-9_])|\$([A-Za-z_][A-Za-z0-9_]*)/g;
 
 function substituteArguments(
 	content: string,
@@ -650,49 +740,41 @@ function substituteArguments(
 	baseDir: string,
 	sessionId?: string,
 	context: SubstitutionContext = {},
-): string {
-	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-	content = substitute(content, "${CAST_SKILL_DIR}", baseDir);
-	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-	content = substitute(content, "${CLAUDE_SKILL_DIR}", baseDir);
-	// An unresolved placeholder must never reach the model: it reads as an
-	// instruction ("substitute the arguments") for something that already
-	// happened, or as literal text the skill author never meant to show. Every
-	// placeholder is replaced, with an empty string when there is nothing to
-	// put there — both for a skill invoked without `args` (the tool's `args`
-	// is optional) and outside a session.
-	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-	content = substitute(content, "${CAST_SESSION_ID}", sessionId ?? "");
-	// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-	content = substitute(content, "${CLAUDE_SESSION_ID}", sessionId ?? "");
-
-	if (context.projectDir) {
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-		content = substitute(content, "${CLAUDE_PROJECT_DIR}", context.projectDir);
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder for skill template variable, not JS template
-		content = substitute(content, "${CAST_PROJECT_DIR}", context.projectDir);
-	}
-
+): { text: string; consumedArguments: boolean } {
 	const parsed = parseArguments(args ?? "");
-
-	// Named arguments (`arguments: [issue, branch]` → `$issue`, `$branch`),
-	// substituted before the positional forms so a name is never mistaken for
-	// bare text. Declared-but-missing names resolve to an empty string, like
-	// every other placeholder.
-	for (const [index, argName] of (context.argumentNames ?? []).entries()) {
-		content = substitute(content, `$${argName}`, parsed[index] ?? "");
-	}
-
-	// $ARGUMENTS[0], $ARGUMENTS[1], etc.
-	content = content.replace(/\$ARGUMENTS\[(\d+)\]/g, (_, idx) => parsed[parseInt(idx, 10)] ?? "");
-
-	// $0, $1, etc. (but not $0x or $10+ which are different patterns)
-	content = content.replace(/\$(\d+)(?!\w)/g, (_, idx) => parsed[parseInt(idx, 10)] ?? "");
-
-	// $ARGUMENTS — full string
-	content = substitute(content, "$ARGUMENTS", args ?? "");
-
-	return content;
+	const names = new Map((context.argumentNames ?? []).map((name, index) => [name, index]));
+	let consumedArguments = false;
+	// An unresolved placeholder must never reach the model: it reads as an instruction ("substitute the arguments")
+	// for something that already happened. Every one is replaced, with an empty string when there is nothing to put
+	// there (a skill invoked without `args`, or outside a session). The project dir is the one exception: without a
+	// project it stays as written, since there is nothing true to say.
+	const text = content.replace(
+		PLACEHOLDER_RE,
+		(match, special?: string, index?: string, bare?: string, name?: string): string => {
+			if (special === "SKILL_DIR") return baseDir;
+			if (special === "SESSION_ID") return sessionId ?? "";
+			if (special === "PROJECT_DIR") return context.projectDir ?? match;
+			if (index !== undefined) {
+				consumedArguments = true;
+				return parsed[Number.parseInt(index, 10)] ?? "";
+			}
+			if (bare !== undefined) {
+				consumedArguments = true;
+				return parsed[Number.parseInt(bare, 10)] ?? "";
+			}
+			if (name === undefined) return match;
+			if (name === "ARGUMENTS") {
+				consumedArguments = true;
+				return args ?? "";
+			}
+			if (names.has(name)) {
+				consumedArguments = true;
+				return parsed[names.get(name)!] ?? "";
+			}
+			return match;
+		},
+	);
+	return { text, consumedArguments };
 }
 
 const BASH_INJECTION_RE = /!`([^`\n]+)`/g;
@@ -719,8 +801,28 @@ export interface InlineCommandGate {
  * saying `` Node: !`node --version` `` reads as though the version had been
  * checked.
  */
+const FENCE_RE = /^\s{0,3}(```|~~~)/;
+
+/** The body's lines with whether each sits inside a fenced code block: an example of `!`cmd`` in one is text to show, not to run. */
+function markFences(content: string): Array<{ text: string; fenced: boolean }> {
+	let open: string | undefined;
+	return content.split("\n").map((text) => {
+		const fence = FENCE_RE.exec(text)?.[1];
+		if (fence && !open) {
+			open = fence;
+			return { text, fenced: true };
+		}
+		if (fence && fence === open) {
+			open = undefined;
+			return { text, fenced: true };
+		}
+		return { text, fenced: open !== undefined };
+	});
+}
+
 async function runInlineCommands(content: string, cwd: string | undefined, gate: InlineCommandGate): Promise<string> {
-	const matches = [...content.matchAll(BASH_INJECTION_RE)];
+	const lines = markFences(content);
+	const matches = lines.filter((l) => !l.fenced).flatMap((l) => [...l.text.matchAll(BASH_INJECTION_RE)]);
 	if (matches.length === 0) return content;
 	const outputs = new Map<string, string>();
 	let executed = 0;
@@ -774,7 +876,11 @@ async function runInlineCommands(content: string, cwd: string | undefined, gate:
 			outputs.set(command, `[command failed: ${message.split("\n")[0]}]`);
 		}
 	}
-	return content.replace(BASH_INJECTION_RE, (_, command: string) => outputs.get(command) ?? "");
+	return lines
+		.map((l) =>
+			l.fenced ? l.text : l.text.replace(BASH_INJECTION_RE, (_, command: string) => outputs.get(command) ?? ""),
+		)
+		.join("\n");
 }
 
 /** Format a skill's full content for `/skill:name` invocation, optionally with trailing user args. */
@@ -799,26 +905,21 @@ export function formatSkillInvocation(
 	sessionId?: string,
 	context: Omit<SubstitutionContext, "argumentNames"> = {},
 ): string {
-	const content = readSkillBody(skill);
-	const substituted = substituteArguments(content, additionalArgs, skill.baseDir, sessionId, {
-		...context,
-		argumentNames: skill.argumentNames,
-	});
-	// Check if any $ARGUMENTS placeholders were actually substituted
-	const hadPlaceholders =
-		content.includes("$ARGUMENTS") ||
-		content.includes("$0") ||
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: checking for literal placeholder in content
-		content.includes("${CLAUDE_SKILL_DIR}") ||
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: checking for literal placeholder in content
-		content.includes("${CAST_SESSION_ID}");
+	const { text: substituted, consumedArguments } = substituteArguments(
+		readSkillBody(skill),
+		additionalArgs,
+		skill.baseDir,
+		sessionId,
+		{ ...context, argumentNames: skill.argumentNames },
+	);
 	const allowedTools = skill.allowedTools ? ` allowed-tools="${escapeXml(skill.allowedTools)}"` : "";
 	// What was typed, on the tag: the body may have consumed it ($ARGUMENTS), and the
 	// thread shows `/name args`, not the file.
 	const typed = additionalArgs?.trim() ? ` arguments="${escapeXml(additionalArgs.trim())}"` : "";
 	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}"${typed}${allowedTools}>\nReferences are relative to ${skill.baseDir}.\n\n${substituted}\n</skill>`;
-	// If args were provided but no $ARGUMENTS placeholder consumed them, append as User: line
-	if (additionalArgs && !hadPlaceholders) {
+	// Arguments the body had no place for are appended rather than dropped. Only an argument placeholder counts as a
+	// place: a body that merely names its own directory has not asked for what was typed.
+	if (additionalArgs?.trim() && !consumedArguments) {
 		return `${block}\n\nUser: ${additionalArgs}`;
 	}
 	return block;

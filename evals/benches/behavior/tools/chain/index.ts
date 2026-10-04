@@ -23,8 +23,10 @@ import { planReentryReusesExistingPlan } from "./plan-reentry-reuses-existing-pl
 import { readBeforeEdit } from "./read-before-edit.ts";
 import { readErrorThenRecover } from "./read-error-then-recover.ts";
 import { searchThenRead } from "./search-then-read.ts";
+import { skillArgumentsReachTheBody } from "./skill-arguments-reach-the-body.ts";
 import { skillLoadsMatchingWorkflow } from "./skill-loads-matching-workflow.ts";
 import { skillNotLoadedForGenericRequest } from "./skill-not-loaded-for-generic-request.ts";
+import { skillReadsItsReferenceFile } from "./skill-reads-its-reference-file.ts";
 import { taskDelegatesScopedInvestigation } from "./task-delegates-scoped-investigation.ts";
 import { taskFollowUpWithTaskId } from "./task-follow-up-with-task-id.ts";
 import { taskParallelDelegation } from "./task-parallel-delegation.ts";
@@ -67,4 +69,6 @@ export const chainCases: EvalCase[] = [
 	skillNotLoadedForGenericRequest,
 	approvedPlanTodoProgress,
 	cleanContextPlanTodoState,
+	skillReadsItsReferenceFile,
+	skillArgumentsReachTheBody,
 ];

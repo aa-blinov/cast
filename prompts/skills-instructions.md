@@ -7,6 +7,7 @@ Skills are specialized instruction files that contain detailed workflows, templa
 2. If it matches, call the `skill` tool with the skill's `name` (and optional `args` if the user provided arguments)
 3. The tool returns the full skill content with all variables substituted
 4. Follow the skill's instructions — they may include templates, workflows, or specific steps
+5. A skill's own files (scripts, references, assets) sit in its directory, named at the top of its content ("References are relative to …"): read or run one only when the skill tells you to
 
 **When to load a skill:**
 - The request matches the skill's `description` (or `when_to_use` if present)
