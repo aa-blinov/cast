@@ -3,9 +3,16 @@ import { approvedPlanTodoProgress } from "./approved-plan-todo-progress.ts";
 import { backgroundBashExplicitTimeout } from "./background-bash-explicit-timeout.ts";
 import { backgroundBashKill } from "./background-bash-kill.ts";
 import { backgroundBashOutput } from "./background-bash-output.ts";
+import { backgroundDependentStep } from "./background-dependent-step.ts";
 import { backgroundExplicitNotPolled } from "./background-explicit-not-polled.ts";
+import { backgroundFailureReported } from "./background-failure-reported.ts";
 import { backgroundKillNoNotice } from "./background-kill-no-notice.ts";
+import { backgroundLargeOutput } from "./background-large-output.ts";
+import { backgroundLongWaitPastCap } from "./background-long-wait-past-cap.ts";
+import { backgroundParallelPromotedBothAwaited } from "./background-parallel-promoted-both-awaited.ts";
 import { backgroundPromotedResultAwaited } from "./background-promoted-result-awaited.ts";
+import { backgroundServerLifecycle } from "./background-server-lifecycle.ts";
+import { backgroundTimeoutReported } from "./background-timeout-reported.ts";
 import { backgroundWaitNoDuplicateNotice } from "./background-wait-no-duplicate-notice.ts";
 import { bashFixRerunsCheck } from "./bash-fix-reruns-check.ts";
 import { btwAnswersFromContext } from "./btw-answers-from-context.ts";
@@ -91,6 +98,13 @@ export const chainCases: EvalCase[] = [
 	btwSaysWhenUnknown,
 	backgroundWaitNoDuplicateNotice,
 	backgroundExplicitNotPolled,
+	backgroundParallelPromotedBothAwaited,
+	backgroundFailureReported,
+	backgroundDependentStep,
+	backgroundServerLifecycle,
+	backgroundTimeoutReported,
+	backgroundLargeOutput,
+	backgroundLongWaitPastCap,
 	backgroundKillNoNotice,
 	backgroundPromotedResultAwaited,
 	btwDoesNotReadFiles,
