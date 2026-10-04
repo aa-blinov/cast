@@ -76,6 +76,7 @@ import {
 	toDisplayMessages,
 	type WebEvent,
 } from "./bridge.ts";
+import { browseErrorText } from "./browse-error.ts";
 import { buildGoalPrompt, GOAL_MAX_OUTER_ITERATIONS, goalIterationBudget } from "./commands.ts";
 import { readLiveServerState } from "./daemon-state.ts";
 import { isBlockedAttachmentName, sessionInputsDir } from "./inputs.ts";
@@ -2553,12 +2554,13 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("GET", "/api/browse", async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const requested = url.searchParams.get("path");
+		const showHidden = url.searchParams.get("hidden") === "1";
 		const target = resolve(requested || bridge.getConfig().cwd || homedir());
 		try {
 			const st = await stat(target);
-			if (!st.isDirectory()) throw new Error("Not a directory");
+			if (!st.isDirectory()) throw Object.assign(new Error("Not a directory"), { code: "ENOTDIR" });
 			const entries = (await readdir(target, { withFileTypes: true }))
-				.filter((e) => e.isDirectory() && !e.name.startsWith("."))
+				.filter((e) => e.isDirectory() && (showHidden || !e.name.startsWith(".")))
 				.map((e) => e.name)
 				.sort((a, b) => a.localeCompare(b))
 				.map((name) => ({ name, path: join(target, name) }));
@@ -2569,7 +2571,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				path: target,
 				parent: dirname(target) === target ? null : dirname(target),
 				entries: [],
-				error: err instanceof Error ? err.message : String(err),
+				error: browseErrorText(err),
 			});
 		}
 	});
@@ -2594,14 +2596,14 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			await mkdir(target);
 			json(res, { ok: true, path: target });
 		} catch (err) {
-			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+			json(res, { error: browseErrorText(err) }, 400);
 		}
 	});
 
 	// Non-recursive on purpose — this is one click away in a folder-picker
 	// modal, not a deliberate "rm -rf" the user typed out. An OS ENOTEMPTY
 	// error is the safety net for a directory that still has something in it;
-	// the client surfaces it as-is rather than silently escalating to -r.
+	// the client says so in words rather than silently escalating to -r.
 	route("DELETE", "/api/browse", async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const target = resolve(url.searchParams.get("path") ?? "");
@@ -2613,7 +2615,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			await rmdir(target);
 			json(res, { ok: true });
 		} catch (err) {
-			json(res, { error: err instanceof Error ? err.message : String(err) }, 400);
+			json(res, { error: browseErrorText(err) }, 400);
 		}
 	});
 

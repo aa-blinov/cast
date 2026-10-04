@@ -181,6 +181,74 @@ describe("web session authentication", () => {
 	});
 });
 
+describe("/api/browse", () => {
+	let root: string;
+	let cookie: string;
+
+	beforeEach(async () => {
+		root = mkdtempSync(join(tmpdir(), "cast-browse-test-"));
+		mkdirSync(join(root, "visible"));
+		mkdirSync(join(root, ".hidden"));
+		mkdirSync(join(root, "full"));
+		mkdirSync(join(root, "full", "inner"));
+		writeFileSync(join(root, "a-file.txt"), "x");
+		const login = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		cookie = login.headers.get("set-cookie") ?? "";
+	});
+
+	afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+	const call = (path: string, init: RequestInit = {}) =>
+		fetch(`${origin}${path}`, { ...init, headers: { Cookie: cookie, "Content-Type": "application/json" } });
+
+	it("lists folders only, and leaves the dot folders out unless asked", async () => {
+		const plain = (await (await call(`/api/browse?path=${encodeURIComponent(root)}`)).json()) as {
+			entries: Array<{ name: string }>;
+		};
+		expect(plain.entries.map((e) => e.name)).toEqual(["full", "visible"]);
+		const all = (await (await call(`/api/browse?path=${encodeURIComponent(root)}&hidden=1`)).json()) as {
+			entries: Array<{ name: string }>;
+		};
+		expect(all.entries.map((e) => e.name)).toEqual([".hidden", "full", "visible"]);
+	});
+
+	it("says in words that a path is missing or not a folder", async () => {
+		const missing = (await (await call(`/api/browse?path=${encodeURIComponent(join(root, "nope"))}`)).json()) as {
+			error: string;
+		};
+		expect(missing.error).toBe("That folder doesn't exist");
+		const file = (await (await call(`/api/browse?path=${encodeURIComponent(join(root, "a-file.txt"))}`)).json()) as {
+			error: string;
+		};
+		expect(file.error).toBe("That is not a folder");
+	});
+
+	it("returns the new folder's path and refuses a name that exists", async () => {
+		const made = await call("/api/browse/mkdir", {
+			method: "POST",
+			body: JSON.stringify({ path: root, name: "fresh" }),
+		});
+		expect(await made.json()).toEqual({ ok: true, path: join(root, "fresh") });
+		const again = await call("/api/browse/mkdir", {
+			method: "POST",
+			body: JSON.stringify({ path: root, name: "fresh" }),
+		});
+		expect(again.status).toBe(400);
+		expect(await again.json()).toEqual({ error: "A folder with that name already exists" });
+	});
+
+	it("will not delete a folder that has something in it, and says so without the path", async () => {
+		const res = await call(`/api/browse?path=${encodeURIComponent(join(root, "full"))}`, { method: "DELETE" });
+		expect(res.status).toBe(400);
+		expect(await res.json()).toEqual({ error: "The folder isn't empty, so it was not deleted" });
+		expect(existsSync(join(root, "full", "inner"))).toBe(true);
+	});
+});
+
 describe("shared live relay", () => {
 	// The saved share view drops tool messages, so a link opened afterwards
 	// never shows what a command printed or a file held. The live relay was
