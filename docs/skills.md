@@ -4,7 +4,7 @@ Skills are self-contained instruction packages the agent loads on demand. They f
 
 ## How Skills Work
 
-The agent sees a list of available skills (name + description, and `description — whenToUse` when `when_to_use` is set) in its system prompt. When a task matches a skill's description, the agent calls the dedicated `skill` tool with the skill's name to get full instructions. It no longer reads the skill file via the generic `read` tool. Skills with `disable-model-invocation: true` are hidden from the agent and can only be invoked manually via `/skill:<name>`.
+The agent sees a list of available skills (name + description, and `description — whenToUse` when `when_to_use` is set) in its system prompt. The list has a budget of about 5k tokens: past it, each description is cut to an even share (never under 160 characters, marked with `…`) and the names always stay, so a hundred skills do not cost every turn 14k tokens. When a task matches a skill's description, the agent calls the dedicated `skill` tool with the skill's name to get full instructions. It no longer reads the skill file via the generic `read` tool. Skills with `disable-model-invocation: true` are hidden from the agent and can only be invoked manually via `/skill:<name>`.
 
 ## Built-in Skills
 
@@ -57,7 +57,7 @@ pass one: that form installs only into that one agent's directory (e.g.
 `.claude/skills`), which cast never scans, so the skill would silently never
 appear. The catalog refreshes in the same session (no `/reload`).
 
-Or run the CLI yourself:
+cast runs a pinned release of the CLI (`npx skills@1.7.0`, `SKILLS_SH_VERSION` in `skills-sh.ts`), not whatever npm serves that day, and the agent's `skill_install` asks you first and names the version. Or run the CLI yourself:
 
 ```bash
 npx -y skills add mattpocock/skills --skill grill-me
@@ -66,8 +66,8 @@ npx -y skills add mattpocock/skills --skill grill-me
 Either way the skill lands in `.agents/skills/` (project, trust-gated) or
 `~/.agents/skills/` (global); cast also recognizes the compatible
 `~/.config/agents/skills/` location. Installing by hand needs `/reload` (or a
-restart) for cast to pick it up. Invoke with `/skill:grill-me` (not
-`/grill-me`).
+restart) for cast to pick it up. Invoke with `/skill:grill-me` or
+`/grill-me` (the web UI and the terminal take both).
 
 Settings → Skills.sh lists the skills whose provenance `npx skills`' own
 lockfile (`~/.agents/.skill-lock.json`) records, with their source repo. A
@@ -137,7 +137,7 @@ Per the Agent Skills spec:
 - Must not contain consecutive hyphens (`--`)
 - Maximum 64 characters
 
-A malformed `name`, an over-long `description` or `compatibility`, and invalid YAML prevent the skill from loading. A name that differs from its directory does not. The spec treats `name` as a display name. Cast warns when the body exceeds the spec's recommended 500 lines but still loads it. In the skill listing, `description` and `when_to_use` are combined and truncated at 1,536 characters, as the spec specifies.
+A malformed `name`, a missing description and invalid YAML prevent the skill from loading; `/skills problems` (and the end of `/skills list`) says which and why, so a skill never just vanishes. A `description` over 1,024 characters is cut (and noted), a `compatibility` over 500 is left out (and noted), a body over the spec's recommended 500 lines loads with a note, and a name that differs from its directory is fine: the spec treats `name` as a display name. A skill linked into several agents' directories (what `skills add` does) is one skill, not a collision. In the skill listing, `description` and `when_to_use` are combined and truncated at 1,536 characters, as the spec specifies.
 
 ### Hooks in a Skill
 
@@ -176,13 +176,17 @@ Node: !`node --version 2>/dev/null || echo "not installed"`
 These run for every skill, whatever its source: most of them only probe the
 environment, and a skill can already tell the model to run anything in prose.
 What a skill body must not be is a way *around* the checks a plain `bash` call
-faces, so each command goes through the same two gates:
+faces, so each command goes through the same two gates, whether the model loaded
+the skill or you ran it with `/skill:name`:
 
 - In **plan mode** (and in a subagent of a plan-mode parent) only read-only
   commands run; anything that could write is reported in place, unrun.
 - A command matching a **dangerous pattern** (`rm -rf`, `sudo`, force-push, …)
-  needs the same confirmation the `bash` tool asks for. Without a confirmation
-  callback it is refused rather than silently allowed.
+  needs the same confirmation the `bash` tool asks for (in a mode that never
+  asks, it runs, as bash does). Where nobody can be asked, it is refused.
+
+A `!`command`` inside a fenced code block (``` or ~~~) is an example to show,
+not a command to run, so a skill that documents the feature does not trigger it.
 
 Bounds: at most 10 commands per skill, 10s each, 2,000 characters of output
 each. A failing or refused command is reported in place rather than left as
@@ -190,14 +194,15 @@ literal text.
 
 ### Relative Paths
 
-When a skill file references relative paths (scripts, references, assets, templates, configs), resolve them against the skill's directory. The system prompt tells the agent: *"When a skill file references a relative path, resolve it against the skill directory."* Resources are never automatically read or executed: the agent loads or runs the referenced file only when the activated instructions require it.
+When a skill file references relative paths (scripts, references, assets, templates, configs), resolve them against the skill's directory. The skill's content starts with the directory ("References are relative to …"), and the skills instructions in the system prompt say to read or run a skill's own files only when the skill says so. Resources are never automatically read or executed: the agent loads or runs the referenced file only when the activated instructions require it.
 
 ## Enabling / disabling
 
 | Command | Description |
 |---------|-------------|
 | `/skills` | Toggle on/off (multi-select picker, like `/mcp`) |
-| `/skills list` | Read-only catalog (source + on/off) |
+| `/skills list` | Read-only catalog (source + on/off), then what failed to load |
+| `/skills problems` | The skills that failed to load, and why, and notes about the ones that did |
 | `/skills enable` / `disable <name>` | Toggle one skill without the picker |
 | `/skills uninstall` | Remove a global/project skill (picker + confirm, or typed name) |
 | `/skills help` | Cheat sheet |
@@ -242,7 +247,11 @@ Skill bodies can reference invocation arguments and their own directory:
 | `${CLAUDE_PROJECT_DIR}` (`${CAST_PROJECT_DIR}`) | The project root |
 | `${CLAUDE_SESSION_ID}` (`${CAST_SESSION_ID}`) | The current session id |
 
-If arguments are supplied but the skill body contains no `$ARGUMENTS` placeholder, they're appended as a trailing `User: <args>` line instead of being silently dropped. If the skill is invoked *without* arguments, every placeholder is replaced with an empty string: an unsubstituted `$ARGUMENTS` reaching the model reads as an instruction rather than as "there were none".
+Placeholders are replaced in one pass, so text you typed (`$5`, a literal `$ARGUMENTS`) is never read as a placeholder. If arguments are supplied but the body has no argument placeholder (`$ARGUMENTS`, `$0`, `$name`; naming `${CLAUDE_SKILL_DIR}` does not count), they're appended as a trailing `User: <args>` line instead of being silently dropped; if a placeholder took them, they are not repeated. If the skill is invoked *without* arguments, every placeholder is replaced with an empty string: an unsubstituted `$ARGUMENTS` reaching the model reads as an instruction rather than as "there were none". `${CLAUDE_PROJECT_DIR}` stays as written when there is no project.
+
+### After a compaction
+
+A skill's instructions arrive as a tool result, which a compaction summary does not carry. So when the conversation is compacted, the skills loaded before it (the latest three, each up to 12,000 characters) are put back as a reminder after the summary, and the workflow you were halfway through still applies.
 
 ### The `skill` Tool
 

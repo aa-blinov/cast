@@ -541,6 +541,63 @@ describe("web bridge", () => {
 		expect(skills.find((skill) => skill.name === "from-amp")).toMatchObject({ skillssh: false });
 	});
 
+	describe("user-invoked skills", () => {
+		const skillsBridge = () =>
+			createServerBridge(
+				makeResult({
+					projectDeps: {
+						noSkills: false,
+						noMcp: false,
+						cliSkillPaths: [],
+						cliMcpPaths: [],
+					} as StartupResult["projectDeps"],
+				}),
+			);
+		const install = (name: string, body: string, frontmatter = "") => {
+			const dir = join(fakeHome, ".agents", "skills", name);
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: d\n${frontmatter}---\n${body}\n`);
+		};
+
+		it("runs a skill as /skill:name as well as /name, with the session id filled in", async () => {
+			install("recorder", "id=${CLAUDE_SESSION_ID} args=$ARGUMENTS");
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			const bridge = skillsBridge();
+			const ws = bridge.createSession();
+			expect(await bridge.executeCommand(ws.id, "/skill:recorder hello")).toEqual({
+				ok: true,
+				result: "Invoked skill: recorder",
+			});
+			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+			const sent = JSON.stringify(runAgentLoop.mock.calls.at(-1)![0]);
+			expect(sent).toContain(`id=${ws.id} args=hello`);
+		});
+
+		it("says which skills failed to load and why", async () => {
+			install("Bad_Name", "x");
+			const bridge = skillsBridge();
+			const ws = bridge.createSession();
+			const problems = await bridge.executeCommand(ws.id, "/skills problems");
+			expect(problems.ok).toBe(true);
+			expect(String(problems.result)).toContain("Could not load");
+			expect(String(problems.result)).toContain("name must be lowercase");
+		});
+
+		it("holds a skill's inline command to read-only in plan mode", async () => {
+			install("probe", "out: !`touch " + join(fakeHome, "planned.txt") + "`");
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			const bridge = skillsBridge();
+			const ws = bridge.createSession();
+			ws.session.mode = "plan";
+			await bridge.executeCommand(ws.id, "/skill:probe");
+			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+			expect(existsSync(join(fakeHome, "planned.txt"))).toBe(false);
+			expect(JSON.stringify(runAgentLoop.mock.calls.at(-1)![0])).toContain(
+				"plan mode allows read-only commands only",
+			);
+		});
+	});
+
 	it("refuses names it does not know for /skills|/mcp enable|disable and for the model-provider commands", async () => {
 		const bridge = createServerBridge(
 			makeResult({
@@ -2865,7 +2922,7 @@ describe("web bridge", () => {
 		expect(result).toEqual({
 			ok: true,
 			result:
-				"/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name> – /skills sources [<name> on|off]",
+				"/skills list – /skills problems – /skills enable <name> – /skills disable <name> – /skills uninstall <name> – /skills sources [<name> on|off]",
 		});
 	});
 

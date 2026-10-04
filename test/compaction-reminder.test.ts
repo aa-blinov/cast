@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+	collectLoadedSkills,
+	formatLoadedSkillsReminder,
 	formatPostCompactReminder,
 	injectPostCompactReminder,
 	reminderStateFromPlan,
@@ -131,5 +133,40 @@ describe("reminderStateFromPlan", () => {
 
 	it("returns empty object without planState", () => {
 		expect(reminderStateFromPlan(undefined)).toEqual({});
+	});
+});
+
+describe("skills loaded before a compaction", () => {
+	const skillBlock = (name: string, text = "steps") =>
+		`<skill name="${name}" location="/x/${name}/SKILL.md">\nReferences are relative to /x/${name}.\n\n${text}\n</skill>`;
+
+	it("finds a skill that arrived as a tool result or as a /skill message, once each, newest last", () => {
+		const found = collectLoadedSkills([
+			{ role: "user", content: skillBlock("alpha", "old") },
+			{ role: "assistant", content: "ok" },
+			{ role: "tool", tool_call_id: "1", content: skillBlock("beta") },
+			{ role: "tool", tool_call_id: "2", content: skillBlock("alpha", "new") },
+			{ role: "user", content: "an ordinary message" },
+		] as never);
+		expect(found.map((s) => s.name)).toEqual(["beta", "alpha"]);
+		expect(found[1]!.block).toContain("new");
+	});
+
+	it("keeps the latest three, each cut to a bound", () => {
+		const many = ["a", "b", "c", "d"].map((n) => ({ role: "tool", tool_call_id: n, content: skillBlock(n) }));
+		expect(collectLoadedSkills(many as never).map((s) => s.name)).toEqual(["b", "c", "d"]);
+		const huge = collectLoadedSkills([
+			{ role: "tool", tool_call_id: "h", content: skillBlock("huge", "z".repeat(50_000)) },
+		] as never);
+		expect(huge[0]!.block.length).toBeLessThan(12_200);
+		expect(huge[0]!.block.endsWith("</skill>")).toBe(true);
+	});
+
+	it("says nothing when no skill was loaded, and puts the skills back as a reminder otherwise", () => {
+		expect(formatLoadedSkillsReminder([])).toBeUndefined();
+		const reminder = formatLoadedSkillsReminder([{ name: "alpha", block: skillBlock("alpha") }])!;
+		expect(reminder.startsWith("<system-reminder>")).toBe(true);
+		expect(reminder).toContain("still apply");
+		expect(reminder).toContain('<skill name="alpha"');
 	});
 });

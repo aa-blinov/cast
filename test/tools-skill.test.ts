@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const install = vi.hoisted(() => ({ fn: vi.fn(async (_input: string) => "Installed 1 skill") }));
-vi.mock("../src/core/skills-sh.ts", () => ({ skillsShInstall: install.fn }));
+vi.mock("../src/core/skills-sh.ts", () => ({ skillsShInstall: install.fn, SKILLS_SH_VERSION: "9.9.9" }));
 
 import type { Skill } from "../src/core/skills.ts";
 import { execSkill, execSkillInstall, type SkillToolDeps } from "../src/core/tools/skill.ts";
@@ -56,7 +56,7 @@ describe("execSkillInstall", () => {
 		const confirm = vi.fn(async () => false);
 		const deps: SkillToolDeps = { skills: [], reload: () => [] };
 		const result = await execSkillInstall({ source: "owner/repo" }, deps, confirm);
-		expect(confirm).toHaveBeenCalledWith("npx skills add owner/repo -g", expect.any(String));
+		expect(confirm).toHaveBeenCalledWith("npx skills add owner/repo -g", expect.stringContaining("skills@9.9.9"));
 		expect(install.fn).not.toHaveBeenCalled();
 		expect(result.isError).toBe(true);
 	});

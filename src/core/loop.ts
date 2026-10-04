@@ -16,6 +16,8 @@ import {
 	validateCheckpointArtifacts,
 } from "./checkpoint-validation.ts";
 import {
+	collectLoadedSkills,
+	formatLoadedSkillsReminder,
 	formatPostCompactReminder,
 	injectPostCompactReminder,
 	type PostCompactReminderState,
@@ -677,6 +679,12 @@ export async function compactSessionMessages(
 			// Reminder is a separate trailing message, never embedded in the
 			// summary. Omit entirely when nothing actionable.
 			const fileTags = fileTagsFromCompactionSummary(result.summary.summary);
+			// Skills loaded before the cut are gone with the messages they came in; put back the ones still wanted.
+			const stillThere = new Set(collectLoadedSkills(result.messages).map((s) => s.name));
+			injectPostCompactReminder(
+				result.messages,
+				formatLoadedSkillsReminder(collectLoadedSkills(messages).filter((s) => !stillThere.has(s.name))),
+			);
 			injectPostCompactReminder(
 				result.messages,
 				formatPostCompactReminder({
@@ -2386,7 +2394,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						: {}),
 					// Plan mode (and a plan-mode parent's subagent) restricts a skill's
 					// inline commands exactly as it restricts the bash tool.
-					inlineGate: { readOnly: loopConfig.planState?.enabled === true || loopConfig.readOnlyBash === true },
+					inlineGate: {
+						readOnly: loopConfig.planState?.enabled === true || loopConfig.readOnlyBash === true,
+						// A dangerous command in a skill body asks the person the way the same command in bash would; in a
+						// mode that never asks it runs, as bash does.
+						confirm: loopConfig.permissionMode === "bypass" ? async () => true : confirmBashWithHooks,
+					},
 				}
 			: undefined,
 		loopConfig.beforeFileWrite,

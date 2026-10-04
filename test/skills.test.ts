@@ -17,6 +17,7 @@ import { parseFrontmatter } from "../src/core/frontmatter.ts";
 import type { Skill } from "../src/core/skills.ts";
 import {
 	builtinSkillsDir,
+	formatSkillDiagnostics,
 	formatSkillInvocation,
 	formatSkillsForPrompt,
 	isUninstallableSkill,
@@ -793,5 +794,164 @@ describe("paths-scoped skills", () => {
 		const { skills } = loadSkills({ globalDir: dir, extraPaths: [] });
 		expect(skills[0]?.paths).toEqual(["**/*.py", "**/*.pyi"]);
 		expect(formatSkillsForPrompt(skills, undefined, ["app/main.py"])).toContain("<name>scoped</name>");
+	});
+});
+
+describe("skill fixes from the audit", () => {
+	const load = (name: string, frontmatter: Record<string, string>, body: string) => {
+		writeSkill(GLOBAL_DIR, `${name}/SKILL.md`, frontmatter, body);
+		return loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] }).skills.find((s) => s.name === name)!;
+	};
+
+	it("keeps what was typed when the body only names its own directory", () => {
+		const skill = load("uses-dir", { description: "runs a script" }, "Run ${CLAUDE_SKILL_DIR}/run.sh on the file.");
+		expect(formatSkillInvocation(skill, "report.csv")).toContain("\n\nUser: report.csv");
+	});
+
+	it("does not add the arguments a second time when a placeholder took them", () => {
+		const named = load("named", { description: "n", arguments: "[issue]" }, "Fix $issue now.");
+		expect(formatSkillInvocation(named, "42")).not.toContain("User:");
+		const indexed = load("indexed", { description: "i" }, "First: $0, all: $ARGUMENTS");
+		expect(formatSkillInvocation(indexed, "a b")).not.toContain("User:");
+	});
+
+	it("never reads a value that was just put in as a placeholder", () => {
+		const skill = load("dollar", { description: "d", arguments: "[a, b]" }, "A=$a B=$b ALL=$ARGUMENTS");
+		const out = formatSkillInvocation(skill, '"$ARGUMENTS x" "costs $5"');
+		expect(out).toContain("A=$ARGUMENTS x B=costs $5 ALL=");
+		expect(out).toContain('ALL="$ARGUMENTS x" "costs $5"');
+	});
+
+	it("leaves a shell variable and an undeclared $name alone", () => {
+		const skill = load("shell", { description: "s" }, "echo $HOME and $other");
+		expect(formatSkillInvocation(skill, undefined)).toContain("echo $HOME and $other");
+	});
+
+	it("does not run a `!`command`` that sits inside a fenced code block", async () => {
+		const skill = load(
+			"fenced",
+			{ description: "f" },
+			"Example:\n```\n!`echo SHOULD-NOT-RUN`\n```\nreal: !`echo ran`\n~~~\n!`echo ALSO-NOT`\n~~~",
+		);
+		const out = await renderSkillInvocation(skill);
+		expect(out).toContain("!`echo SHOULD-NOT-RUN`");
+		expect(out).toContain("!`echo ALSO-NOT`");
+		expect(out).toContain("real: ran");
+	});
+
+	it("cuts an over-long description and says so instead of losing the skill", () => {
+		writeSkill(GLOBAL_DIR, "longdesc/SKILL.md", { description: "x".repeat(1100) });
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills.find((s) => s.name === "longdesc")?.description).toHaveLength(1024);
+		expect(diagnostics).toContainEqual(
+			expect.objectContaining({ severity: "warning", message: expect.stringContaining("it was cut") }),
+		);
+	});
+
+	it("reports a skill that cannot load as an error, with the reason", () => {
+		writeSkill(GLOBAL_DIR, "badname/SKILL.md", { name: "Bad_Name", description: "d" });
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills.some((s) => s.name === "Bad_Name")).toBe(false);
+		const text = formatSkillDiagnostics(diagnostics);
+		expect(text).toContain("Could not load 1 skill:");
+		expect(text).toContain("name must be lowercase");
+		expect(formatSkillDiagnostics([])).toBe("");
+	});
+
+	it("is quiet when two directories hold the same skill through a link, loud when they are different", () => {
+		writeSkill(GLOBAL_DIR, "shared/SKILL.md", { description: "one" });
+		mkdirSync(PROJECT_DIR, { recursive: true });
+		symlinkSync(join(GLOBAL_DIR, "shared"), join(PROJECT_DIR, "shared"));
+		writeSkill(PROJECT_DIR, "other/SKILL.md", { description: "p" });
+		writeSkill(GLOBAL_DIR, "other/SKILL.md", { description: "g" });
+		const { diagnostics } = loadSkills({ projectDir: PROJECT_DIR, globalDir: GLOBAL_DIR, extraPaths: [] });
+		const collisions = diagnostics.filter((d) => d.message.includes("collision"));
+		expect(collisions.map((d) => d.message)).toEqual(['skill name "other" collision — keeping the first one loaded']);
+	});
+
+	it("keeps the skill list inside its budget, names intact, and says it was shortened", () => {
+		for (let i = 0; i < 60; i++)
+			writeSkill(GLOBAL_DIR, `bulk-${String(i).padStart(2, "0")}/SKILL.md`, {
+				description: `${"d".repeat(1000)} ${i}`,
+			});
+		const { skills } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		const listing = formatSkillsForPrompt(skills);
+		expect(listing.length).toBeLessThan(26_000);
+		expect(skills.every((s) => listing.includes(`<name>${s.name}</name>`))).toBe(true);
+		expect(listing).toContain("…</description>");
+	});
+
+	it("leaves the project dir placeholder as written when there is no project", () => {
+		const skill = load("proj", { description: "p" }, "in ${CLAUDE_PROJECT_DIR}");
+		expect(formatSkillInvocation(skill)).toContain("in ${CLAUDE_PROJECT_DIR}");
+		expect(formatSkillInvocation(skill, undefined, undefined, { projectDir: "/work" })).toContain("in /work");
+	});
+});
+
+describe("argument-hint written in brackets", () => {
+	it("reads `[issue-number]` and `[file] [format]` as the text they are, not as YAML", () => {
+		for (const [hint, name] of [
+			["[issue-number]", "hint-one"],
+			["[file] [format]", "hint-two"],
+			['say "hi" \\ there]', "hint-odd"],
+		] as const) {
+			mkdirSync(join(GLOBAL_DIR, name), { recursive: true });
+			writeFileSync(
+				join(GLOBAL_DIR, name, "SKILL.md"),
+				`---\nname: ${name}\ndescription: d\nargument-hint: ${hint.startsWith("say") ? hint : hint}\n---\nbody\n`,
+			);
+		}
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills.find((s) => s.name === "hint-one")?.argumentHint).toBe("[issue-number]");
+		expect(skills.find((s) => s.name === "hint-two")?.argumentHint).toBe("[file] [format]");
+		expect(diagnostics.filter((d) => d.path.includes("hint-one") || d.path.includes("hint-two"))).toEqual([]);
+	});
+});
+
+describe("skill loading edges", () => {
+	it("leaves a too-long compatibility out, with a note, and keeps the skill", () => {
+		writeSkill(GLOBAL_DIR, "compat/SKILL.md", { description: "c", compatibility: "x".repeat(600) });
+		const { skills, diagnostics } = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] });
+		expect(skills.find((s) => s.name === "compat")?.compatibility).toBeUndefined();
+		expect(diagnostics.some((d) => d.severity === "warning" && d.message.includes("compatibility exceeds"))).toBe(
+			true,
+		);
+	});
+
+	it("reports --skill paths that are missing, empty or not a directory", () => {
+		mkdirSync(join(TEST_DIR, "empty-dir"), { recursive: true });
+		writeFileSync(join(TEST_DIR, "a-file.md"), "x");
+		const { diagnostics } = loadSkills({
+			extraPaths: [join(TEST_DIR, "nope"), join(TEST_DIR, "empty-dir"), join(TEST_DIR, "a-file.md")],
+		});
+		expect(diagnostics.map((d) => d.message)).toEqual([
+			"skill path does not exist",
+			"skill directory must contain SKILL.md",
+			"skill path must be a directory containing SKILL.md",
+		]);
+		expect(diagnostics.every((d) => d.severity === "error")).toBe(true);
+	});
+
+	it("loads a --skill directory and reports its own problems", () => {
+		writeSkill(TEST_DIR, "extra/SKILL.md", { name: "Not_Valid", description: "d" });
+		const { skills, diagnostics } = loadSkills({ extraPaths: [join(TEST_DIR, "extra")] });
+		expect(skills).toEqual([]);
+		expect(diagnostics[0]?.message).toContain("name must be lowercase");
+	});
+
+	it("takes `$ARGUMENTS[n]`, and a bare `$n` with no argument for it, as empty", () => {
+		writeSkill(GLOBAL_DIR, "idx/SKILL.md", { description: "i" }, "[$ARGUMENTS[1]] [$ARGUMENTS[0]] [$2]");
+		const skill = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] }).skills.find((s) => s.name === "idx")!;
+		expect(formatSkillInvocation(skill, "one two")).toContain("[two] [one] []");
+	});
+
+	it("runs at most ten inline commands and says so for the rest", async () => {
+		const body = Array.from({ length: 12 }, (_, i) => `!\`echo n${i}\``).join("\n");
+		writeSkill(GLOBAL_DIR, "many/SKILL.md", { description: "m" }, body);
+		const skill = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] }).skills.find((s) => s.name === "many")!;
+		const out = await renderSkillInvocation(skill);
+		expect(out).toContain("n9");
+		expect(out).not.toContain("n10\n");
+		expect(out.match(/a skill may run at most 10 inline commands/g)).toHaveLength(2);
 	});
 });

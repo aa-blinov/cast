@@ -17,7 +17,17 @@ All notable user-facing changes to cast, newest first.
 - **MCP OAuth.** `/mcp auth <name>` signs in to a remote server with OAuth (authorization code with PKCE, dynamic client registration, loopback return or a pasted address for a browser elsewhere), `/mcp logout <name>` forgets it; the token is kept in `~/.cast/mcp-auth.json` (mode 600) and refreshed. A connect that gets `401` says to run it. Checked against the SDK's own OAuth server.
 - **MCP prompts over ACP and `cast run`.** The editor's command list carries a server's prompts, and `cast run` runs one as a `command` action.
 
+- **Skills: a skill that fails to load says so.** Load errors were computed and thrown away, so a skill with a bad name or broken YAML simply was not there. `/skills problems` (and the end of `/skills list`) lists them with the reason, and notes about ones that loaded. An over-long `description` is cut and noted instead of dropping the skill.
+- **Skills survive a compaction.** The latest three loaded skills (up to 12,000 characters each) are put back as a reminder after the summary; before, a workflow loaded early was gone halfway through a long session.
+
 ### Fixed
+- **Skill arguments.** A body that only named `${CLAUDE_SKILL_DIR}` lost what you typed; one that used `$issue` got it twice; and substitution ran in passes, so `$5` or a literal `$ARGUMENTS` in what you typed came out garbled. One pass now, and the `User:` fallback applies only when no argument placeholder took the text.
+- **Running a skill yourself is held to the same gates as the model loading it.** `/skill:name` ran its `!`command`` blocks with no plan-mode read-only check and no confirmation for dangerous ones; the web UI also left `${CLAUDE_SESSION_ID}` empty and did not accept `/skill:name` (only `/name`). Dangerous inline commands now ask, as bash does, on every path (they were silently refused when the model loaded the skill).
+- **`argument-hint: [file]` no longer drops the skill.** That is how Claude Code's documentation writes the field, and YAML reads it as a list (`[file] [format]` is not YAML at all), so such skills vanished. A hint in brackets is read as the text it is.
+- **`!`command`` inside a fenced code block no longer runs.** A skill that documents the feature executed its own examples.
+- **A skill linked into several agents' directories is one skill.** `skills add` symlinks produced a collision note per link.
+- **The skill list has a budget** (about 5k tokens); past it descriptions are cut evenly and names always stay.
+- **`skill_install` and `/skills-sh` run a pinned `skills` release** instead of whatever `npx skills` resolves to that day.
 - **The legacy HTTP+SSE fallback failed on Node 22.** Its dedicated connection pool was an `undici` 8 agent handed to Node's built-in fetch, which refused it (`invalid onRequestStart method`), so a server that only speaks the old transport could not connect.
 - **The terminal lost its own MCP connections right after start.** Servers connected in the background were closed at once when React ran its state update late, so `/mcp` showed them but nothing could use them in the terminal. The check now reads the current state directly.
 - **A resource blob with a text type is read as text.** `text/plain` content delivered as a blob was reported as binary.

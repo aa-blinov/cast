@@ -21,6 +21,9 @@ const GITHUB_URL_RE = /^https?:\/\/(?:www\.)?github\.com\//i;
 const GITHUB_GIT_SUFFIX = /\.git$/;
 const WHITESPACE_SPLIT = /\s+/;
 
+/** The `skills` CLI version cast runs. Pinned: `npx skills` unpinned runs whatever npm serves that day, with the user's
+ *  permissions, on a command that is mostly a person pasting a name. Bump it by hand after trying the new release. */
+export const SKILLS_SH_VERSION = "1.7.0";
 export const SKILLS_SH_INSTALL_TIMEOUT_MS = 120_000;
 export const SKILLS_SH_QUERY_TIMEOUT_MS = 60_000;
 export const SKILLS_SH_REMOVE_TIMEOUT_MS = 30_000;
@@ -47,7 +50,7 @@ export function normalizeSkillsShInstallArgs(input: string): string[] {
 	}
 	if (args[0] === "npx") args.shift();
 	if (args[0] === "--yes" || args[0] === "-y") args.shift();
-	if (args[0] === "skills") args.shift();
+	if (args[0] === "skills" || args[0]?.startsWith("skills@")) args.shift();
 	if (args[0] === "add" || args[0] === "a") args.shift();
 
 	const out: string[] = [];
@@ -77,7 +80,7 @@ export function normalizeSkillsShInstallArgs(input: string): string[] {
 export async function runSkillsSh(args: string[], timeout: number): Promise<string> {
 	const fullArgs = args.includes("-y") || args.includes("--yes") ? args : [...args, "-y"];
 	try {
-		const { stdout, stderr } = await execFileAsync("npx", ["--yes", "skills", ...fullArgs], {
+		const { stdout, stderr } = await execFileAsync("npx", ["--yes", `skills@${SKILLS_SH_VERSION}`, ...fullArgs], {
 			cwd: homedir(),
 			encoding: "utf-8",
 			timeout,

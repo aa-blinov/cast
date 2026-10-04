@@ -8,7 +8,7 @@ const TOOL_LIST_SPLIT_RE = /[\s,]+/;
 
 import type { Skill } from "../skills.ts";
 import { type InlineCommandGate, renderSkillInvocation } from "../skills.ts";
-import { skillsShInstall } from "../skills-sh.ts";
+import { SKILLS_SH_VERSION, skillsShInstall } from "../skills-sh.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
 
 export interface SkillToolDeps {
@@ -36,12 +36,6 @@ function reloadSkills(deps: SkillToolDeps): boolean {
 	if (!fresh) return false;
 	deps.skills.splice(0, deps.skills.length, ...fresh);
 	return true;
-}
-
-export function getSkillToolDescription(skills: Skill[]): string {
-	if (skills.length === 0) return "";
-	const names = skills.map((s) => s.name).join(", ");
-	return `Load a specialized skill by name. Skills contain detailed workflows and instructions for specific tasks. Available skills: ${names}. Call this tool when the user's request matches a skill's description, or when the user invokes /skill:name.`;
 }
 
 export async function execSkill(args: Record<string, unknown>, deps: SkillToolDeps): Promise<ToolResult> {
@@ -118,7 +112,13 @@ export async function execSkillInstall(
 			isError: true,
 		};
 	const input = skillName ? `${source} --skill ${skillName}` : source;
-	if (confirm && !(await confirm(`npx skills add ${input} -g`, "installs a third-party skill from the internet"))) {
+	if (
+		confirm &&
+		!(await confirm(
+			`npx skills add ${input} -g`,
+			`installs a third-party skill from the internet (runs npx skills@${SKILLS_SH_VERSION})`,
+		))
+	) {
 		return { content: "Blocked: the user did not confirm installing this skill.", isError: true };
 	}
 

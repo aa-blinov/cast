@@ -3373,6 +3373,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			sessionReasoningLevel,
 			countTurnMessages,
 			permissionMode,
+			requestBashConfirm,
 			subagentModel: subagentModel ?? null,
 			subagentModelProvider: subagentModelProvider ?? null,
 			planModel: planModel ?? null,

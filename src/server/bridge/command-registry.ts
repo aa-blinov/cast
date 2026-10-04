@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 /**
  * Command registry — a dispatch table for `bridge.executeCommand(name, args)`.
  *
@@ -80,6 +81,7 @@ import {
 	removeMcpServerFromDisk,
 	resolveHooksForCwd,
 	resolveMcpForCwd,
+	skillDiagnosticsForCwd,
 } from "../../core/project.ts";
 import { setModelsCache } from "../../core/readline.ts";
 import { REWIND_MODES, type RewindMode } from "../../core/rewind.ts";
@@ -104,6 +106,7 @@ import {
 	updateSettings,
 } from "../../core/settings.ts";
 import {
+	formatSkillDiagnostics,
 	isSkillSourceFamily,
 	isUninstallableSkill,
 	listSkillSources,
@@ -168,6 +171,8 @@ export interface CommandContext {
 	sessionReasoningLevel: (ws: WebAgentSession) => string;
 	countTurnMessages: (messages: Message[]) => number;
 	permissionMode: PermissionMode;
+	/** Ask the connected clients to confirm a dangerous command, blocking until one answers (denied with none attached). */
+	requestBashConfirm: (ws: WebAgentSession, command: string, reason: string, rule?: string) => Promise<boolean>;
 	subagentModel: string | null;
 	subagentModelProvider: string | null;
 	planModel: string | null;
@@ -1554,8 +1559,15 @@ const commandHandlers: Record<string, CommandHandler> = {
 			return {
 				ok: true,
 				result:
-					"/skills list – /skills enable <name> – /skills disable <name> – /skills uninstall <name> – /skills sources [<name> on|off]",
+					"/skills list – /skills problems – /skills enable <name> – /skills disable <name> – /skills uninstall <name> – /skills sources [<name> on|off]",
 			};
+		}
+		if (sub === "problems") {
+			const problems = formatSkillDiagnostics(
+				skillDiagnosticsForCwd(projectDeps, sessionCwd, projectTrusted),
+				homedir(),
+			);
+			return { ok: true, result: problems || "Every skill loaded cleanly." };
 		}
 		if (sub === "sources") {
 			const current = loadSettings().disabledSkillSources ?? [];
@@ -2068,7 +2080,8 @@ async function dispatchMcpPrompt(name: string, ctx: CommandContext): Promise<Com
  *  shouldn't accept another turn at the same time (it'd race the
  *  prompt queue). */
 async function dispatchSkillInvocation(name: string, ctx: CommandContext): Promise<CommandResult | undefined> {
-	const skillId = name.slice(1);
+	// `/skill:name` is the explicit spelling (docs and the terminal accept it); `/name` the short one.
+	const skillId = name.startsWith("/skill:") ? name.slice("/skill:".length) : name.slice(1);
 	if (!skillId) return undefined;
 	const { ws, arg, cwd, loadSettings, projectDeps, projectTrusted, fireUserPromptExpansion, submit } = ctx;
 	const sessionCwd = ws.session.cwd ?? cwd;
@@ -2081,7 +2094,19 @@ async function dispatchSkillInvocation(name: string, ctx: CommandContext): Promi
 	}
 	fireUserPromptExpansion(sessionCwd, skill.name);
 	runDetached(
-		submit(ws.id, await renderSkillInvocation(skill, arg, undefined, { projectDir: sessionCwd })),
+		submit(
+			ws.id,
+			await renderSkillInvocation(skill, arg, ws.id, {
+				projectDir: sessionCwd,
+				gate: {
+					readOnly: ws.session.mode === "plan",
+					confirm:
+						(ws.permissionModeOverride ?? ctx.permissionMode) === "bypass"
+							? async () => true
+							: (command, reason) => ctx.requestBashConfirm(ws, command, reason),
+				},
+			}),
+		),
 		"invoking a skill",
 	);
 	return { ok: true, result: `Invoked skill: ${skill.name}` };

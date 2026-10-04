@@ -28,7 +28,14 @@ import {
 	type Rule,
 } from "./rules.ts";
 import { loadSettings, type PermissionMode, type Settings } from "./settings.ts";
-import { builtinSkillsDir, formatSkillsForPrompt, loadSkills, type Skill, type SkillSourceFamily } from "./skills.ts";
+import {
+	builtinSkillsDir,
+	formatSkillsForPrompt,
+	loadSkills,
+	type Skill,
+	type SkillDiagnostic,
+	type SkillSourceFamily,
+} from "./skills.ts";
 import { loadSshConfig, projectSshPath } from "./ssh.ts";
 import type { ConfirmBash } from "./tools/shared.ts";
 
@@ -202,15 +209,23 @@ function skillLoadOptionsForCwd(cwd: string, trusted: boolean, opts: { noSkills:
 	};
 }
 
-/** All skills on disk for this cwd (ignores disabledSkills — use for /skills picker). */
-export function discoverSkillsForCwd(deps: ProjectResolverDeps, cwd: string, trusted: boolean): Skill[] {
-	const skillsResult = loadSkills(
+function loadSkillsForCwd(deps: ProjectResolverDeps, cwd: string, trusted: boolean) {
+	return loadSkills(
 		skillLoadOptionsForCwd(cwd, trusted, { noSkills: deps.noSkills, cliSkillPaths: deps.cliSkillPaths }),
 	);
+}
+
+/** All skills on disk for this cwd (ignores disabledSkills — use for /skills picker). */
+export function discoverSkillsForCwd(deps: ProjectResolverDeps, cwd: string, trusted: boolean): Skill[] {
 	// Diagnostics are intentionally not printed here: this runs in the TUI
 	// process too, where a raw console.log writes into the screen being drawn and
-	// tears the layout. Callers surface warnings through the UI instead.
-	return skillsResult.skills;
+	// tears the layout. `/skills problems` shows them (skillDiagnosticsForCwd).
+	return loadSkillsForCwd(deps, cwd, trusted).skills;
+}
+
+/** What went wrong loading this cwd's skills: the ones that did not load, and notes about the ones that did. */
+export function skillDiagnosticsForCwd(deps: ProjectResolverDeps, cwd: string, trusted: boolean): SkillDiagnostic[] {
+	return loadSkillsForCwd(deps, cwd, trusted).diagnostics;
 }
 
 export async function resolveSkillsForCwd(
