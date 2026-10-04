@@ -55,6 +55,26 @@ export function getSubagentProgress(id) {
 	return progressById.get(id);
 }
 
+// Live `tool_progress` of a running MCP call, by tool-call id: how far a long call has got. It is dropped when the
+// call ends, so a settled card shows none.
+const toolProgressById = new Map();
+const toolProgressListeners = new Set();
+
+export function setToolProgress(id, progress) {
+	if (progress) toolProgressById.set(id, progress);
+	else toolProgressById.delete(id);
+	for (const listener of toolProgressListeners) listener(id);
+}
+
+export function getToolProgress(id) {
+	return toolProgressById.get(id);
+}
+
+export function subscribeToolProgress(listener) {
+	toolProgressListeners.add(listener);
+	return () => toolProgressListeners.delete(listener);
+}
+
 export function subscribeSubagentProgress(listener) {
 	progressListeners.add(listener);
 	return () => progressListeners.delete(listener);

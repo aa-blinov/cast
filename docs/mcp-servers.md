@@ -62,7 +62,7 @@ Stdio servers inherit cast's **full environment**, with the config's `env` winni
 | `url` | Server endpoint URL |
 
 Remote servers are connected over **Streamable HTTP** first; if the server rejects it (legacy servers answer the initialize POST with an HTTP error), cast retries once over the deprecated **HTTP+SSE** transport, so old `/sse` endpoints (e.g. Cloudflare's docs server) work with the same one-line config. Timeouts are not retried: a hung endpoint is hung on either transport.
-| `headers` | HTTP headers for auth (static header/token only) |
+| `headers` | HTTP headers for auth (a static token); for OAuth see [Signing in](#signing-in-oauth) |
 
 Each server needs either `command` (local) or `url` (remote), not both.
 
@@ -88,7 +88,9 @@ The model lists, then reads; a URI built from a template reads like any other. A
 
 A server with only resources, or only prompts, has no `tools/list`: it connects with no tools of its own and not as a failed server.
 
-Not supported: subscribing to a resource's changes, and `@`-mentioning a resource in a message.
+**`@`-mentions.** Write `@<server>:<uri>` in a message (`@docs:file:///docs/readme.md`) and cast reads that resource before the model's first request and hands it over with the message, so the model has it without a call. The server name is the one the tools use (cleaned the way tool names are). A mention counts at the start of a word, so `ann@host:8080` is left alone; at most five per message; a server the persona may not use is skipped; a resource that cannot be read is reported to the model as such.
+
+**Changes.** From a server that offers subscriptions, cast subscribes to each resource the model reads. When the server says one changed, the model is told once, on your next message, which ones, and decides whether to read them again.
 
 ## Prompts
 
@@ -96,7 +98,23 @@ A server that declares prompts (ready-made, parameterised requests) gets one sla
 
 Arguments are positional or named, in the order the prompt declares them: `/mcp:everything:args-prompt Tokyo state=Japan`. Quote a value with spaces (`code="x = 1"`). A missing required argument is reported with the server's own wording and nothing is sent. A prompt does not run while a turn is running.
 
-Offered in the web UI and in the terminal (a terminal attached to the daemon uses its own connection to the server). Not offered over ACP or `cast run`.
+Offered in the web UI, in the terminal (attached to the daemon, it uses its own connection to the server), over ACP (the editor's command list, sent again when a server's prompts change) and in `cast run` as a `command` action (`{"type":"command","name":"mcp:docs:review","args":" code"}`).
+
+## What a server sends and asks
+
+- **Changes to its lists.** A server that says its tools or prompts changed (`list_changed`) has them read again and swapped in place: the next turn has the new tools, `/` the new prompts, and no connection is restarted. Over Streamable HTTP this needs the server's listening stream, which cast opens only for a server that declares it sends such things (list changes, resource updates, logging); a server that does not declare them keeps the plain behaviour that avoids hangs with some servers.
+- **Progress.** A long call that reports progress shows `[3/10 message]` on its row in the terminal and a progress bar on its card in the web UI, and does not hit the request timeout while it keeps reporting.
+- **Logs.** A server's own log is kept (the last 200 lines at level `info` and above); `/mcp logs <name>` shows the last 50.
+- **Roots.** Servers are told the working folder (`roots/list`): the session's folder for a project's servers, the folder cast was started in for the shared set.
+- **Structured output.** A tool that returns only `structuredContent` is shown as that JSON.
+- **Sampling.** A server may ask for a model answer while one of its tools runs. It is asked of you first, as the same confirmation a dangerous command gets (it names the server and the start of the request), and runs on your current model and provider; in a mode that never asks (`bypass`) it runs, and where nobody can be asked (`cast run`, ACP without a client answer) it is refused. A request outside a running tool call is refused too.
+- **Questions for you (elicitation).** A server may ask for input while a tool runs: a form of text, number, yes/no and choice fields. The web UI shows it as a card (required fields marked, checked before it is sent), the terminal asks field by field; Submit, Decline and Cancel are all answers the server can handle. Left unanswered for five minutes, or when the call ends, it is cancelled. `cast run` and ACP decline it. A server asking you to open a URL is declined.
+
+## Signing in (OAuth)
+
+A remote server that wants OAuth answers `401`; the connect error then says `run /mcp auth <name>` (not when an `Authorization` header is configured: that `401` is a bad token). `/mcp auth <name>` prints an address; open it, sign in, and the browser comes back to `http://127.0.0.1:33418/callback` on the machine running cast, which finishes the login and reconnects the server. If the browser is on another machine (cast on a server), copy the address it ends at (it will not load) and run `/mcp auth <name> <that address>`. Port 33418 is fixed because the client registers it with the server once; free it if it is busy.
+
+The login (token, refresh token, registered client) is kept in `~/.cast/mcp-auth.json` (mode 600), per server and address, and is refreshed on its own. `/mcp logout <name>` forgets it. A login is never started by a connect: only by `/mcp auth`.
 
 ## Connection
 
@@ -133,6 +151,9 @@ Extra paths (`--mcp`) work even with `--no-mcp`.
 | `/mcp list` | Read-only list (origin + tools/status) |
 | `/mcp enable` / `disable <name>` | Toggle one server without the picker |
 | `/mcp uninstall` | Remove a server from global/project `mcp.json` (picker + confirm, or typed name) |
+| `/mcp logs <name>` | The last lines the server logged |
+| `/mcp auth <name> [address]` | Sign in to a remote server with OAuth (see above) |
+| `/mcp logout <name>` | Forget that sign in |
 | `/mcp help` | Cheat sheet |
 | `/reload` | Reconnect MCP servers (re-reads config files) |
 
@@ -166,6 +187,7 @@ The picker shows all servers from all config sources, regardless of connection s
 ## Limitations
 
 - **Transports**: stdio and Streamable HTTP are primary. Cast also retries a failed Streamable HTTP initialization once through legacy HTTP+SSE for older servers; new server deployments should use Streamable HTTP.
-- **Auth**: Static header/token authentication only. OAuth (browser redirect, token storage/refresh) is not supported.
-- **Tool output**: Text, images, resource links, and embedded resources are handled. Audio content is noted but omitted.
-- **Resources**: listing and reading only (see above); no subscriptions to changes, no `@`-mention. Prompts are run by you as `/mcp:<server>:<prompt>` (see above), never called by the model.
+- **Auth**: a static header/token, or OAuth through `/mcp auth` (authorization code with PKCE and dynamic client registration; no client credentials or enterprise flows).
+- **Tool output**: Text, images, resource links, embedded resources and structured output are handled. Audio content is noted but omitted.
+- **Prompts** are run by you as `/mcp:<server>:<prompt>`, never called by the model; their arguments are not auto-completed (`completion/complete`).
+- **Not supported**: tasks (the experimental long-running call protocol), a server asking you to open a URL (URL-mode elicitation), roots following a session that moves into a worktree.

@@ -1419,6 +1419,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			// Held in memory while the turn waits: a client that reloads or
 			// reattaches mid-wait gets the prompt back from here.
 			bashConfirm: bridge.getBashConfirm(ws.id) ?? null,
+			mcpElicit: bridge.getMcpElicit(ws.id) ?? null,
 			title: ws.session.title,
 			pinned: ws.session.pinned,
 			shareToken: ws.session.shareToken ?? null,
@@ -1756,6 +1757,35 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		}
 		if (!bridge.answerBashConfirm(params.id, id, allow, always)) {
 			return json(res, { error: "No matching confirmation is pending" }, 409);
+		}
+		json(res, { ok: true }, 202);
+	});
+
+	route("POST", "/api/sessions/:id/mcp-elicit", async (req, res, params) => {
+		const ws = bridge.getSession(params.id);
+		if (!ws) return json(res, { error: "Not found" }, 404);
+		let parsed: { id?: unknown; action?: unknown; content?: unknown };
+		try {
+			parsed = JSON.parse(await readBody(req));
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		const { id, action, content } = parsed;
+		if (typeof id !== "string" || (action !== "accept" && action !== "decline" && action !== "cancel")) {
+			return json(
+				res,
+				{ error: 'Expected { id: string, action: "accept" | "decline" | "cancel", content?: object }' },
+				400,
+			);
+		}
+		const values =
+			content && typeof content === "object" && !Array.isArray(content)
+				? (content as Record<string, string | number | boolean | string[]>)
+				: undefined;
+		if (
+			!bridge.answerMcpElicit(params.id, id, action === "accept" ? { action, content: values ?? {} } : { action })
+		) {
+			return json(res, { error: "No matching form is pending" }, 409);
 		}
 		json(res, { ok: true }, 202);
 	});

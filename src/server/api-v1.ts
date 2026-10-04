@@ -35,7 +35,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "POST",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+\/(fork|rewind|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|fs\/create|fs\/move|fs\/delete|inputs\/upload)$/,
+			/^\/api\/sessions\/[^/]+\/(fork|rewind|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|mcp-elicit|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|fs\/create|fs\/move|fs\/delete|inputs\/upload)$/,
 	},
 	{ method: "PUT", legacyPath: /^\/api\/sessions\/[^/]+\/(fs\/upload|inputs\/upload)$/ },
 	{ method: "GET", legacyPath: /^\/api\/browse$/ },
@@ -815,6 +815,33 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 				},
 			},
 		},
+		"/api/v1/sessions/{id}/mcp-elicit": {
+			post: {
+				summary: "Answer a form an MCP server asked the person to fill in",
+				description:
+					"An MCP server can ask for input while one of its tools runs (elicitation). The call stays blocked until this is answered, or the request times out (cancelled).",
+				parameters: [idParameter],
+				requestBody: requestBody({
+					type: "object",
+					required: ["id", "action"],
+					properties: {
+						id: { type: "string", description: "The id carried by the mcp_elicit event." },
+						action: {
+							enum: ["accept", "decline", "cancel"],
+							description: "accept sends content; decline refuses; cancel dismisses.",
+						},
+						content: { type: "object", description: "With accept: the values for the fields of the form." },
+					},
+				}),
+				responses: {
+					"202": jsonResponse("Answer accepted", { $ref: "#/components/schemas/Ok" }),
+					"400": errorResponse,
+					"401": errorResponse,
+					"404": errorResponse,
+					"409": errorResponse,
+				},
+			},
+		},
 		"/api/v1/sessions/{id}/plan-transition": {
 			post: {
 				summary: "Resolve a plan completion transition",
@@ -966,6 +993,10 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 					turnStartedAt: { type: ["integer", "null"], description: "Epoch ms the in-flight turn began." },
 					question: { type: ["object", "null"], description: "Pending question awaiting an answer." },
 					planTransition: { type: ["object", "null"] },
+					mcpElicit: {
+						type: ["object", "null"],
+						description: "The MCP form the call is waiting on (same shape as the mcp_elicit event), or null.",
+					},
 					bashConfirm: {
 						type: ["object", "null"],
 						description:

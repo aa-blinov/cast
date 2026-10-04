@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ElicitRequestFormParams, ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // Node 22 has no global EventSource; undici ships one (experimental) that we
 // use to receive the daemon's SSE stream. The browser build (esbuild bundle)
@@ -16,6 +17,7 @@ import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts"
 import { describeTurnError, isRetryableStreamError, type Message, stripHermesToolCalls } from "../core/llm.ts";
 import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
+import type { AskMcpForm } from "../core/mcp-interaction.ts";
 import {
 	approvedResumeText,
 	getPendingApproval,
@@ -53,6 +55,7 @@ import type { SubagentProgress } from "../core/tools/task.ts";
 import {
 	abortServerSession,
 	answerServerBashConfirm,
+	answerServerMcpElicit,
 	answerServerQuestion,
 	ensureServerClient,
 	followUpServerSession,
@@ -76,6 +79,7 @@ import {
 import { displayWidthCacheFlush } from "./display-width.ts";
 import { isTableLine } from "./markdown-terminal.ts";
 import { notifyTerminal, turnEndNotice } from "./terminal-notify.ts";
+import { applyToolProgress } from "./tool-progress.ts";
 import { reportFatal } from "./tui-errors.ts";
 
 export type AgentStatus = "idle" | "running" | "error";
@@ -96,6 +100,8 @@ export interface ToolCallEntry {
 	result?: string;
 	/** A running `task` call's latest subagent progress. */
 	progress?: SubagentProgress;
+	/** A running MCP call's latest step ("3/10 reading"). */
+	toolProgress?: string;
 }
 
 /**
@@ -211,10 +217,19 @@ export interface DaemonBashConfirm {
 	rule?: string;
 }
 
+/** A form an MCP server asked the daemon's session for, as the daemon holds it. */
+export interface DaemonMcpElicit {
+	id: string;
+	server: string;
+	message: string;
+	schema: ElicitRequestFormParams["requestedSchema"];
+}
+
 export function parseDaemonPendingState(state: Record<string, unknown>): {
 	question: PlanQuestion | undefined;
 	planTransition: PlanTransition | undefined;
 	bashConfirm: DaemonBashConfirm | undefined;
+	mcpElicit: DaemonMcpElicit | undefined;
 	status: AgentStatus | undefined;
 	startedAt: number | undefined;
 } {
@@ -222,7 +237,17 @@ export function parseDaemonPendingState(state: Record<string, unknown>): {
 	const planTransition = state.planTransition;
 	const status = state.status;
 	const confirm = state.bashConfirm as Partial<DaemonBashConfirm> | null | undefined;
+	const elicit = state.mcpElicit as Partial<DaemonMcpElicit> | null | undefined;
 	return {
+		mcpElicit:
+			elicit && typeof elicit.id === "string" && typeof elicit.server === "string" && elicit.schema
+				? {
+						id: elicit.id,
+						server: elicit.server,
+						message: typeof elicit.message === "string" ? elicit.message : "",
+						schema: elicit.schema,
+					}
+				: undefined,
 		bashConfirm:
 			confirm && typeof confirm.id === "string" && typeof confirm.command === "string"
 				? {
@@ -403,6 +428,8 @@ interface UseAgentSessionParams {
 	permissionMode: PermissionMode;
 	mcpResult: McpSetupResult;
 	confirmBash: ConfirmBash;
+	/** Shows an MCP server's form to the person (local runs). */
+	askMcpForm: AskMcpForm;
 	/** Per-turn system prompt rebuild for sticky rules + @-mention. */
 	rebuildSystemPrompt?: (context: { userText: string; contextFiles: string[] }) => string;
 	/** The agent saved a persona and asked to switch to it (persona_create with
@@ -602,6 +629,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		permissionMode,
 		mcpResult,
 		confirmBash,
+		askMcpForm,
 		rebuildSystemPrompt,
 		refreshPersonasForTurn,
 		personas,
@@ -1210,6 +1238,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					steeringQueue: runner.steeringQueue,
 					followUpQueue: runner.followUpQueue,
 					confirmBash: permissionMode === "bypass" ? undefined : confirmBash,
+					askMcpForm,
 					preApproved,
 					// Same crash-safe snapshot the daemon keeps: quitting mid-turn
 					// (or a crash) must not lose the prompt and what already ran.
@@ -1308,6 +1337,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								updateStreaming((s) =>
 									s ? reduceStreamEvent(s, { type: "subagent_progress", progress: event }) : s,
 								);
+								break;
+							case "tool_progress":
+								updateStreaming((s) => (s ? applyToolProgress(s, event) : s));
 								break;
 							case "tool_end":
 								updateStreaming((s) => {
@@ -1525,6 +1557,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			permissionMode,
 			mcpResult,
 			confirmBash,
+			askMcpForm,
 			refresh,
 			promoteStreamingToHistory,
 			updateStreaming,
@@ -1621,6 +1654,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				setPendingQuestion(pending.question);
 				setPendingPlanTransition(pending.planTransition);
 				if (pending.bashConfirm) askDaemonConfirmRef.current(pending.bashConfirm);
+				if (pending.mcpElicit) askDaemonElicitRef.current(pending.mcpElicit);
 				applyDaemonStatusRef.current(pending, askedAt);
 			})
 			.catch(() => {});
@@ -1677,6 +1711,41 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		})();
 		return () => controller.abort();
 	}, [isClient, session.id]);
+	// The same for a form an MCP server asked for: one prompt per id, closed when it is settled elsewhere.
+	const openElicitsRef = useRef(new Map<string, AbortController>());
+	const askMcpFormRef = useRef(askMcpForm);
+	askMcpFormRef.current = askMcpForm;
+	const askDaemonElicitRef = useRef((_request: DaemonMcpElicit) => {});
+	askDaemonElicitRef.current = (request) => {
+		if (openElicitsRef.current.has(request.id)) return;
+		const controller = new AbortController();
+		openElicitsRef.current.set(request.id, controller);
+		void (async () => {
+			let result: ElicitResult = { action: "cancel" };
+			try {
+				result = await askMcpFormRef.current(
+					request.server,
+					{ mode: "form", message: request.message, requestedSchema: request.schema },
+					controller.signal,
+				);
+			} catch {
+				result = { action: "cancel" };
+			}
+			openElicitsRef.current.delete(request.id);
+			if (controller.signal.aborted || !serverClient) return;
+			try {
+				await answerServerMcpElicit(
+					serverClient,
+					session.id,
+					request.id,
+					result.action,
+					result.action === "accept" ? result.content : undefined,
+				);
+			} catch {
+				// The daemon cancels the request on its own timeout if this never lands.
+			}
+		})();
+	};
 	const askDaemonConfirmRef = useRef((_request: DaemonBashConfirm) => {});
 	askDaemonConfirmRef.current = (request) => {
 		if (openConfirmsRef.current.has(request.id)) return;
@@ -1739,6 +1808,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						setPendingQuestion(pending.question);
 						setPendingPlanTransition(pending.planTransition);
 						if (pending.bashConfirm) askDaemonConfirmRef.current(pending.bashConfirm);
+						if (pending.mcpElicit) askDaemonElicitRef.current(pending.mcpElicit);
 						applyDaemonStatusRef.current(pending, askedAt);
 					})
 					.catch(() => {});
@@ -1871,6 +1941,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 				case "subagent_progress":
 					updateStreaming((s) => (s ? reduceStreamEvent(s, { type: "subagent_progress", progress: event }) : s));
 					break;
+				case "tool_progress":
+					updateStreaming((s) => (s ? applyToolProgress(s, event) : s));
+					break;
 				case "tool_end": {
 					updateStreaming((s) => {
 						if (!s) return s;
@@ -1914,6 +1987,12 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					break;
 				case "bash_confirm_resolved":
 					openConfirmsRef.current.get(event.id)?.abort();
+					break;
+				case "mcp_elicit":
+					askDaemonElicitRef.current(event);
+					break;
+				case "mcp_elicit_resolved":
+					openElicitsRef.current.get(event.id)?.abort();
 					break;
 				case "agent_actor": {
 					const status = event.actor.status === "success" ? "completed" : event.actor.status;

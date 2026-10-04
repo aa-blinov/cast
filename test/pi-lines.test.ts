@@ -14,6 +14,26 @@ const bash = (status: ToolCallEntry["status"], command = LONG): ToolCallEntry =>
 	status,
 });
 
+describe("toolRowLines: an MCP call's progress", () => {
+	const call = (status: ToolCallEntry["status"]): ToolCallEntry => ({
+		id: "t",
+		name: "mcp_x_slow",
+		args: "{}",
+		status,
+		toolProgress: "3/10 reading",
+	});
+
+	it("shows how far a running call has got, in one row that fits the width, and not once it has finished", () => {
+		for (const width of [46, 100]) {
+			const rows = toolRowLines(call("running"), width);
+			expect(rows).toHaveLength(1);
+			expect(plain(rows[0]!)).toContain("[3/10 reading]");
+			expect(visibleWidth(rows[0]!)).toBeLessThanOrEqual(width);
+		}
+		expect(toolRowLines(call("ok"), 100).map(plain).join("\n")).not.toContain("3/10");
+	});
+});
+
 describe("toolRowLines: a call with a huge payload", () => {
 	// A heredoc writing a file, or the arguments of a tool with no summary of its own, can be megabytes. They used to
 	// be measured and wrapped in full (seconds per layout, repeated on every resize); the row now stops and counts.

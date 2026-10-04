@@ -137,6 +137,7 @@ export function toolRowLines(call: ToolCallEntry, width: number): string[] {
 				{ color: colors.accent },
 			)
 		: "";
+	const stepText = running && call.toolProgress ? paint(`[${call.toolProgress}] `, { color: colors.accent }) : "";
 	const tone = { color: failed ? colors.error : colors.muted };
 	const render = (piece: ReturnType<typeof summaryPieces>[number]) => {
 		if (piece.style === "added") return paint(piece.text, { color: colors.success });
@@ -159,7 +160,7 @@ export function toolRowLines(call: ToolCallEntry, width: number): string[] {
 	const tail = note + failure;
 	if (running) {
 		const room = Math.max(1, width - visibleWidth(tail));
-		return [truncateToWidth(margin + name + badge + summary, room, "…") + tail];
+		return [truncateToWidth(margin + name + badge + stepText + summary, room, "…") + tail];
 	}
 	// A finished command wraps in full, its continuation under the text and not under the margin.
 	const body = wrapTextWithAnsi(name + badge + summary + tail, Math.max(1, width - MARGIN_WIDTH));

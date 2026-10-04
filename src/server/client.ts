@@ -337,6 +337,20 @@ export async function answerServerBashConfirm(
 	});
 }
 
+/** Answer a form an MCP server asked the person to fill in; `content` only goes with "accept". */
+export async function answerServerMcpElicit(
+	client: ServerClient,
+	sessionId: string,
+	id: string,
+	action: "accept" | "decline" | "cancel",
+	content?: Record<string, unknown>,
+): Promise<void> {
+	await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/mcp-elicit`, {
+		method: "POST",
+		body: { id, action, ...(content ? { content } : {}) },
+	});
+}
+
 export async function runServerCommand(client: ServerClient, sessionId: string, command: string): Promise<unknown> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/command`, {
 		method: "POST",

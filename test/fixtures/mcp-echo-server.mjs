@@ -3,8 +3,10 @@
 // not mocked, so the tests exercise the actual protocol handshake against the
 // official SDK on both ends. Runs as stdio by default (`node mcp-echo-server.mjs`),
 // or as a real HTTP server with `--http` (prints "LISTENING <port>" once up).
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -13,6 +15,8 @@ import {
 	ListResourceTemplatesRequestSchema,
 	ListToolsRequestSchema,
 	ReadResourceRequestSchema,
+	SubscribeRequestSchema,
+	UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
@@ -175,6 +179,99 @@ function buildServer() {
 		});
 	}
 
+	// Gated behind --dynamic: the tool and prompt lists change while connected, and the server says so.
+	if (process.argv.includes("--dynamic")) {
+		server.registerTool("grow", { description: "Adds a tool and a prompt to the server." }, async () => {
+			server.registerTool("grown", { description: "Appeared after connect." }, async () => ({
+				content: [{ type: "text", text: "grown" }],
+			}));
+			server.registerPrompt("fresh", { description: "Appeared after connect" }, () => ({
+				messages: [{ role: "user", content: { type: "text", text: "fresh prompt" } }],
+			}));
+			return { content: [{ type: "text", text: "grew" }] };
+		});
+		server.registerTool("shrink", { description: "Removes the grown tool." }, async () => {
+			server._registeredTools.grown?.remove();
+			return { content: [{ type: "text", text: "shrank" }] };
+		});
+		server.registerPrompt("seed", { description: "A prompt present from the start" }, () => ({
+			messages: [{ role: "user", content: { type: "text", text: "seed" } }],
+		}));
+	}
+
+	// Gated behind --progress: reports steps of a call, logs, reads the client's roots, returns structured output.
+	if (process.argv.includes("--progress")) {
+		server.server.registerCapabilities({ logging: {} });
+		server.registerTool(
+			"slow",
+			{ description: "Takes three steps.", inputSchema: { steps: z.number().optional() } },
+			async ({ steps }, extra) => {
+				const total = steps ?? 3;
+				for (let i = 1; i <= total; i++) {
+					if (extra._meta?.progressToken !== undefined) {
+						await extra.sendNotification({
+							method: "notifications/progress",
+							params: { progressToken: extra._meta.progressToken, progress: i, total, message: `step ${i}` },
+						});
+					// Real work takes time; a client drops a progress handler when the answer arrives.
+					await new Promise((resolve) => setTimeout(resolve, 30));
+					}
+				}
+				return { content: [{ type: "text", text: "done" }] };
+			},
+		);
+		server.registerTool("chatty", { description: "Logs two lines." }, async () => {
+			await server.server.sendLoggingMessage({ level: "info", logger: "fixture", data: "first line" });
+			await server.server.sendLoggingMessage({ level: "warning", data: { code: 7 } });
+			return { content: [{ type: "text", text: "logged" }] };
+		});
+		server.registerTool("roots", { description: "Lists the client's roots." }, async () => {
+			const { roots } = await server.server.listRoots();
+			return { content: [{ type: "text", text: roots.map((r) => `${r.name} ${r.uri}`).join("\n") }] };
+		});
+		server.registerTool(
+			"structured",
+			{ description: "Returns only structured output.", outputSchema: { temperature: z.number() } },
+			async () => ({ structuredContent: { temperature: 21 }, content: [] }),
+		);
+	}
+
+	// Gated behind --ask: the server asks the client for a model answer and for a person's input.
+	if (process.argv.includes("--ask")) {
+		server.registerTool("ask-model", { description: "Asks the client's model.", inputSchema: { prompt: z.string() } }, async ({ prompt }) => {
+			const answer = await server.server.createMessage({
+				messages: [{ role: "user", content: { type: "text", text: prompt } }],
+				maxTokens: 50,
+			});
+			return { content: [{ type: "text", text: `model said: ${answer.content.type === "text" ? answer.content.text : answer.content.type}` }] };
+		});
+		server.registerTool("ask-user", { description: "Asks the person for a name.", inputSchema: {} }, async () => {
+			const answer = await server.server.elicitInput({
+				message: "Who are you?",
+				requestedSchema: { type: "object", properties: { name: { type: "string", title: "Name" } }, required: ["name"] },
+			});
+			return { content: [{ type: "text", text: `${answer.action}: ${JSON.stringify(answer.content ?? {})}` }] };
+		});
+	}
+
+	// Gated behind --subscribe: resources can be subscribed to, and a tool says one of them changed.
+	if (process.argv.includes("--subscribe")) {
+		server.server.registerCapabilities({ resources: { subscribe: true } });
+		const watched = new Set();
+		server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+			watched.add(request.params.uri);
+			return {};
+		});
+		server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+			watched.delete(request.params.uri);
+			return {};
+		});
+		server.registerTool("touch", { description: "Says the readme changed.", inputSchema: {} }, async () => {
+			await server.server.sendResourceUpdated({ uri: "file:///docs/readme.md" });
+			return { content: [{ type: "text", text: `watched: ${[...watched].join(",")}` }] };
+		});
+	}
+
 	// Gated behind --resources-paged: resources across two pages, to prove the listing follows nextCursor.
 	if (process.argv.includes("--resources-paged")) {
 		server.server.registerCapabilities({ resources: {} });
@@ -219,12 +316,38 @@ function buildServer() {
 	return server;
 }
 
-if (process.argv.includes("--http")) {
+// A server of the legacy HTTP+SSE kind: GET /sse opens the stream, POST /messages carries the requests.
+if (process.argv.includes("--legacy-sse")) {
+	const streams = new Map();
+	const legacy = createServer(async (req, res) => {
+		const url = new URL(req.url, "http://localhost");
+		if (req.method === "GET" && url.pathname === "/sse") {
+			const transport = new SSEServerTransport("/messages", res);
+			streams.set(transport.sessionId, transport);
+			await buildServer().connect(transport);
+		} else if (req.method === "POST" && url.pathname === "/messages") {
+			await streams.get(url.searchParams.get("sessionId"))?.handlePostMessage(req, res);
+		} else {
+			res.writeHead(405).end();
+		}
+	});
+	legacy.listen(0, "127.0.0.1", () => {
+		console.log(`LISTENING ${legacy.address().port}`);
+	});
+} else if (process.argv.includes("--http")) {
 	// Stateless mode (sessionIdGenerator: undefined) — one transport per
 	// request is simplest for a test fixture, no session bookkeeping needed.
+	// With --stateful one server and transport live per session, so it can push to a client between its requests.
+	const stateful = process.argv.includes("--stateful");
+	const live = new Map();
 	const httpServer = createServer(async (req, res) => {
 		lastAuthHeader = req.headers["x-test-token"] ?? "none";
-		const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+		const known = stateful ? live.get(req.headers["mcp-session-id"]) : undefined;
+		if (known) return known.handleRequest(req, res);
+		const transport = new StreamableHTTPServerTransport({
+			sessionIdGenerator: stateful ? () => randomUUID() : undefined,
+			onsessioninitialized: (id) => live.set(id, transport),
+		});
 		const server = buildServer();
 		await server.connect(transport);
 		await transport.handleRequest(req, res);

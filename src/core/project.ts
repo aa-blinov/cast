@@ -338,7 +338,7 @@ export async function resolveMcpForCwd(
 	// Filter out disabled servers before connecting
 	const disabledSet = new Set(disabledServers);
 	const filtered = Object.fromEntries(Object.entries(merged).filter(([name]) => !disabledSet.has(name)));
-	const result = await connectMcpServers(filtered);
+	const result = await connectMcpServers(filtered, undefined, undefined, [cwd]);
 	result.allServerNames = allNames.sort((a, b) => a.localeCompare(b));
 	result.serverSources = serverSources;
 	// Diagnostics are intentionally not printed here: this runs in the TUI

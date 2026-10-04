@@ -68,6 +68,8 @@ import {
 } from "./llm.ts";
 import { closeMcpConnections, type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
 import { isMcpConfigPath } from "./mcp-config.ts";
+import { type AskMcpForm, createMcpInteraction } from "./mcp-interaction.ts";
+import { appendMcpResourceMentions, appendMcpResourceUpdates } from "./mcp-mentions.ts";
 import {
 	type CheckpointWriterHandle,
 	type CheckpointWriterToolRuntime,
@@ -854,6 +856,8 @@ export type AgentEvent =
 	  }
 	| { type: "tool_start"; id: string; name: string; args: string; status: "running" }
 	| { type: "tool_end"; id: string; name: string; result: ToolResult; status: CompletedToolCallStatus }
+	/** A long MCP call reports how far it has got (`notifications/progress`). */
+	| { type: "tool_progress"; id: string; name: string; progress: number; total?: number; message?: string }
 	| { type: "turn_end"; toolResults: Array<{ id: string; name: string; result: ToolResult }> }
 	// Carries the actual injected messages (not just a count) so the UI can show
 	// them as permanent history entries immediately, the same way it does for
@@ -943,6 +947,8 @@ export interface LoopConfig {
 	mcpTools?: Tool[];
 	/** Dispatch table for mcpTools — checked before falling back to the built-in executor. */
 	mcpToolIndex?: Map<string, McpToolHandle>;
+	/** Shows an MCP server's form (elicitation) to the person; without it such requests are declined. */
+	askMcpForm?: AskMcpForm;
 	/** Available personas for the task tool. */
 	personas?: Persona[];
 	/** Current persona name (inherited by subagents by default). */
@@ -2583,7 +2589,20 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				(await gateWorktreeCreate(name, finalArgs, loopConfig.confirmWrite));
 			if (writeDenial) return writeDenial;
 			const mcpTool = mcpToolIndex?.get(name);
-			if (mcpTool) return mcpTool.call(finalArgs, toolSignal);
+			if (mcpTool) {
+				return mcpTool.call(finalArgs, toolSignal, {
+					interaction: mcpInteraction,
+					onProgress: (p) =>
+						onEvent({
+							type: "tool_progress",
+							id: toolCallId ?? "",
+							name,
+							progress: p.progress,
+							total: p.total,
+							message: p.message,
+						}),
+				});
+			}
 			return builtinExecuteTool(name, finalArgs, toolSignal, toolCallId);
 		};
 		const hooks = activeHooks;
@@ -2609,6 +2628,32 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		return dispatch(args);
 	};
 	const client = createClient(config, loopConfig.modelProvider);
+	// What an MCP server may ask for while one of its tools runs. Sampling is asked of the person on the surface's own
+	// confirmation, not through the persisted approval above: a restart must not resume a question as if it were a command.
+	const mcpInteraction = createMcpInteraction({
+		model: initialModel,
+		confirm: loopConfig.confirmBash,
+		bypass: loopConfig.permissionMode === "bypass",
+		askForm: loopConfig.askMcpForm,
+		complete: async (chat, maxTokens, sig) => {
+			const done = await streamAndCollect(
+				client,
+				initialModel,
+				chat,
+				[],
+				maxTokens,
+				sig,
+				undefined,
+				undefined,
+				{},
+				undefined,
+				{},
+				undefined,
+				loopConfig.sessionId ? { sessionId: loopConfig.sessionId, purpose: "mcp-sampling" } : undefined,
+			);
+			return { text: done.content, truncated: done.finishReason === "length" };
+		},
+	});
 	const steeringQueue = loopConfig.steeringQueue ?? new MessageQueue();
 	const followUpQueue = loopConfig.followUpQueue ?? new MessageQueue();
 
@@ -2893,6 +2938,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				`Compaction cannot get this conversation below its threshold: the system prompt and tools alone take about ${Math.round(promptTokens / 1000)}k tokens of the ${Math.round(trigger / 1000)}k that triggers it. It will run less often now. A larger contextWindow (or compactionThreshold) fits this setup better.`,
 			);
 		};
+		// What the person pointed at with @server:uri, read before the first request so the model has it already.
+		if (mcpToolIndex) {
+			const available = new Set(mcps.map((t) => t.function.name));
+			await appendMcpResourceMentions(messages, mcpToolIndex, (name) => available.has(name), signal);
+			appendMcpResourceUpdates(messages, mcpToolIndex);
+		}
 		// Goal-mode iteration budget (maxOuterIterations), enforced in the loop.
 		let outerIteration = 0;
 		// The main agent turn loop is inherently sequential: each iteration

@@ -21,6 +21,7 @@ import { formatLspStatus, lspStatus } from "../core/lsp/index.ts";
 import {
 	closeMcpConnections,
 	formatMcpForPrompt,
+	formatMcpLogs,
 	getMcpPrompt,
 	type McpSetupResult,
 	mcpPromptCommands,
@@ -28,6 +29,7 @@ import {
 	parseMcpPromptArguments,
 	syncMcpServers,
 } from "../core/mcp.ts";
+import { clearMcpLogin, runMcpAuthCommand } from "../core/mcp-auth.ts";
 import {
 	cancelAutomaticMemoryRun,
 	distillProjectMemory,
@@ -268,10 +270,13 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/keys", description: "List all keybindings" },
 	{ name: "/lsp", description: "Show the language servers cast is running" },
 	{ name: "/mcp", description: "Toggle MCP servers on/off" },
+	{ name: "/mcp auth", description: "Sign in to a remote server with OAuth — name", takesArgs: true },
 	{ name: "/mcp disable", description: "Disable one server — name", takesArgs: true },
 	{ name: "/mcp enable", description: "Enable one server — name", takesArgs: true },
 	{ name: "/mcp help", description: "Show MCP command cheat sheet" },
 	{ name: "/mcp list", description: "List configured MCP servers" },
+	{ name: "/mcp logout", description: "Forget a server's sign in — name", takesArgs: true },
+	{ name: "/mcp logs", description: "Show what a server logged — name", takesArgs: true },
 	{
 		name: "/mcp uninstall",
 		description: "Uninstall — picker, or server name",
@@ -573,6 +578,9 @@ const MCP_HELP = `MCP — pick a row from the /mcp palette, or type:
 
   /mcp                         Toggle servers on/off (multi-select)
   /mcp list                    Configured servers + status
+  /mcp logs NAME               What the server logged (last 50 lines)
+  /mcp auth NAME [ADDRESS]     Sign in to a remote server (OAuth); ADDRESS is where the browser ended, if elsewhere
+  /mcp logout NAME             Forget the sign in
   /mcp enable|disable NAME
   /mcp uninstall               Pick server to remove from mcp.json
   /mcp uninstall NAME
@@ -806,6 +814,15 @@ async function handleSkillSources(deps: CommandDeps, args: string[]): Promise<vo
 	await reloadSkillsAfterChange(deps);
 	const off = next.length > 0 ? next.join(", ") : "none";
 	deps.agent.addDisplayMessage({ role: "warning", content: `[Skill sources off: ${off}]` });
+}
+
+/** Connect one server again on what the config says, for after its login changed. */
+async function reconnectMcpFromConfig(deps: CommandDeps, serverName: string): Promise<void> {
+	if (deps.mcpResult.connectPending || deps.projectDeps.noMcp) return;
+	const { merged, serverSources } = loadMergedMcpConfig(deps.projectDeps, deps.cwd, deps.projectTrusted);
+	const off = new Set(loadSettings().disabledMcpServers ?? []);
+	const desired = Object.fromEntries(Object.entries(merged).filter(([name]) => !off.has(name)));
+	await syncMcpServers(deps.mcpResult, desired, Object.keys(merged), serverSources, new Set([serverName]));
 }
 
 /**
@@ -1048,6 +1065,38 @@ async function handleMcpCommand(input: string, deps: CommandDeps): Promise<void>
 	const name = rest.join(" ").trim();
 	if (verb === "list") {
 		deps.agent.addDisplayMessage({ role: "warning", content: formatMcpList(deps) });
+		return;
+	}
+	if (verb === "auth" || verb === "logout") {
+		const [serverName = "", ...pasted] = rest;
+		if (!serverName) {
+			showNotice(`[Usage: /mcp ${verb} <name>${verb === "auth" ? " [address the browser ended at]" : ""}]`);
+			return;
+		}
+		if (verb === "logout") {
+			const had = clearMcpLogin(serverName);
+			if (had) await reconnectMcpFromConfig(deps, serverName);
+			showNotice(had ? `[Signed out of "${serverName}"]` : `[No sign in on file for "${serverName}"]`);
+			return;
+		}
+		try {
+			const { merged } = loadMergedMcpConfig(deps.projectDeps, deps.cwd, deps.projectTrusted);
+			const message = await runMcpAuthCommand(serverName, merged[serverName], pasted.join(" "), {
+				afterLogin: () => reconnectMcpFromConfig(deps, serverName),
+				notify: (text) => showNotice(`[${text}]`),
+			});
+			deps.agent.addDisplayMessage({ role: "warning", content: message });
+		} catch (error) {
+			showNotice(`[${error instanceof Error ? error.message : String(error)}]`);
+		}
+		return;
+	}
+	if (verb === "logs") {
+		if (!name) {
+			showNotice("[Usage: /mcp logs <name>]");
+			return;
+		}
+		deps.agent.addDisplayMessage({ role: "warning", content: formatMcpLogs(deps.mcpResult, name) });
 		return;
 	}
 	if (verb === "enable" || verb === "disable") {

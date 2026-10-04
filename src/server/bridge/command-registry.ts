@@ -57,11 +57,13 @@ import type { Message } from "../../core/llm.ts";
 import { compactSessionMessages, runMemoryMaintenanceAgent } from "../../core/loop.ts";
 import {
 	closeMcpConnections,
+	formatMcpLogs,
 	getMcpPrompt,
 	type McpSetupResult,
 	mcpPromptCommands,
 	parseMcpPromptArguments,
 } from "../../core/mcp.ts";
+import { clearMcpLogin, runMcpAuthCommand } from "../../core/mcp-auth.ts";
 import {
 	cancelAutomaticMemoryRun,
 	distillProjectMemory,
@@ -73,6 +75,7 @@ import type { ProjectResolverDeps, resolveRulesForCwd } from "../../core/project
 import {
 	discoverSkillsForCwd,
 	listHooksForCwdSettings,
+	loadMergedMcpConfig,
 	readSkillsShSources,
 	removeMcpServerFromDisk,
 	resolveHooksForCwd,
@@ -1428,11 +1431,43 @@ const commandHandlers: Record<string, CommandHandler> = {
 				})),
 			};
 		}
+		if (sub === "auth") {
+			const [name = "", ...pasted] = rest.split(/\s+/);
+			if (!name) return { ok: false, error: "Usage: /mcp auth <name> [address the browser ended at]" };
+			const { merged } = loadMergedMcpConfig(ctx.projectDeps, sessionCwd, ctx.trustForCwd(sessionCwd));
+			try {
+				const message = await runMcpAuthCommand(name, merged[name], pasted.join(" "), {
+					afterLogin: async () => {
+						await syncMcp(sessionCwd, { force: [name] });
+						recomputeAllSystemPrompts();
+					},
+					notify: (text) => ctx.broadcaster.broadcast(ws, { type: "notice", message: text }),
+				});
+				return { ok: true, result: message };
+			} catch (err) {
+				return { ok: false, error: err instanceof Error ? err.message : String(err) };
+			}
+		}
+		if (sub === "logout") {
+			if (!rest) return { ok: false, error: "Usage: /mcp logout <name>" };
+			if (!clearMcpLogin(rest)) return { ok: true, result: `No sign in on file for "${rest}".` };
+			try {
+				await syncMcp(sessionCwd, { force: [rest] });
+				recomputeAllSystemPrompts();
+			} catch {
+				// The login is gone either way; the reconnect only shows it.
+			}
+			return { ok: true, result: `Signed out of "${rest}".` };
+		}
+		if (sub === "logs") {
+			if (!rest) return { ok: false, error: "Usage: /mcp logs <name>" };
+			return { ok: true, result: formatMcpLogs(mcpForSessionCwd(sessionCwd), rest) };
+		}
 		if (sub === "help") {
 			return {
 				ok: true,
 				result:
-					"/mcp list – /mcp enable <name> – /mcp disable <name> – /mcp reconnect <name> – /mcp uninstall <name>",
+					"/mcp list – /mcp logs <name> – /mcp auth <name> – /mcp logout <name> – /mcp enable <name> – /mcp disable <name> – /mcp reconnect <name> – /mcp uninstall <name>",
 			};
 		}
 		if (sub === "reconnect") {
