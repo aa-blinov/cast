@@ -1981,6 +1981,51 @@ describe("/worktree honours a blocking WorktreeCreate hook", () => {
 	});
 });
 
+describe("/mcp:<server>:<prompt>", () => {
+	const FIXTURE = join(import.meta.dirname, "fixtures", "mcp-echo-server.mjs");
+	let mcp: McpSetupResult;
+
+	beforeEach(async () => {
+		const { connectMcpServers } = await import("../src/core/mcp.ts");
+		mcp = await connectMcpServers({ docs: { command: "node", args: [FIXTURE, "--prompts"] } });
+	});
+	afterEach(async () => {
+		const { closeMcpConnections } = await import("../src/core/mcp.ts");
+		await closeMcpConnections(mcp.connections);
+	});
+
+	const notices = (calls: Calls) =>
+		(calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
+
+	it("renders the prompt on the server and submits what it returns", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.mcpResult = mcp;
+		await handleInput('/mcp:docs:review language=python code="x = 1"', undefined, deps);
+		expect(calls["agent.submit"]?.at(-1)?.[0]).toBe("Review this python:\nx = 1");
+		expect(notices(calls)).toEqual([]);
+	});
+
+	it("takes the whole rest of the line as the one argument of a prompt that has one", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.mcpResult = mcp;
+		await handleInput("/mcp:docs:explain how the cache works", undefined, deps);
+		expect(calls["agent.submit"]?.at(-1)?.[0]).toBe("Explain how the cache works.");
+	});
+
+	it("says what is missing, what is unknown and what the server refused, and submits nothing", async () => {
+		const { deps, calls } = createFakeDeps();
+		deps.mcpResult = mcp;
+		await handleInput("/mcp:docs:review", undefined, deps);
+		await handleInput("/mcp:docs:nope", undefined, deps);
+		await handleInput("/mcp:docs:broken", undefined, deps);
+		const shown = notices(calls);
+		expect(shown[0]).toContain("Missing code. Usage: <code> [language]");
+		expect(shown[1]).toContain("No MCP prompt /mcp:docs:nope");
+		expect(shown[2]).toContain("prompt backend is down");
+		expect(calls["agent.submit"]).toBeUndefined();
+	});
+});
+
 describe("/worktree attached to the daemon", () => {
 	it("is the daemon's to do: it is sent there, and nothing is made or saved here", async () => {
 		const { deps, calls } = createFakeDeps();

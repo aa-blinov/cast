@@ -31,6 +31,7 @@ import {
 	formatMcpForPrompt,
 	loadMcpConfig,
 	type McpSetupResult,
+	mcpPromptCommands,
 	syncMcpServers,
 } from "../core/mcp.ts";
 import {
@@ -3727,7 +3728,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				...(s.argumentHint ? { argumentHint: s.argumentHint } : {}),
 				blocking: false,
 			}));
-		return [...SLASH_COMMANDS, ...skillCommands];
+		// The prompts the session's MCP servers offer, run as /mcp:<server>:<prompt>.
+		const mcpPrompts = mcpPromptCommands(mcpForSessionCwd(sessionCwd)).map((c) => ({
+			name: c.name,
+			description: c.description,
+			takesArgs: c.takesArgs,
+			...(c.argumentHint ? { argumentHint: c.argumentHint } : {}),
+			blocking: false,
+		}));
+		return [...SLASH_COMMANDS, ...skillCommands, ...mcpPrompts];
 	}
 
 	return {

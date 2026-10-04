@@ -21,8 +21,11 @@ import { formatLspStatus, lspStatus } from "../core/lsp/index.ts";
 import {
 	closeMcpConnections,
 	formatMcpForPrompt,
+	getMcpPrompt,
 	type McpSetupResult,
+	mcpPromptCommands,
 	mcpServerToolBlurbs,
+	parseMcpPromptArguments,
 	syncMcpServers,
 } from "../core/mcp.ts";
 import {
@@ -857,7 +860,7 @@ async function uninstallMcpInteractive(deps: CommandDeps): Promise<void> {
 	const disabled = new Set(loadSettings().disabledMcpServers ?? []);
 	const toolCounts: Record<string, number> = {};
 	for (const c of deps.mcpResult.connections) toolCounts[c.serverName] = c.toolCount;
-	const withResources = new Set(deps.mcpResult.connections.filter((c) => c.resources).map((c) => c.serverName));
+	const extras = mcpServerExtras(deps.mcpResult.connections);
 	const blurbs = mcpServerToolBlurbs(deps.mcpResult);
 	const picked = await deps.pickers.pickOption(
 		[...removable]
@@ -867,7 +870,7 @@ async function uninstallMcpInteractive(deps: CommandDeps): Promise<void> {
 				const status = disabled.has(s.name)
 					? "disabled"
 					: count !== undefined
-						? `${count} tools${withResources.has(s.name) ? " + resources" : ""}`
+						? `${count} tools${extras.get(s.name) ?? ""}`
 						: "disconnected";
 				return {
 					value: s.name,
@@ -903,6 +906,18 @@ async function setMcpServerEnabled(deps: CommandDeps, name: string, enable: bool
 	});
 }
 
+/** What a server offers besides tools, for the lists: ` + resources + 2 prompts`. */
+function mcpServerExtras(connections: McpSetupResult["connections"]): Map<string, string> {
+	return new Map(
+		connections.map((c) => {
+			const parts = [c.resources ? "resources" : "", c.prompts?.length ? `${c.prompts.length} prompts` : ""].filter(
+				Boolean,
+			);
+			return [c.serverName, parts.length > 0 ? ` + ${parts.join(" + ")}` : ""];
+		}),
+	);
+}
+
 function formatMcpList(deps: CommandDeps): string {
 	const allNames = deps.mcpResult.allServerNames;
 	if (allNames.length === 0) {
@@ -911,7 +926,7 @@ function formatMcpList(deps: CommandDeps): string {
 	const disabled = new Set(loadSettings().disabledMcpServers ?? []);
 	const toolCounts: Record<string, number> = {};
 	for (const c of deps.mcpResult.connections) toolCounts[c.serverName] = c.toolCount;
-	const withResources = new Set(deps.mcpResult.connections.filter((c) => c.resources).map((c) => c.serverName));
+	const extras = mcpServerExtras(deps.mcpResult.connections);
 	const ownership = new Map(listUninstallableMcpServers(deps.cwd, deps.projectTrusted).map((s) => [s.name, s.origin]));
 	const lines = [...allNames]
 		.sort((a, b) => a.localeCompare(b))
@@ -922,7 +937,7 @@ function formatMcpList(deps: CommandDeps): string {
 			const status = disabled.has(name)
 				? "disabled"
 				: count !== undefined
-					? `${count} tools${withResources.has(name) ? " + resources" : ""}`
+					? `${count} tools${extras.get(name) ?? ""}`
 					: notUp;
 			return `${disabled.has(name) ? "off" : "on "} ${name} (${origin}, ${status})`;
 		});
@@ -4004,6 +4019,32 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		run: ({ input, deps }) => {
 			echoCommand(deps, input);
 			deps.agent.addDisplayMessage({ role: "warning", content: helpMarkdown() });
+			return;
+		},
+	},
+	{
+		// A prompt a connected MCP server offers, run like a skill: the server renders it, and what it returns is sent.
+		match: (input) => input.startsWith("/mcp:"),
+		run: async ({ input, deps, agent, showNotice }) => {
+			const spaceIdx = input.indexOf(" ");
+			const name = spaceIdx === -1 ? input : input.slice(0, spaceIdx);
+			const command = mcpPromptCommands(deps.mcpResult).find((c) => c.name === name);
+			if (!command) {
+				showNotice(`[No MCP prompt ${name}. Servers that are up and offer prompts list them when you type /mcp:.]`);
+				return;
+			}
+			const parsed = parseMcpPromptArguments(command.prompt, spaceIdx === -1 ? "" : input.slice(spaceIdx + 1));
+			if (!parsed.ok) {
+				showNotice(`[${name}: ${parsed.error}]`);
+				return;
+			}
+			const got = await getMcpPrompt(deps.mcpResult, command, parsed.arguments);
+			if (!got.ok) {
+				showNotice(`[${got.error}]`);
+				return;
+			}
+			fireUserPromptExpansion(deps, name.slice(1));
+			await agent.submit(got.text);
 			return;
 		},
 	},

@@ -55,7 +55,13 @@ import { fetchModels, probeProvider } from "../../core/config.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
 import type { Message } from "../../core/llm.ts";
 import { compactSessionMessages, runMemoryMaintenanceAgent } from "../../core/loop.ts";
-import { closeMcpConnections, type McpSetupResult } from "../../core/mcp.ts";
+import {
+	closeMcpConnections,
+	getMcpPrompt,
+	type McpSetupResult,
+	mcpPromptCommands,
+	parseMcpPromptArguments,
+} from "../../core/mcp.ts";
 import {
 	cancelAutomaticMemoryRun,
 	distillProjectMemory,
@@ -1979,6 +1985,8 @@ export async function dispatchRegisteredCommand(name: string, ctx: CommandContex
 	if (name.startsWith("/rule:")) {
 		return await commandRegistry["/rule:"]?.(ctx);
 	}
+	// /mcp:SERVER:PROMPT is one token too: a prompt a connected MCP server offers, run like a skill.
+	if (name.startsWith("/mcp:")) return await dispatchMcpPrompt(name, ctx);
 	const handler = commandRegistry[name];
 	if (handler) return await handler(ctx);
 	// Catch-all: any `/<name>` not handled above is a user-invocable
@@ -1986,6 +1994,31 @@ export async function dispatchRegisteredCommand(name: string, ctx: CommandContex
 	// skill matched" and the bridge falls through to its Unknown command
 	// error.
 	return await dispatchSkillInvocation(name, ctx);
+}
+
+/**
+ * `/mcp:<server>:<prompt> [arguments]`: asks the server for the prompt and submits what it returns as a real turn,
+ * the way a skill command does. Not blocking in the palette sense, but a turn that is running does not take another.
+ */
+async function dispatchMcpPrompt(name: string, ctx: CommandContext): Promise<CommandResult> {
+	const { ws, arg, cwd, mcpForSessionCwd, fireUserPromptExpansion, submit } = ctx;
+	const sessionCwd = ws.session.cwd ?? cwd;
+	const mcp = mcpForSessionCwd(sessionCwd);
+	const command = mcpPromptCommands(mcp).find((c) => c.name === name);
+	if (!command) {
+		return {
+			ok: false,
+			error: `No MCP prompt ${name}. Servers that are up and offer prompts list them when you type /mcp:.`,
+		};
+	}
+	if (ws.status === "running") return { ok: false, error: "Agent running — use /queue, /steer, or /abort" };
+	const parsed = parseMcpPromptArguments(command.prompt, arg);
+	if (!parsed.ok) return { ok: false, error: `${name}: ${parsed.error}` };
+	const got = await getMcpPrompt(mcp, command, parsed.arguments);
+	if (!got.ok) return { ok: false, error: got.error };
+	fireUserPromptExpansion(sessionCwd, name.slice(1));
+	runDetached(submit(ws.id, got.text), "running an MCP prompt");
+	return { ok: true, result: `Ran ${name}` };
 }
 
 /** Fallback used by dispatchRegisteredCommand when no named handler is

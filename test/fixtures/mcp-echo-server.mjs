@@ -122,6 +122,12 @@ function buildServer() {
 			async (uri) => ({ contents: [{ uri: uri.href, mimeType: "image/png", blob: "aGVsbG8=" }] }),
 		);
 		server.registerResource(
+			"memo",
+			"blob:///assets/memo.txt",
+			{ description: "text sent as a blob", mimeType: "text/plain" },
+			async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/plain", blob: "aGVsbG8gYmxvYg==" }] }),
+		);
+		server.registerResource(
 			"archive",
 			"blob:///assets/data.bin",
 			{ description: "an archive", mimeType: "application/octet-stream" },
@@ -133,6 +139,40 @@ function buildServer() {
 			{ description: "a note by id", mimeType: "text/plain" },
 			async (uri, { id }) => ({ contents: [{ uri: uri.href, mimeType: "text/plain", text: `note ${id}` }] }),
 		);
+	}
+
+	// Gated behind --prompts: prompts a person runs as slash commands, with and without arguments, one that seeds a
+	// conversation, one with an embedded resource, one that fails.
+	if (process.argv.includes("--prompts")) {
+		server.registerPrompt(
+			"review",
+			{
+				title: "Code review",
+				description: "Review a piece of code",
+				argsSchema: { code: z.string(), language: z.string().optional() },
+			},
+			({ code, language }) => ({
+				messages: [{ role: "user", content: { type: "text", text: `Review this ${language ?? "code"}:\n${code}` } }],
+			}),
+		);
+		server.registerPrompt(
+			"explain",
+			{ description: "Explain a topic", argsSchema: { topic: z.string() } },
+			({ topic }) => ({ messages: [{ role: "user", content: { type: "text", text: `Explain ${topic}.` } }] }),
+		);
+		server.registerPrompt("triage", { description: "Triage a ticket" }, () => ({
+			messages: [
+				{ role: "user", content: { type: "text", text: "Triage the ticket." } },
+				{ role: "assistant", content: { type: "text", text: "Which ticket?" } },
+				{
+					role: "user",
+					content: { type: "resource", resource: { uri: "ticket://42", mimeType: "text/plain", text: "Printer on fire" } },
+				},
+			],
+		}));
+		server.registerPrompt("broken", { description: "Always fails" }, () => {
+			throw new Error("prompt backend is down");
+		});
 	}
 
 	// Gated behind --resources-paged: resources across two pages, to prove the listing follows nextCursor.

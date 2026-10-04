@@ -7,12 +7,18 @@ import {
 	closeMcpConnections,
 	connectMcpServers,
 	formatMcpForPrompt,
+	formatMcpPromptMessages,
 	formatResourceContents,
 	formatResourceListing,
+	getMcpPrompt,
 	listMcpTools,
 	loadMcpConfig,
 	mcpHttpFetch,
+	mcpPromptArgumentHint,
+	mcpPromptCommand,
+	mcpPromptCommands,
 	mcpToolName,
+	parseMcpPromptArguments,
 	reconnectMcpServer,
 	sanitizeToolNamePart,
 	saveMcpConfig,
@@ -642,6 +648,9 @@ describe("MCP resources (real spawned server, not mocked)", () => {
 			expect(text.content).toBe("# Readme\nDeploy step 3 is: flush the cache.");
 			const image = await call(result, "read_resource", { uri: "blob:///assets/logo.png" });
 			expect(image.imageDataUrl).toBe("data:image/png;base64,aGVsbG8=");
+			// Text that arrives as a blob (its type says text) is read as text.
+			const memo = await call(result, "read_resource", { uri: "blob:///assets/memo.txt" });
+			expect(memo.content).toBe("hello blob");
 			const binary = await call(result, "read_resource", { uri: "blob:///assets/data.bin" });
 			expect(binary.imageDataUrl).toBeUndefined();
 			expect(binary.content).toBe("[binary resource omitted: application/octet-stream, 10B]");
@@ -691,6 +700,152 @@ describe("MCP resources (real spawned server, not mocked)", () => {
 		} finally {
 			await closeMcpConnections(result.connections);
 		}
+	});
+});
+
+describe("MCP prompts (real spawned server, not mocked)", () => {
+	const connect = (...flags: string[]) =>
+		connectMcpServers({ docs: { command: "node", args: [FIXTURE_SERVER, ...flags] } });
+	const find = (result: Awaited<ReturnType<typeof connect>>, name: string) =>
+		mcpPromptCommands(result).find((c) => c.name === `/mcp:docs:${name}`)!;
+
+	it("lists a server's prompts as slash commands with their arguments", async () => {
+		const result = await connect("--prompts");
+		try {
+			expect(result.diagnostics).toEqual([]);
+			expect(mcpPromptCommands(result).map((c) => c.name)).toEqual([
+				"/mcp:docs:review",
+				"/mcp:docs:explain",
+				"/mcp:docs:triage",
+				"/mcp:docs:broken",
+			]);
+			const review = find(result, "review");
+			expect(review).toMatchObject({ takesArgs: true, argumentHint: "<code> [language]", serverName: "docs" });
+			expect(review.description).toBe("[docs] Code review");
+			expect(find(result, "triage")).toMatchObject({ takesArgs: false, argumentHint: undefined });
+			expect(find(result, "explain").description).toBe("[docs] Explain a topic");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("offers none for a server without prompts, or one that has gone away", async () => {
+		const plain = await connect();
+		const away = await connect("--prompts");
+		away.connections[0]!.alive = false;
+		try {
+			expect(mcpPromptCommands(plain)).toEqual([]);
+			expect(mcpPromptCommands(away)).toEqual([]);
+		} finally {
+			await closeMcpConnections([...plain.connections, ...away.connections]);
+		}
+	});
+
+	it("runs a prompt with its arguments and returns the text to send", async () => {
+		const result = await connect("--prompts");
+		try {
+			const got = await getMcpPrompt(result, find(result, "review"), { code: "x = 1", language: "python" });
+			expect(got).toEqual({ ok: true, text: "Review this python:\nx = 1" });
+			const bare = await getMcpPrompt(result, find(result, "review"), { code: "y" });
+			expect(bare).toEqual({ ok: true, text: "Review this code:\ny" });
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("marks the turns of a prompt that seeds a conversation and inlines its embedded resource", async () => {
+		const result = await connect("--prompts");
+		try {
+			const got = await getMcpPrompt(result, find(result, "triage"), {});
+			expect(got).toEqual({
+				ok: true,
+				text: "User:\nTriage the ticket.\n\nAssistant:\nWhich ticket?\n\nUser:\n[resource ticket://42]\nPrinter on fire",
+			});
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("says what went wrong: the server failed, the server is gone", async () => {
+		const result = await connect("--prompts");
+		try {
+			const review = find(result, "review");
+			const failed = await getMcpPrompt(result, find(result, "broken"), {});
+			expect(failed).toMatchObject({ ok: false });
+			expect((failed as { error: string }).error).toContain("prompt backend is down");
+			result.connections[0]!.alive = false;
+			result.connections[0]!.deadReason = "the connection closed";
+			const gone = await getMcpPrompt(result, review, { code: "x" });
+			expect((gone as { error: string }).error).toContain("no longer connected");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+});
+
+describe("parseMcpPromptArguments", () => {
+	const review = { name: "review", arguments: [{ name: "code", required: true }, { name: "language" }] };
+	const explain = { name: "explain", arguments: [{ name: "topic", required: true }] };
+	const none = { name: "triage", arguments: [] };
+
+	it("fills the arguments by name, quoted values included, and the rest in order", () => {
+		expect(parseMcpPromptArguments(review, 'language=python code="x = 1"')).toEqual({
+			ok: true,
+			arguments: { language: "python", code: "x = 1" },
+		});
+		expect(parseMcpPromptArguments(review, '"a b" go')).toEqual({
+			ok: true,
+			arguments: { code: "a b", language: "go" },
+		});
+		expect(parseMcpPromptArguments(review, "language=go print(1)")).toEqual({
+			ok: true,
+			arguments: { language: "go", code: "print(1)" },
+		});
+	});
+
+	it("takes the whole remainder as the one argument of a prompt that has one", () => {
+		expect(parseMcpPromptArguments(explain, "how the cache works")).toEqual({
+			ok: true,
+			arguments: { topic: "how the cache works" },
+		});
+		expect(parseMcpPromptArguments(explain, "topic=caching")).toEqual({ ok: true, arguments: { topic: "caching" } });
+	});
+
+	it("names the usage when a required argument is missing, one is unknown, or there are too many", () => {
+		expect(parseMcpPromptArguments(review, "")).toEqual({
+			ok: false,
+			error: "Missing code. Usage: <code> [language]",
+		});
+		expect(parseMcpPromptArguments(explain, "")).toEqual({ ok: false, error: "Missing topic. Usage: <topic>" });
+		expect(parseMcpPromptArguments(review, "color=red x")).toMatchObject({
+			ok: false,
+			error: expect.stringContaining('Unknown argument "color"'),
+		});
+		expect(parseMcpPromptArguments(review, "a b c")).toEqual({
+			ok: false,
+			error: "Too many arguments. Usage: <code> [language]",
+		});
+		expect(parseMcpPromptArguments(none, "")).toEqual({ ok: true, arguments: {} });
+		expect(parseMcpPromptArguments(none, "x")).toEqual({
+			ok: false,
+			error: "Too many arguments. Usage: (no arguments)",
+		});
+	});
+});
+
+describe("mcp prompt names and messages", () => {
+	it("cleans server and prompt names into one command token", () => {
+		expect(mcpPromptCommand("my server", "code.review")).toBe("/mcp:my_server:code_review");
+		expect(mcpPromptArgumentHint({ name: "p", arguments: [] })).toBeUndefined();
+	});
+
+	it("notes what a prompt message holds that cannot be sent as text", () => {
+		const text = formatMcpPromptMessages([
+			{ role: "user", content: { type: "text", text: "look" } },
+			{ role: "user", content: { type: "image", data: "aGk=", mimeType: "image/png" } },
+			{ role: "user", content: { type: "resource_link", uri: "file:///a", name: "a" } },
+		]);
+		expect(text).toBe("look\n\n[image omitted: image/png]\n\n[resource link: a (file:///a)]");
 	});
 });
 
