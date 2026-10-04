@@ -5,6 +5,7 @@ import {
 	promptCacheRequestBody,
 	resolvePromptCacheStrategy,
 	streamAndCollect,
+	stripHermesToolCalls,
 	type Usage,
 } from "./llm.ts";
 import { estimateTokens } from "./session.ts";
@@ -16,7 +17,7 @@ import { estimateTokens } from "./session.ts";
  */
 
 const SIDE_QUESTION_REMINDER =
-	"<system-reminder>\nThis is a side question the user asked with /btw while the work goes on. Answer it from what is already in this conversation, briefly. You have no tools in this reply, and neither the question nor your answer stays in the conversation. If the answer is not in the conversation, say so instead of guessing.\n</system-reminder>";
+	"<system-reminder>\nThis is a side question the user asked with /btw while the work goes on. Answer it from what is already in this conversation, briefly. You have no tools in this reply: do not write a tool call in any form, answer in plain words. Neither the question nor your answer stays in the conversation. If the answer is not in the conversation, say so instead of guessing.\n</system-reminder>";
 
 /** A block of the turn in progress, in the shape both the daemon and the terminal keep it in. */
 export interface InFlightBlock {
@@ -127,30 +128,63 @@ export async function askSideQuestion(input: SideQuestionInput, question: string
 	// The same prefix the turns send (system prompt, then history), so a provider that caches prefixes serves it from
 	// there.
 	const cacheBody = promptCacheRequestBody(resolvePromptCacheStrategy(input.config.baseURL, input.sessionId));
-	let done: Awaited<ReturnType<typeof streamAndCollect>>;
-	try {
-		done = await streamAndCollect(
-			client,
-			input.model,
-			request,
-			[],
-			Math.min(input.config.maxResponseTokens, ANSWER_MAX_TOKENS),
-			input.signal,
-			undefined,
-			undefined,
-			{},
-			undefined,
-			cacheBody,
-			undefined,
-			input.sessionId ? { sessionId: input.sessionId, purpose: "btw" } : undefined,
-		);
-	} catch (error) {
-		if (input.signal?.aborted) throw new SideQuestionError("Stopped.");
-		throw new SideQuestionError(error instanceof Error ? error.message : String(error));
+	const ask = async (messages: Message[]) => {
+		try {
+			return await streamAndCollect(
+				client,
+				input.model,
+				messages,
+				[],
+				Math.min(input.config.maxResponseTokens, ANSWER_MAX_TOKENS),
+				input.signal,
+				undefined,
+				undefined,
+				{},
+				undefined,
+				cacheBody,
+				undefined,
+				input.sessionId ? { sessionId: input.sessionId, purpose: "btw" } : undefined,
+			);
+		} catch (error) {
+			if (input.signal?.aborted) throw new SideQuestionError("Stopped.");
+			throw new SideQuestionError(error instanceof Error ? error.message : String(error));
+		}
+	};
+	let done = await ask(request);
+	// A model with no tools sometimes writes a call out anyway, as markup; that is not an answer. Once more, told so.
+	let text = stripHermesToolCalls(done.content).trim();
+	if (!text && done.content.trim()) {
+		const first = done.usage;
+		done = await ask([
+			...request,
+			{ role: "assistant", content: stripHermesToolCalls(done.content) || "(a tool call)" },
+			{
+				role: "user",
+				content: "There are no tools here. Answer the question in plain words, from the conversation only.",
+			},
+		]);
+		text = stripHermesToolCalls(done.content).trim();
+		if (first && done.usage) done = { ...done, usage: addTokens(first, done.usage) };
+		if (!text) {
+			return {
+				text: "(the model tried to call a tool, which this reply does not have; ask something the conversation can answer)",
+				usage: done.usage,
+			};
+		}
 	}
-	const text = done.content.trim();
 	return {
 		text: text || "(the model gave no answer: its reply may have gone to reasoning; ask again, shorter)",
 		usage: done.usage,
+	};
+}
+
+/** Two requests of one question, billed as one. */
+function addTokens(a: Usage, b: Usage): Usage {
+	return {
+		...b,
+		promptTokens: (a.promptTokens ?? 0) + (b.promptTokens ?? 0),
+		completionTokens: (a.completionTokens ?? 0) + (b.completionTokens ?? 0),
+		totalTokens: (a.totalTokens ?? 0) + (b.totalTokens ?? 0),
+		...(a.cost !== undefined || b.cost !== undefined ? { cost: (a.cost ?? 0) + (b.cost ?? 0) } : {}),
 	};
 }

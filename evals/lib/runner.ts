@@ -14,9 +14,11 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { askSideQuestion, describeInFlight, type InFlightBlock } from "../../src/core/btw.ts";
 import type { AppConfig } from "../../src/core/config.ts";
 import { loadConfig } from "../../src/core/config.ts";
 import { clearGoal, readGoal, startGoal } from "../../src/core/goal.ts";
+import type { Message } from "../../src/core/llm.ts";
 import { type AgentEvent, MessageQueue, runAgentLoop } from "../../src/core/loop.ts";
 import {
 	closeMcpConnections,
@@ -78,6 +80,10 @@ export interface VerifyContext {
 	finalCwd: string;
 	/** The scratchpad folder, when `EvalCase.scratchpad` was set. */
 	scratchpad?: string;
+	/** The conversation as the run left it (after a `sideQuestion`, so a side question that leaked into it shows here). */
+	messages: Message[];
+	/** The answer to `EvalCase.sideQuestion`, or the error it ended in. */
+	sideAnswer?: { text?: string; error?: string };
 }
 
 export interface EvalCase {
@@ -116,6 +122,13 @@ export interface EvalCase {
 	 * case exercise the same fresh-context contract as an approved `/plan`
 	 * transition without relying on a live client picker. */
 	initialTodos?: TodoItem[];
+	/**
+	 * Puts a `/btw` question to the model with the real side-question code (src/core/btw.ts), either once the run has
+	 * ended (`after`) or while a named tool is running (`duringTool`: the question goes out at its start, with what
+	 * the turn has done so far, as the daemon sends it). `verify` gets the answer and the conversation, which must
+	 * not hold the question or the answer.
+	 */
+	sideQuestion?: { question: string; when: "after" | { duringTool: string } };
 	/** Run the case as a session, so it has a scratchpad (as a real one does); `verify` gets its path. */
 	scratchpad?: boolean;
 	/** Offer the worktree tool, as a daemon does (the case's `cwd` must be a git repository); `verify` gets `finalCwd`. */
@@ -328,6 +341,8 @@ interface AttemptResult {
 	turns: number;
 	errors: string[];
 	usage: RunResult["usage"];
+	messages: Message[];
+	sideAnswer?: { text?: string; error?: string };
 }
 
 /** Infra-only retries: a case that dies before a single tool call or turn
@@ -389,6 +404,11 @@ async function runAttempt(
 	let goalSessionId: string | undefined;
 	let finalCwd: string | undefined;
 	let sessionId: string | undefined;
+	let finalMessages: Message[] = [];
+	let sideAnswer: { text?: string; error?: string } | undefined;
+	let sidePending: Promise<void> | undefined;
+	// The turn in progress as a side question hears it: what was said and which tools started or finished.
+	const liveBlocks: InFlightBlock[] = [];
 
 	try {
 		await evalCase.setup?.();
@@ -450,7 +470,17 @@ async function runAttempt(
 			goalSessionId ??
 			(subagentPrompts ? `eval-task-${evalCase.id}-${randomUUID().slice(0, 8)}` : undefined) ??
 			(evalCase.scratchpad ? `eval-scratch-${evalCase.id}-${randomUUID().slice(0, 8)}` : undefined);
-		await runAgentLoop([{ role: "user", content: evalCase.prompt }], {
+		const initialMessages: Message[] = [{ role: "user", content: evalCase.prompt }];
+		const askSide = (history: Message[], inFlight?: string) =>
+			askSideQuestion({ config, model, systemPrompt, history, inFlight }, evalCase.sideQuestion!.question).then(
+				(answer) => {
+					sideAnswer = { text: answer.text };
+				},
+				(error: unknown) => {
+					sideAnswer = { error: error instanceof Error ? error.message : String(error) };
+				},
+			);
+		finalMessages = await runAgentLoop(initialMessages, {
 			config,
 			model,
 			cwd,
@@ -484,6 +514,29 @@ async function runAttempt(
 			signal: ac.signal,
 			onEvent: (event) => {
 				events.push(event);
+
+				// What a side question would hear of the running turn.
+				if (event.type === "token") {
+					const last = liveBlocks.at(-1);
+					if (last?.kind === "content") last.text = `${last.text ?? ""}${event.text}`;
+					else liveBlocks.push({ kind: "content", text: event.text });
+				}
+				if (event.type === "tool_start") {
+					liveBlocks.push({ kind: "tool", call: { name: event.name, args: event.args, status: "running" } });
+					const when = evalCase.sideQuestion?.when;
+					if (!sidePending && typeof when === "object" && when.duringTool === event.name) {
+						sidePending = askSide(
+							initialMessages.map((m) => ({ ...m })),
+							describeInFlight(liveBlocks),
+						);
+					}
+				}
+				if (event.type === "tool_end") {
+					const block = liveBlocks.findLast(
+						(b) => b.kind === "tool" && b.call?.name === event.name && b.call.status === "running",
+					);
+					if (block?.call) block.call.status = "ok";
+				}
 
 				if (event.type === "tool_start") {
 					toolsCalled.push(event.name);
@@ -554,6 +607,10 @@ async function runAttempt(
 				}
 			},
 		});
+		// Asked once the run has ended: the conversation as it stands.
+		if (evalCase.sideQuestion?.when === "after" && !sidePending)
+			sidePending = askSide(finalMessages.map((m) => ({ ...m })));
+		await sidePending;
 	} catch (error) {
 		errors.push(error instanceof Error ? error.message : String(error));
 	}
@@ -575,6 +632,8 @@ async function runAttempt(
 		goalSessionId,
 		sessionId,
 		finalCwd,
+		messages: finalMessages,
+		sideAnswer,
 	};
 }
 
@@ -610,6 +669,8 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 		goalSessionId,
 		sessionId,
 		finalCwd,
+		messages,
+		sideAnswer,
 	} = attempt;
 
 	const duration = Date.now() - startTime;
@@ -723,6 +784,8 @@ export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promi
 				goal: goalSessionId ? readGoal(goalSessionId) : undefined,
 				scratchpad:
 					evalCase.scratchpad && sessionId ? scratchpadFor(sessionId, evalCase.cwd ?? options.cwd) : undefined,
+				messages,
+				sideAnswer,
 			});
 			if (verifyError) failedChecks.push(`Verify failed: ${verifyError}`);
 		} catch (error) {
