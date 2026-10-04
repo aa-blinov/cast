@@ -2,7 +2,6 @@ import { api } from "./api.js";
 
 const SYSTEM_REMINDER_STRIP_RE = /\n\n<system-reminder>[\s\S]*<\/system-reminder>/;
 const STEER_CMD_RE = /^\/(steer|s)\s*/;
-const QUEUE_CMD_RE = /^\/(queue|q)\s*/;
 const UNDO_FORCE_RE = /\s(--force|-f)(\s|$)/;
 
 export async function submitMessage(text, images, pendingDocs, context) {
@@ -332,8 +331,6 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				if (msg) setPendingSteers((prev) => [...prev, msg]);
 				addNotice(result.result);
 			} else if ((commandName === "/queue" || commandName === "/q") && result?.ok) {
-				const msg = text.replace(QUEUE_CMD_RE, "");
-				if (msg) setPendingQueue((prev) => [...prev, msg]);
 				addNotice(result.result);
 			} else if ((text === "/queue-reset" || text === "/qr") && result?.ok) {
 				setPendingQueue([]);

@@ -206,6 +206,8 @@ export function sanitizeSharedLiveEvent(event: { type: string } & Record<string,
 			},
 		};
 	}
+	// What is still waiting to be sent is the owner's: a viewer of the shared page sees it when it runs.
+	if (event.type === "queue_update") return { type: "queue_update", items: [] };
 	return event;
 }
 
@@ -2000,6 +2002,9 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const writer = createSseWriter(res, () => bridge.unsubscribe(params.id, listener));
 		// Send current status immediately
 		writer.write(`data: ${JSON.stringify({ type: "status", status: ws.status, startedAt: ws.turnStartedAt })}\n\n`);
+		// A client that joins late, or reloads, shows what is already waiting.
+		const waiting = ws.runner.followUpQueue.texts();
+		if (waiting.length > 0) writer.write(`data: ${JSON.stringify({ type: "queue_update", items: waiting })}\n\n`);
 		bridge.subscribe(params.id, listener);
 
 		// Heartbeat

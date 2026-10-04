@@ -824,9 +824,38 @@ async function performCompaction(
 /** Drains one queued message at a time — each becomes its own turn. */
 export class MessageQueue {
 	private messages: Message[] = [];
+	/** Called after the queue changes (the daemon tells every client what is waiting). */
+	onChange?: () => void;
 
 	enqueue(message: Message): void {
 		this.messages.push(message);
+		this.onChange?.();
+	}
+
+	// What cast itself queues (a finished background task, say) is not the person's message: it is neither listed nor
+	// counted, so the numbers a person sees are the numbers `removeAt` takes.
+	private people(): Message[] {
+		return this.messages.filter((m) => !(typeof m.content === "string" && m.content.startsWith("<system-reminder>")));
+	}
+
+	/** What each message a person queued says, in order. */
+	texts(): string[] {
+		return this.people().map((m) =>
+			typeof m.content === "string"
+				? m.content
+				: Array.isArray(m.content)
+					? m.content.map((part) => (part.type === "text" ? part.text : `[${part.type}]`)).join(" ")
+					: "",
+		);
+	}
+
+	/** Drops the person's queued message at `index` (0-based, as `texts` lists them); false when there is none there. */
+	removeAt(index: number): boolean {
+		const target = Number.isInteger(index) ? this.people()[index] : undefined;
+		if (!target) return false;
+		this.messages.splice(this.messages.indexOf(target), 1);
+		this.onChange?.();
+		return true;
 	}
 
 	hasItems(): boolean {
@@ -837,11 +866,15 @@ export class MessageQueue {
 		const first = this.messages[0];
 		if (!first) return [];
 		this.messages = this.messages.slice(1);
+		this.onChange?.();
 		return [first];
 	}
 
-	clear(): void {
+	/** `announce: false` is for a stopped run, whose clients say what was not sent when it ends. */
+	clear(announce = true): void {
+		if (this.messages.length === 0) return;
 		this.messages = [];
+		if (announce) this.onChange?.();
 	}
 
 	get length(): number {

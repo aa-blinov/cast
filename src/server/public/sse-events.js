@@ -483,9 +483,12 @@ export function handleSseEvent(event, context) {
 				return { ...prev, messages: [...messages, ...injected] };
 			});
 			if (event.type === "steering_injected") setPendingSteers((previous) => previous.slice(event.messages.length));
-			else setPendingQueue((previous) => previous.slice(event.messages.length));
 			break;
 		}
+		case "queue_update":
+			// The daemon owns the queue: this is the whole list, whoever queued what and whenever this page loaded.
+			setPendingQueue(event.items);
+			break;
 		case "interrupt_reminder":
 			setSession((prev) =>
 				prev

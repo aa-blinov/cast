@@ -188,6 +188,7 @@ These commands work while the agent is running:
 | `/queue <message>` | `/q` | Queue a message for after the current turn |
 | `/queue-reset` | `/qr` | Clear the message queue |
 | `/btw <question>` | | Ask a question on the side: answered from the conversation, kept out of it |
+| `/queue-remove <n>` | | Remove the queued message numbered `n` (the number in the Queued list) |
 | `/running-input [steer\|queue]` | | What a plain message does while a turn runs: steer it (default) or queue it |
 | `/abort`, `/stop` | | Stop current agent run |
 
@@ -202,7 +203,7 @@ These commands work while the agent is running:
 
 **`/steer`** interrupts the current turn with new context: the message is injected immediately into the conversation, and the agent sees it on the next tool-call iteration. Useful for correcting course mid-execution.
 
-**`/queue`** saves a message to run after the agent finishes its current turn. The message becomes a new turn automatically.
+**`/queue`** saves a message to run after the agent finishes its current turn. The message becomes a new turn automatically. The queue lives in the daemon and every client shows the same list: a message queued in the terminal is in the web page's Queued list, and the reverse, also after a reload. `/queue-remove <n>` (a cross beside each entry in the web UI) drops one entry, `/queue-reset` clears all; a stopped run takes its queue with it and says which messages were not sent. What cast queues itself (a finished background task) is not listed.
 
 If nothing is running, both `/steer` and `/queue` submit the message as a normal prompt.
 

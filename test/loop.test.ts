@@ -195,6 +195,52 @@ describe("MessageQueue", () => {
 		expect(q.drain()).toEqual([]);
 	});
 
+	it("tells what waits and says so on every change, and removes one by position", () => {
+		const q = new MessageQueue();
+		let changes = 0;
+		q.onChange = () => {
+			changes++;
+		};
+		q.enqueue({ role: "user", content: "a" });
+		q.enqueue({
+			role: "user",
+			content: [
+				{ type: "text", text: "b" },
+				{ type: "image_url", image_url: { url: "x" } },
+			],
+		});
+		q.enqueue({ role: "user", content: "c" });
+		expect(q.texts()).toEqual(["a", "b [image_url]", "c"]);
+		expect(changes).toBe(3);
+		expect(q.removeAt(1)).toBe(true);
+		expect(q.texts()).toEqual(["a", "c"]);
+		expect(q.removeAt(5)).toBe(false);
+		expect(q.removeAt(-1)).toBe(false);
+		expect(changes).toBe(4);
+		q.drain();
+		expect(changes).toBe(5);
+		q.clear(false);
+		expect(q.length).toBe(0);
+		expect(changes).toBe(5);
+		q.enqueue({ role: "user", content: "d" });
+		q.clear();
+		expect(changes).toBe(7);
+		q.clear();
+		expect(changes).toBe(7);
+	});
+
+	it("keeps what cast queued itself out of the list and out of the numbering", () => {
+		const q = new MessageQueue();
+		q.enqueue({ role: "user", content: "<system-reminder>Background task bg-1 exited</system-reminder>" });
+		q.enqueue({ role: "user", content: "mine" });
+		q.enqueue({ role: "user", content: "also mine" });
+		expect(q.texts()).toEqual(["mine", "also mine"]);
+		expect(q.removeAt(0)).toBe(true);
+		expect(q.texts()).toEqual(["also mine"]);
+		expect(q.length).toBe(2);
+		expect(q.removeAt(1)).toBe(false);
+	});
+
 	it("clear removes all messages", () => {
 		const q = new MessageQueue();
 		q.enqueue({ role: "user", content: "a" });

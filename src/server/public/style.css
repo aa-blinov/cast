@@ -723,6 +723,9 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .pending-item.pending-steer { color: var(--cyan); background: var(--accent-subtle); }
 .pending-item.pending-queue { color: var(--amber); }
 .pending-label { font-weight: 600; }
+.pending-remove { margin-left: 6px; padding: 0 2px; border: 0; background: none; color: inherit; cursor: pointer; opacity: 0.7; vertical-align: middle; }
+.pending-remove:hover, .pending-remove:focus-visible { opacity: 1; }
+.pending-remove svg { width: 14px; height: 14px; }
 .composer-wrap {
 	position: relative;
 	max-width: 860px;

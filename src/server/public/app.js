@@ -2405,6 +2405,7 @@ function App() {
 							(text, i) => html`
 							<div key=${`queue-${i}`} class="pending-item pending-queue">
 								<span class="pending-label">Queued${pendingQueue.length > 1 ? ` (${i + 1}/${pendingQueue.length})` : ""}:</span> ${text}
+								<button class="pending-remove" title="Remove from the queue" aria-label=${`Remove queued message ${i + 1}`} onClick=${() => api("POST", `/api/sessions/${activeId}/command`, { command: `/queue-remove ${i + 1}` }).catch((err) => showToast(err.message, "error"))}><${icons.xMark} /></button>
 							</div>
 						`,
 						)}

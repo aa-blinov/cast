@@ -5171,6 +5171,35 @@ describe("web bridge", () => {
 		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
 	});
 
+	it("the daemon tells every subscriber what is queued, drops one on /queue-remove, and says nothing for a stopped run", async () => {
+		runAgentLoop.mockImplementation(async (messages: unknown[]) => {
+			await new Promise((resolve) => setTimeout(resolve, 300));
+			return [...messages, { role: "assistant", content: "ok" }];
+		});
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const lists: string[][] = [];
+		bridge.subscribe(ws.id, (event) => {
+			if (event.type === "queue_update") lists.push(event.items);
+		});
+		await bridge.submit(ws.id, "long job");
+		await vi.waitFor(() => expect(ws.status).toBe("running"), { timeout: 5000 });
+		await bridge.executeCommand(ws.id, "/queue first");
+		await bridge.executeCommand(ws.id, "/queue second");
+		expect(lists.at(-1)).toEqual(["first", "second"]);
+		expect((await bridge.executeCommand(ws.id, "/queue-remove 9")).ok).toBe(false);
+		expect((await bridge.executeCommand(ws.id, "/queue-remove 1")).ok).toBe(true);
+		expect(lists.at(-1)).toEqual(["second"]);
+		await bridge.executeCommand(ws.id, "/queue-reset");
+		expect(lists.at(-1)).toEqual([]);
+		expect((await bridge.executeCommand(ws.id, "/queue-remove 1")).error).toBe("Nothing is queued");
+		await bridge.executeCommand(ws.id, "/queue third");
+		const before = lists.length;
+		ws.runner.abort();
+		expect(ws.runner.followUpQueue.length).toBe(0);
+		expect(lists).toHaveLength(before);
+	});
+
 	it("/steer and /queue require a message", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();

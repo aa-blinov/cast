@@ -333,6 +333,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/q", description: "Alias for /queue", takesArgs: true },
 	{ name: "/qr", description: "Alias for /queue-reset" },
 	{ name: "/queue", description: "Queue a message for after the run", takesArgs: true },
+	{ name: "/queue-remove", description: "Remove one queued message by its number — N", takesArgs: true },
 	{ name: "/queue-reset", description: "Clear the message queue" },
 	{ name: "/quit", description: "Save and exit" },
 	{ name: "/reasoning", description: "Change reasoning level" },
@@ -1652,6 +1653,18 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			// to the same value.
 			const next = agent.toggleReasoning();
 			showNotice(`[Reasoning display: ${next ? "on" : "off"}]`);
+		},
+	},
+	{
+		match: (input) => isCommand(input, "/queue-remove"),
+		whileRunning: "submit",
+		run: async ({ input, agent, showNotice }) => {
+			const n = Number(input.slice("/queue-remove".length).trim());
+			if (!Number.isInteger(n) || n < 1) {
+				showNotice("[Usage: /queue-remove <number>, as in the Queued list]");
+				return;
+			}
+			showNotice((await agent.removeQueued(n)) ? `[Removed queued message ${n}]` : `[No queued message ${n}]`);
 		},
 	},
 	{

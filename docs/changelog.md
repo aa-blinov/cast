@@ -4,7 +4,11 @@ All notable user-facing changes to cast, newest first.
 
 ## Unreleased
 
+### Fixed
+- **The message queue is the same everywhere.** It was drawn from each client's own memory: a message queued in the web page was not in the terminal's list (nor the reverse), a reload emptied the list while the messages still waited, and `/queue-reset` in the terminal cleared nothing on the daemon. The daemon now sends the list on every change and to a client that joins, so the web page and the terminal show the same entries. A shared page's viewers do not see it. A background task that finished no longer shows up in the list as a raw `<system-reminder>`.
+
 ### Added
+- **Queued messages can be removed one at a time.** `/queue-remove <n>` (the number in the Queued list), or the cross beside an entry in the web UI.
 - **A plain message during a turn can steer it or wait for it.** Steering stays the default. `/running-input queue` (or Settings, "Message while a turn runs", in the terminal and the web UI) makes a message typed while a turn runs wait for the turn to end and run as the next one, the way `/queue` does; `/running-input steer` goes back. `/steer` and `/queue` work as before in either mode.
 
 ## 0.55.0
