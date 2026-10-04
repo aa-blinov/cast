@@ -56,6 +56,18 @@ export function parseUserShellMessage(content) {
 	};
 }
 
+// Port of backgroundTaskLine in src/core/system-reminder.ts (a test keeps the two in step): a finished background task
+// is one line, that it came back and how, not its output.
+export function backgroundTaskLine(body) {
+	const first = /^Background task [^\n]*/.exec(body)?.[0];
+	if (!first) return undefined;
+	const line = first.replace(/ Relay what matters to the user\.$/, "").replace(/\.$/, "");
+	return line.replace(/\(`([^`]*)`\)/, (_, command) => {
+		const flat = command.replace(/\s+/g, " ");
+		return `(\`${flat.length > 60 ? `${flat.slice(0, 60)}…` : flat}\`)`;
+	});
+}
+
 // Port of goalPromptDisplay in src/core/goal.ts (a test keeps the two in step): the goal's own prompts are cast
 // talking to the model, so show the command typed and one-line notices, not a page of rules as the user's words.
 const GOAL_START_OBJECTIVE_RE = /\n\nGoal: ([\s\S]*?)\n\nWork as a careful senior engineer:/;

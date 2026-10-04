@@ -24,9 +24,11 @@ import {
 	GOAL_CONTINUATION_PROMPT,
 	GOAL_NUDGE_PROMPT,
 } from "../src/core/goal.ts";
+import { backgroundTaskLine as coreBackgroundTaskLine } from "../src/core/system-reminder.ts";
 import { parseUserShellMessage as coreParseUserShellMessage, userShellMessage } from "../src/core/user-shell.ts";
 import { buildGoalPrompt, commitPrompt, initPrompt } from "../src/server/commands.ts";
 import {
+	backgroundTaskLine,
 	goalPromptDisplay,
 	isForkableAnswer,
 	Message,
@@ -130,6 +132,20 @@ describe("goalPromptDisplay", () => {
 			"fix the tests please",
 		]) {
 			expect(goalPromptDisplay(text) ?? undefined, text.slice(0, 40)).toEqual(coreGoalPromptDisplay(text));
+		}
+	});
+});
+
+describe("backgroundTaskLine", () => {
+	it("is the web port of the core one: the same line for background tasks of both kinds, nothing for other reminders", () => {
+		for (const body of [
+			"Background task bg-7 (`du -xh --max-depth=1 /`) exited with code 0 after 117s.\n\n187G\t/",
+			`Background task bg-8 (\`${"x ".repeat(60)}\`) killed.`,
+			"Background task t1 (explore: find callers) finished. Relay what matters to the user.\n\nreport",
+			"The date is now 2026-10-05.",
+			"",
+		]) {
+			expect(backgroundTaskLine(body) ?? undefined, body.slice(0, 40)).toEqual(coreBackgroundTaskLine(body));
 		}
 	});
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRetries, insertRunNotices } from "../src/server/bridge/display.ts";
+import { formatRetries, insertRunNotices, toDisplayMessages } from "../src/server/bridge/display.ts";
 
 const retry = (eventSeq: number, afterSeq: number, attempt: number, reason = "529 overloaded") => ({
 	eventSeq,
@@ -67,5 +67,22 @@ describe("insertRunNotices", () => {
 
 	it("returns the same array when there is nothing to add", () => {
 		expect(insertRunNotices(page, [], 0, 99)).toBe(page);
+	});
+});
+
+describe("toDisplayMessages: a finished background task", () => {
+	it("is one notice line, with no empty message of the person's after it", () => {
+		const out = toDisplayMessages([
+			{ role: "user", content: "go" },
+			{
+				role: "user",
+				content:
+					"<system-reminder>\nBackground task bg-7 (`du -xh /`) exited with code 0 after 117s.\n\n187G\t/\n99G\t/var\n</system-reminder>",
+			},
+		] as never);
+		expect(out.map((m) => [m.role, m.content])).toEqual([
+			["user", "go"],
+			["warning", "[system] Background task bg-7 (`du -xh /`) exited with code 0 after 117s"],
+		]);
 	});
 });
