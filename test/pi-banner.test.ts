@@ -16,6 +16,12 @@ describe("fitParts", () => {
 });
 
 describe("bannerRows", () => {
+	it("tells how to quit with the one-press key, and keeps that hint inside a phone's width", () => {
+		expect(plain(bannerRows(parts, 100)[1]!)).toContain("Ctrl+Q quits");
+		expect(visibleWidth(bannerRows(parts, 46)[1]!)).toBeLessThanOrEqual(46);
+		expect(plain(bannerRows(parts, 46)[1]!)).toContain("Ctrl+Q quits");
+	});
+
 	const parts = ["Senior Developer", "mimo-v2.6-flash", "v1.2.3", "~/pet/cast"];
 
 	it("joins everything with one ` * ` instead of padding to the edges", () => {
@@ -38,7 +44,7 @@ describe("bannerRows", () => {
 	it("sets the name in bold and follows with a hint row that drops hints from the end", () => {
 		const rows = bannerRows(parts, 40);
 		expect(rows[0]).toContain("\x1b[1m");
-		expect(plain(rows[1]!)).toBe("/ commands * /settings");
+		expect(plain(rows[1]!)).toBe("/ commands * Ctrl+Q quits * /settings");
 	});
 });
 

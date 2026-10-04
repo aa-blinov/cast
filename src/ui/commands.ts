@@ -4198,6 +4198,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				"editor.deleteToLineEnd": "Delete to line end",
 				"input.submit": "Submit",
 				"input.abort": "Exit (2× to confirm)",
+				"input.quit": "Quit at once",
 				"input.escape": "Stop turn (2×)",
 				"input.attachImage": "Attach image",
 				"input.externalEditor": "Edit in $EDITOR",
@@ -4218,6 +4219,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				home: "Home",
 				end: "End",
 				"ctrl+c": "Ctrl+C",
+				"ctrl+q": "Ctrl+Q",
 				"ctrl+d": "Ctrl+D",
 				"ctrl+w": "Ctrl+W",
 				"ctrl+u": "Ctrl+U",
@@ -4257,6 +4259,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			const notes =
 				"\n\n  Esc      stops the current turn while generating (press twice); Ctrl+L clears the input" +
 				"\n  Ctrl+C   press twice within 2s to exit (does not stop a turn — use Esc for that)" +
+				"\n  Ctrl+Q   exits at once, with no second press, in any state (the session is saved)" +
 				"\n  Enter    sends; for a line break use Shift+Enter or Alt+Enter, or end the line with \\" +
 				"\n           (Shift+Enter needs a terminal that reports it — kitty, WezTerm, Ghostty, iTerm2)" +
 				"\n  Tab      completes a slash command, or a path containing / or starting with ~";

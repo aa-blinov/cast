@@ -1,9 +1,21 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { getKeybindings, keyLabel } from "../ui/input/keybindings.ts";
 import { theme } from "../ui/themes/index.ts";
 import { paint } from "./paint.ts";
 
 const SEPARATOR = " * ";
-const HINTS = ["/ commands", "/settings", "Esc Esc stops a turn", "PageUp scrolls", "Ctrl+C twice quits"];
+/** The hint row. Quitting shows the one-press key when there is one (it can be rebound or unbound). */
+function hints(): string[] {
+	const quit = getKeybindings().keysFor("input.quit")[0];
+	// Parts drop from the end on a narrow screen, so the way out comes second, not last.
+	return [
+		"/ commands",
+		quit ? `${keyLabel(quit)} quits` : "Ctrl+C twice quits",
+		"/settings",
+		"Esc Esc stops a turn",
+		"PageUp scrolls",
+	];
+}
 
 /** The first parts that fit `width` when joined by `separator`; the last ones are dropped whole, and the first is always kept. */
 export function fitParts(parts: string[], separator: string, width: number): string[] {
@@ -23,5 +35,5 @@ export function bannerRows(parts: string[], width: number): string[] {
 	const header = fitParts(["CAST(1)", ...parts], SEPARATOR, width);
 	const [name, ...rest] = header;
 	const line = [paint(name ?? "", { bold: true }), ...rest.map((part) => paint(part, {}))].join(joiner);
-	return [line, paint(fitParts(HINTS, SEPARATOR, width).join(SEPARATOR), muted)];
+	return [line, paint(fitParts(hints(), SEPARATOR, width).join(SEPARATOR), muted)];
 }
