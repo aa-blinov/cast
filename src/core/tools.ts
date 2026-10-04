@@ -119,7 +119,7 @@ export function getToolDefinitions(
 					"Long output shows its first and last lines, about 32000 characters; the full output is saved to a file the result names. " +
 					"Short commands return normally. Long-running commands are automatically promoted to a managed background task " +
 					"instead of blocking indefinitely; use run_in_background:true to start one immediately. " +
-					"Background results arrive automatically, and bash_output/bash_kill can inspect or stop them. " +
+					"A background result arrives on its own when the task finishes; bash_output waits for one you need now, and bash_kill stops one. " +
 					"Do NOT re-run an identical command to 'double-check' a result you already have — the previous " +
 					"output still holds unless something changed. Running the same command repeatedly is treated as a " +
 					"doom loop and blocked.",
@@ -145,8 +145,8 @@ export function getToolDefinitions(
 										description:
 											"Start a managed background task and return its task id immediately. Use for dev servers, watchers, " +
 											"or long work whose result is not needed before the next action. " +
-											"The result is delivered automatically when it finishes; use bash_output({task_id,wait}) for progress " +
-											"or bash_kill({task_id}) to stop it. If omitted, long-running commands may be promoted automatically.",
+											"The result arrives on its own when it finishes: do not poll or wait for it, carry on or end your turn. " +
+											"bash_kill({task_id}) stops it. If omitted, a command that runs long is moved to the background for you.",
 									},
 								}
 							: {}),
@@ -535,10 +535,11 @@ export function getToolDefinitions(
 							description:
 								"Check on a managed background bash task returned by bash, either through run_in_background:true " +
 								"or automatic promotion. Returns its " +
-								"current status (running/exited/killed) and captured output so far. You don't need this to " +
-								"find out when a task finishes — a <system-reminder> arrives automatically — only call it if " +
-								"you want progress sooner. Repeated identical calls on the same task_id are expected while " +
-								"waiting and are never treated as a doom loop.",
+								"current status (running/exited/killed) and captured output so far. Use it when you need a task's output " +
+								"to go on (pass `wait` to block until it finishes: that result is then yours and no separate notice " +
+								"follows) or to see progress. Do not use it only to find out that a task you started in the background " +
+								"has finished: that notice arrives on its own. Repeated identical calls on the same task_id are expected " +
+								"while waiting and are never treated as a doom loop.",
 							parameters: {
 								type: "object",
 								properties: {

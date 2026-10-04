@@ -270,11 +270,14 @@ function formatManagedTaskResult(
 }
 
 function formatBackgroundStart(task: BackgroundTask, warnPrefix: string, automatic: boolean): ToolResult {
-	const prefix = automatic ? "Automatically moved to background" : "Started in background";
+	// Two situations that read alike and are not. The model asked for a background task: it does not need the result
+	// now, and polling spends turns. The command ran long and was moved: the model may well need its output to go on,
+	// and waiting for it is the right thing. Either way the result reaches the model once, not twice.
+	const next = automatic
+		? `It was still running, so it was moved to the background and is not finished. If you need its output to carry on, wait for it with bash_output({task_id:"${task.id}",wait:60000}): that result is then yours and no separate notice follows. If you do not need it yet, carry on: the result arrives on its own when it finishes.`
+		: "Its result arrives on its own when it finishes: do not poll it or wait for it. Carry on with other work, or end your turn.";
 	return {
-		content:
-			`${warnPrefix}${prefix} as ${task.id}. The result will be delivered automatically when it finishes. ` +
-			`Call bash_output({task_id:"${task.id}",wait:5000}) for progress or bash_kill({task_id:"${task.id}"}) to stop it.`,
+		content: `${warnPrefix}${automatic ? "Moved to the background" : "Started in the background"} as ${task.id}. ${next} bash_output({task_id:"${task.id}"}) shows its progress; bash_kill({task_id:"${task.id}"}) stops it.`,
 	};
 }
 
