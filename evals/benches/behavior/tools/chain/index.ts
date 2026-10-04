@@ -4,6 +4,10 @@ import { backgroundBashExplicitTimeout } from "./background-bash-explicit-timeou
 import { backgroundBashKill } from "./background-bash-kill.ts";
 import { backgroundBashOutput } from "./background-bash-output.ts";
 import { bashFixRerunsCheck } from "./bash-fix-reruns-check.ts";
+import { btwAnswersFromContext } from "./btw-answers-from-context.ts";
+import { btwDoesNotReadFiles } from "./btw-does-not-read-files.ts";
+import { btwDuringToolSeesRunningWork } from "./btw-during-tool-sees-running-work.ts";
+import { btwSaysWhenUnknown } from "./btw-says-when-unknown.ts";
 import { buildModeFlagsPlanDivergence } from "./build-mode-flags-plan-divergence.ts";
 import { cleanContextPlanTodoState } from "./clean-context-plan-todo-state.ts";
 import { editAmbiguousNotWriteFallback } from "./edit-ambiguous-not-write-fallback.ts";
@@ -77,4 +81,8 @@ export const chainCases: EvalCase[] = [
 	ruleAlwaysApplyFollowed,
 	ruleLazyReadWhenRelevant,
 	ruleLazyNotReadWhenIrrelevant,
+	btwAnswersFromContext,
+	btwSaysWhenUnknown,
+	btwDoesNotReadFiles,
+	btwDuringToolSeesRunningWork,
 ];

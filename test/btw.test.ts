@@ -128,6 +128,44 @@ describe("askSideQuestion", () => {
 		expect(answer.text).toContain("gave no answer");
 	});
 
+	it("asks once more when the model writes a tool call out as markup, and shows the plain answer", async () => {
+		vi.mocked(streamAndCollect)
+			.mockResolvedValueOnce({
+				content: "<tool_call>\n<function=bash>\n<parameter=command>ls</parameter>\n</function>\n</tool_call>",
+				finishReason: "stop",
+				usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+			} as never)
+			.mockResolvedValueOnce({
+				content: "It is in a.ts.",
+				finishReason: "stop",
+				usage: { promptTokens: 12, completionTokens: 4, totalTokens: 16 },
+			} as never);
+		const answer = await askSideQuestion({ config, model: "m", systemPrompt: "S", history }, "where is it?");
+		expect(answer.text).toBe("It is in a.ts.");
+		expect(streamAndCollect).toHaveBeenCalledTimes(2);
+		const second = vi.mocked(streamAndCollect).mock.calls[1]![2] as Message[];
+		expect(String(second.at(-1)!.content)).toContain("There are no tools here");
+		// Both requests are billed to the one question.
+		expect(answer.usage?.totalTokens).toBe(31);
+	});
+
+	it("says so when the model keeps writing tool calls, and drops a tool call written after a real answer", async () => {
+		const call = "<tool_call><function=bash></function></tool_call>";
+		vi.mocked(streamAndCollect).mockResolvedValue({ content: call, finishReason: "stop" } as never);
+		const stuck = await askSideQuestion({ config, model: "m", systemPrompt: "S", history }, "list");
+		expect(stuck.text).toContain("tried to call a tool");
+		expect(stuck.text).not.toContain("<tool_call>");
+		vi.mocked(streamAndCollect).mockReset();
+		vi.mocked(streamAndCollect).mockResolvedValue({
+			content: `It is in a.ts.\n${call}`,
+			finishReason: "stop",
+		} as never);
+		expect((await askSideQuestion({ config, model: "m", systemPrompt: "S", history }, "where?")).text).toBe(
+			"It is in a.ts.",
+		);
+		expect(streamAndCollect).toHaveBeenCalledTimes(1);
+	});
+
 	it("refuses a conversation that fills the window, and does not call the model", async () => {
 		const huge: Message[] = [{ role: "user", content: "x".repeat(500_000) }];
 		await expect(askSideQuestion({ config, model: "m", systemPrompt: "S", history: huge }, "q")).rejects.toThrow(

@@ -59,6 +59,9 @@ All notable user-facing changes to cast, newest first.
 - **The picker's errors say what happened.** Deleting a folder with something in it showed `ENOTEMPTY: directory not empty, rmdir '/very/long/path'`; it says the folder isn't empty. A missing path, a refused permission, a name that exists and a file where a folder was expected read the same way.
 - **The picker on a touch screen.** Rows, the path, the filter and the delete buttons are 44px; the delete button is set apart by a rule since it is always there without a mouse; each one is named for its folder ("Delete proj-12").
 
+### Internal
+- **`/btw` has evals on real models** (`btw-answers-from-context`, `btw-says-when-unknown`, `btw-does-not-read-files`, `btw-during-tool-sees-running-work`). The runner can put a side question to the model with the real code, after the run or while a named tool runs, and `verify` gets the answer and the conversation (which must not hold the question). The in-flight case has the model invent the file name its running command creates, so only what the turn has done can answer it; with that context withheld, or the conversation withheld, the cases fail. A model with no tools that writes a call out as markup is asked once more in plain words (it was seen doing so, 1 run in 3).
+
 ## 0.54.1
 
 ### Added
