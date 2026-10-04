@@ -12,7 +12,7 @@
 
 import type { Message } from "../../core/llm.ts";
 import type { TurnMeta } from "../../core/session.ts";
-import { extractSystemReminders } from "../../core/system-reminder.ts";
+import { backgroundTaskLine, extractSystemReminders } from "../../core/system-reminder.ts";
 import { type CompletedToolCallStatus, completedToolCallStatus } from "../../core/tools/shared.ts";
 
 export interface DisplayToolCall {
@@ -348,7 +348,7 @@ export function toDisplayMessages(
 			const { cleaned, reminders } = extractSystemReminders(content);
 			// Show each reminder as a styled warning message
 			for (const body of reminders) {
-				if (body) out.push({ role: "warning", content: `[system] ${body}` });
+				if (body) out.push({ role: "warning", content: `[system] ${backgroundTaskLine(body) ?? body}` });
 			}
 			if (cleaned) {
 				content = cleaned;

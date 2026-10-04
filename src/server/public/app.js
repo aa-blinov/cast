@@ -17,7 +17,7 @@ import { ElapsedTimer } from "./elapsed-timer.js";
 import { hotkeysHtml, modKey } from "./hotkeys.js";
 import { icons } from "./icons.js";
 import { lazy, prefetchWhenIdle } from "./lazy.js";
-import { isForkableAnswer, Message as MessageModule } from "./message.js";
+import { backgroundTaskLine, isForkableAnswer, Message as MessageModule } from "./message.js";
 import { submitMessage as submitMessageRequest } from "./message-submit.js";
 import { describeFork } from "./fork-flow.js";
 import { rewindTo } from "./rewind-flow.js";
@@ -1959,6 +1959,18 @@ function App() {
 				}
 				cleaned = cleaned.trim();
 				pendingAttachments = null;
+				// A message that is only what cast tells the model (a finished background task) is not the person
+				// speaking: one line as a notice, not an empty bubble.
+				if (!cleaned && content.includes("<system-reminder>")) {
+					const lines = [...content.matchAll(/<system-reminder>([\s\S]*?)<\/system-reminder>/g)]
+						.map((found) => found[1].trim())
+						.filter(Boolean)
+						.map((body) => backgroundTaskLine(body) ?? body);
+					if (lines.length > 0 && !attachments.length) {
+						processed.push({ role: "warning", content: `[system] ${lines.join("\n")}` });
+						continue;
+					}
+				}
 				processed.push({
 					...m,
 					content: cleaned,

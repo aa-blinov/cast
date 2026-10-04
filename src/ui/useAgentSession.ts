@@ -15,7 +15,7 @@ import { forkSessionWithFiles } from "../core/fork-files.ts";
 import { goalPromptDisplay } from "../core/goal.ts";
 import { hasHooks, hookPromptContext, runHooksForEvent } from "../core/hooks.ts";
 import { describeTurnError, isRetryableStreamError, type Message, stripHermesToolCalls } from "../core/llm.ts";
-import { type AgentEvent, runAgentLoop } from "../core/loop.ts";
+import { type AgentEvent, isCastNotice, runAgentLoop } from "../core/loop.ts";
 import { formatMcpForPrompt, type McpSetupResult } from "../core/mcp.ts";
 import type { AskMcpForm } from "../core/mcp-interaction.ts";
 import {
@@ -1413,7 +1413,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 								if (event.type === "steering_injected") {
 									setPendingSteers((p) => p.slice(event.messages.length));
 								} else {
-									setPendingQueue((p) => p.slice(event.messages.length));
+									// What cast queued itself (a finished background task) was never a Queued entry.
+									const typed = event.messages.filter((m) => !isCastNotice(m)).length;
+									if (typed > 0) setPendingQueue((p) => p.slice(typed));
 								}
 								break;
 							}
@@ -1557,7 +1559,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						.map((message) => messageContentToText(message.content))
 						.filter(Boolean)
 						.join("\n\n");
-					setPendingQueue((pending) => pending.slice(lateFollowUps.length));
+					setPendingQueue((pending) => pending.slice(lateFollowUps.filter((m) => !isCastNotice(m)).length));
 					void submit(followUpText);
 				}
 			}
