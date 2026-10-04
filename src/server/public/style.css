@@ -410,6 +410,45 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	color: var(--text-muted);
 	padding: 4px 4px 8px;
 }
+.sidebar-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar-section-head .sidebar-section-title { padding-bottom: 4px; }
+/* Two modes of one list, like the directory toggle: the pressed one is the accent. */
+.sidebar-group-toggle {
+	display: flex;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	overflow: hidden;
+	flex-shrink: 0;
+}
+.sidebar-group-btn {
+	padding: 2px 8px;
+	border: none;
+	background: none;
+	color: var(--text-muted);
+	font-family: var(--font);
+	font-size: var(--fs-micro);
+	font-weight: 600;
+	cursor: pointer;
+}
+.sidebar-group-btn + .sidebar-group-btn { border-left: 1px solid var(--border); }
+.sidebar-group-btn:hover { color: var(--text); background: var(--bg-hover); }
+.sidebar-group-btn[aria-pressed="true"] { color: var(--cyan); background: var(--bg-hover); }
+.sidebar-project-select {
+	width: 100%;
+	margin: 0 0 6px;
+	padding: 5px 8px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font);
+	font-size: var(--fs-ui);
+}
+.sidebar-project-select:focus { border-color: var(--cyan); outline: none; }
+.sidebar-hint { padding: 8px 4px; color: var(--text-muted); font-size: var(--fs-micro); }
+.sidebar-group-count { margin-left: 6px; color: var(--text-muted); font-weight: 400; letter-spacing: 0; }
+/* A project is a folder name, and folder names are case-sensitive: the date headings are small caps, these are not. */
+.sidebar-group-label.sidebar-group-label-project { text-transform: none; letter-spacing: 0; }
 .sidebar-group-label {
 	font-size: var(--fs-micro); font-weight: 600;
 	text-transform: uppercase;
@@ -1603,7 +1642,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	.fs-error-dismiss { position: relative; }
 	.fs-error-dismiss::after { content: ""; position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 	/* The session row is the thing tapped most; the search field and "Load more" sit in the same list. */
-	.sidebar-item, .sidebar-load-more, .sidebar-search, .sidebar-item-menu-item { min-height: 44px; }
+	.sidebar-item, .sidebar-load-more, .sidebar-search, .sidebar-item-menu-item, .sidebar-project-select, .sidebar-group-btn { min-height: 44px; }
 	.sidebar-search { margin-bottom: 12px; }
 	.verify-btn { flex-basis: 44px; }
 

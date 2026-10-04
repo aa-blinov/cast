@@ -37,6 +37,7 @@ export function SidebarSessionItem({
 	startEdit,
 	menuFor,
 	openMenu,
+	hideFolder = false,
 }) {
 	const s = session;
 	// `selecting` is true while the click's /api/sessions/:id fetch is still
@@ -83,7 +84,7 @@ export function SidebarSessionItem({
 					: html`<button type="button" class="sidebar-item-text" aria-current=${isActive ? "true" : undefined} onDblClick=${(e) => {
 							e.stopPropagation();
 							startEdit(s);
-						}}><span class="sidebar-item-name">${sessionLabel(s)}</span><span class="sidebar-item-meta">${sessionMeta(s)}</span></button>`
+						}}><span class="sidebar-item-name">${sessionLabel(s)}</span><span class="sidebar-item-meta">${sessionMeta(s, undefined, { hideFolder })}</span></button>`
 			}
 			<div class="sidebar-item-menu-anchor">
 				<button class="sidebar-item-more" title="More" aria-label="More" aria-haspopup="menu" aria-expanded=${menuOpen} onClick=${(e) => {

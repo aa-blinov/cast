@@ -6,7 +6,7 @@ The browser client (`cast server`) is one page with a few surfaces around a conv
 
 ```
 header      sessions panel toggle . connection dot . [status] [dashboard] [settings] [shortcuts] [files panel toggle]
-sidebar     new session . quick session . search . sessions grouped by date . model . log out
+sidebar     new session . quick session . date/project switch . search . project filter . pinned . sessions . model . log out
 chat        the thread: user, reasoning (folded), tool cards, agent text, turn meta
 composer    role line (persona, mode, folder, timer) . queued messages . input . attach . voice . send
 files panel inputs . files . memory . changes (diff)

@@ -92,6 +92,7 @@ import {
 	renameEntry,
 	saveUpload,
 } from "./project-fs.ts";
+import { pinnedFirst } from "./session-list.ts";
 
 /** HTTP status for a bridge result's error string.
  *
@@ -1156,7 +1157,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const q = url.searchParams.get("q");
 		const limitParam = url.searchParams.get("limit");
 		const offsetParam = url.searchParams.get("offset");
-		const all = q ? await bridge.searchSessionsAsync(q) : await bridge.listSessionsAsync();
+		// A search keeps its ranking; the plain list puts pinned sessions on the first page.
+		const all = q ? await bridge.searchSessionsAsync(q) : pinnedFirst(await bridge.listSessionsAsync());
 		if (limitParam !== null || offsetParam !== null) {
 			const limit = Math.min(200, Math.max(1, parseInt(limitParam ?? "50", 10) || 50));
 			const offset = Math.max(0, parseInt(offsetParam ?? "0", 10) || 0);

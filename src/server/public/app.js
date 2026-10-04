@@ -972,6 +972,7 @@ function App() {
 	}, [activeSessionIdRef]);
 	const {
 		loadSessions,
+		loadAllSessions,
 		loadMoreSessions,
 		loadingMore,
 		selectSession,
@@ -2170,6 +2171,7 @@ function App() {
 				confirm=${requestConfirm}
 				hasMore=${hasMoreSessions}
 				onLoadMore=${loadMoreSessions}
+				onLoadAll=${loadAllSessions}
 				loadingMore=${loadingMore}
 			/>
 

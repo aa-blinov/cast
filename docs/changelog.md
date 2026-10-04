@@ -5,6 +5,7 @@ All notable user-facing changes to cast, newest first.
 ## Unreleased
 
 ### Added
+- **The web session list can be grouped by project, and pinned sessions stay on top.** A Date / Project switch in the Sessions heading (remembered in the browser) groups the list by working directory: every quick-session sandbox is one group, a project is named by its folder (and its parent where two share a name), the project used most recently comes first. A "Filter by project" box under the search narrows the list, or a search, to one project. Pinned sessions are one list above all groups, newest first, wherever their date is: a session pinned months ago used to sit under "Older", and past the first page it was not even loaded (the server now sends pinned sessions first). Grouping by project and filtering load every session rather than the first pages.
 - **The web folder picker can be typed into and filtered.** The path is a field: type or paste a path and press Enter, and a long path shows its end (the folder that "Use this folder" takes) instead of its start. With more than a few folders a filter appears (Enter on a single match opens it, Escape clears it), a "Hidden" box shows the dot folders, and arrows, Home and End move through the list as one tab stop (Delete asks to remove the folder). The list says how many folders it holds.
 
 ### Fixed
