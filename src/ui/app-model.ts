@@ -168,6 +168,8 @@ export function useAppModel(props: AppModelProps) {
 
 	const [session] = useState(result.session);
 	const [mcpResult, setMcpResult] = useState(result.mcpResult);
+	const mcpResultRef = useRef(mcpResult);
+	mcpResultRef.current = mcpResult;
 	const [currentPersona, setCurrentPersona] = useState(result.persona);
 	const [systemPrompt, setSystemPrompt] = useState(result.systemPrompt);
 	const [skills, setSkills] = useState(result.skills);
@@ -399,12 +401,10 @@ export function useAppModel(props: AppModelProps) {
 		if (!result.mcpResult.connectPending) return;
 		void resolveMcpForCwd(projectDeps, cwd, projectTrusted, loadSettings().disabledMcpServers ?? []).then(
 			async (connected) => {
-				let kept = false;
-				setMcpResult((current) => {
-					kept = current.connectPending === true;
-					return kept ? connected : current;
-				});
-				if (!kept) await closeMcpConnections(connected.connections);
+				// Read from the ref, not from inside the updater: React runs an updater when it likes, often after this
+				// line, so a flag set there was still false here and the connections just made were closed at once.
+				if (mcpResultRef.current.connectPending === true) setMcpResult(connected);
+				else await closeMcpConnections(connected.connections);
 			},
 		);
 	}, []);
@@ -890,6 +890,7 @@ export function useAppModel(props: AppModelProps) {
 		session,
 		cwd,
 		skills,
+		mcpResult,
 		running,
 		statusBar,
 		header,

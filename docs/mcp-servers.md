@@ -90,6 +90,14 @@ A server with only resources, or only prompts, has no `tools/list`: it connects 
 
 Not supported: subscribing to a resource's changes, and `@`-mentioning a resource in a message.
 
+## Prompts
+
+A server that declares prompts (ready-made, parameterised requests) gets one slash command per prompt: `/mcp:<server>:<prompt> [arguments]`. They show in the `/` palette with the argument names as a hint, and `/mcp list` shows `+ N prompts`. Running one asks the server to render it (`prompts/get`), and the messages it returns are sent as your next message, so the model answers them like anything you typed.
+
+Arguments are positional or named, in the order the prompt declares them: `/mcp:everything:args-prompt Tokyo state=Japan`. Quote a value with spaces (`code="x = 1"`). A missing required argument is reported with the server's own wording and nothing is sent. A prompt does not run while a turn is running.
+
+Offered in the web UI and in the terminal (a terminal attached to the daemon uses its own connection to the server). Not offered over ACP or `cast run`.
+
 ## Connection
 
 Servers connect in parallel during startup. Each gets a 30-second timeout, enough for `npx -y` cold cache resolution (~12s) without leaving a hung server unnoticed.
@@ -160,4 +168,4 @@ The picker shows all servers from all config sources, regardless of connection s
 - **Transports**: stdio and Streamable HTTP are primary. Cast also retries a failed Streamable HTTP initialization once through legacy HTTP+SSE for older servers; new server deployments should use Streamable HTTP.
 - **Auth**: Static header/token authentication only. OAuth (browser redirect, token storage/refresh) is not supported.
 - **Tool output**: Text, images, resource links, and embedded resources are handled. Audio content is noted but omitted.
-- **Resources**: listing and reading only (see above); no subscriptions to changes, no `@`-mention. MCP prompts are not used.
+- **Resources**: listing and reading only (see above); no subscriptions to changes, no `@`-mention. Prompts are run by you as `/mcp:<server>:<prompt>` (see above), never called by the model.

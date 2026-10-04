@@ -142,9 +142,25 @@ export interface McpToolHandle {
 	call: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolResult>;
 }
 
+export interface McpPromptArgument {
+	name: string;
+	description?: string;
+	required?: boolean;
+}
+
+/** A prompt a server offers: a template a person runs as `/mcp:<server>:<name>`, not a tool the model calls. */
+export interface McpPromptInfo {
+	name: string;
+	title?: string;
+	description?: string;
+	arguments: McpPromptArgument[];
+}
+
 export interface McpConnection {
 	serverName: string;
 	toolCount: number;
+	/** The prompts the server offered when it connected (empty when it declares none). */
+	prompts?: McpPromptInfo[];
 	/** The server declared the `resources` capability: it has list_resources and read_resource tools beside its own. */
 	resources?: boolean;
 	client: Client;
@@ -253,6 +269,212 @@ export async function listMcpTools(
 	return tools;
 }
 
+/** Prompts a server may list before the rest is dropped: a menu, not an index. */
+const PROMPT_MAX_LISTED = 200;
+
+async function listMcpPrompts(client: Client, requestTimeoutMs: number): Promise<McpPromptInfo[]> {
+	const out: McpPromptInfo[] = [];
+	let cursor: string | undefined;
+	const seen = new Set<string>();
+	for (let page = 0; page < RESOURCE_MAX_PAGES && out.length < PROMPT_MAX_LISTED; page++) {
+		// biome-ignore lint/performance/noAwaitInLoops: pagination — each page's cursor depends on the previous response
+		const got = await client.listPrompts(cursor ? { cursor } : undefined, {
+			timeout: requestTimeoutMs,
+			maxTotalTimeout: requestTimeoutMs,
+		});
+		for (const p of got.prompts) {
+			out.push({
+				name: p.name,
+				title: p.title,
+				description: p.description,
+				arguments: (p.arguments ?? []).map((a) => ({
+					name: a.name,
+					description: a.description,
+					required: a.required,
+				})),
+			});
+		}
+		cursor = got.nextCursor;
+		if (!cursor || seen.has(cursor)) break;
+		seen.add(cursor);
+	}
+	return out.slice(0, PROMPT_MAX_LISTED);
+}
+
+/** The slash command a prompt runs as. Server and prompt names are cleaned the way tool names are, so it is one token. */
+export function mcpPromptCommand(serverName: string, promptName: string): string {
+	return `/mcp:${sanitizeToolNamePart(serverName)}:${sanitizeToolNamePart(promptName)}`;
+}
+
+/** `<code> [language]`: required arguments in angle brackets, optional in square, in the order the server declares. */
+export function mcpPromptArgumentHint(prompt: McpPromptInfo): string | undefined {
+	if (prompt.arguments.length === 0) return undefined;
+	return prompt.arguments.map((a) => (a.required ? `<${a.name}>` : `[${a.name}]`)).join(" ");
+}
+
+export interface McpPromptCommand {
+	/** `/mcp:<server>:<prompt>`, the name typed. */
+	name: string;
+	serverName: string;
+	prompt: McpPromptInfo;
+	description: string;
+	takesArgs: boolean;
+	argumentHint?: string;
+}
+
+/**
+ * The prompts of the servers that are up, as slash commands. Two prompts that clean to the same name keep the
+ * first. A server that has gone away offers none, so a command never leads to a dead connection.
+ */
+export function mcpPromptCommands(result: Pick<McpSetupResult, "connections">): McpPromptCommand[] {
+	const out: McpPromptCommand[] = [];
+	const seen = new Set<string>();
+	for (const c of result.connections) {
+		if (c.alive === false) continue;
+		for (const prompt of c.prompts ?? []) {
+			const name = mcpPromptCommand(c.serverName, prompt.name);
+			if (seen.has(name)) continue;
+			seen.add(name);
+			out.push({
+				name,
+				serverName: c.serverName,
+				prompt,
+				description: `[${c.serverName}] ${prompt.title ?? prompt.description ?? prompt.name}`,
+				takesArgs: prompt.arguments.length > 0,
+				argumentHint: mcpPromptArgumentHint(prompt),
+			});
+		}
+	}
+	return out;
+}
+
+// A word is unquoted characters and quoted phrases run together, so `code="x = 1"` is one word.
+const PROMPT_WORD_RE = /(?:[^\s"']+|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')+/g;
+const PROMPT_NAMED_RE = /^([A-Za-z_][\w-]*)=([\s\S]*)$/;
+
+/** Drops the quotes around phrases in a word and unescapes what is inside them. */
+function unquotePromptWord(raw: string): string {
+	let out = "";
+	let quote: string | null = null;
+	for (let i = 0; i < raw.length; i++) {
+		const ch = raw[i]!;
+		if (quote) {
+			if (ch === "\\" && i + 1 < raw.length) out += raw[++i];
+			else if (ch === quote) quote = null;
+			else out += ch;
+		} else if (ch === '"' || ch === "'") {
+			quote = ch;
+		} else {
+			out += ch;
+		}
+	}
+	return out;
+}
+
+/** Splits what was typed after the command into words; a phrase in quotes stays one. */
+function splitPromptArguments(text: string): string[] {
+	return text.match(PROMPT_WORD_RE) ?? [];
+}
+
+/**
+ * Turns what was typed after `/mcp:<server>:<prompt>` into the prompt's arguments. `name=value` fills that
+ * argument (the value may be quoted); what is left fills the rest in the order the server declares them. A prompt
+ * with one argument takes the whole remainder as it, so `/mcp:docs:review some free text` needs no quotes.
+ */
+export function parseMcpPromptArguments(
+	prompt: McpPromptInfo,
+	text: string,
+): { ok: true; arguments: Record<string, string> } | { ok: false; error: string } {
+	const usage = `${mcpPromptArgumentHint(prompt) ?? "(no arguments)"}`;
+	const declared = new Set(prompt.arguments.map((a) => a.name));
+	const given: Record<string, string> = {};
+	const free: string[] = [];
+	const rest = text.trim();
+	if (
+		prompt.arguments.length === 1 &&
+		!(PROMPT_NAMED_RE.exec(rest.split(/\s/)[0] ?? "")?.[1] === prompt.arguments[0]!.name)
+	) {
+		if (rest) given[prompt.arguments[0]!.name] = rest;
+	} else {
+		for (const word of splitPromptArguments(rest)) {
+			const named = /^["']/.test(word) ? null : PROMPT_NAMED_RE.exec(word);
+			if (named && declared.has(named[1]!)) given[named[1]!] = unquotePromptWord(named[2]!);
+			else if (named) return { ok: false, error: `Unknown argument "${named[1]}". Usage: ${usage}` };
+			else free.push(unquotePromptWord(word));
+		}
+		for (const arg of prompt.arguments) {
+			if (given[arg.name] === undefined && free.length > 0) given[arg.name] = free.shift()!;
+		}
+		if (free.length > 0) return { ok: false, error: `Too many arguments. Usage: ${usage}` };
+	}
+	const missing = prompt.arguments.filter((a) => a.required && !given[a.name]);
+	if (missing.length > 0) {
+		return { ok: false, error: `Missing ${missing.map((a) => a.name).join(", ")}. Usage: ${usage}` };
+	}
+	return { ok: true, arguments: given };
+}
+
+interface McpPromptMessage {
+	role: string;
+	content: McpContentPart;
+}
+
+/**
+ * The text a prompt's messages become when run: the user's turns as they are, an assistant turn marked as one (a prompt
+ * can seed a conversation), embedded text resources inline, anything binary or audio only noted.
+ */
+export function formatMcpPromptMessages(messages: McpPromptMessage[]): string {
+	const one = (part: McpContentPart): string => {
+		if (part.type === "text") return part.text ?? "";
+		if (part.type === "resource" && part.resource) {
+			return part.resource.text !== undefined
+				? `[resource ${part.resource.uri}]\n${part.resource.text}`
+				: `[embedded resource: ${part.resource.uri}${part.resource.mimeType ? ` (${part.resource.mimeType})` : ""}]`;
+		}
+		if (part.type === "resource_link" && part.uri) return `[resource link: ${part.name ?? part.uri} (${part.uri})]`;
+		if (part.type === "image") return `[image omitted${part.mimeType ? `: ${part.mimeType}` : ""}]`;
+		if (part.type === "audio") return `[audio omitted${part.mimeType ? `: ${part.mimeType}` : ""}]`;
+		return "";
+	};
+	const mixed = messages.some((m) => m.role !== "user");
+	return messages
+		.map((m) => (mixed ? `${m.role === "assistant" ? "Assistant" : "User"}:\n${one(m.content)}` : one(m.content)))
+		.filter((t) => t.trim() !== "")
+		.join("\n\n");
+}
+
+/** Asks the server for a prompt with its arguments and returns the text to run, or why it could not. */
+export async function getMcpPrompt(
+	result: Pick<McpSetupResult, "connections">,
+	command: McpPromptCommand,
+	args: Record<string, string>,
+	signal?: AbortSignal,
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+	const connection = result.connections.find((c) => c.serverName === command.serverName);
+	if (!connection || connection.alive === false) {
+		return {
+			ok: false,
+			error: `The MCP server "${command.serverName}" is no longer connected${connection?.deadReason ? ` (${connection.deadReason})` : ""}. Run /mcp reconnect ${command.serverName}.`,
+		};
+	}
+	try {
+		const timeout = mcpToolTimeoutMs();
+		const got = await connection.client.getPrompt(
+			{ name: command.prompt.name, arguments: args },
+			{ signal, ...(timeout === undefined ? {} : { timeout }) },
+		);
+		const text = formatMcpPromptMessages(got.messages as McpPromptMessage[]).trim();
+		if (!text)
+			return { ok: false, error: `The prompt "${command.prompt.name}" of "${command.serverName}" came back empty.` };
+		return { ok: true, text };
+	} catch (error) {
+		return {
+			ok: false,
+			error: `MCP server "${command.serverName}" prompt "${command.prompt.name}" failed: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
 /** Pages of resources/list or resources/templates/list followed, and entries listed, before the rest is only counted. */
 const RESOURCE_MAX_PAGES = 20;
 const RESOURCE_MAX_LISTED = 200;
@@ -337,6 +559,16 @@ interface ResourceContent {
 	blob?: string;
 }
 
+const TEXTUAL_MIME_RE =
+	/^(?:text\/|application\/(?:json|xml|x-yaml|yaml|toml|javascript|x-sh|sql)\b|[^;]+\+(?:json|xml))/i;
+
+/** A blob whose type says it is text (some servers send everything as base64): its text, or undefined when it is not. */
+function textOfBlob(blob: string, mimeType: string | undefined): string | undefined {
+	if (!mimeType || !TEXTUAL_MIME_RE.test(mimeType)) return undefined;
+	const text = Buffer.from(blob, "base64").toString("utf-8");
+	return text.includes("\u0000") || text.includes("\uFFFD") ? undefined : text;
+}
+
 /** What read_resource returns: text as it is, an image as an image, any other binary as a note of what it was. */
 export function formatResourceContents(uri: string, contents: ResourceContent[]): ToolResult {
 	const fragments: string[] = [];
@@ -344,8 +576,9 @@ export function formatResourceContents(uri: string, contents: ResourceContent[])
 	let extraImages = 0;
 	for (const c of contents) {
 		const heading = contents.length > 1 ? `[${c.uri}${c.mimeType ? ` (${c.mimeType})` : ""}]\n` : "";
-		if (c.text !== undefined) {
-			fragments.push(`${heading}${c.text}`);
+		const decoded = c.text === undefined && c.blob !== undefined ? textOfBlob(c.blob, c.mimeType) : undefined;
+		if (c.text !== undefined || decoded !== undefined) {
+			fragments.push(`${heading}${c.text ?? decoded}`);
 		} else if (c.blob !== undefined && c.mimeType?.startsWith("image/")) {
 			if (!image) image = c;
 			else extraImages++;
@@ -726,9 +959,20 @@ export async function connectMcpServers(
 				const offersResources = Boolean(client.getServerCapabilities()?.resources);
 				if (offersResources) addResourceTools(setupResult, serverName, client, connectionRef);
 
+				// The prompts are a menu for the person, so a server that cannot list them keeps its tools and resources.
+				const prompts = client.getServerCapabilities()?.prompts
+					? await listMcpPrompts(client, connectTimeoutMs).catch((error: unknown) => {
+							setupResult.diagnostics.push(
+								`mcp server "${serverName}": could not list its prompts: ${error instanceof Error ? error.message : String(error)}`,
+							);
+							return [];
+						})
+					: [];
+
 				const connection: McpConnection = {
 					serverName,
 					toolCount: tools.length,
+					prompts: prompts.length > 0 ? prompts : undefined,
 					resources: offersResources || undefined,
 					client,
 					alive: true,

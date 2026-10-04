@@ -10,6 +10,7 @@ import {
 	VStack,
 } from "@earendil-works/pi-tui";
 import { formatGoalSegment, readGoal } from "../core/goal.ts";
+import { mcpPromptCommands } from "../core/mcp.ts";
 import { skillInvocationLabel } from "../core/session-title.ts";
 import type { StatusBarConfig } from "../core/settings.ts";
 import type { AppModel } from "../ui/app-model.ts";
@@ -277,7 +278,9 @@ export class PiApp {
 
 	private syncCommands(model: AppModel): void {
 		const skills = model.skills;
-		const key = `${model.cwd}|${skills.map((s) => `${s.name}:${s.argumentHint ?? ""}`).join("|")}`;
+		// What the connected MCP servers offer as prompts: `/mcp:<server>:<prompt>`.
+		const mcpPrompts = mcpPromptCommands(model.mcpResult);
+		const key = `${model.cwd}|${skills.map((s) => `${s.name}:${s.argumentHint ?? ""}`).join("|")}|${mcpPrompts.map((c) => `${c.name}:${c.argumentHint ?? ""}`).join("|")}`;
 		if (key === this.commandKey) return;
 		this.commandKey = key;
 		const builtin = new Set(SLASH_COMMANDS.map((c) => c.name));
@@ -287,6 +290,11 @@ export class PiApp {
 		const commands: SlashCommand[] = [
 			...SLASH_COMMANDS.filter((c) => !c.hidden).map((c) => ({ name: c.name.slice(1), description: c.description })),
 			...skillCommands,
+			...mcpPrompts.map((c) => ({
+				name: c.name.slice(1),
+				description: c.description,
+				argumentHint: c.argumentHint,
+			})),
 		].map((c) => ({ ...c, description: c.description === undefined ? undefined : sanitize(c.description) }));
 		const hidden = new Set(
 			SLASH_COMMANDS.filter((c) => c.hidden && !c.name.includes(" ")).map((c) => c.name.slice(1)),
