@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 // provides a real global EventSource, so this import is Node-only and safe in
 // both runtimes.
 import { EventSource } from "undici";
+import { sessionIsInProject } from "../core/project-cwd.ts";
 import type { SessionState } from "../core/session.ts";
 import { API_V1_PREFIX } from "./api-v1.ts";
 import { canBind, rememberedBind, type ServerBind } from "./daemon-bind.ts";
@@ -274,15 +275,14 @@ export async function ensureServerSession(
 		if (status === 200) return { id: options.resumeId, resumed: true };
 		throw new Error(`session ${options.resumeId} not found`);
 	}
-	// --continue: the most recent session in the same cwd (mirrors local
-	// startup's mostRecentSessionForProject).
+	// --continue: the most recent session in the same cwd, or in a worktree cast made for it.
 	if (options.resumeRequested) {
 		const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions`);
 		if (status === 200) {
 			const list = data as Array<{ id: string; cwd?: string; updatedAt?: string }>;
 			const cwd = options.cwd ?? process.env.CAST_CWD;
 			const match = [...list]
-				.filter((s) => !cwd || s.cwd === cwd)
+				.filter((s) => !cwd || sessionIsInProject(s.cwd, cwd))
 				.sort((a, b) => String(b.updatedAt ?? "").localeCompare(String(a.updatedAt ?? "")))[0];
 			if (match) return { id: match.id, resumed: true };
 		}

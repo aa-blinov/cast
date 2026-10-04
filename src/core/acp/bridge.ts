@@ -20,6 +20,7 @@ import {
 } from "../mcp.ts";
 import { createPlanState, type PlanState, resolvePlanQuestion, resolvePlanTransition } from "../plan.ts";
 import { buildSystemPrompt, resolvePromptContextForCwd, resolveRulesForCwd } from "../project.ts";
+import { sessionIsInProject } from "../project-cwd.ts";
 import { formatRulesForTurn, matchAutoRules, type Rule, selectMentionedRules, unionStickyRules } from "../rules.ts";
 import type { AgentRunner } from "../runner.ts";
 import { createAgentRunner } from "../runner.ts";
@@ -372,7 +373,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			// filter for /proj would match /projects/a). Editors asking for
 			// "sessions for this exact project" want the sessionId back, not
 			// every session whose cwd happens to share a prefix.
-			const filtered = params?.cwd ? all.filter((s) => s.cwd === params.cwd) : all;
+			const filtered = params?.cwd ? all.filter((s) => sessionIsInProject(s.cwd, params.cwd!)) : all;
 			// Cursor encodes the next offset as the sessionId at that index.
 			// Using sessionId (not numeric offset) is stable across re-sorts.
 			// Cursor is the sessionId at the start of the next page — the

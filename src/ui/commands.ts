@@ -2390,6 +2390,17 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				);
 				return;
 			}
+			// Attached to the daemon, the session and its directory are the daemon's: it makes the worktree, moves the
+			// agent into it and tells every client (this one learns the new directory from its session update).
+			if (agent.daemonMode) {
+				try {
+					const result = await agent.runCommand(`/worktree ${rawArg}`);
+					showNotice(`[${typeof result === "string" ? result : "Done"}]`);
+				} catch (err) {
+					showNotice(`[Worktree failed: ${err instanceof Error ? err.message : String(err)}]`);
+				}
+				return;
+			}
 			if (rawArg === "list") {
 				const wts = listWorktrees(deps.cwd);
 				if (wts.length === 0) {

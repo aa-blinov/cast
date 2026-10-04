@@ -412,6 +412,8 @@ interface UseAgentSessionParams {
 	onSkillsChanged?: () => void;
 	/** The agent changed an MCP config file: the host reconnects the servers it lists. */
 	onMcpChanged?: () => void;
+	/** The daemon moved this session's working directory (the agent's worktree tool, /worktree from any client). */
+	onCwdChanged?: (cwd: string) => void;
 	/** Re-read persona overrides before a new turn so chat-created changes apply immediately. */
 	refreshPersonasForTurn?: () => Promise<{ persona: Persona; personas: Persona[]; systemPrompt: string }>;
 	/** Available personas for the task tool. */
@@ -586,6 +588,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	onPersonaActivatedRef.current = params.onPersonaActivated;
 	const onSkillsChangedRef = useRef(params.onSkillsChanged);
 	onSkillsChangedRef.current = params.onSkillsChanged;
+	const onCwdChangedRef = useRef(params.onCwdChanged);
+	onCwdChangedRef.current = params.onCwdChanged;
 	const onMcpChangedRef = useRef(params.onMcpChanged);
 	onMcpChangedRef.current = params.onMcpChanged;
 	const {
@@ -1792,6 +1796,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					break;
 				case "mcp_changed":
 					onMcpChangedRef.current?.();
+					break;
+				case "session_update":
+					// The daemon owns the session's directory: a move made by the agent or by another client shows here too.
+					if (event.session.id === session.id && event.session.cwd) onCwdChangedRef.current?.(event.session.cwd);
 					break;
 				case "user_message":
 					setMessages((msgs) => {

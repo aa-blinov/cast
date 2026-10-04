@@ -34,7 +34,7 @@ import { usePanelResize } from "./use-panel-resize.js";
 import { readOlderPages, useSessionController } from "./use-session-controller.js";
 import { useSessionState } from "./use-session-state.js";
 import { useWorkspaceState } from "./use-workspace-state.js";
-import { isSandboxSessionCwd, SANDBOX_CWD } from "./sidebar-utils.js";
+import { isSandboxSessionCwd, SANDBOX_CWD, worktreeOf } from "./sidebar-utils.js";
 
 const FRONTMATTER_LINE_RE = /^- (.+?): (.+)$/;
 
@@ -2367,7 +2367,7 @@ function App() {
 								session?.cwd &&
 								html`<span class="composer-role-cwd" title=${session.cwd}>(<span class="composer-role-cwd-path">${`\u200e${isSandboxSessionCwd(session.cwd) ? "sandbox" : session.cwd}`}</span>)</span>`
 							}
-							${session?.worktree && html`<span class="composer-role-mode composer-role-worktree">worktree</span>`}
+							${worktreeOf(session?.cwd) && html`<span class="composer-role-mode composer-role-worktree" title="Working in an isolated git worktree">wt:${worktreeOf(session?.cwd)}</span>`}
 						</div>
 						<${ElapsedTimer} key=${activeId} running=${running} connected=${connected} turnStartedAt=${session?.turnStartedAt} pendingSince=${pendingSinceMs} />
 					</div>

@@ -17,6 +17,7 @@ import {
 	sortSessionsByActivity,
 	splitPinned,
 	visibleSessions,
+	worktreeOf,
 } from "../src/server/public/sidebar-utils.js";
 
 describe("web sidebar session helpers", () => {
@@ -193,5 +194,32 @@ describe("grouping by project and pinned", () => {
 		expect(sessionMeta(session, now)).toBe("api · 30m");
 		expect(sessionMeta(session, now, { hideFolder: true })).toBe("30m");
 		expect(sessionMeta({ ...session, status: "running" }, now, { hideFolder: true })).toBe("running · 30m");
+	});
+});
+
+describe("sessions in a worktree", () => {
+	const root = "/work/api";
+	const inWorktree = { cwd: `${root}/.cast/worktrees/feature-x`, updatedAt: "2026-10-02T11:30:00Z" };
+	const now = Date.parse("2026-10-02T12:00:00Z");
+
+	it("names the worktree a folder is in, and nothing for any other folder", () => {
+		expect(worktreeOf(inWorktree.cwd)).toBe("feature-x");
+		expect(worktreeOf(`${root}/.cast/worktrees/feature-x/src/deep`)).toBe("feature-x");
+		expect(worktreeOf(`${root}/.cast/worktrees/a+b`)).toBe("a/b");
+		expect(worktreeOf(root)).toBe("");
+		expect(worktreeOf(`${root}/.cast/skills`)).toBe("");
+		expect(worktreeOf(undefined)).toBe("");
+	});
+
+	it("is the project's session: grouped with it and filtered by it", () => {
+		expect(projectOf(inWorktree)).toBe(root);
+		expect(projectOf({ cwd: `${root}/.cast/worktrees/other/pkg`, updatedAt: "x" })).toBe(root);
+		const projects = listProjects([inWorktree, { cwd: root, updatedAt: "2026-10-01T00:00:00Z" }]);
+		expect(projects).toEqual([{ key: root, count: 2, updatedAt: "2026-10-02T11:30:00Z" }]);
+	});
+
+	it("shows the project and the worktree in the meta line, and only the worktree under its project", () => {
+		expect(sessionMeta(inWorktree, now)).toBe("api · wt:feature-x · 30m");
+		expect(sessionMeta(inWorktree, now, { hideFolder: true })).toBe("wt:feature-x · 30m");
 	});
 });

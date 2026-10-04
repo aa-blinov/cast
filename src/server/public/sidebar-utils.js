@@ -10,6 +10,15 @@ export function isSandboxSessionCwd(cwd) {
 	return cwd === SANDBOX_CWD || SANDBOX_PATH_RE.test(cwd ?? "");
 }
 
+// A worktree cast made for a project lives inside it: <project>/.cast/worktrees/<name> (a nested name is flattened with "+").
+const WORKTREE_PATH_RE = /^(.*?)[\\/]\.cast[\\/]worktrees[\\/]([^\\/]+)/;
+
+/** The worktree a working folder is in (or a folder of), as it was named; "" for anything else. */
+export function worktreeOf(cwd) {
+	const match = WORKTREE_PATH_RE.exec(cwd ?? "");
+	return match ? match[2].replaceAll("+", "/") : "";
+}
+
 export function shortPath(path) {
 	if (!path) return "";
 	const parts = path.split("/").filter(Boolean);
@@ -74,16 +83,23 @@ export function relativeAge(updatedAt, now = Date.now()) {
 
 // `hideFolder` for a list already grouped by project: the folder is the group's heading there.
 export function sessionMeta(session, now = Date.now(), { hideFolder = false } = {}) {
-	const folder = session.cwd ? session.cwd.split("/").filter(Boolean).pop() : "";
 	// The status dot is a colour; running and error are also said in words.
 	const state = session.status === "running" || session.status === "error" ? session.status : "";
+	// A session in a worktree is shown as its project plus the worktree, not under the worktree's own folder name.
+	const root = WORKTREE_PATH_RE.exec(session.cwd ?? "")?.[1] ?? session.cwd ?? "";
+	const folder = root.split(/[\\/]/).filter(Boolean).pop() ?? "";
+	const worktree = worktreeOf(session.cwd);
 	const where = hideFolder ? "" : isSandboxSessionCwd(session.cwd) ? "sandbox" : folder;
-	return [state, where, relativeAge(session.updatedAt, now)].filter(Boolean).join(" · ");
+	return [state, where, worktree ? `wt:${worktree}` : "", relativeAge(session.updatedAt, now)].filter(Boolean).join(" · ");
 }
 
-/** The project a session belongs to: its folder, or "sandbox" for every throwaway folder (each has a path of its own). */
+/**
+ * The project a session belongs to: its folder, or "sandbox" for every throwaway folder (each has a path of its own).
+ * A session in a worktree of a project is that project's.
+ */
 export function projectOf(session) {
-	return isSandboxSessionCwd(session.cwd) ? SANDBOX_CWD : session.cwd || "";
+	if (isSandboxSessionCwd(session.cwd)) return SANDBOX_CWD;
+	return WORKTREE_PATH_RE.exec(session.cwd ?? "")?.[1] || session.cwd || "";
 }
 
 /** Pinned sessions apart from the rest, newest first: pinning is "keep this where I can see it", not "keep it in its month". */

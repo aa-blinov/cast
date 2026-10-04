@@ -27,9 +27,9 @@ Shell commands, HTTP callbacks, MCP tool calls, or one-shot model prompts that f
 | `StopFailure` | A turn ends because of an API error | No, observation only |
 | `FileChanged` | A file is added, changed, or removed while the daemon session is idle | No |
 | `DirectoryAdded` | A directory is added while the daemon session is idle | No |
-| `WorktreeCreate` | Before `/worktree <name>` creates a worktree | **Yes**: can cancel creation |
+| `WorktreeCreate` | Before `/worktree <name>`, or the agent's `worktree` tool, creates a worktree | **Yes**: can cancel creation |
 | `WorktreeRemove` | After `/worktree remove <name>` succeeds | No |
-| `CwdChanged` | `/worktree <name>` switches the live session to its worktree | No |
+| `CwdChanged` | `/worktree <name>`, or the agent's `worktree` tool, switches the live session to its worktree (or back) | No |
 | `MessageDisplay` | A completed assistant message is delivered to a daemon client | No |
 
 "Blocking" means the hook can change what happens next. Every other event is passive: its exit code/output never changes the run, only what gets logged, or (for `UserPromptSubmit`) appended to the prompt as extra context when it *doesn't* block.

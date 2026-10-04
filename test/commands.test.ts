@@ -1981,6 +1981,37 @@ describe("/worktree honours a blocking WorktreeCreate hook", () => {
 	});
 });
 
+describe("/worktree attached to the daemon", () => {
+	it("is the daemon's to do: it is sent there, and nothing is made or saved here", async () => {
+		const { deps, calls } = createFakeDeps();
+		const sent: string[] = [];
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async (command) => {
+			sent.push(command);
+			return "Worktree ready: /p/.cast/worktrees/x";
+		};
+		deps.cwd = join(tmpdir(), "cast-not-a-repo-for-daemon-worktree");
+
+		await handleInput("/worktree x", undefined, deps);
+
+		expect(sent).toEqual(["/worktree x"]);
+		const notices = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
+		expect(notices.at(-1)).toBe("[Worktree ready: /p/.cast/worktrees/x]");
+		expect(calls.setCwd ?? []).toEqual([]);
+	});
+
+	it("says what the daemon refused", async () => {
+		const { deps, calls } = createFakeDeps();
+		(deps.agent as { daemonMode: boolean }).daemonMode = true;
+		(deps.agent as { runCommand: (c: string) => Promise<unknown> }).runCommand = async () => {
+			throw new Error("Agent running — finish the run or /abort before switching worktrees");
+		};
+		await handleInput("/worktree x", undefined, deps);
+		const notices = (calls.showNotice as unknown[][] | undefined)?.map((n) => String(n[0] ?? "")) ?? [];
+		expect(notices.at(-1)).toContain("Agent running");
+	});
+});
+
 describe("/compact fires the compaction hooks", () => {
 	// The web /compact and the automatic threshold both fire PreCompact and
 	// PostCompact; the TUI's /compact fired neither, so a guard written to

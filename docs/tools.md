@@ -290,6 +290,23 @@ Fetch a web page and return clean markdown via Jina Reader. Handles JS rendering
 | `url` | Yes | URL to fetch |
 | `maxChars` | No | Maximum characters (default: 12,000) |
 
+## Worktree Tool
+
+### `worktree`
+
+Works in an isolated git worktree: a second checkout of the repository on its own branch, so what the agent changes does not touch your files or your branch. It is the agent's way to do what `/worktree <name>` does for you, and it is offered where a daemon records the move (the web UI, the terminal attached to the daemon, `cast run`), not in plan mode, not to a subagent, not in the in-process ACP bridge (the editor owns the folder there) and not in the terminal's no-daemon fallback (`CAST_NO_DAEMON=1`; use `/worktree` there). It asks before creating, where a write asks.
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `action` | Yes | `enter`, `exit` or `list` |
+| `name` | For `enter` | A short slug such as `feature-x` |
+
+- `enter` creates the worktree (or reuses it) at `.cast/worktrees/<name>` on branch `cast-<name>`, fires the `WorktreeCreate` hook (which can cancel it) and moves the session into it: from the next tool call relative paths, `bash` and the permission rules work there, the session's working directory is saved (a later message continues in the worktree), the next turn's prompt is built for it and the `CwdChanged` hook fires.
+- `exit` goes back to the main checkout and keeps the worktree and its branch.
+- `list` shows the repository's worktrees and which one the agent is in.
+
+The agent is told to use it when you ask for a worktree or an isolated copy to try something in, not on its own, and not to make one with `git worktree add` in `bash` (that one would not be tracked and the agent would not be working in it). Removing a worktree stays yours: `/worktree remove <name>`. It is called alone, not in a message with other tool calls, since the calls after it run in the new directory.
+
 ## Task Tool
 
 ### `task`

@@ -691,6 +691,8 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	text-transform: uppercase;
 	letter-spacing: .04em;
 }
+/* A worktree name is case-sensitive: the role line sets its labels in capitals, this one is not. */
+.composer-role-mode.composer-role-worktree { text-transform: none; }
 .composer-elapsed {
 	/* Bigger and in the theme accent (not muted gray) — this is the one
 	   ticking indicator that a run is still alive, so it needs to read at a
