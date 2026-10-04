@@ -20,10 +20,10 @@
  */
 
 import { lookup as dnsLookup } from "node:dns/promises";
-import { isIPv4 } from "node:net";
+import { isIPv4, isIPv6 } from "node:net";
 import { Parser } from "htmlparser2";
 import TurndownService from "turndown";
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch } from "undici";
 import { loadSettings } from "../settings.ts";
 import type { ToolResult } from "./shared.ts";
 
@@ -31,10 +31,11 @@ const UDDG_RE = /uddg=([^&"]+)/;
 const DDG_RESULT_RE = /<div[^>]+class="result\s/;
 const DDG_LINK_RE = /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/;
 const DDG_SNIPPET_RE = /<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>/;
+const DDG_TIME_VALUES = new Set(["d", "w", "m", "y"]);
+const DDG_REGION_RE = /^(?:wt-wt|[a-z]{2}-[a-z]{2})$/;
+const DDG_BLOCK_RE = /Please complete the following challenge|anomaly-modal|bots use DuckDuckGo too/i;
+const DDG_NO_RESULTS_RE = /class="no-results"|No\s+results/i;
 const JINA_TITLE_RE = /^Title: (.+)$/m;
-const IPV6_LINK_LOCAL_RE = /^fe[89ab][0-9a-f]:/;
-const IPV6_UNIQUE_LOCAL_RE = /^f[cd][0-9a-f]{2}:/;
-const IPV4_MAPPED_IPV6_RE = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/;
 
 // ============================================================================
 // Constants
@@ -65,6 +66,10 @@ const LOCAL_MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 // the cache for the rest of the TTL — parse the full page once and truncate
 // per-caller on the way out instead.
 const PARSE_RESULTS_LIMIT = 25;
+// A search that never answers held the whole turn until the person pressed Esc; fetch always had a timeout.
+const SEARCH_TIMEOUT_MS = 20_000;
+// What the model may ask web_fetch for. The default is 12k; this is the ceiling, not a target.
+const MAX_CONTENT_CHARS_LIMIT = 200_000;
 
 // ============================================================================
 // DDG Search — html.duckduckgo.com
@@ -105,6 +110,38 @@ function cacheSet(key: string, results: SearchResults): void {
 		if (first !== undefined) searchCache.delete(first);
 	}
 	searchCache.set(key, { results, ts: Date.now() });
+}
+
+/**
+ * One request of a search backend, with a deadline. Only the person's own signal bounded it before, so a backend
+ * that accepted the connection and never answered held the turn until Esc; a timeout is reported as what it is.
+ */
+async function searchRequest(
+	label: string,
+	url: string | URL,
+	init: RequestInit,
+	signal?: AbortSignal,
+	timeoutMs = SEARCH_TIMEOUT_MS,
+): Promise<Response> {
+	const deadline = AbortSignal.timeout(timeoutMs);
+	try {
+		return await fetch(url, { ...init, signal: signal ? AbortSignal.any([signal, deadline]) : deadline });
+	} catch (error) {
+		if (deadline.aborted && !signal?.aborted) {
+			throw new Error(`${label} did not answer within ${timeoutMs / 1000}s`);
+		}
+		throw error;
+	}
+}
+
+/** DuckDuckGo's own click-tracking redirect for an ad: a link to an advertiser, not a result. */
+function isDdgAdUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url);
+		return parsed.hostname.endsWith("duckduckgo.com") && parsed.pathname === "/y.js";
+	} catch {
+		return false;
+	}
 }
 
 /** Decode DDG redirect URL: `//duckduckgo.com/l/?uddg=https%3A%2F%2F...` → `https://...` */
@@ -153,6 +190,8 @@ export async function searchDuckDuckGo(
 		region?: string;
 		time?: string;
 		signal?: AbortSignal;
+		/** How long the request may take, in ms (default 20s). */
+		timeoutMs?: number;
 	},
 ): Promise<SearchResults> {
 	const maxResults = options?.maxResults ?? MAX_SEARCH_RESULTS;
@@ -167,14 +206,19 @@ export async function searchDuckDuckGo(
 	if (options?.region) params.set("kl", options.region);
 	if (options?.time) params.set("df", options.time);
 	const url = `https://html.duckduckgo.com/html/?${params.toString()}`;
-	const resp = await fetch(url, {
-		headers: {
-			"User-Agent": UA,
-			Accept: "text/html",
-			"Accept-Language": "en-US,en;q=0.9",
+	const resp = await searchRequest(
+		"DuckDuckGo",
+		url,
+		{
+			headers: {
+				"User-Agent": UA,
+				Accept: "text/html",
+				"Accept-Language": "en-US,en;q=0.9",
+			},
 		},
 		signal,
-	});
+		options?.timeoutMs,
+	);
 
 	if (resp.status === 202) {
 		throw new Error(
@@ -186,8 +230,8 @@ export async function searchDuckDuckGo(
 
 	const html = await resp.text();
 
-	// Detect CAPTCHA page (sometimes returned as 200)
-	if (html.includes("Please complete the following challenge")) {
+	// Detect CAPTCHA / bot-check pages (sometimes returned as 200)
+	if (DDG_BLOCK_RE.test(html)) {
 		throw new Error("DDG rate limit — CAPTCHA triggered. Try again later.");
 	}
 
@@ -197,12 +241,14 @@ export async function searchDuckDuckGo(
 
 	for (let i = 1; i < blocks.length && results.length < PARSE_RESULTS_LIMIT; i++) {
 		const block = blocks[i];
+		// An ad is laid out like a result and comes first: its link is a redirect to an advertiser.
+		if (block.slice(0, 300).includes("result--ad")) continue;
 
 		const titleMatch = DDG_LINK_RE.exec(block);
 		if (!titleMatch) continue;
 
 		const resultUrl = decodeDdgUrl(titleMatch[1]);
-		if (!resultUrl) continue;
+		if (!resultUrl || isDdgAdUrl(resultUrl)) continue;
 		const title = stripTags(titleMatch[2]);
 		if (!title) continue;
 
@@ -212,10 +258,19 @@ export async function searchDuckDuckGo(
 		results.push({ title, url: resultUrl, snippet });
 	}
 
+	// A page with no results that is not DDG's own "no results" page is one this parser does not understand (a block
+	// page worded differently, a layout change): saying "no results" and remembering it for ten minutes would turn
+	// that into a fact the model acts on.
+	if (results.length === 0 && !DDG_NO_RESULTS_RE.test(html)) {
+		throw new Error(
+			"DDG answered with a page cast could not read as search results (a block page, or DuckDuckGo changed its layout). Try again later or use another provider (/web-search-provider).",
+		);
+	}
+
 	const searchResults = { query, results };
 
-	// Cache the full parsed set (see PARSE_RESULTS_LIMIT) even when empty, to
-	// avoid re-hitting DDG; truncate to this caller's maxResults on the way out.
+	// Cache the full parsed set (see PARSE_RESULTS_LIMIT); a real "no results" is cached too, to avoid re-hitting DDG.
+	// Truncate to this caller's maxResults on the way out.
 	cacheSet(key, searchResults);
 
 	return { ...searchResults, results: results.slice(0, maxResults) };
@@ -240,6 +295,8 @@ export async function searchTavily(
 	options?: {
 		maxResults?: number;
 		signal?: AbortSignal;
+		/** How long the request may take, in ms (default 20s). */
+		timeoutMs?: number;
 	},
 ): Promise<SearchResults> {
 	if (!query.trim()) throw new Error("Tavily search error: query is empty.");
@@ -256,20 +313,25 @@ export async function searchTavily(
 	const cached = cacheGet(key);
 	if (cached) return { ...cached, results: cached.results.slice(0, maxResults) };
 
-	const resp = await fetch("https://api.tavily.com/search", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			Authorization: `Bearer ${apiKey}`,
+	const resp = await searchRequest(
+		"Tavily",
+		"https://api.tavily.com/search",
+		{
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${apiKey}`,
+			},
+			// Always request Tavily's own max (20), independent of this caller's
+			// maxResults — same reasoning as DDG's PARSE_RESULTS_LIMIT: cache the
+			// full set once, slice per-caller below, so a query first run with a
+			// small maxResults doesn't cap what a later, larger request can get
+			// out of the cache for the rest of the TTL.
+			body: JSON.stringify({ query: truncatedQuery, max_results: 20 }),
 		},
-		// Always request Tavily's own max (20), independent of this caller's
-		// maxResults — same reasoning as DDG's PARSE_RESULTS_LIMIT: cache the
-		// full set once, slice per-caller below, so a query first run with a
-		// small maxResults doesn't cap what a later, larger request can get
-		// out of the cache for the rest of the TTL.
-		body: JSON.stringify({ query: truncatedQuery, max_results: 20 }),
 		signal,
-	});
+		options?.timeoutMs,
+	);
 
 	if (resp.status === 401 || resp.status === 403) {
 		throw new Error("Tavily rejected the API key — check /web-search-provider or the tavilyApiKey setting.");
@@ -322,6 +384,8 @@ export async function searchBrave(
 	options?: {
 		maxResults?: number;
 		signal?: AbortSignal;
+		/** How long the request may take, in ms (default 20s). */
+		timeoutMs?: number;
 	},
 ): Promise<SearchResults> {
 	if (!query.trim()) throw new Error("Brave search error: query is empty.");
@@ -339,13 +403,18 @@ export async function searchBrave(
 	// reasoning as Tavily/DDG above.
 	url.searchParams.set("count", "20");
 
-	const resp = await fetch(url, {
-		headers: {
-			Accept: "application/json",
-			"X-Subscription-Token": apiKey,
+	const resp = await searchRequest(
+		"Brave",
+		url,
+		{
+			headers: {
+				Accept: "application/json",
+				"X-Subscription-Token": apiKey,
+			},
 		},
 		signal,
-	});
+		options?.timeoutMs,
+	);
 
 	if (resp.status === 429) {
 		throw new Error("Brave rate limit or free-tier quota exceeded.");
@@ -419,15 +488,51 @@ function truncateAtBoundary(text: string, maxChars: number): string {
 }
 
 /**
+ * Whether a URL may be handed to Jina Reader. Jina fetches from its own servers, so what is sent to it is what a third
+ * party learns: a private or internal address (it cannot reach one anyway, and the name is the leak), and a login in
+ * the URL (`https://user:password@host/`) have no business going there. The same address check the local backend
+ * runs, before anything leaves this machine.
+ */
+async function assertSendableToJina(url: string): Promise<void> {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		throw new Error(`Invalid URL: ${url}`);
+	}
+	if (parsed.username || parsed.password) {
+		throw new Error(
+			"Refusing to send a URL with a login in it to Jina Reader (a third party). Fetch it with /web-fetch-provider local, which asks the site directly.",
+		);
+	}
+	try {
+		await assertPublicFetchTarget(url);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`${reason}. Jina Reader is a third party and cannot reach internal addresses; the URL was not sent to it.`,
+		);
+	}
+}
+
+/** Jina's own notes about the target, written between its header and the content (`Warning: ...`). */
+const JINA_WARNING_RE = /^Warning: (.+)$/gm;
+const JINA_TARGET_ERROR_RE = /returned error (\d{3})\b/i;
+
+/**
  * Fetch a URL via Jina Reader (`r.jina.ai`).
- * Returns clean markdown content optimized for LLM consumption.
+ * Returns clean markdown content optimized for LLM consumption, and Jina's warnings about the page: a target that
+ * answered 404 comes back from Jina as a successful response whose only sign of the failure is one of them.
  */
 export async function fetchUrl(
 	url: string,
 	options?: { maxChars?: number; signal?: AbortSignal },
-): Promise<{ url: string; title: string; content: string }> {
+): Promise<{ url: string; title: string; content: string; warnings: string[] }> {
 	const maxChars = options?.maxChars ?? MAX_CONTENT_CHARS;
 	const signal = options?.signal;
+
+	// Before any timer or listener: nothing here is worth cleaning up if the URL is refused.
+	await assertSendableToJina(url);
 
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -472,10 +577,15 @@ export async function fetchUrl(
 					await sleep(FETCH_RETRY_DELAY_MS);
 					continue;
 				}
+				if (resp.status === 429) {
+					throw new Error(
+						"Jina Reader rate limit (the free tier allows only a few requests a minute). Wait a minute, or switch to /web-fetch-provider local.",
+					);
+				}
 				throw new Error(`Jina Reader HTTP ${resp.status} ${resp.statusText}`);
 			}
 
-			const text = await resp.text();
+			const text = await readTextCapped(resp);
 
 			// Jina Reader's response is a metadata block followed by the actual
 			// content, not a bare markdown document:
@@ -485,14 +595,20 @@ export async function fetchUrl(
 			if (titleMatch) title = titleMatch[1].trim();
 
 			let content = text;
+			let header = "";
 			const marker = "Markdown Content:";
 			const markerIdx = text.indexOf(marker);
-			if (markerIdx !== -1) content = text.slice(markerIdx + marker.length);
+			if (markerIdx !== -1) {
+				header = text.slice(0, markerIdx);
+				content = text.slice(markerIdx + marker.length);
+			}
+			const warnings = [...header.matchAll(JINA_WARNING_RE)].map((m) => m[1]!.trim());
 
 			return {
 				url,
 				title,
 				content: truncateAtBoundary(content.trim(), maxChars),
+				warnings,
 			};
 		}
 		// Unreachable — the loop above always either returns or throws on its
@@ -502,6 +618,13 @@ export async function fetchUrl(
 		clearTimeout(timeout);
 		signal?.removeEventListener("abort", onAbort);
 	}
+}
+
+/** The response as text, never past the size cap: a body of any size was read whole before. */
+async function readTextCapped(resp: Response): Promise<string> {
+	// A response with no body stream (a test double, a 204) is read the plain way.
+	if (!resp.body) return await resp.text();
+	return new TextDecoder().decode(await readCappedBody(resp));
 }
 
 // ============================================================================
@@ -625,16 +748,71 @@ function isPrivateOrReservedIPv4(ip: string): boolean {
 	if (a === 169 && b === 254) return true; // link-local, incl. 169.254.169.254 cloud metadata
 	if (a === 192 && b === 0 && c === 0) return true; // IETF protocol assignments
 	if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
+	if (a === 192 && b === 88 && c === 99) return true; // 6to4 relay anycast
+	if (
+		(a === 192 && b === 0 && c === 2) ||
+		(a === 198 && b === 51 && c === 100) ||
+		(a === 203 && b === 0 && c === 113)
+	) {
+		return true; // documentation ranges
+	}
 	return false;
 }
 
+/**
+ * An IPv6 address as its 16 bytes, or undefined when it does not parse. `new URL` writes `[::ffff:127.0.0.1]` as
+ * `[::ffff:7f00:1]`, so a check that looks for the dotted form never sees the address it is meant to refuse.
+ */
+function ipv6Bytes(ip: string): number[] | undefined {
+	const address = ip.split("%")[0] ?? ip;
+	if (!isIPv6(address)) return undefined;
+	let text = address;
+	// A dotted IPv4 tail (`::ffff:1.2.3.4`) is two groups.
+	const tail = /(\d+\.\d+\.\d+\.\d+)$/.exec(text)?.[1];
+	if (tail) {
+		const parts = tail.split(".").map(Number);
+		if (parts.some((p) => p > 255)) return undefined;
+		text = `${text.slice(0, -tail.length)}${((parts[0]! << 8) | parts[1]!).toString(16)}:${((parts[2]! << 8) | parts[3]!).toString(16)}`;
+	}
+	const halves = text.split("::");
+	if (halves.length > 2) return undefined;
+	const groups = (part: string) => (part ? part.split(":") : []);
+	const head = groups(halves[0] ?? "");
+	const rest = halves.length === 2 ? groups(halves[1] ?? "") : [];
+	if (halves.length === 1 && head.length !== 8) return undefined;
+	const fill = 8 - head.length - rest.length;
+	if (fill < 0) return undefined;
+	const all = [...head, ...Array<string>(halves.length === 2 ? fill : 0).fill("0"), ...rest];
+	if (all.length !== 8) return undefined;
+	const bytes: number[] = [];
+	for (const group of all) {
+		const value = Number.parseInt(group, 16);
+		if (Number.isNaN(value) || value < 0 || value > 0xffff) return undefined;
+		bytes.push(value >> 8, value & 0xff);
+	}
+	return bytes;
+}
+
 function isPrivateOrReservedIPv6(ip: string): boolean {
-	const lower = ip.toLowerCase();
-	if (lower === "::1" || lower === "::") return true; // loopback, unspecified
-	if (IPV6_LINK_LOCAL_RE.test(lower)) return true; // fe80::/10 link-local
-	if (IPV6_UNIQUE_LOCAL_RE.test(lower)) return true; // fc00::/7 unique-local
-	const mapped = IPV4_MAPPED_IPV6_RE.exec(lower);
-	if (mapped) return isPrivateOrReservedIPv4(mapped[1]!);
+	const b = ipv6Bytes(ip);
+	// An address that does not parse is not one to connect to.
+	if (!b) return true;
+	const v4 = (at: number) => `${b[at]}.${b[at + 1]}.${b[at + 2]}.${b[at + 3]}`;
+	const zeros = (from: number, to: number) => b.slice(from, to).every((x) => x === 0);
+	if (zeros(0, 10) && b[10] === 0xff && b[11] === 0xff) return isPrivateOrReservedIPv4(v4(12)); // ::ffff:a.b.c.d
+	if (zeros(0, 12)) return true; // ::, ::1, and the deprecated IPv4-compatible ::a.b.c.d
+	if (b[0] === 0x00 && b[1] === 0x64 && b[2] === 0xff && b[3] === 0x9b) {
+		// NAT64: the IPv4 address sits in the last 32 bits (64:ff9b::/96); the local-use prefix (64:ff9b:1::/48) is not public.
+		if (zeros(4, 12)) return isPrivateOrReservedIPv4(v4(12));
+		if (b[4] === 0x00 && b[5] === 0x01) return true;
+	}
+	if (b[0] === 0x20 && b[1] === 0x02) return isPrivateOrReservedIPv4(v4(2)); // 6to4: the address follows the prefix
+	if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x00 && b[3] === 0x00) return true; // Teredo
+	if (b[0] === 0x20 && b[1] === 0x01 && b[2] === 0x0d && b[3] === 0xb8) return true; // documentation
+	if (b[0] === 0x01 && zeros(1, 8)) return true; // discard-only 100::/64
+	if ((b[0]! & 0xfe) === 0xfc) return true; // fc00::/7 unique-local
+	if (b[0] === 0xfe && ((b[1]! & 0xc0) === 0x80 || (b[1]! & 0xc0) === 0xc0)) return true; // link-local, site-local
+	if (b[0] === 0xff) return true; // multicast
 	return false;
 }
 
@@ -648,7 +826,7 @@ function isPrivateOrReservedIPv6(ip: string): boolean {
  * metadata endpoint) for the request that follows, and every guard here would
  * have passed. The connection is now pinned to what was actually vetted.
  */
-async function assertPublicFetchTarget(urlStr: string): Promise<string[]> {
+async function assertPublicFetchTarget(urlStr: string, allowPrivate = false): Promise<string[]> {
 	let parsed: URL;
 	try {
 		parsed = new URL(urlStr);
@@ -660,12 +838,12 @@ async function assertPublicFetchTarget(urlStr: string): Promise<string[]> {
 	}
 	const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
 	if (isIPv4(hostname)) {
-		if (isPrivateOrReservedIPv4(hostname))
+		if (!allowPrivate && isPrivateOrReservedIPv4(hostname))
 			throw new Error(`Refusing to fetch a private/internal address: ${hostname}`);
 		return [hostname];
 	}
 	if (hostname.includes(":")) {
-		if (isPrivateOrReservedIPv6(hostname))
+		if (!allowPrivate && isPrivateOrReservedIPv6(hostname))
 			throw new Error(`Refusing to fetch a private/internal address: ${hostname}`);
 		return [hostname];
 	}
@@ -677,7 +855,7 @@ async function assertPublicFetchTarget(urlStr: string): Promise<string[]> {
 	}
 	for (const { address, family } of addresses) {
 		const isPrivate = family === 4 ? isPrivateOrReservedIPv4(address) : isPrivateOrReservedIPv6(address);
-		if (isPrivate) {
+		if (isPrivate && !allowPrivate) {
 			throw new Error(`Refusing to fetch — "${hostname}" resolves to a private/internal address (${address})`);
 		}
 	}
@@ -799,8 +977,14 @@ function decodeBody(buf: Uint8Array, contentType: string): string {
 
 export async function fetchUrlLocal(
 	url: string,
-	options?: { format?: FetchFormat; maxChars?: number; signal?: AbortSignal },
-): Promise<{ url: string; title: string; content: string }> {
+	options?: {
+		format?: FetchFormat;
+		maxChars?: number;
+		signal?: AbortSignal;
+		/** @internal Lets a test reach a server on this machine; the tools never set it. */
+		allowPrivate?: boolean;
+	},
+): Promise<{ url: string; title: string; content: string; warnings: string[] }> {
 	const format = options?.format ?? "markdown";
 	const maxChars = options?.maxChars ?? MAX_CONTENT_CHARS;
 	const signal = options?.signal;
@@ -820,11 +1004,13 @@ export async function fetchUrlLocal(
 		// check 302 into an internal address afterward.
 		for (let hop = 0; ; hop++) {
 			// biome-ignore lint/performance/noAwaitInLoops: each redirect hop must be validated and fetched before the next one is even known
-			const vetted = await assertPublicFetchTarget(currentUrl);
+			const vetted = await assertPublicFetchTarget(currentUrl, options?.allowPrivate);
 			const dispatcher = pinnedDispatcher(vetted);
 			dispatchers.push(dispatcher);
+			// The package's own fetch, not the global one: its Agent speaks a newer dispatch interface than the fetch
+			// built into Node 22, which refuses it ("invalid onRequestStart method"), so every request through here failed.
 			const doFetch = (userAgent: string) =>
-				fetch(currentUrl, {
+				undiciFetch(currentUrl, {
 					headers: {
 						"User-Agent": userAgent,
 						Accept: acceptHeaderForFormat(format),
@@ -833,7 +1019,7 @@ export async function fetchUrlLocal(
 					redirect: "manual",
 					signal: controller.signal,
 					dispatcher,
-				} as RequestInit & { dispatcher: Agent });
+				}) as unknown as Promise<Response>;
 
 			resp = await doFetch(LOCAL_BROWSER_UA);
 			if (resp.status === 403 && resp.headers.get("cf-mitigated") === "challenge") {
@@ -876,6 +1062,7 @@ export async function fetchUrlLocal(
 			// cases apart.
 			title: "",
 			content: truncateAtBoundary(content.trim(), maxChars),
+			warnings: [],
 		};
 	} finally {
 		clearTimeout(timeout);
@@ -922,6 +1109,21 @@ export async function execWebSearch(args: Record<string, unknown>, signal?: Abor
 	const maxResults = typeof args.maxResults === "number" ? args.maxResults : MAX_SEARCH_RESULTS;
 	const region = typeof args.region === "string" ? args.region : undefined;
 	const time = typeof args.time === "string" ? args.time : undefined;
+	// A value DuckDuckGo does not know is ignored by it without a word, and the model never learns the filter did
+	// nothing; the other backends are never offered these, so only the DDG path checks.
+	const settingsProvider = loadSettings().searchProvider;
+	if (settingsProvider !== "tavily" && settingsProvider !== "brave") {
+		if (time !== undefined && !DDG_TIME_VALUES.has(time)) {
+			return { content: "Error: 'time' must be one of d (day), w (week), m (month), y (year).", isError: true };
+		}
+		if (region !== undefined && !DDG_REGION_RE.test(region)) {
+			return {
+				content:
+					"Error: 'region' must look like 'us-en', 'ru-ru' or 'wt-wt' (language-country, or wt-wt for none).",
+				isError: true,
+			};
+		}
+	}
 
 	// Read fresh each call (not cached at startup) — same pattern as webTools,
 	// so switching provider via /web-search-provider takes effect on the next
@@ -979,6 +1181,12 @@ export async function execWebFetch(args: Record<string, unknown>, signal?: Abort
 			isError: true,
 		};
 	}
+	if (typeof args.maxChars === "number" && args.maxChars > MAX_CONTENT_CHARS_LIMIT) {
+		return {
+			content: `Error: 'maxChars' must be at most ${MAX_CONTENT_CHARS_LIMIT}. Fetch a narrower page, or read it in parts.`,
+			isError: true,
+		};
+	}
 	const maxChars = typeof args.maxChars === "number" ? args.maxChars : MAX_CONTENT_CHARS;
 	// "format" only has an effect on the "local" backend below — Jina Reader
 	// is always asked for markdown (X-Return-Format), matching this tool's
@@ -997,9 +1205,20 @@ export async function execWebFetch(args: Record<string, unknown>, signal?: Abort
 				? await fetchUrlLocal(url, { format, maxChars, signal })
 				: await fetchUrl(url, { maxChars, signal });
 
+		// Jina answers 200 for a page that answered 404 or 403 and says so only in a warning; what came back is that
+		// site's error page, which the model would otherwise read as the page it asked for.
+		const failed = result.warnings.map((w) => JINA_TARGET_ERROR_RE.exec(w)).find((m) => m && Number(m[1]) >= 400);
+		if (failed) {
+			return {
+				content: `Fetch error: ${url} answered HTTP ${failed[1]} (${result.warnings.join("; ")}). What came back is that site's error page, not the page asked for:\n\n${result.content.slice(0, 1_000) || "[Empty page]"}`,
+				isError: true,
+			};
+		}
+
 		const parts: string[] = [];
 		if (result.title) parts.push(`# ${result.title}`);
 		parts.push(result.content || "[Empty page]");
+		if (result.warnings.length > 0) parts.push(`[Reader note: ${result.warnings.join("; ")}]`);
 
 		return { content: parts.join("\n\n") };
 	} catch (error) {

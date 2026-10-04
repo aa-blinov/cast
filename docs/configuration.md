@@ -212,7 +212,7 @@ A rule is a tool name, or a tool name with a pattern in parentheses. The pattern
 |------|---------|
 | `bash`, `ssh` | the command |
 | `read`, `write`, `edit`, `ls`, `glob`, `grep` | the path, relative to the project when it is inside it, absolute otherwise |
-| `web_fetch` | the URL |
+| `web_fetch` | the URL (`"ask": ["web_fetch"]` asks before every fetch; `"deny": ["web_fetch(*://*.example.com/*)"]` refuses a site) |
 
 In a command pattern `*` matches anything, spaces included. In a path pattern `*` stays within one directory and `**` crosses them. Tool names take `*` too, so `mcp_github_*` covers every tool of that MCP server. A rule with a pattern never matches a tool without a subject.
 

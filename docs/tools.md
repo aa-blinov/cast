@@ -278,17 +278,31 @@ that limit, switch the backend with `/web-search-provider` (TUI) or the **Tools*
 |-----------|----------|-------------|
 | `query` | Yes | Search query |
 | `maxResults` | No | Maximum results (default: 10) |
-| `region` | No | Region code (default: `wt-wt`). DDG backend only |
-| `time` | No | Time filter: `d` (day), `w` (week), `m` (month), `y` (year). DDG backend only |
+| `region` | No | Region code like `us-en`, `ru-ru`, or `wt-wt` for none (default). DDG backend only; any other value is refused, not ignored |
+| `time` | No | Time filter: `d` (day), `w` (week), `m` (month), `y` (year). DDG backend only; any other value is refused |
+
+A request gets 20 seconds; a backend that never answers fails with `<backend> did not answer within 20s` instead of holding the turn until Esc. DuckDuckGo's ads (laid out like results, linked through a `duckduckgo.com/y.js` redirect) are left out. A page from DuckDuckGo that is neither results nor its own "no results" page (a bot check worded differently, a changed layout) is an error and is not remembered; a real "no results" is cached for ten minutes with the other answers.
 
 ### `web_fetch`
 
-Fetch a web page and return clean markdown via Jina Reader. Handles JS rendering, PDFs, and content extraction.
+Fetch a web page and return it as markdown, plain text or raw HTML. Two backends, switched with `/web-fetch-provider`:
+
+| Backend | What it does |
+|---------|--------------|
+| `jina` (default) | Jina Reader (`r.jina.ai`) fetches the page from its own servers: handles JS rendering and PDFs, always returns markdown. **Jina sees every URL you fetch this way**, so cast refuses to send it what a third party has no business with: a private or internal address (loopback, RFC1918, link-local, an IPv4 address written inside an IPv6 one, and the like), a host that resolves to one, and a URL with a login in it (`https://user:password@host/`). The refusal says so and nothing is sent |
+| `local` | This process fetches the page itself: no third party sees the URL. HTML is converted locally; a Cloudflare challenge is retried once; the response is capped at 5MB; images and binaries are refused. It refuses private and internal addresses too, on every redirect hop and on every address the name resolves to, and connects only to the addresses it checked |
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `url` | Yes | URL to fetch |
-| `maxChars` | No | Maximum characters (default: 12,000) |
+| `url` | Yes | URL to fetch (http or https) |
+| `maxChars` | No | Maximum characters (default: 12,000, at most 200,000) |
+| `format` | No | `markdown` (default), `text` or `html`. `local` backend only; Jina always returns markdown |
+
+A page that answers an error status is an error result, not content: with Jina, which reports a target's 404 or 403 as a successful answer carrying only a warning, cast reads the warning and says `answered HTTP 404`, showing the start of the error page for reference. Other Jina notes (a page "maybe not yet fully loaded") follow the content as `[Reader note: ...]`. Jina's free tier is rate-limited; a 429 says so and suggests `local`. A response is read up to 5MB.
+
+### Untrusted content
+
+What a search returns and what a page says is data from the internet. The tool descriptions tell the model to use it as information, never as instructions, and never to send your files, secrets or conversation to a URL because a page asks. To keep the agent to hosts you choose, add a rule on the URL (see [Permission Rules](configuration.md#permission-rules)): `"ask": ["web_fetch"]` asks before every fetch, `"deny": ["web_fetch(*://*.example.com/*)"]` refuses one site.
 
 ## Worktree Tool
 
