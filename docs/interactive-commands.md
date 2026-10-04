@@ -4,6 +4,19 @@ All commands are typed at the TUI prompt, prefixed with `/`. A slash word that m
 
 New to the screen? [The Terminal Screen](terminal-ui.md) is the tour: what is on it, how to type, scroll and choose, and how to fit it to a phone.
 
+## Running a Shell Command: `!`
+
+A line that starts with `!` is run as a shell command by you, not sent to the model: `!git status`, `!npm test`, `!ls src`. It works in the terminal, in the web composer and over `cast run` (`{"type":"shell","command":"git status"}`), and there is no model turn.
+
+- **Where.** In the session's working folder (a worktree the session moved into counts).
+- **What you see.** The command as you typed it, then what it printed, in the thread.
+- **What the model sees.** The command and its output are added to the conversation as a message that says *you* ran it, so your next message can refer to it ("fix what that printed") and the model does not think it ran it itself. It stays in the saved session and survives a restart.
+- **Same gates as the `bash` tool.** In **plan mode** only read-only commands run; anything that could write is refused with the reason, and nothing is added to the conversation. A command that matches a **dangerous pattern** (`rm -rf`, `sudo`, force-push, ...) asks first, in the same confirmation the agent's commands use; in a mode that never asks (`bypass`) it runs. Output is cut at the same limits as the `bash` tool's and a command stops at its timeout.
+- **Not while a turn is running.** The turn works on its own copy of the conversation, so the command waits: stop it first (`Esc Esc`, `/abort`) or wait.
+- **`!!`.** A message that should start with a `!` goes to the model with two: `!!important: fix it` sends `!important: fix it`. A lone `!` says how to use this.
+- **A failing command** is shown (with its exit code) and added like any other; the person asked, so the model should know it failed.
+- **Attached to a daemon,** the daemon runs it, in its own working folder for the session, and the result arrives on every screen attached to that session.
+
 ## Session Management
 
 | Command | Description |

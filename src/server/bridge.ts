@@ -123,6 +123,7 @@ import { classifyLlmError, recordLlmCompaction, recordLlmRequest, recordToolCall
 import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../core/tools/bash-background.ts";
 import { activeTaskIds, cancelTask, queuedTaskIds, runningTaskIds } from "../core/tools/task.ts";
 import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
+import { runUserShell } from "../core/user-shell.ts";
 import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,
@@ -518,6 +519,11 @@ export interface ServerBridge {
 	answerBashConfirm(sessionId: string, id: string, allow: boolean, always?: boolean): boolean;
 	/** Answer a pending MCP form. False when none is pending or the id is an older one. */
 	answerMcpElicit(sessionId: string, id: string, result: ElicitResult): boolean;
+	/** `!command`: run a command the person typed, with no model turn, and put it and its output in the conversation. */
+	runShell(
+		sessionId: string,
+		command: string,
+	): Promise<{ ok: true; output: string; failed: boolean; added: boolean } | { ok: false; error: string }>;
 	getMcpElicit(sessionId: string): PendingMcpElicit | undefined;
 	/** The confirmation this session is blocked on, if any — so a client that
 	 * connects mid-turn can render it instead of waiting for a replayed event. */
@@ -1410,6 +1416,37 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	function getMcpElicit(sessionId: string): PendingMcpElicit | undefined {
 		const pending = sessions.get(sessionId)?.pendingMcpElicit;
 		return pending && { id: pending.id, server: pending.server, message: pending.message, schema: pending.schema };
+	}
+
+	async function runShell(
+		sessionId: string,
+		command: string,
+	): Promise<{ ok: true; output: string; failed: boolean; added: boolean } | { ok: false; error: string }> {
+		const ws = sessions.get(sessionId);
+		if (!ws) return { ok: false, error: "Session not found" };
+		// A running turn works on its own copy of the conversation and writes it back at the end: a message added now
+		// would be written over.
+		const busy = () => ws.status === "running" || ws.runner.isRunning;
+		if (busy()) {
+			return { ok: false, error: "Agent running: wait for it, or /abort, then run the command" };
+		}
+		const effectiveMode = ws.permissionModeOverride ?? permissionMode;
+		const result = await runUserShell(command, {
+			cwd: ws.session.cwd ?? cwd,
+			config,
+			readOnly: ws.session.mode === "plan",
+			confirm:
+				effectiveMode === "bypass" ? undefined : (cmd, reason, rule) => requestBashConfirm(ws, cmd, reason, rule),
+		});
+		if (!result.ran) return { ok: false, error: result.reason };
+		// A turn that began while the command ran owns the conversation now; the output is still returned.
+		if (busy()) {
+			return { ok: true, output: result.output, failed: result.failed, added: false };
+		}
+		appendMessage(ws.session, { role: "user", content: result.message });
+		saveSession(ws.session);
+		broadcaster.broadcast(ws, { type: "user_message", message: { role: "user", content: result.message } });
+		return { ok: true, output: result.output, failed: result.failed, added: true };
 	}
 
 	function answerMcpElicit(sessionId: string, id: string, result: ElicitResult): boolean {
@@ -3852,6 +3889,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		getBashConfirm,
 		answerMcpElicit,
 		getMcpElicit,
+		runShell,
 		getPlanTransition,
 		resolvePlanTransition: resolvePersistedPlanTransition,
 		setSessionMode,

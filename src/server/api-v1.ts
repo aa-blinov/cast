@@ -35,7 +35,7 @@ const STABLE_API_V1_ROUTES: StableRoute[] = [
 	{
 		method: "POST",
 		legacyPath:
-			/^\/api\/sessions\/[^/]+\/(fork|rewind|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|mcp-elicit|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|fs\/create|fs\/move|fs\/delete|inputs\/upload)$/,
+			/^\/api\/sessions\/[^/]+\/(fork|rewind|chat|abort|retry|steer|followup|command|mode|question|bash-confirm|mcp-elicit|shell|plan-transition|clean-context|rename|pin|share|background\/kill|fs\/rename|fs\/create|fs\/move|fs\/delete|inputs\/upload)$/,
 	},
 	{ method: "PUT", legacyPath: /^\/api\/sessions\/[^/]+\/(fs\/upload|inputs\/upload)$/ },
 	{ method: "GET", legacyPath: /^\/api\/browse$/ },
@@ -808,6 +808,38 @@ export const apiV1OpenApiDocument: OpenApiObject = {
 				}),
 				responses: {
 					"202": jsonResponse("Answer accepted", { $ref: "#/components/schemas/Ok" }),
+					"400": errorResponse,
+					"401": errorResponse,
+					"404": errorResponse,
+					"409": errorResponse,
+				},
+			},
+		},
+		"/api/v1/sessions/{id}/shell": {
+			post: {
+				summary: "Run a command the person typed (`!command`), with no model turn",
+				description:
+					"Runs the command in the session's working directory through the same gates as the bash tool (plan mode reads only; a dangerous command asks the connected clients). Its output is added to the conversation as a user message and broadcast as a user_message event. 409 when the agent is running, the command was refused, or the session cannot take it.",
+				parameters: [idParameter],
+				requestBody: requestBody({
+					type: "object",
+					required: ["command"],
+					properties: { command: { type: "string", description: "The shell command, without the leading !." } },
+				}),
+				responses: {
+					"200": jsonResponse("The run, ok even when the command failed", {
+						type: "object",
+						properties: {
+							ok: { const: true },
+							output: { type: "string" },
+							failed: { type: "boolean", description: "The command exited non-zero, timed out or was aborted." },
+							added: {
+								type: "boolean",
+								description:
+									"False when a turn began meanwhile and the output was not added to the conversation.",
+							},
+						},
+					}),
 					"400": errorResponse,
 					"401": errorResponse,
 					"404": errorResponse,

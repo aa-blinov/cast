@@ -68,6 +68,7 @@ import { formatRuleInvocation, type Rule } from "../core/rules.ts";
 import { clearScratchpad, describeScratchpad, formatScratchpadListing, scratchpadFor } from "../core/scratchpad.ts";
 import {
 	addUsage,
+	appendMessage,
 	countTurnMessages,
 	createSession,
 	deleteMessagesFrom,
@@ -109,6 +110,7 @@ import {
 import { skillsShInstall, skillsShListAvailable, skillsShSearch, skillsShUninstall } from "../core/skills-sh.ts";
 import { resolveSshHosts, type SshHost, saveSshConfig, scanSshKeys, validateKeyPermissions } from "../core/ssh.ts";
 import { activeTaskIds, cancelTask, queuedTaskIds, summarizeToolArgs } from "../core/tools/task.ts";
+import { parseUserShellInput, runUserShell, type UserShellInput } from "../core/user-shell.ts";
 import {
 	buildReasoningParams,
 	getDefaultReasoningLevel,
@@ -393,7 +395,7 @@ export function helpMarkdown(): string {
 		"",
 		"Settings (model, provider, persona, permissions, reasoning, theme, status bar, header, web tools, skills, MCP, memory, turn cap, keys): **/settings**",
 		"",
-		"A loaded skill runs as **/<skill>** (or **/skill:<name>**), a rule as **/rule:<name>**. Plain text while a turn runs steers it.",
+		"A loaded skill runs as **/<skill>** (or **/skill:<name>**), a rule as **/rule:<name>**. Plain text while a turn runs steers it. **!<command>** runs a shell command yourself, with no model turn (**!!** sends a message that starts with !).",
 	].join("\n");
 }
 
@@ -592,6 +594,18 @@ const MCP_HELP = `MCP — pick a row from the /mcp palette, or type:
 
 Add servers via ~/.cast/mcp.json, .cast/mcp.json, or --mcp.
 CLI --mcp paths are not removable with /mcp uninstall.`;
+
+async function confirmDangerousCommand(deps: CommandDeps, command: string, reason: string): Promise<boolean> {
+	return (
+		(await deps.pickers.pickOption(
+			[
+				{ value: true, label: "Run it" },
+				{ value: false, label: "Do not run it" },
+			],
+			{ title: `Run: ${command} (${reason})` },
+		)) === true
+	);
+}
 
 /** The gate for a skill's inline commands when a person runs the skill: plan mode reads only, and a dangerous command is asked about. */
 function skillInlineGate(deps: CommandDeps): InlineCommandGate {
@@ -4287,11 +4301,62 @@ function lowerCommandWord(input: string): string {
  * Route a line of user input. Every slash command is handled
  * here (parity or it's a bug); non-slash input goes to the agent as a prompt.
  */
+/** `!command`: the same gates as the bash tool, the output shown and put in the conversation, no model turn. */
+async function handleUserShell(shell: Exclude<UserShellInput, { kind: "text" }>, deps: CommandDeps): Promise<void> {
+	const { agent, session, config, showNotice } = deps;
+	if (shell.kind === "empty") {
+		showNotice("[Usage: !<command> runs it yourself; !!text sends a message that starts with !]");
+		return;
+	}
+	if (deps.running) {
+		showNotice("[Agent running: wait for it, or Esc Esc, then run the command]");
+		return;
+	}
+	if (agent.daemonMode) {
+		// The daemon holds the conversation and the folder: it runs the command, asks about a dangerous one, and the
+		// result comes back to this screen as a message like any other.
+		try {
+			await agent.runShell(shell.command);
+		} catch (error) {
+			showNotice(`[${error instanceof Error ? error.message : String(error)}]`);
+		}
+		return;
+	}
+	const result = await runUserShell(shell.command, {
+		cwd: deps.cwd,
+		config,
+		readOnly: deps.planMode,
+		confirm:
+			deps.permissionMode === "bypass"
+				? undefined
+				: (command, reason) => confirmDangerousCommand(deps, command, reason),
+	});
+	if (!result.ran) {
+		showNotice(`[${result.reason}]`);
+		return;
+	}
+	appendMessage(session, { role: "user", content: result.message });
+	saveSession(session);
+	agent.refresh();
+}
+
 export async function handleInput(text: string, images: PendingImage[] | undefined, deps: CommandDeps): Promise<void> {
 	const { agent, session, config, running, onQuit, showNotice } = deps;
 	const input = lowerCommandWord(text.trim());
 
 	if (!input) return;
+
+	// `!command` runs a command for the person, with no model turn; `!!text` is a message that starts with a `!`.
+	const shell = parseUserShellInput(text.trim());
+	if (shell?.kind === "text") {
+		if (running) agent.steer(shell.text);
+		else await agent.submit(shell.text, images);
+		return;
+	}
+	if (shell) {
+		await handleUserShell(shell, deps);
+		return;
+	}
 
 	if (!input.startsWith("/")) {
 		// Typing during a turn steers it — no /steer needed. That is what the

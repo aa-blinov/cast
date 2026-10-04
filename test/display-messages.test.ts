@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { deriveSessionTitle } from "../src/core/session-title.ts";
+import { userShellMessage } from "../src/core/user-shell.ts";
 import { buildDisplayMessages, messageContentToText, userMessageRows } from "../src/ui/useAgentSession.ts";
 
 type Msgs = Parameters<typeof buildDisplayMessages>[0];
@@ -222,5 +224,17 @@ describe("userMessageRows", () => {
 
 	it("keeps an empty message visible rather than dropping the row", () => {
 		expect(userMessageRows("")).toEqual([{ role: "user", content: "" }]);
+	});
+});
+
+describe("userMessageRows for a `!command` the person ran", () => {
+	it("shows the command as typed, then what it printed, and titles a session by the command", () => {
+		const message = userShellMessage("git status", "On branch main");
+		expect(userMessageRows(message, "c1")).toEqual([
+			{ role: "user", content: "!git status", clientMessageId: "c1" },
+			{ role: "warning", content: "On branch main" },
+		]);
+		expect(userMessageRows(userShellMessage("true", ""))[1]).toEqual({ role: "warning", content: "(no output)" });
+		expect(deriveSessionTitle(message)).toBe("!git status");
 	});
 });

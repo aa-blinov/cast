@@ -1,4 +1,5 @@
 import { goalPromptDisplay } from "./goal.ts";
+import { parseUserShellMessage } from "./user-shell.ts";
 
 // renderSkillInvocation's shape: a /skill command reaches the model as the
 // whole SKILL.md, with any arguments appended after it.
@@ -31,7 +32,12 @@ export function skillInvocationLabel(text: string): string | undefined {
  *  opened with a /skill command is titled by what was typed, not by the
  *  skill file's opening lines. */
 export function deriveSessionTitle(text: string): string {
-	const source = skillInvocationLabel(text) ?? goalPromptDisplay(text)?.content ?? text;
+	const shell = parseUserShellMessage(text);
+	const source =
+		(shell ? `!${shell.command}` : undefined) ??
+		skillInvocationLabel(text) ??
+		goalPromptDisplay(text)?.content ??
+		text;
 	const oneLine = source.replace(/\s+/g, " ").trim();
 	return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine;
 }

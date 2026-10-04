@@ -1761,6 +1761,22 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { ok: true }, 202);
 	});
 
+	// `!command` from a client: run it for the person, with no model turn.
+	route("POST", "/api/sessions/:id/shell", async (req, res, params) => {
+		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
+		let command: unknown;
+		try {
+			command = (JSON.parse(await readBody(req)) as { command?: unknown }).command;
+		} catch {
+			return json(res, { error: "Invalid JSON" }, 400);
+		}
+		if (typeof command !== "string" || !command.trim())
+			return json(res, { error: "Expected { command: string }" }, 400);
+		const result = await bridge.runShell(params.id, command);
+		if (!result.ok) return json(res, { error: result.error }, 409);
+		json(res, { ok: true, output: result.output, failed: result.failed, added: result.added });
+	});
+
 	route("POST", "/api/sessions/:id/mcp-elicit", async (req, res, params) => {
 		const ws = bridge.getSession(params.id);
 		if (!ws) return json(res, { error: "Not found" }, 404);
