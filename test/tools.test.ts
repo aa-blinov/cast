@@ -339,7 +339,7 @@ describe("bash — run_in_background", () => {
 			const result = await exec("bash", { command: "python3 -m http.server 8000" });
 			expect(Date.now() - start).toBeLessThan(500);
 			expect(result.isError).toBeFalsy();
-			expect(result.content).toMatch(/Automatically moved to background as bg-\d+/);
+			expect(result.content).toMatch(/Moved to the background as bg-\d+/);
 		} finally {
 			deps.registry.killAll();
 		}
@@ -359,7 +359,7 @@ describe("bash — run_in_background", () => {
 		try {
 			const result = await exec("bash", { command: "sleep 5" });
 			expect(result.isError).toBeFalsy();
-			expect(result.content).toMatch(/Automatically moved to background as bg-\d+/);
+			expect(result.content).toMatch(/Moved to the background as bg-\d+/);
 			expect(deps.registry.hasRunning()).toBe(true);
 		} finally {
 			deps.registry.killAll();
@@ -374,14 +374,14 @@ describe("bash — run_in_background", () => {
 		const elapsed = Date.now() - start;
 		expect(elapsed).toBeLessThan(500);
 		expect(result.isError).toBeFalsy();
-		expect(result.content).toMatch(/Started in background as bg-\d+/);
+		expect(result.content).toMatch(/Started in the background as bg-\d+/);
 	});
 
 	it("falls back to running synchronously when no background deps are configured, and says so", async () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("bash", { command: "echo hi", run_in_background: true });
 		expect(result.content).toContain("hi");
-		expect(result.content).not.toContain("Started in background");
+		expect(result.content).not.toContain("Started in the background");
 		// The fallback is right; doing it silently was not — the model asked
 		// for a background task and has to know it did not get one.
 		expect(result.content).toContain("run_in_background is unavailable");

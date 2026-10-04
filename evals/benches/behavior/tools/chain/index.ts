@@ -3,7 +3,9 @@ import { approvedPlanTodoProgress } from "./approved-plan-todo-progress.ts";
 import { backgroundBashExplicitTimeout } from "./background-bash-explicit-timeout.ts";
 import { backgroundBashKill } from "./background-bash-kill.ts";
 import { backgroundBashOutput } from "./background-bash-output.ts";
+import { backgroundExplicitNotPolled } from "./background-explicit-not-polled.ts";
 import { backgroundKillNoNotice } from "./background-kill-no-notice.ts";
+import { backgroundPromotedResultAwaited } from "./background-promoted-result-awaited.ts";
 import { backgroundWaitNoDuplicateNotice } from "./background-wait-no-duplicate-notice.ts";
 import { bashFixRerunsCheck } from "./bash-fix-reruns-check.ts";
 import { btwAnswersFromContext } from "./btw-answers-from-context.ts";
@@ -88,7 +90,9 @@ export const chainCases: EvalCase[] = [
 	btwAnswersFromContext,
 	btwSaysWhenUnknown,
 	backgroundWaitNoDuplicateNotice,
+	backgroundExplicitNotPolled,
 	backgroundKillNoNotice,
+	backgroundPromotedResultAwaited,
 	btwDoesNotReadFiles,
 	commitStagesExplicitPaths,
 	initWritesAgentsMdFromRepo,
