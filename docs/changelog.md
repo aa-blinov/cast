@@ -2,6 +2,16 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+- **The web folder picker can be typed into and filtered.** The path is a field: type or paste a path and press Enter, and a long path shows its end (the folder that "Use this folder" takes) instead of its start. With more than a few folders a filter appears (Enter on a single match opens it, Escape clears it), a "Hidden" box shows the dot folders, and arrows, Home and End move through the list as one tab stop (Delete asks to remove the folder). The list says how many folders it holds.
+
+### Fixed
+- **A folder made in the picker is now the one you are in.** After "New folder" it used to stay in the parent, with the new folder one of dozens in the list; it now goes inside and leaves "Use this folder" focused. A path typed and not yet opened is opened by the first press of "Use this folder", and the first listing can no longer land on top of a path being typed.
+- **The picker's errors say what happened.** Deleting a folder with something in it showed `ENOTEMPTY: directory not empty, rmdir '/very/long/path'`; it says the folder isn't empty. A missing path, a refused permission, a name that exists and a file where a folder was expected read the same way.
+- **The picker on a touch screen.** Rows, the path, the filter and the delete buttons are 44px; the delete button is set apart by a rule since it is always there without a mouse; each one is named for its folder ("Delete proj-12").
+
 ## 0.54.1
 
 ### Added
