@@ -822,6 +822,11 @@ async function performCompaction(
 // ============================================================================
 
 /** Drains one queued message at a time — each becomes its own turn. */
+/** What cast itself queues for the model (a finished background task, say), as opposed to what a person typed. */
+export function isCastNotice(message: Message): boolean {
+	return typeof message.content === "string" && message.content.startsWith("<system-reminder>");
+}
+
 export class MessageQueue {
 	private messages: Message[] = [];
 	/** Called after the queue changes (the daemon tells every client what is waiting). */
@@ -835,7 +840,7 @@ export class MessageQueue {
 	// What cast itself queues (a finished background task, say) is not the person's message: it is neither listed nor
 	// counted, so the numbers a person sees are the numbers `removeAt` takes.
 	private people(): Message[] {
-		return this.messages.filter((m) => !(typeof m.content === "string" && m.content.startsWith("<system-reminder>")));
+		return this.messages.filter((m) => !isCastNotice(m));
 	}
 
 	/** What each message a person queued says, in order. */
@@ -847,6 +852,16 @@ export class MessageQueue {
 					? m.content.map((part) => (part.type === "text" ? part.text : `[${part.type}]`)).join(" ")
 					: "",
 		);
+	}
+
+	/** Takes out, and returns, every queued message `match` accepts; the rest keep their places. */
+	drainWhere(match: (message: Message) => boolean): Message[] {
+		const taken = this.messages.filter(match);
+		if (taken.length > 0) {
+			this.messages = this.messages.filter((m) => !match(m));
+			this.onChange?.();
+		}
+		return taken;
 	}
 
 	/** Drops every queued message `match` accepts; says how many went. */
@@ -3090,6 +3105,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						role: "user",
 						content: `<system-reminder>You are near the end of this turn's iteration budget (~${activeCap - outerIteration} iterations left). Finish the current work and summarize; do not start new sub-tasks.</system-reminder>`,
 					});
+				}
+				// What cast has to tell the model (a background task finished) reaches it on its next step, not only when it
+				// would stop: the model that was told "it arrives on its own" then has no reason to poll for it. A person's
+				// queued message keeps waiting for the end of the turn.
+				const notices = followUpQueue.drainWhere(isCastNotice);
+				if (notices.length > 0) {
+					for (const notice of notices) messages.push(notice);
+					onEvent({ type: "followup_injected", messages: [...notices] });
 				}
 				// Inject pending steering messages
 				if (pendingMessages.length > 0) {

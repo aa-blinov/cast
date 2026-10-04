@@ -9,6 +9,7 @@ import { backgroundFailureReported } from "./background-failure-reported.ts";
 import { backgroundKillNoNotice } from "./background-kill-no-notice.ts";
 import { backgroundLargeOutput } from "./background-large-output.ts";
 import { backgroundLongWaitPastCap } from "./background-long-wait-past-cap.ts";
+import { backgroundNoticeMidturnNotRepolled } from "./background-notice-midturn-not-repolled.ts";
 import { backgroundParallelPromotedBothAwaited } from "./background-parallel-promoted-both-awaited.ts";
 import { backgroundPromotedResultAwaited } from "./background-promoted-result-awaited.ts";
 import { backgroundServerLifecycle } from "./background-server-lifecycle.ts";
@@ -98,6 +99,7 @@ export const chainCases: EvalCase[] = [
 	btwSaysWhenUnknown,
 	backgroundWaitNoDuplicateNotice,
 	backgroundExplicitNotPolled,
+	backgroundNoticeMidturnNotRepolled,
 	backgroundParallelPromotedBothAwaited,
 	backgroundFailureReported,
 	backgroundDependentStep,
