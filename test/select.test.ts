@@ -85,4 +85,56 @@ describe("resolveProjectTrust", () => {
 		expect(trusted).toBe(true);
 		expect(getProjectTrust(loadSettings(), project)).toBe(true);
 	});
+
+	describe("project rules in the trust prompt", () => {
+		const ask = async (cwd: string) => {
+			process.stdin.isTTY = true;
+			const shown: string[] = [];
+			const pickers = {
+				pickOption: async (_options: unknown, opts: unknown) => {
+					shown.push(JSON.stringify(opts));
+					return true;
+				},
+				promptText: async () => null,
+				log: (text: string) => {
+					shown.push(String(text));
+				},
+			} as unknown as Pickers;
+			await resolveProjectTrustForCwd(
+				{ noSkills: false, noMcp: false, cliSkillPaths: [], cliMcpPaths: [], settings: {}, pickers },
+				cwd,
+			);
+			return shown.join("\n");
+		};
+		const project = () => join(fakeHome, "project");
+		const write = (path: string) => {
+			mkdirSync(join(project(), path, ".."), { recursive: true });
+			writeFileSync(join(project(), path), "---\nalways-apply: true\n---\nrule\n");
+		};
+
+		it("asks about Cursor's .cursor/rules, which go into the system prompt as well", async () => {
+			mkdirSync(join(project(), ".git"), { recursive: true });
+			write(".cursor/rules/a.mdc");
+			expect(await ask(project())).toContain(".cursor/rules/");
+		});
+
+		it("asks about rules nested in a subfolder, and names the folder", async () => {
+			mkdirSync(join(project(), ".git"), { recursive: true });
+			write("apps/web/.cast/rules/a.md");
+			expect(await ask(project())).toContain("apps/web/.cast/rules/");
+		});
+
+		it("asks when the session starts in a subfolder and the rules are at the project root", async () => {
+			mkdirSync(join(project(), ".git"), { recursive: true });
+			write(".cast/rules/a.md");
+			mkdirSync(join(project(), "apps", "web"), { recursive: true });
+			expect(await ask(join(project(), "apps", "web"))).toContain(".cast/rules/");
+		});
+
+		it("does not ask when there is no rule file anywhere", async () => {
+			mkdirSync(join(project(), ".git"), { recursive: true });
+			mkdirSync(join(project(), ".cast", "rules"), { recursive: true });
+			expect(await ask(project())).not.toContain("Trust this project");
+		});
+	});
 });

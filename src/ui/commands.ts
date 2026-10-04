@@ -52,9 +52,10 @@ import {
 	resolveProjectTrustForCwd,
 	resolveRulesForCwd,
 	resolveSkillsForCwd,
+	rulesCwd,
 	skillDiagnosticsForCwd,
 } from "../core/project.ts";
-import { clearProjectRootCache } from "../core/project-root.ts";
+import { clearProjectRootCache, findProjectRoot } from "../core/project-root.ts";
 import { getModelsCache } from "../core/readline.ts";
 import {
 	buildReviewScope,
@@ -64,7 +65,7 @@ import {
 	startReviewState,
 } from "../core/review.ts";
 import { listRewindPoints, type RewindMode, rewindSession } from "../core/rewind.ts";
-import { formatRuleInvocation, type Rule } from "../core/rules.ts";
+import { formatRuleInvocation, formatRulesList, type Rule } from "../core/rules.ts";
 import { clearScratchpad, describeScratchpad, formatScratchpadListing, scratchpadFor } from "../core/scratchpad.ts";
 import {
 	addUsage,
@@ -3724,51 +3725,34 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			// explanation, which reads as "cast never saw my file". Cheap — rule
 			// files are small and this is not a hot path.
 			const rulesTrusted = await resolveProjectTrustForCwd(deps.projectDeps, deps.cwd);
-			const loadIssues = resolveRulesForCwd(deps.cwd, rulesTrusted).diagnostics;
-			const issuesBlock =
-				loadIssues.length > 0
-					? `\n\nCould not load ${loadIssues.length} rule file${loadIssues.length === 1 ? "" : "s"}:\n${loadIssues
-							.map((issue) => `  ${issue}`)
-							.join("\n")}`
-					: "";
-			if (deps.directoryRules.length === 0) {
-				deps.agent.addDisplayMessage({
-					role: "warning",
-					content: `No rules loaded. Create .cast/rules/*.md files to add rules.${issuesBlock}`,
-				});
-			} else {
-				// Which auto rules have latched is tracked wherever the agent loop
-				// runs. As a thin client that is the daemon, not here, so ask it —
-				// otherwise every auto rule reads as "not matched yet" for the whole
-				// session even while the daemon is injecting it on every turn.
-				let stickyIds = new Set(deps.activeAutoRules.map((r) => r.id));
-				if (deps.agent.daemonMode) {
-					try {
-						const remote = (await deps.agent.runCommand("/rules")) as Array<{ id?: string; sticky?: boolean }>;
-						if (Array.isArray(remote)) {
-							stickyIds = new Set(remote.filter((r) => r.sticky && r.id).map((r) => r.id!));
-						}
-					} catch {
-						// Fall back to the local view rather than failing the listing.
-					}
+			const fresh = resolveRulesForCwd(deps.cwd, rulesTrusted);
+			// Which rules have latched is tracked wherever the agent loop runs. As a thin client that is the daemon,
+			// not here, so ask it: otherwise every auto rule reads as "not matched yet" for the whole session even
+			// while the daemon is injecting it on every turn.
+			let stickyIds = new Set(deps.activeAutoRules.map((r) => r.id));
+			if (deps.agent.daemonMode) {
+				try {
+					const remote = (await deps.agent.runCommand("/rules")) as
+						| Array<{ id?: string; sticky?: boolean }>
+						| { rules?: Array<{ id?: string; sticky?: boolean }> };
+					const rules = Array.isArray(remote) ? remote : remote?.rules;
+					if (Array.isArray(rules)) stickyIds = new Set(rules.filter((r) => r.sticky && r.id).map((r) => r.id!));
+				} catch {
+					// Fall back to the local view rather than failing the listing.
 				}
-				const lines = deps.directoryRules.map((r) => {
-					let tag: string;
-					if (r.applyMode === "always") {
-						tag = " [always]";
-					} else if (r.applyMode === "auto") {
-						tag = stickyIds.has(r.id) ? " [auto:sticky]" : " [auto:globs]";
-					} else if (r.applyMode === "lazy") {
-						tag = " [lazy]";
-					} else {
-						tag = " [manual]";
-					}
-					const globs = r.globs.length > 0 ? ` globs=${JSON.stringify(r.globs)}` : "";
-					const scope = r.scope ? ` scope=${r.scope}` : "";
-					return `  ${r.id}${tag}${globs}${scope} (${r.source}) — ${r.description || "no description"}`;
-				});
-				deps.agent.addDisplayMessage({ role: "warning", content: `Rules\n${lines.join("\n")}${issuesBlock}` });
 			}
+			deps.agent.addDisplayMessage({
+				role: "warning",
+				content: formatRulesList({
+					loaded: deps.directoryRules,
+					onDisk: fresh.directoryRules,
+					stickyIds,
+					problems: fresh.diagnostics,
+					notes: fresh.notes,
+					relativeTo: findProjectRoot(deps.cwd),
+					cwdRel: rulesCwd(deps.cwd),
+				}),
+			});
 			return;
 		},
 	},

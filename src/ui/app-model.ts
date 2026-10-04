@@ -22,11 +22,14 @@ import {
 	personaOptionsForCwd,
 	resolveMcpForCwd,
 	resolveSkillsForCwd,
+	rulesCwd,
 } from "../core/project.ts";
 import {
 	formatRulesForTurn,
+	latchedRuleIds,
 	matchAutoRules,
 	type Rule,
+	restoreLatchedRules,
 	selectMentionedRules,
 	unionStickyRules,
 } from "../core/rules.ts";
@@ -180,7 +183,10 @@ export function useAppModel(props: AppModelProps) {
 	const [rulesSuffix, setRulesSuffix] = useState(result.rulesSuffix);
 	const [rulesLazySuffix, setRulesLazySuffix] = useState(result.rulesLazySuffix);
 	const [directoryRules, setDirectoryRules] = useState(result.directoryRules);
-	const [activeAutoRules, setActiveAutoRules] = useState<Rule[]>([]);
+	// A resumed session starts from the rules it had latched, saved with it.
+	const [activeAutoRules, setActiveAutoRules] = useState<Rule[]>(() =>
+		restoreLatchedRules(result.session.activeRuleIds, result.directoryRules),
+	);
 	const [permissionMode, setPermissionMode] = useState(result.permissionMode);
 	const [sshHosts, setSshHosts] = useState(result.sshHosts);
 	const [projectTrusted, setProjectTrusted] = useState(result.projectTrusted);
@@ -302,10 +308,11 @@ export function useAppModel(props: AppModelProps) {
 			//    turn, the rule vanished from under a conversation built on it
 			//    and the changed system prompt re-billed the whole history.
 			const newRules = [
-				...matchAutoRules(directoryRules, ctxFiles),
+				...matchAutoRules(directoryRules, ctxFiles, rulesCwd(cwd)),
 				...selectMentionedRules(directoryRules, userText),
 			];
 			const sticky = unionStickyRules(activeAutoRules, newRules);
+			session.activeRuleIds = latchedRuleIds(sticky);
 			if (sticky.length !== activeAutoRules.length) {
 				setActiveAutoRules(sticky);
 			}
@@ -343,6 +350,7 @@ export function useAppModel(props: AppModelProps) {
 			);
 		},
 		[
+			session,
 			directoryRules,
 			activeAutoRules,
 			skills,

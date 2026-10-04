@@ -1,26 +1,32 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { projectIdForCwd } from "../src/core/memory.ts";
 import { resolveRulesForCwd } from "../src/core/project.ts";
 import { clearProjectRootCache } from "../src/core/project-root.ts";
 import {
+	dirHasRuleFiles,
 	discoverProjectRuleDirs,
 	fileMatchesGlob,
 	formatAlwaysApplyRules,
 	formatLazyRulesForPrompt,
 	formatRuleInvocation,
 	formatRulesForTurn,
+	formatRulesList,
 	hasProjectRulesDir,
+	latchedRuleIds,
 	loadDirectoryRules,
 	MAX_RULE_BODY_CHARS,
+	MAX_RULES_TOTAL_CHARS,
 	matchAutoRules,
 	matchesRuleGlobs,
 	parseAtMentions,
 	type Rule,
 	readRuleBody,
+	restoreLatchedRules,
 	ruleScopeActive,
+	scopeContainsCwd,
 	selectMentionedRules,
 	unionStickyRules,
 } from "../src/core/rules.ts";
@@ -1037,6 +1043,246 @@ describe("rules", () => {
 			};
 			expect(() => formatRuleInvocation(rule)).not.toThrow();
 			expect(formatRuleInvocation(rule)).toContain("could not be read");
+		});
+	});
+});
+
+describe("rules audit fixes", () => {
+	let realHome: string | undefined;
+	let fakeHome: string;
+	let projectDir: string;
+	let rulesDir: string;
+
+	const write = (dir: string, file: string, frontmatter: string, body = "BODY") => {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, file), `---\n${frontmatter}\n---\n${body}\n`);
+	};
+	const load = () => {
+		const notes: string[] = [];
+		const diagnostics: string[] = [];
+		const rules = loadDirectoryRules({
+			projectCwd: projectDir,
+			globalDir: join(fakeHome, ".cast", "rules"),
+			notes,
+			diagnostics,
+		});
+		return { rules, notes, diagnostics };
+	};
+
+	beforeEach(() => {
+		realHome = process.env.HOME;
+		fakeHome = mkdtempSync(join(tmpdir(), "cast-rules-audit-"));
+		process.env.HOME = fakeHome;
+		projectDir = join(fakeHome, "project");
+		rulesDir = join(projectDir, ".cast", "rules");
+		mkdirSync(join(projectDir, ".git"), { recursive: true });
+		clearProjectRootCache();
+	});
+
+	afterEach(() => {
+		process.env.HOME = realHome;
+		rmSync(fakeHome, { recursive: true, force: true });
+		clearProjectRootCache();
+	});
+
+	it("reads always-apply written as yes, on, 1 or a quoted true, and says when it cannot read the value", () => {
+		write(rulesDir, "a.md", "always-apply: yes");
+		write(rulesDir, "b.md", 'alwaysApply: "true"');
+		write(rulesDir, "c.md", "always-apply: on");
+		write(rulesDir, "d.md", "always-apply: 1");
+		write(rulesDir, "e.md", "always-apply: no");
+		write(rulesDir, "f.md", "always-apply: maybe");
+		const { rules, notes } = load();
+		const mode = (name: string) => rules.find((r) => r.name === name)?.applyMode;
+		expect(["a", "b", "c", "d"].map(mode)).toEqual(["always", "always", "always", "always"]);
+		expect(mode("e")).toBe("manual");
+		expect(mode("f")).toBe("manual");
+		expect(notes.filter((n) => n.includes("always-apply must be true or false"))).toHaveLength(1);
+		expect(notes.join("\n")).toContain('"maybe"');
+	});
+
+	it("says when one rule hides another of the same name: .md over .mdc, project over global", () => {
+		write(rulesDir, "dup.md", "description: from md", "MD");
+		write(rulesDir, "dup.mdc", "description: from mdc", "MDC");
+		write(join(fakeHome, ".cast", "rules"), "style.md", "description: global", "G");
+		write(rulesDir, "style.md", "description: project", "P");
+		const { rules, notes } = load();
+		expect(rules.find((r) => r.name === "dup")?.filePath.endsWith("dup.md")).toBe(true);
+		expect(rules.find((r) => r.name === "style")?.source).toBe("project");
+		expect(notes.some((n) => n.includes("dup.mdc") && n.includes("hidden by") && n.includes("dup.md"))).toBe(true);
+		expect(
+			notes.some((n) => n.startsWith(join(fakeHome, ".cast", "rules", "style.md")) && n.includes("hidden by")),
+		).toBe(true);
+	});
+
+	it("lets @ spell a name with inner dots, and says when a name cannot be mentioned", () => {
+		write(rulesDir, "api.style.md", "description: dotted");
+		write(rulesDir, "Spaces In Name.md", "description: spaces");
+		const { rules, notes } = load();
+		expect(selectMentionedRules(rules, "use @api.style please").map((r) => r.name)).toEqual(["api.style"]);
+		expect(selectMentionedRules(rules, "see @api.style.").map((r) => r.name)).toEqual(["api.style"]);
+		expect(selectMentionedRules(rules, "@Spaces").map((r) => r.name)).toEqual([]);
+		expect(notes.some((n) => n.includes("Spaces In Name") && n.includes("cannot be @-mentioned"))).toBe(true);
+		expect(notes.some((n) => n.includes("api.style"))).toBe(false);
+	});
+
+	it("keeps a nested always-apply rule out of a prompt built without a turn", () => {
+		write(rulesDir, "base.md", "always-apply: true", "BASE-ALWAYS");
+		write(join(projectDir, "apps", "web", ".cast", "rules"), "web.md", "always-apply: true", "WEB-ALWAYS");
+		const { rules } = load();
+		const suffix = formatAlwaysApplyRules(rules);
+		expect(suffix).toContain("BASE-ALWAYS");
+		expect(suffix).not.toContain("WEB-ALWAYS");
+		// The per-turn build still has it once a file of its subtree is in context.
+		expect(formatRulesForTurn(matchAutoRules(rules, ["apps/web/src/a.ts"]), [])).toContain("WEB-ALWAYS");
+		expect(formatRulesForTurn(matchAutoRules(rules, []), [])).not.toContain("WEB-ALWAYS");
+	});
+
+	it("puts a nested rule in force from the start when the session works in its folder", () => {
+		write(rulesDir, "base.md", "always-apply: true", "BASE-ALWAYS");
+		write(join(projectDir, "apps", "web", ".cast", "rules"), "web.md", "always-apply: true", "WEB-ALWAYS");
+		write(join(projectDir, "apps", "api", ".cast", "rules"), "api.md", "always-apply: true", "API-ALWAYS");
+		const { rules } = load();
+		expect(scopeContainsCwd("apps/web", "apps/web")).toBe(true);
+		expect(scopeContainsCwd("apps/web", "apps/web/src")).toBe(true);
+		expect(scopeContainsCwd("apps/web", "apps")).toBe(false);
+		expect(scopeContainsCwd("apps/web", "apps/website")).toBe(false);
+		const inWeb = formatAlwaysApplyRules(rules, "apps/web");
+		expect(inWeb).toContain("WEB-ALWAYS");
+		expect(inWeb).not.toContain("API-ALWAYS");
+		expect(matchAutoRules(rules, [], "apps/web").map((r) => r.id)).toEqual(["base", "apps/web/web"]);
+		expect(matchAutoRules(rules, [], "").map((r) => r.id)).toEqual(["base"]);
+		// The resolver does the same for a session started in the folder.
+		expect(resolveRulesForCwd(join(projectDir, "apps", "web"), true).alwaysApplySuffix).toContain("WEB-ALWAYS");
+		expect(resolveRulesForCwd(projectDir, true).alwaysApplySuffix).not.toContain("WEB-ALWAYS");
+		const text = formatRulesList({
+			loaded: rules,
+			stickyIds: new Set(),
+			problems: [],
+			notes: [],
+			cwdRel: "apps/web",
+		});
+		expect(text).toContain("apps/web/web [always] scope=apps/web");
+		expect(text).toContain("apps/api/api [always:waiting] scope=apps/api");
+	});
+
+	it("finds a rule file in a folder inside a rules folder, and none in an empty or missing one", () => {
+		write(join(rulesDir, "team", "backend"), "db.md", "description: db");
+		expect(dirHasRuleFiles(rulesDir)).toBe(true);
+		mkdirSync(join(projectDir, "empty-rules"), { recursive: true });
+		expect(dirHasRuleFiles(join(projectDir, "empty-rules"))).toBe(false);
+		expect(dirHasRuleFiles(join(projectDir, "nope"))).toBe(false);
+		write(rulesDir, "notes.txt", "x");
+		mkdirSync(join(projectDir, "only-text"), { recursive: true });
+		writeFileSync(join(projectDir, "only-text", "notes.txt"), "x");
+		expect(dirHasRuleFiles(join(projectDir, "only-text"))).toBe(false);
+	});
+
+	it("bounds what all the rules together cost, and names the ones it left out", () => {
+		const big = "x".repeat(60 * 1024);
+		for (const name of ["r1", "r2", "r3", "r4"]) write(rulesDir, `${name}.md`, "always-apply: true", big);
+		const { rules } = load();
+		const out = formatAlwaysApplyRules(rules);
+		expect(out.length).toBeLessThan(MAX_RULES_TOTAL_CHARS + 2_000);
+		expect(out).toMatch(/\[\d+ more rules? left out/);
+		expect(out).toContain("r3.md");
+	});
+
+	it("keeps the lazy-rule list inside a budget, names and paths intact", () => {
+		for (let i = 0; i < 60; i++)
+			write(rulesDir, `lazy-${String(i).padStart(2, "0")}.md`, `description: ${"d".repeat(900)} ${i}`);
+		const { rules } = load();
+		const listing = formatLazyRulesForPrompt(rules);
+		expect(listing.length).toBeLessThan(18_000);
+		for (const r of rules) {
+			expect(listing).toContain(`<name>${r.name}</name>`);
+			expect(listing).toContain(r.filePath);
+		}
+		expect(listing).toContain("…</description>");
+	});
+
+	it("tells the model not to read what is already in the prompt", () => {
+		write(rulesDir, "lazy.md", "description: use when lazy");
+		const listing = formatLazyRulesForPrompt(load().rules);
+		expect(listing).toContain("already part of this prompt");
+		expect(listing).not.toContain("alwaysApply: true` and `globs");
+	});
+
+	describe("formatRulesList", () => {
+		it("shows mode, globs, scope and source, marks what waits, what latched and what is only on disk", () => {
+			write(rulesDir, "base.md", "always-apply: true");
+			write(rulesDir, "ts.md", "globs: ['**/*.ts']");
+			write(rulesDir, "m.md", "always-apply: false");
+			write(join(projectDir, "apps", "web", ".cast", "rules"), "web.md", "always-apply: true");
+			const { rules } = load();
+			const text = formatRulesList({ loaded: rules, stickyIds: new Set(["ts"]), problems: [], notes: [] });
+			expect(text).toContain("base [always] (project)");
+			expect(text).toContain('ts [auto:sticky] globs=["**/*.ts"] (project)');
+			expect(text).toContain("apps/web/web [always:waiting] scope=apps/web (project)");
+			const mentioned = formatRulesList({ loaded: rules, stickyIds: new Set(["ts", "m"]), problems: [], notes: [] });
+			expect(mentioned).toContain("m [manual:sticky] (project)");
+			expect(text).toContain("m [manual] (project)");
+			const onDisk = formatRulesList({
+				loaded: rules.slice(0, 1),
+				onDisk: rules,
+				stickyIds: new Set(),
+				problems: [],
+				notes: [],
+			});
+			expect(onDisk).toContain("[on disk, not loaded: /reload]");
+		});
+
+		it("shows the paths in notes relative to the project, and the home folder as ~", () => {
+			const text = formatRulesList({
+				loaded: [],
+				stickyIds: new Set(),
+				problems: [],
+				notes: [
+					`/work/proj/.cast/rules/a.mdc: hidden by /work/proj/.cast/rules/a.md, which was loaded first`,
+					`${homedir()}/.cast/rules/g.md: x`,
+				],
+				relativeTo: "/work/proj",
+			});
+			expect(text).toContain(".cast/rules/a.mdc: hidden by .cast/rules/a.md, which was loaded first");
+			expect(text).toContain("~/.cast/rules/g.md: x");
+			expect(text).not.toContain("/work/proj");
+		});
+
+		it("lists the files that did not load and the notes after the rules, and says so when there are no rules", () => {
+			const text = formatRulesList({
+				loaded: [],
+				stickyIds: new Set(),
+				problems: ["/p/a.md: unreadable (EACCES)"],
+				notes: ["/p/b.md: hidden by /p/c.md"],
+			});
+			expect(text).toContain("No rules loaded");
+			expect(text).toContain("Could not load 1 rule file:");
+			expect(text).toContain("Notes:\n  /p/b.md: hidden by /p/c.md");
+		});
+	});
+
+	describe("latched rules across a restart", () => {
+		it("keeps the ones that latched, not the always-apply ones, and finds them again by id", () => {
+			write(rulesDir, "base.md", "always-apply: true");
+			write(rulesDir, "ts.md", "globs: ['**/*.ts']");
+			write(rulesDir, "manual.md", "");
+			const { rules } = load();
+			const ids = latchedRuleIds(rules);
+			expect(ids).toEqual(["manual", "ts"]);
+			expect(restoreLatchedRules(ids, rules).map((r) => r.id)).toEqual(["manual", "ts"]);
+			expect(restoreLatchedRules(["gone"], rules)).toEqual([]);
+			expect(restoreLatchedRules(undefined, rules)).toEqual([]);
+			expect(latchedRuleIds([])).toBeUndefined();
+		});
+	});
+
+	describe("rules in the project resolver", () => {
+		it("carries the notes with the diagnostics", () => {
+			write(rulesDir, "dup.md", "description: a");
+			write(rulesDir, "dup.mdc", "description: b");
+			const resolved = resolveRulesForCwd(projectDir, true);
+			expect(resolved.notes.some((n) => n.includes("hidden by"))).toBe(true);
+			expect(resolved.diagnostics).toEqual([]);
 		});
 	});
 });

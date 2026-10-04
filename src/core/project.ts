@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { arch, homedir, platform } from "node:os";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { resolveProjectTrust } from "../pickers/domain.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { hasContextFileInDir } from "./context-files.ts";
@@ -20,10 +20,11 @@ import { addAllowRule, exactRule } from "./permissions.ts";
 import { globalPersonasDir, type LoadPersonasOptions, loadPersonas, type Persona } from "./personas.ts";
 import { findProjectRoot } from "./project-root.ts";
 import {
+	dirHasRuleFiles,
+	discoverProjectRuleDirs,
 	formatAlwaysApplyRules,
 	formatLazyRulesForPrompt,
 	globalRulesDir,
-	hasProjectRulesDir,
 	loadDirectoryRules,
 	type Rule,
 } from "./rules.ts";
@@ -147,6 +148,8 @@ function hasProjectPersonas(targetCwd: string): boolean {
  * per-cwd in settings.json. Used both at startup (runStartup) and mid-session
  * (/sessions switching cwd, /reload re-scanning the current cwd).
  */
+const MAX_TRUST_RULE_LINES = 8;
+
 export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: string): Promise<boolean> {
 	const lines: string[] = [];
 	const skillsDir = projectSkillsDir(cwd);
@@ -167,7 +170,16 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 		}
 	}
 	if (hasContextFileInDir(cwd)) lines.push("  - AGENTS.md / CLAUDE.md (project instructions for the system prompt)");
-	if (hasProjectRulesDir(cwd)) lines.push("  - .cast/rules/ (project rules — always-apply, lazy, or manual)");
+	// Every rules folder the session would read, not only <cwd>/.cast/rules: Cursor's `.cursor/rules`, rules nested in
+	// subfolders, and the project root's when the session starts in a subfolder all go into the system prompt too.
+	const ruleDirs = discoverProjectRuleDirs(findProjectRoot(cwd)).filter(({ dir }) => dirHasRuleFiles(dir));
+	const root = findProjectRoot(cwd);
+	for (const { dir } of ruleDirs.slice(0, MAX_TRUST_RULE_LINES)) {
+		const shown = dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : dir;
+		lines.push(`  - ${shown}/ (project rules, written into the system prompt: always-apply, lazy, or manual)`);
+	}
+	if (ruleDirs.length > MAX_TRUST_RULE_LINES)
+		lines.push(`  - ... and ${ruleDirs.length - MAX_TRUST_RULE_LINES} more rules folders`);
 	if (hasProjectPersonas(cwd)) lines.push("  - .cast/personas/ (custom personas — system prompts for the agent)");
 	const hooksPath = projectHooksPath(cwd);
 	if (hooksPath !== globalHooksPath() && existsSync(hooksPath)) {
@@ -392,6 +404,17 @@ export interface ResolvedRules {
 	directoryRules: Rule[];
 	/** Per-file load failures, so `/rules` can say why a rule is missing. */
 	diagnostics: string[];
+	/** Notes about rules that did load: hidden by another of the same name, a value not understood, a name `@` cannot spell. */
+	notes: string[];
+}
+
+/**
+ * The session's folder relative to the project root ("" at the root): nested rules whose folder holds or contains
+ * it are in force from the first message, with no file of theirs read yet.
+ */
+export function rulesCwd(cwd: string): string {
+	const rel = relative(findProjectRoot(cwd), cwd);
+	return rel.split(sep).join("/");
 }
 
 export function resolveRulesForCwd(cwd: string, trusted: boolean): ResolvedRules {
@@ -402,17 +425,20 @@ export function resolveRulesForCwd(cwd: string, trusted: boolean): ResolvedRules
 	// inherited from the same repository root — the rules were simply above the
 	// only directory being searched.
 	const diagnostics: string[] = [];
+	const notes: string[] = [];
 	const directoryRules = loadDirectoryRules({
 		globalDir: globalRulesDir(),
 		projectCwd: trusted ? findProjectRoot(cwd) : undefined,
 		diagnostics,
+		notes,
 	});
 
 	return {
-		alwaysApplySuffix: formatAlwaysApplyRules(directoryRules),
+		alwaysApplySuffix: formatAlwaysApplyRules(directoryRules, rulesCwd(cwd)),
 		lazySuffix: formatLazyRulesForPrompt(directoryRules),
 		directoryRules,
 		diagnostics,
+		notes,
 	};
 }
 

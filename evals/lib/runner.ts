@@ -28,6 +28,12 @@ import {
 import { findPersona } from "../../src/core/personas.ts";
 import { createPlanState, modeDisabledTools } from "../../src/core/plan.ts";
 import { buildSystemPrompt, personaOptionsForCwd, resolvePersonasForCwd } from "../../src/core/project.ts";
+import {
+	formatLazyRulesForPrompt,
+	formatRulesForTurn,
+	loadDirectoryRules,
+	matchAutoRules,
+} from "../../src/core/rules.ts";
 import { removeScratchpadFor, scratchpadFor } from "../../src/core/scratchpad.ts";
 import { builtinSkillsDir, formatSkillsForPrompt, loadSkills } from "../../src/core/skills.ts";
 import { loadSubagentPrompts } from "../../src/core/subagents.ts";
@@ -91,6 +97,11 @@ export interface EvalCase {
 	withSkills?: boolean;
 	/** Extra skill directories loaded beside the builtin ones (needs `withSkills`). */
 	skillPaths?: string[];
+	/**
+	 * A project root (made in `setup`) whose `.cast/rules` are loaded the way a session loads them: always-apply
+	 * rules go into the system prompt, lazy ones are listed with their path for the model to read.
+	 */
+	rulesProject?: () => string;
 	/** Local or remote MCP servers made available to this case's agent loop. */
 	mcpServers?: Record<string, McpServerConfig>;
 	/**
@@ -414,11 +425,21 @@ async function runAttempt(
 			}
 		}
 		const skillsSuffix = skills ? formatSkillsForPrompt(skills) : "";
-		const systemPrompt = buildSystemPrompt(persona, "", "", "", skillsSuffix, "", cwd, {
-			model,
-			reasoningLevel: config.reasoningLevel,
-			mode: evalCase.mode,
-		});
+		const rules = evalCase.rulesProject ? loadDirectoryRules({ projectCwd: evalCase.rulesProject() }) : [];
+		const systemPrompt = buildSystemPrompt(
+			persona,
+			"",
+			formatRulesForTurn(matchAutoRules(rules, []), []),
+			formatLazyRulesForPrompt(rules),
+			skillsSuffix,
+			"",
+			cwd,
+			{
+				model,
+				reasoningLevel: config.reasoningLevel,
+				mode: evalCase.mode,
+			},
+		);
 		// A goal is session state, so the case needs a session id to hang it on.
 		// Unique per attempt: repeated runs must not inherit each other's goal.
 		goalSessionId = evalCase.goal ? `eval-goal-${evalCase.id}-${Date.now()}-${randomUUID().slice(0, 8)}` : undefined;

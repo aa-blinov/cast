@@ -186,6 +186,9 @@ export interface SessionState {
 	 * these transient UI decisions belong to the session record. */
 	planQuestion?: PlanQuestion;
 	planTransition?: PlanTransition;
+	/** Ids of the rules this session has latched (auto-attached by a file, or @-mentioned), so they are still in force
+	 * when it is opened again. */
+	activeRuleIds?: string[];
 }
 
 /** Fold one turn's usage into the session's running totals. When `opts.subagent`
@@ -779,6 +782,7 @@ function sessionMetaRow(session: SessionState) {
 		share_token: session.shareToken ?? null,
 		plan_question_json: session.planQuestion ? JSON.stringify(session.planQuestion) : null,
 		plan_transition_json: session.planTransition ? JSON.stringify(session.planTransition) : null,
+		active_rules_json: session.activeRuleIds?.length ? JSON.stringify(session.activeRuleIds) : null,
 		version: session.version ?? 0,
 	};
 }
@@ -835,8 +839,8 @@ function writeSessionRows(
 	const pendingExtras: Array<[Message, WrittenExtras]> = [];
 	const meta = sessionMetaRow(session);
 	db.prepare(
-		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, version)
-			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :version)
+		`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, active_rules_json, version)
+			 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :active_rules_json, :version)
 		 ON CONFLICT(id) DO UPDATE SET
 		   cwd = excluded.cwd, model = excluded.model, persona = excluded.persona, mode = excluded.mode,
 		   title = excluded.title, pinned = excluded.pinned, updated_at = excluded.updated_at,
@@ -845,7 +849,7 @@ function writeSessionRows(
 		   parent_session_id = excluded.parent_session_id, background_kind = excluded.background_kind,
 		   usage_json = excluded.usage_json, todos_json = excluded.todos_json,
 		   share_token = excluded.share_token, plan_question_json = excluded.plan_question_json,
-		   plan_transition_json = excluded.plan_transition_json,
+		   plan_transition_json = excluded.plan_transition_json, active_rules_json = excluded.active_rules_json,
 		   version = excluded.version`,
 	).run(meta);
 
@@ -1498,6 +1502,7 @@ interface SessionRow {
 	share_token: string | null;
 	plan_question_json: string | null;
 	plan_transition_json: string | null;
+	active_rules_json: string | null;
 	version: number | null;
 }
 
@@ -1527,8 +1532,19 @@ function rowToMeta(row: SessionRow): Omit<SessionState, "messages"> {
 			row.plan_transition_json && (JSON.parse(row.plan_transition_json) as { kind?: unknown }).kind === "done"
 				? { kind: "done" }
 				: undefined,
+		activeRuleIds: parseRuleIds(row.active_rules_json),
 		version: row.version ?? undefined,
 	};
+}
+
+function parseRuleIds(json: string | null): string[] | undefined {
+	if (!json) return undefined;
+	try {
+		const ids = JSON.parse(json) as unknown;
+		return Array.isArray(ids) && ids.every((id) => typeof id === "string") && ids.length > 0 ? ids : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /** Loads the in-context working set (`in_context = 1`) into
@@ -2066,8 +2082,8 @@ export function migrateLegacySessionsToDb(): number {
 		try {
 			if (!session.title) session.title = deriveSessionTitle(getFirstUserMessage(session));
 			db.prepare(
-				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, version)
-					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :version)`,
+				`INSERT INTO sessions (id, cwd, model, persona, mode, title, pinned, created_at, updated_at, last_prompt_tokens, last_announced_local_date, provider_url, provider_name, session_kind, parent_session_id, background_kind, usage_json, todos_json, share_token, plan_question_json, plan_transition_json, active_rules_json, version)
+					 VALUES (:id, :cwd, :model, :persona, :mode, :title, :pinned, :created_at, :updated_at, :last_prompt_tokens, :last_announced_local_date, :provider_url, :provider_name, :session_kind, :parent_session_id, :background_kind, :usage_json, :todos_json, :share_token, :plan_question_json, :plan_transition_json, :active_rules_json, :version)`,
 			).run(sessionMetaRow(session));
 			const insertRow = db.prepare(
 				"INSERT INTO messages (session_id, seq, message_id, role, content_json, in_context, has_tool_calls) VALUES (?, ?, ?, ?, ?, 1, ?)",
@@ -2791,6 +2807,7 @@ export function forkSession(
 	fork.providerUrl = source.providerUrl;
 	fork.providerName = source.providerName;
 	fork.lastAnnouncedLocalDate = source.lastAnnouncedLocalDate;
+	fork.activeRuleIds = source.activeRuleIds ? [...source.activeRuleIds] : undefined;
 	// Index maps and the todo list describe the source as it is now; an
 	// earlier point has its reasoning attached per message, and no list yet.
 	if (beforeSeq === undefined) {

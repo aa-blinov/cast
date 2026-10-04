@@ -2566,14 +2566,26 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		const result = await bridge.executeCommand(ws.id, "/rules");
 		expect(result.ok).toBe(true);
-		const list = result.result as Array<{
-			id: string;
-			name: string;
-			description: string;
-			applyMode: string;
-			sticky: boolean;
-		}>;
+		const shaped = result.result as {
+			rules: Array<{
+				id: string;
+				name: string;
+				description: string;
+				applyMode: string;
+				sticky: boolean;
+				globs: string[];
+				scope: string;
+				source: string;
+			}>;
+			text: string;
+			problems: string[];
+			notes: string[];
+		};
+		const list = shaped.rules;
 		expect(Array.isArray(list)).toBe(true);
+		expect(typeof shaped.text).toBe("string");
+		expect(Array.isArray(shaped.problems)).toBe(true);
+		expect(Array.isArray(shaped.notes)).toBe(true);
 		// Each entry carries the contract shape — even if the project has no
 		// rules installed, an empty array is the same shape; the per-field
 		// shape check pins what /rules emits so a regression that drops
@@ -2585,6 +2597,9 @@ describe("web bridge", () => {
 			expect(typeof r.description).toBe("string");
 			expect(typeof r.applyMode).toBe("string");
 			expect(typeof r.sticky).toBe("boolean");
+			expect(Array.isArray(r.globs)).toBe(true);
+			expect(typeof r.scope).toBe("string");
+			expect(typeof r.source).toBe("string");
 		}
 	});
 
@@ -2599,7 +2614,7 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		const result = await bridge.executeCommand(ws.id, "/rules");
 		expect(result.ok).toBe(true);
-		const list = result.result as Array<{ sticky: boolean }>;
+		const list = (result.result as { rules: Array<{ sticky: boolean }> }).rules;
 		// No activeAutoRules → no entry can have sticky: true.
 		for (const entry of list) expect(entry.sticky).toBe(false);
 		// Pin the contract for ws.activeAutoRules wired through to the
@@ -2610,7 +2625,8 @@ describe("web bridge", () => {
 		ws.activeAutoRules = [{ id: "stale", name: "stale-rule" } as never];
 		const second = await bridge.executeCommand(ws.id, "/rules");
 		expect(second.ok).toBe(true);
-		for (const entry of second.result as Array<{ sticky: boolean }>) expect(entry.sticky).toBe(false);
+		for (const entry of (second.result as { rules: Array<{ sticky: boolean }> }).rules)
+			expect(entry.sticky).toBe(false);
 	});
 
 	it("/rule: <empty> returns the usage error", async () => {
@@ -3811,10 +3827,56 @@ describe("web bridge", () => {
 
 			const listed = (await bridge.executeCommand(ws.id, "/rules")) as {
 				ok: boolean;
-				result?: Array<{ name: string }>;
+				result?: { rules: Array<{ name: string }>; text: string };
 			};
 			expect(listed.ok).toBe(true);
-			expect((listed.result ?? []).map((r) => r.name)).toContain("project-only");
+			expect((listed.result?.rules ?? []).map((r) => r.name)).toContain("project-only");
+			expect(listed.result?.text).toContain("project-only");
+		} finally {
+			rmSync(projectDir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps an @-mentioned or glob-latched rule across a restart: it is saved with the session and in force again", async () => {
+		const projectDir = mkdtempSync(join(tmpdir(), "cast-bridge-latch-"));
+		mkdirSync(join(projectDir, ".git"), { recursive: true });
+		mkdirSync(join(projectDir, ".cast", "rules"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".cast", "rules", "ts.md"),
+			"---\nglobs: ['**/*.ts']\n---\nTS_LATCHED_RULE\n",
+			"utf-8",
+		);
+		writeFileSync(
+			join(projectDir, ".cast", "rules", "manual.md"),
+			"---\nalways-apply: false\n---\nMANUAL_LATCHED_RULE\n",
+			"utf-8",
+		);
+		try {
+			setProjectTrust(projectDir, true);
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			type Rebuild = (ctx: { userText: string; contextFiles: string[] }) => string;
+			const rebuildOf = async (bridge: ReturnType<typeof createServerBridge>, id: string): Promise<Rebuild> => {
+				await bridge.submit(id, "hello");
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				return (runAgentLoop.mock.calls.at(-1)![1] as { rebuildSystemPrompt: Rebuild }).rebuildSystemPrompt;
+			};
+
+			const first = createServerBridge(makeResult({ directoryRules: [] }));
+			const ws = first.createSession(undefined, undefined, projectDir);
+			const rebuild = await rebuildOf(first, ws.id);
+			const prompt = rebuild({ userText: "look at @manual", contextFiles: ["src/a.ts"] });
+			expect(prompt).toContain("TS_LATCHED_RULE");
+			expect(prompt).toContain("MANUAL_LATCHED_RULE");
+			expect(ws.session.activeRuleIds).toEqual(["ts", "manual"]);
+
+			// A new daemon opens the saved session: nothing is in memory, the ids come from the session.
+			const second = createServerBridge(makeResult({ directoryRules: [] }));
+			const reopened = second.createSession(undefined, undefined, projectDir);
+			reopened.session.activeRuleIds = ["ts", "manual"];
+			const rebuildAgain = await rebuildOf(second, reopened.id);
+			const again = rebuildAgain({ userText: "carry on", contextFiles: [] });
+			expect(again).toContain("TS_LATCHED_RULE");
+			expect(again).toContain("MANUAL_LATCHED_RULE");
 		} finally {
 			rmSync(projectDir, { recursive: true, force: true });
 		}
