@@ -30,6 +30,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		awaitConnection,
 		pendingOutgoingRef,
 		setRunning,
+		running,
 		canSend,
 	} = context;
 	// Browsers only grant this from a user gesture, and sending is the first
@@ -80,6 +81,14 @@ export async function submitMessage(text, images, pendingDocs, context) {
 	if (planRefineArmedRef.current && !text.trim().startsWith("/")) {
 		planRefineArmedRef.current = false;
 		text = `The user wants to refine the plan. Update it using this feedback:\n\n${text}`;
+	}
+	// A plain message during a turn steers it unless the setting says to queue it: then it is sent as `/queue`, which
+	// shows in the pending list and runs when the turn ends. An attachment cannot ride a queued message.
+	if (running && activeId && !images?.length && !pendingDocs?.length && text.trim() && !text.trim().startsWith("/")) {
+		try {
+			const current = await api("POST", `/api/sessions/${activeId}/command`, { command: "/current" });
+			if (current?.result?.runningInput === "queue") text = `/queue ${text.trim()}`;
+		} catch {}
 	}
 	const draftVersion = session?.isDraft ? session.draftVersion : null;
 	const isCurrentDraft = () => draftVersion == null || draftVersion === draftVersionRef.current;

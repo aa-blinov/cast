@@ -109,6 +109,12 @@ function SettingsBash({ data, busy, act }) {
 				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
 				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
 			</div>
+			<div class="settings-section-title">Message while a turn runs</div>
+			<p class="settings-intro"><span>Steer: the agent reads a new message on its next step. Queue: it waits for the turn to end and runs next. <code>/steer</code> and <code>/queue</code> always do their own thing.</span></p>
+			<div class="settings-form-row">
+				<button class="modal-btn${data.runningInput !== "queue" ? " modal-btn-primary" : ""}" title="Inject the message into the running turn" disabled=${busy} onClick=${() => act("/running-input steer")}>Steer</button>
+				<button class="modal-btn${data.runningInput === "queue" ? " modal-btn-primary" : ""}" title="Run the message after the turn ends" disabled=${busy} onClick=${() => act("/running-input queue")}>Queue</button>
+			</div>
 			<div class="settings-section-title">Turn safety cap</div>
 			<p class="settings-intro"><span>Max model calls per turn before the loop stops as a runaway (default 500). Applies on the next agent call.</span></p>
 			<div class="settings-inline-form">

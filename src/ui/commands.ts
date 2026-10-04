@@ -94,6 +94,8 @@ import {
 	loadSettings,
 	type PermissionMode,
 	type Provider,
+	runningInputMode,
+	runningInputText,
 	type StatusBarConfig,
 	turnIterationCap,
 	updateSettings,
@@ -342,6 +344,11 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/rewind", description: "Rewind to before a message: files, conversation or both" },
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true },
 	{ name: "/rules", description: "List loaded rules" },
+	{
+		name: "/running-input",
+		description: "What a plain message does while a turn runs — steer | queue",
+		takesArgs: true,
+	},
 	{ name: "/s", description: "Alias for /steer", takesArgs: true },
 	{ name: "/scratchpad", description: "Show this session's scratchpad folder and what is in it" },
 	{ name: "/scratchpad clear", description: "Empty this session's scratchpad" },
@@ -3324,6 +3331,20 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		},
 	},
 	{
+		match: (input) => input === "/running-input" || input.startsWith("/running-input "),
+		whileRunning: "submit",
+		run: async ({ input, showNotice }) => {
+			const arg = input.slice("/running-input".length).trim();
+			const mode = arg === "steer" || arg === "queue" ? arg : undefined;
+			if (arg && !mode) {
+				showNotice("[Usage: /running-input steer | queue]");
+				return;
+			}
+			if (mode) updateSettings({ runningInput: mode === "steer" ? undefined : mode });
+			showNotice(`[${runningInputText(runningInputMode(loadSettings()))}]`);
+		},
+	},
+	{
 		match: (input) => input === "/turn-cap" || input.startsWith("/turn-cap "),
 		run: async ({ input, deps, showNotice }) => {
 			const arg = input.slice("/turn-cap".length).trim();
@@ -4425,6 +4446,12 @@ async function handleUserShell(shell: Exclude<UserShellInput, { kind: "text" }>,
 	agent.refresh();
 }
 
+/** A plain message typed during a turn: it steers the turn, or waits for it, as the setting says. */
+function sendWhileRunning(agent: CommandDeps["agent"], text: string): void {
+	if (runningInputMode(loadSettings()) === "queue") agent.followUp(text);
+	else agent.steer(text);
+}
+
 export async function handleInput(text: string, images: PendingImage[] | undefined, deps: CommandDeps): Promise<void> {
 	const { agent, session, config, running, onQuit, showNotice } = deps;
 	const input = lowerCommandWord(text.trim());
@@ -4434,7 +4461,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	// `!command` runs a command for the person, with no model turn; `!!text` is a message that starts with a `!`.
 	const shell = parseUserShellInput(text.trim());
 	if (shell?.kind === "text") {
-		if (running) agent.steer(shell.text);
+		if (running) sendWhileRunning(agent, shell.text);
 		else await agent.submit(shell.text, images);
 		return;
 	}
@@ -4457,7 +4484,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				showNotice("[An image can't be injected mid-turn — send it once the turn ends]");
 				return;
 			}
-			agent.steer(input);
+			sendWhileRunning(agent, input);
 			return;
 		}
 		await agent.submit(text, images);

@@ -109,6 +109,8 @@ import {
 	memoryDistillIntervalDays,
 	memoryDreamAuto,
 	memoryDreamIntervalDays,
+	runningInputMode,
+	runningInputText,
 	updateSettings,
 } from "../../core/settings.ts";
 import {
@@ -450,6 +452,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 				planModel: planModel ?? null,
 				planModelProvider: planModelProvider ?? null,
 				maxTurnIterations: turnIterationCap(loadSettings()),
+				runningInput: runningInputMode(loadSettings()),
 			},
 		};
 	},
@@ -606,6 +609,12 @@ const commandHandlers: Record<string, CommandHandler> = {
 			return { ok: true, result: `Hook ${id} ${verb}d` };
 		}
 		return { ok: false, error: `Unknown /hooks ${verb}` };
+	},
+	"/running-input": ({ arg, loadSettings }) => {
+		if (!arg) return { ok: true, result: runningInputText(runningInputMode(loadSettings())) };
+		if (arg !== "steer" && arg !== "queue") return { ok: false, error: "Usage: /running-input steer | queue" };
+		updateSettings({ runningInput: arg === "steer" ? undefined : arg });
+		return { ok: true, result: runningInputText(arg) };
 	},
 	"/turn-cap": ({ arg, loadSettings, turnIterationCap }) => {
 		const settings = loadSettings();

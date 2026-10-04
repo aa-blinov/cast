@@ -160,7 +160,11 @@ export function SettingsModal({
 				if (failed(permissions, current)) return;
 				commit((d) => ({
 					...d,
-					bash: { permissions: permissions?.result, maxTurnIterations: current?.result?.maxTurnIterations },
+					bash: {
+						permissions: permissions?.result,
+						maxTurnIterations: current?.result?.maxTurnIterations,
+						runningInput: current?.result?.runningInput,
+					},
 				}));
 			} else if (t === "web") {
 				const [webTools, searchProvider, fetchProvider] = await Promise.all([

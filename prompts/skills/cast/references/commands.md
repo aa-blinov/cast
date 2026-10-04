@@ -50,6 +50,7 @@
 | `/context` | List the loaded AGENTS.md / CLAUDE.md context files |
 | `/steer <message>` (`/s`) | Inject a message while the agent is running |
 | `/btw <question>` | Ask a side question: answered from the conversation with no tools, kept out of it (not saved, no steering); works while a turn runs |
+| `/running-input [steer\|queue]` | What a plain message typed during a turn does: steer it (default) or queue it for after; `/steer` and `/queue` always work |
 | `/queue <message>` (`/q`) | Queue a message for after the agent stops |
 | `/queue-reset` (`/qr`) | Clear the message queue |
 | `/reasoning` | Change reasoning level |
