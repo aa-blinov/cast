@@ -475,7 +475,7 @@ export class BackgroundTaskRegistry {
  */
 const MAX_BASH_OUTPUT_WAIT_MS = 60_000;
 
-function clampWait(v: unknown): number {
+export function clampWait(v: unknown): number {
 	if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return 0;
 	const ms = v < BASH_TIMEOUT_SECONDS_THRESHOLD ? v * 1000 : v;
 	return Math.max(0, Math.min(MAX_BASH_OUTPUT_WAIT_MS, ms));

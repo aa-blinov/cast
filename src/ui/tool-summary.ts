@@ -1,5 +1,6 @@
 import { DEFAULT_BASH_TIMEOUT_MS } from "../core/config.ts";
 import { readBashTimeout } from "../core/tools/bash.ts";
+import { clampWait } from "../core/tools/bash-background.ts";
 import { formatTaskToolSummary } from "./task-tool-summary.ts";
 
 // What a tool row says about its call, with no drawing in it: used by the
@@ -112,6 +113,13 @@ export function parseToolSummary(name: string, args: string): ToolSummaryModel {
 			command: parsed.command,
 			timeoutMs: explicitMs ?? (background ? undefined : DEFAULT_BASH_TIMEOUT_MS),
 		};
+	}
+
+	// A background task is named by its id, and a wait is shown as the timeout of a bash row is (`30s`, not `30000`):
+	// the number the model passed is milliseconds, which no one reads at a glance.
+	if (parsed && (name === "bash_output" || name === "bash_kill") && typeof parsed.task_id === "string") {
+		const wait = name === "bash_output" ? clampWait(parsed.wait) : 0;
+		return { kind: "generic", text: wait > 0 ? `${parsed.task_id} * wait ${formatTimeout(wait)}` : parsed.task_id };
 	}
 
 	// `command="ls -la /tmp"` spent a third of the row on the key and the

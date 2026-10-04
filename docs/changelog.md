@@ -8,6 +8,8 @@ All notable user-facing changes to cast, newest first.
 - **A background task's result is not told to the model twice.** When the model waited on a task with `bash_output` (or read it after it finished, or killed it itself), the completion notice still arrived later as a message of its own, and the model spent a turn on each one answering that it already knew. The notice is taken back once the model has the result. Two evals (`background-wait-no-duplicate-notice`, `background-kill-no-notice`) check it with a real model.
 - **A finished background task is one line in the terminal.** `[system] Background task bg-7 (du -xh …) exited with code 0 after 117s`: that it came back and how, not a page of its output (the model has it), as a foreground command shows a row and not a block.
 
+- **Background task rows read like bash rows.** `bash_output bg-1 * wait 30s` and `bash_kill bg-2` in the terminal, instead of `task_id="bg-1", wait=30000`: the wait is shown as a bash timeout is (`30s`, `1m`), capped to what the tool really waits.
+
 ## 0.56.0
 
 ### Fixed
