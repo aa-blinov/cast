@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.56.0
 
 ### Fixed
 - **The message queue is the same everywhere.** It was drawn from each client's own memory: a message queued in the web page was not in the terminal's list (nor the reverse), a reload emptied the list while the messages still waited, and `/queue-reset` in the terminal cleared nothing on the daemon. The daemon now sends the list on every change and to a client that joins, so the web page and the terminal show the same entries. A shared page's viewers do not see it. A background task that finished no longer shows up in the list as a raw `<system-reminder>`.
