@@ -11,6 +11,16 @@ import { updateSettings } from "../src/core/settings.ts";
 const mockDnsLookup = vi.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
 vi.mock("node:dns/promises", () => ({ lookup: (...args: unknown[]) => mockDnsLookup(...args) }));
 
+// The local backend fetches through the undici package (its Agent is not accepted by Node's own fetch), so that is the
+// function these tests stand in for; everything else in the package stays real.
+const mockUndiciFetch = vi.fn();
+const stubUndici = (_name: string, fn: (...args: unknown[]) => unknown) =>
+	mockUndiciFetch.mockImplementation((...args: unknown[]) => fn(...args));
+vi.mock("undici", async (importOriginal) => ({
+	...(await importOriginal<typeof import("undici")>()),
+	fetch: (...args: unknown[]) => mockUndiciFetch(...args),
+}));
+
 import {
 	execWebFetch,
 	execWebSearch,
@@ -609,7 +619,7 @@ describe("fetchUrlLocal", () => {
 				body: "<html><body><h1>Hello</h1><p>World <b>bold</b></p></body></html>",
 			}),
 		);
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await fetchUrlLocal("https://example.com/");
 
@@ -627,7 +637,7 @@ describe("fetchUrlLocal", () => {
 				body: "<html><head><title>Example Domain</title></head><body><h1>Example Domain</h1><p>Body text.</p></body></html>",
 			}),
 		);
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const markdown = await fetchUrlLocal("https://example.com/", { format: "markdown" });
 		expect(markdown.content).toBe("# Example Domain\n\nBody text.");
@@ -643,7 +653,7 @@ describe("fetchUrlLocal", () => {
 				body: "<html><head><style>.x{color:red}</style></head><body><script>evil()</script><p>Visible text</p></body></html>",
 			}),
 		);
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await fetchUrlLocal("https://example.com/", { format: "text" });
 
@@ -657,7 +667,7 @@ describe("fetchUrlLocal", () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/html" }, body: html }));
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await fetchUrlLocal("https://example.com/", { format: "html" });
 
@@ -668,7 +678,7 @@ describe("fetchUrlLocal", () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "application/json" }, body: '{"a":1}' }));
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await fetchUrlLocal("https://example.com/data.json");
 
@@ -679,7 +689,7 @@ describe("fetchUrlLocal", () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "image/png" }, body: "binary-ish" }));
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		await expect(fetchUrlLocal("https://example.com/pic.png")).rejects.toThrow(/image/i);
 	});
@@ -688,7 +698,7 @@ describe("fetchUrlLocal", () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "image/svg+xml" }, body: "<svg></svg>" }));
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await fetchUrlLocal("https://example.com/pic.svg");
 		expect(result.content).toBe("<svg></svg>");
@@ -700,7 +710,7 @@ describe("fetchUrlLocal", () => {
 			.mockResolvedValue(
 				mockLocalResponse({ headers: { "content-type": "application/octet-stream" }, body: "\x00\x01" }),
 			);
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		await expect(fetchUrlLocal("https://example.com/file.bin")).rejects.toThrow(/Unsupported/i);
 	});
@@ -712,7 +722,7 @@ describe("fetchUrlLocal", () => {
 				body: "irrelevant",
 			}),
 		);
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		await expect(fetchUrlLocal("https://example.com/huge")).rejects.toThrow(/too large/i);
 	});
@@ -722,7 +732,7 @@ describe("fetchUrlLocal", () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: bigBody }));
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		await expect(fetchUrlLocal("https://example.com/huge")).rejects.toThrow(/too large/i);
 	});
@@ -734,7 +744,7 @@ describe("fetchUrlLocal", () => {
 		// limit it was supposed to be caught by was ever evaluated.
 		const overLimit = new Uint8Array(6 * 1024 * 1024);
 		const response = mockLocalResponse({ headers: { "content-type": "text/plain" }, bytes: overLimit });
-		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+		stubUndici("fetch", vi.fn().mockResolvedValue(response));
 
 		await expect(fetchUrlLocal("https://example.com/huge")).rejects.toThrow(/too large/i);
 		// The body was streamed (not handed over whole) and reading stopped at
@@ -749,7 +759,7 @@ describe("fetchUrlLocal", () => {
 		// decoder) every byte is invalid and the model gets replacement
 		// characters with no hint that it was an encoding problem.
 		const cp1251 = new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]);
-		vi.stubGlobal(
+		stubUndici(
 			"fetch",
 			vi
 				.fn()
@@ -770,7 +780,7 @@ describe("fetchUrlLocal", () => {
 		bytes.set(head, 0);
 		bytes.set(word, head.length);
 		bytes.set(tail, head.length + word.length);
-		vi.stubGlobal(
+		stubUndici(
 			"fetch",
 			vi.fn().mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/html" }, bytes })),
 		);
@@ -780,7 +790,7 @@ describe("fetchUrlLocal", () => {
 	});
 
 	it("falls back to UTF-8 for a charset label the runtime does not know", async () => {
-		vi.stubGlobal(
+		stubUndici(
 			"fetch",
 			vi.fn().mockResolvedValue(
 				mockLocalResponse({
@@ -806,7 +816,7 @@ describe("fetchUrlLocal", () => {
 				}),
 			)
 			.mockResolvedValueOnce(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: "got through" }));
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await fetchUrlLocal("https://example.com/");
 
@@ -818,7 +828,7 @@ describe("fetchUrlLocal", () => {
 
 	it("does not retry a 403 that isn't a Cloudflare challenge", async () => {
 		const fetchMock = vi.fn().mockResolvedValue(mockLocalResponse({ ok: false, status: 403, body: "" }));
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		await expect(fetchUrlLocal("https://example.com/")).rejects.toThrow("403");
 		expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -828,7 +838,7 @@ describe("fetchUrlLocal", () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: "content" }));
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await fetchUrlLocal("https://example.com/");
 		expect(result.title).toBe("");
@@ -837,7 +847,7 @@ describe("fetchUrlLocal", () => {
 	describe("SSRF guard", () => {
 		it("refuses a literal loopback address before ever calling fetch", async () => {
 			const fetchMock = vi.fn();
-			vi.stubGlobal("fetch", fetchMock);
+			mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 			await expect(fetchUrlLocal("http://127.0.0.1:1337/api/sessions")).rejects.toThrow(/private\/internal/i);
 			expect(fetchMock).not.toHaveBeenCalled();
@@ -845,7 +855,7 @@ describe("fetchUrlLocal", () => {
 
 		it("refuses the cloud metadata link-local address", async () => {
 			const fetchMock = vi.fn();
-			vi.stubGlobal("fetch", fetchMock);
+			mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 			await expect(fetchUrlLocal("http://169.254.169.254/latest/meta-data/")).rejects.toThrow(/private\/internal/i);
 			expect(fetchMock).not.toHaveBeenCalled();
@@ -853,7 +863,7 @@ describe("fetchUrlLocal", () => {
 
 		it("refuses RFC1918 private ranges and IPv6 loopback/unique-local", async () => {
 			const fetchMock = vi.fn();
-			vi.stubGlobal("fetch", fetchMock);
+			mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 			for (const url of [
 				"http://10.0.0.5/",
@@ -871,7 +881,7 @@ describe("fetchUrlLocal", () => {
 			const fetchMock = vi
 				.fn()
 				.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: "ok" }));
-			vi.stubGlobal("fetch", fetchMock);
+			mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 			const result = await fetchUrlLocal("http://93.184.216.34/");
 			expect(result.content).toBe("ok");
@@ -880,7 +890,7 @@ describe("fetchUrlLocal", () => {
 		it("refuses a hostname that resolves (DNS rebinding) to a private address", async () => {
 			mockDnsLookup.mockResolvedValue([{ address: "10.1.2.3", family: 4 }]);
 			const fetchMock = vi.fn();
-			vi.stubGlobal("fetch", fetchMock);
+			mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 			await expect(fetchUrlLocal("https://rebind.example.com/")).rejects.toThrow(/private\/internal/i);
 			expect(fetchMock).not.toHaveBeenCalled();
@@ -895,7 +905,7 @@ describe("fetchUrlLocal", () => {
 					body: "",
 				}),
 			);
-			vi.stubGlobal("fetch", fetchMock);
+			mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 			await expect(fetchUrlLocal("https://example.com/redirects-away")).rejects.toThrow(/private\/internal/i);
 			// The redirect response itself is fine to receive — only the second
@@ -913,7 +923,7 @@ describe("fetchUrlLocal", () => {
 			const fetchMock = vi
 				.fn()
 				.mockResolvedValue(mockLocalResponse({ headers: { "content-type": "text/plain" }, body: "ok" }));
-			vi.stubGlobal("fetch", fetchMock);
+			mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 			await fetchUrlLocal("https://rebind.example/");
 
@@ -949,7 +959,7 @@ describe("fetchUrlLocal", () => {
 					body: "",
 				}),
 			);
-			vi.stubGlobal("fetch", fetchMock);
+			mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 			await expect(fetchUrlLocal("https://example.com/loop")).rejects.toThrow(/too many redirects/i);
 		});
@@ -972,7 +982,7 @@ describe("execWebFetch — provider dispatch", () => {
 			.mockResolvedValue(
 				mockLocalResponse({ headers: { "content-type": "text/html" }, body: "<p>local content</p>" }),
 			);
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await execWebFetch({ url: "https://example.com/" });
 
@@ -987,10 +997,191 @@ describe("execWebFetch — provider dispatch", () => {
 			.mockResolvedValue(
 				mockLocalResponse({ headers: { "content-type": "text/html" }, body: "<p>plain text please</p>" }),
 			);
-		vi.stubGlobal("fetch", fetchMock);
+		mockUndiciFetch.mockImplementation((...args: unknown[]) => fetchMock(...args));
 
 		const result = await execWebFetch({ url: "https://example.com/", format: "text" });
 
 		expect(result.content).toBe("plain text please");
+	});
+});
+
+describe("web tool fixes from the audit", () => {
+	const fetchCalls = () => (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+
+	describe("Jina Reader gets only what a third party may see", () => {
+		it("does not send an internal address, and says why", async () => {
+			mockFetchOnce({ ok: true, status: 200, text: "Title: t\n\nMarkdown Content:\nx" });
+			for (const url of [
+				"http://10.0.0.5/admin?token=SECRET",
+				"http://127.0.0.1:3000/x",
+				"http://[::ffff:7f00:1]/x",
+				"http://169.254.169.254/latest",
+			]) {
+				const result = await execWebFetch({ url });
+				expect(result.isError, url).toBe(true);
+				expect(result.content, url).toContain("was not sent to it");
+			}
+			expect(fetchCalls()).toHaveLength(0);
+		});
+
+		it("does not send a host that resolves to an internal address", async () => {
+			mockDnsLookup.mockResolvedValueOnce([{ address: "10.1.1.1", family: 4 }]);
+			mockFetchOnce({ ok: true, status: 200, text: "Title: t\n\nMarkdown Content:\nx" });
+			const result = await execWebFetch({ url: "https://intranet.example.com/wiki" });
+			expect(result.isError).toBe(true);
+			expect(fetchCalls()).toHaveLength(0);
+		});
+
+		it("does not send a URL with a login in it, and points to the local backend", async () => {
+			mockFetchOnce({ ok: true, status: 200, text: "Title: t\n\nMarkdown Content:\nx" });
+			const result = await execWebFetch({ url: "https://user:hunter2@example.com/page" });
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain("/web-fetch-provider local");
+			expect(result.content).not.toContain("hunter2");
+			expect(fetchCalls()).toHaveLength(0);
+		});
+
+		it("still sends an ordinary public URL", async () => {
+			mockFetchOnce({ ok: true, status: 200, text: "Title: t\n\nMarkdown Content:\nbody" });
+			const result = await execWebFetch({ url: "https://example.com/a?b=c" });
+			expect(result.isError).toBeFalsy();
+			expect(fetchCalls()[0]![0]).toBe("https://r.jina.ai/https://example.com/a?b=c");
+		});
+	});
+
+	describe("Jina's warnings about the page", () => {
+		const jina = (warnings: string[], body = "the site's own error page") =>
+			`Title: Not Found\n\nURL Source: https://example.com/x\n\n${warnings.map((w) => `Warning: ${w}\n`).join("")}\nMarkdown Content:\n${body}`;
+
+		it("reports a target that answered 404 as an error, with the error page marked as such", async () => {
+			mockFetchOnce({ ok: true, status: 200, text: jina(["Target URL returned error 404: Not Found"]) });
+			const result = await execWebFetch({ url: "https://example.com/x" });
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain("answered HTTP 404");
+			expect(result.content).toContain("not the page asked for");
+			expect(result.content).toContain("the site's own error page");
+		});
+
+		it("reports a 403 and a 5xx the same way", async () => {
+			for (const code of ["403: Forbidden", "502: Bad Gateway"]) {
+				mockFetchOnce({ ok: true, status: 200, text: jina([`Target URL returned error ${code}`]) });
+				expect((await execWebFetch({ url: "https://example.com/x" })).isError, code).toBe(true);
+			}
+		});
+
+		it("passes on a note that is not an error, after the content", async () => {
+			mockFetchOnce({
+				ok: true,
+				status: 200,
+				text: jina(
+					["This page maybe not yet fully loaded, consider explicitly specify a timeout."],
+					"real content",
+				),
+			});
+			const result = await execWebFetch({ url: "https://example.com/x" });
+			expect(result.isError).toBeFalsy();
+			expect(result.content).toContain("real content");
+			expect(result.content).toContain("[Reader note: This page maybe not yet fully loaded");
+		});
+
+		it("says what a rate limit means and what to do", async () => {
+			mockFetchOnce({ ok: false, status: 429, statusText: "Too Many Requests", text: "" });
+			const result = await execWebFetch({ url: "https://example.com/x" });
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain("rate limit");
+			expect(result.content).toContain("/web-fetch-provider local");
+		});
+	});
+
+	describe("a search that does not answer", () => {
+		const hang = () =>
+			vi
+				.fn()
+				.mockImplementation(
+					(_url: unknown, init: { signal: AbortSignal }) =>
+						new Promise((_, reject) =>
+							init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }),
+						),
+				);
+
+		it("gives up after the deadline and says which backend it was", async () => {
+			vi.stubGlobal("fetch", hang());
+			await expect(searchDuckDuckGo("slow", { timeoutMs: 40 })).rejects.toThrow(
+				"DuckDuckGo did not answer within 0.04s",
+			);
+			await expect(searchTavily("slow", "key", { timeoutMs: 40 })).rejects.toThrow("Tavily did not answer");
+			await expect(searchBrave("slow", "key", { timeoutMs: 40 })).rejects.toThrow("Brave did not answer");
+		});
+
+		it("is still stopped by the person's own signal, which is not reported as a timeout", async () => {
+			vi.stubGlobal("fetch", hang());
+			const controller = new AbortController();
+			const pending = searchDuckDuckGo("stop me", { timeoutMs: 5_000, signal: controller.signal });
+			controller.abort(new Error("user stopped it"));
+			await expect(pending).rejects.toThrow("user stopped it");
+		});
+	});
+
+	describe("DuckDuckGo results", () => {
+		const ad = `<div class="result results_links results_links_deep result--ad web-result"><a class="result__a" href="https://duckduckgo.com/y.js?ad_domain=shop.example&ad_provider=bing">Buy now</a><a class="result__snippet">sponsored</a></div>`;
+
+		it("leaves the ads out, by their layout and by their redirect link", async () => {
+			const adByLink = `<div class="result results_links web-result"><a class="result__a" href="https://duckduckgo.com/y.js?ad_domain=x.example">Odd ad</a></div>`;
+			const real = ddgHtml([{ title: "Real", href: "https://example.com/real", snippet: "s" }]);
+			mockFetchOnce({ ok: true, status: 200, text: `${ad}\n${adByLink}\n${real}` });
+			const { results } = await searchDuckDuckGo("shoes ads");
+			expect(results.map((r) => r.url)).toEqual(["https://example.com/real"]);
+		});
+
+		it("takes a page that is not search results for a failure, and does not remember it", async () => {
+			mockFetchOnce({
+				ok: true,
+				status: 200,
+				text: "<html><body><p>Something unexpected happened.</p></body></html>",
+			});
+			await expect(searchDuckDuckGo("odd page")).rejects.toThrow(/could not read/);
+			mockFetchOnce({
+				ok: true,
+				status: 200,
+				text: ddgHtml([{ title: "Now fine", href: "https://example.com/ok", snippet: "s" }]),
+			});
+			expect((await searchDuckDuckGo("odd page")).results).toHaveLength(1);
+		});
+
+		it("recognises the bot-check page by more than one wording", async () => {
+			for (const html of [
+				'<div class="anomaly-modal__modal">x</div>',
+				"<p>Unfortunately, bots use DuckDuckGo too.</p>",
+			]) {
+				mockFetchOnce({ ok: true, status: 200, text: html });
+				await expect(searchDuckDuckGo(`blocked ${html.length}`)).rejects.toThrow(/CAPTCHA/);
+			}
+		});
+
+		it("still answers a real 'no results' page with no results", async () => {
+			mockFetchOnce({ ok: true, status: 200, text: '<div class="no-results">No  results.</div>' });
+			const found = await searchDuckDuckGo("zzzz-nothing-matches");
+			expect(found.results).toEqual([]);
+		});
+	});
+
+	describe("arguments", () => {
+		it("rejects a time or region DuckDuckGo would ignore, and a maxChars past the ceiling", async () => {
+			expect((await execWebSearch({ query: "q", time: "yesterday" })).content).toContain("'time' must be one of");
+			expect((await execWebSearch({ query: "q", region: "Russia" })).content).toContain("'region' must look like");
+			expect((await execWebFetch({ url: "https://example.com/", maxChars: 5_000_000 })).content).toContain(
+				"at most 200000",
+			);
+		});
+
+		it("accepts the ones it lists", async () => {
+			mockFetchOnce({
+				ok: true,
+				status: 200,
+				text: ddgHtml([{ title: "T", href: "https://example.com/", snippet: "s" }]),
+			});
+			const result = await execWebSearch({ query: "q-ok", time: "w", region: "ru-ru" });
+			expect(result.isError).toBeFalsy();
+		});
 	});
 });
