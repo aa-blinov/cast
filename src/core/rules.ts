@@ -37,6 +37,13 @@ const QUOTE_RE = /"/g;
 
 const RULES_INSTRUCTIONS = readRequiredPrompt(promptsDir, "rules-instructions.md");
 
+/** What the lazy-rule list may cost in the system prompt, in characters (about 3k tokens). */
+const LAZY_LISTING_BUDGET = 12_000;
+const MAX_LISTING_DESCRIPTION = 400;
+const MIN_LISTING_DESCRIPTION = 80;
+/** The tags around one listed rule, besides its name, description and path. */
+const LISTING_ENTRY_OVERHEAD = 90;
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -96,6 +103,21 @@ export function globalRulesDir(): string {
 export function projectRulesDir(targetCwd: string): string | undefined {
 	const dir = join(targetCwd, ".cast", "rules");
 	return dir !== globalRulesDir() ? dir : undefined;
+}
+
+/** True when a rules directory holds a rule file, in it or in a folder inside it (they are for organisation). */
+export function dirHasRuleFiles(dir: string, depth = 0): boolean {
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return false;
+	}
+	return entries.some(
+		(e) =>
+			(e.isFile() && isRuleFile(e.name)) ||
+			(e.isDirectory() && depth < MAX_RULE_DIR_DEPTH && dirHasRuleFiles(join(dir, e.name), depth + 1)),
+	);
 }
 
 /** True if `<cwd>/.cast/rules/` exists and contains at least one .md file. */
@@ -177,7 +199,31 @@ function parseCursorishFrontmatter(raw: string): Record<string, unknown> {
 	return out;
 }
 
-function loadRuleFromFile(filePath: string, source: RuleSource, scope: string, diagnostics?: string[]): Rule | null {
+/**
+ * `always-apply` / `alwaysApply` as a person writes it: `true`, `yes`, `on`, `1` and their opposites, in any case,
+ * quoted or not. Only a literal `true` counted before, so `always-apply: yes` or `alwaysApply: "true"` made a rule
+ * that never applied, with nothing saying so. A value that is none of these is reported and read as false.
+ */
+function parseRuleBoolean(value: unknown): { value: boolean; recognised: boolean } {
+	if (value === undefined || value === null) return { value: false, recognised: true };
+	if (typeof value === "boolean") return { value, recognised: true };
+	if (typeof value === "number") return { value: value === 1, recognised: value === 0 || value === 1 };
+	const text = String(value).trim().toLowerCase();
+	if (["true", "yes", "on", "1"].includes(text)) return { value: true, recognised: true };
+	if (["false", "no", "off", "0", ""].includes(text)) return { value: false, recognised: true };
+	return { value: false, recognised: false };
+}
+
+/** What `@name` can spell: letters, digits, `_`, `-` and inner dots, ending in a letter, digit or `_`. */
+const MENTIONABLE_NAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9_])?$/;
+
+function loadRuleFromFile(
+	filePath: string,
+	source: RuleSource,
+	scope: string,
+	diagnostics?: string[],
+	notes?: string[],
+): Rule | null {
 	let raw: string;
 	try {
 		raw = readFileSync(filePath, "utf-8");
@@ -202,7 +248,14 @@ function loadRuleFromFile(filePath: string, source: RuleSource, scope: string, d
 			? frontmatter.name
 			: basename(filePath, extname(filePath));
 	const description = typeof frontmatter.description === "string" ? frontmatter.description : "";
-	const alwaysApply = frontmatter["always-apply"] === true || frontmatter.alwaysApply === true;
+	const alwaysRaw = frontmatter["always-apply"] ?? frontmatter.alwaysApply;
+	const always = parseRuleBoolean(alwaysRaw);
+	if (!always.recognised) {
+		notes?.push(
+			`${filePath}: always-apply must be true or false (got ${JSON.stringify(alwaysRaw)}); the rule is not always-apply`,
+		);
+	}
+	const alwaysApply = always.value;
 
 	// Globs arrive as an inline YAML array ["a", "b"], a single string, or —
 	// Cursor's usual shape — one comma-separated string (`*.ts,*.tsx`), which
@@ -228,6 +281,11 @@ function loadRuleFromFile(filePath: string, source: RuleSource, scope: string, d
 		applyMode: "manual", // overwritten below
 	};
 	rule.applyMode = classifyApplyMode(rule);
+	if (!MENTIONABLE_NAME_RE.test(name)) {
+		notes?.push(
+			`${filePath}: the name "${name}" cannot be @-mentioned (use letters, digits, - _ and inner dots); /rule:${rule.id} still works`,
+		);
+	}
 	return rule;
 }
 
@@ -246,7 +304,14 @@ function isRuleFile(name: string): boolean {
  * (or `.cursor/rules`) directory it lives under, however it is filed. */
 const MAX_RULE_DIR_DEPTH = 4;
 
-function loadRulesFromDir(dir: string, source: RuleSource, scope: string, depth = 0, diagnostics?: string[]): Rule[] {
+function loadRulesFromDir(
+	dir: string,
+	source: RuleSource,
+	scope: string,
+	depth = 0,
+	diagnostics?: string[],
+	notes?: string[],
+): Rule[] {
 	if (!existsSync(dir)) return [];
 
 	let entries: Dirent[];
@@ -262,11 +327,11 @@ function loadRulesFromDir(dir: string, source: RuleSource, scope: string, depth 
 			// Cursor lets rules be organised in subdirectories of the rules
 			// directory; reading only the top level silently ignored them.
 			if (depth < MAX_RULE_DIR_DEPTH)
-				rules.push(...loadRulesFromDir(join(dir, entry.name), source, scope, depth + 1, diagnostics));
+				rules.push(...loadRulesFromDir(join(dir, entry.name), source, scope, depth + 1, diagnostics, notes));
 			continue;
 		}
 		if (!entry.isFile() || !isRuleFile(entry.name)) continue;
-		const rule = loadRuleFromFile(join(dir, entry.name), source, scope, diagnostics);
+		const rule = loadRuleFromFile(join(dir, entry.name), source, scope, diagnostics, notes);
 		if (rule) rules.push(rule);
 	}
 	return rules;
@@ -361,6 +426,9 @@ export interface LoadRulesOptions {
 	 * frontmatter) so a surface can show why a rule the user wrote is not in
 	 * the list. Silently dropping them read as cast never having seen the file. */
 	diagnostics?: string[];
+	/** Collects what is worth knowing about rules that did load: one hidden by another of the same name, a value that
+	 * was not understood, a name `@` cannot spell. */
+	notes?: string[];
 }
 
 /**
@@ -374,7 +442,14 @@ export function loadDirectoryRules(options: LoadRulesOptions): Rule[] {
 
 	function addAll(rules: Rule[]) {
 		for (const rule of rules) {
-			if (ruleMap.has(rule.id)) continue; // first-loaded wins
+			const taken = ruleMap.get(rule.id);
+			if (taken) {
+				// First-loaded wins, and saying so: a rule that is silently hidden reads as one cast never saw.
+				options.notes?.push(
+					`${rule.filePath}: hidden by ${taken.filePath}, which has the same name "${rule.id}" and was loaded first`,
+				);
+				continue;
+			}
 			ruleMap.set(rule.id, rule);
 		}
 	}
@@ -383,12 +458,13 @@ export function loadDirectoryRules(options: LoadRulesOptions): Rule[] {
 	// discovered when projectCwd is given; otherwise fall back to the flat dir.
 	if (options.projectCwd) {
 		for (const { dir, scope } of discoverProjectRuleDirs(options.projectCwd)) {
-			addAll(loadRulesFromDir(dir, "project", scope, 0, options.diagnostics));
+			addAll(loadRulesFromDir(dir, "project", scope, 0, options.diagnostics, options.notes));
 		}
 	} else if (options.projectDir) {
-		addAll(loadRulesFromDir(options.projectDir, "project", "", 0, options.diagnostics));
+		addAll(loadRulesFromDir(options.projectDir, "project", "", 0, options.diagnostics, options.notes));
 	}
-	if (options.globalDir) addAll(loadRulesFromDir(options.globalDir, "global", "", 0, options.diagnostics));
+	if (options.globalDir)
+		addAll(loadRulesFromDir(options.globalDir, "global", "", 0, options.diagnostics, options.notes));
 
 	return Array.from(ruleMap.values());
 }
@@ -500,10 +576,18 @@ export function matchesRuleGlobs(r: Rule, contextFiles: string[]): boolean {
  * An unscoped rule (scope `""` — root or global) always passes. A nested rule
  * only passes once a file under its subtree is in context.
  */
-export function ruleScopeActive(scope: string, contextFiles: string[]): boolean {
+export function ruleScopeActive(scope: string, contextFiles: string[], cwdRel?: string): boolean {
 	if (!scope) return true;
+	// Working in a folder is working in its subtree: a session started in `apps/web` has `apps/web`'s rules from the
+	// first message, before any file of it has been read.
+	if (cwdRel !== undefined && scopeContainsCwd(scope, cwdRel)) return true;
 	const prefix = `${scope}/`;
 	return contextFiles.some((f) => f === scope || f.startsWith(prefix));
+}
+
+/** Whether the session's folder (relative to the project root, "" at the root) is the scope's folder or inside it. */
+export function scopeContainsCwd(scope: string, cwdRel: string): boolean {
+	return !scope || cwdRel === scope || cwdRel.startsWith(`${scope}/`);
 }
 
 /**
@@ -514,10 +598,10 @@ export function ruleScopeActive(scope: string, contextFiles: string[]): boolean 
  * Nested rules stay dormant until a file from their subtree enters context —
  * that's the whole point of Cursor's nested rules.
  */
-export function matchAutoRules(catalog: Rule[], contextFiles: string[]): Rule[] {
+export function matchAutoRules(catalog: Rule[], contextFiles: string[], cwdRel?: string): Rule[] {
 	const out: Rule[] = [];
 	for (const r of catalog) {
-		if (!ruleScopeActive(r.scope, contextFiles)) continue;
+		if (!ruleScopeActive(r.scope, contextFiles, cwdRel)) continue;
 		if (r.applyMode === "always") {
 			out.push(r);
 		} else if (r.applyMode === "auto" && matchesRuleGlobs(r, contextFiles)) {
@@ -548,7 +632,7 @@ export function unionStickyRules(sticky: Rule[], newly: Rule[]): Rule[] {
 // @-mention selection
 // ============================================================================
 
-const AT_MENTION_RE = /(?:^|[\s([{])@([a-zA-Z0-9][a-zA-Z0-9_-]*)/g;
+const AT_MENTION_RE = /(?:^|[\s([{])@([a-zA-Z0-9](?:[a-zA-Z0-9_.-]*[a-zA-Z0-9_])?)/g;
 
 /**
  * Extract @ruleName tokens from user text (skips code fences).
@@ -613,8 +697,15 @@ function escapeXml(str: string): string {
  * Format always-apply rules for direct injection into the system prompt.
  * Returns an empty string when there are none.
  */
-export function formatAlwaysApplyRules(rules: Rule[]): string {
-	const parts = renderRuleBodies(rules.filter((r) => r.applyMode === "always"));
+export function formatAlwaysApplyRules(rules: Rule[], cwdRel?: string): string {
+	// The rules of the whole project, and those of the folder the work happens in (and the folders above it). One
+	// nested in a subtree elsewhere waits until a file of that subtree is in context, which a prompt built without a
+	// turn (a subagent's, the first one) cannot know; the per-turn build adds it then.
+	const parts = renderRuleBodies(
+		rules.filter(
+			(r) => r.applyMode === "always" && (!r.scope || (cwdRel !== undefined && scopeContainsCwd(r.scope, cwdRel))),
+		),
+	);
 	if (parts.length === 0) return "";
 	return `\n\n<rules>\n${parts.join("\n\n")}\n</rules>`;
 }
@@ -636,16 +727,37 @@ function clampRuleBody(body: string, filePath: string): string {
 	return `${body.slice(0, MAX_RULE_BODY_CHARS)}\n\n[Rule truncated at ${MAX_RULE_BODY_CHARS} characters — ${filePath} is ${body.length} characters. Split it into focused rules, or have the model read the file when it needs the rest.]`;
 }
 
+/**
+ * What every rule body together may cost on a request. Each is bounded on its own (MAX_RULE_BODY_CHARS), but twenty
+ * of them were not, and they are paid on every request of the session. Past it a rule is cut, then left out, and the
+ * block says which, so neither the model nor the person thinks all of them were read.
+ */
+export const MAX_RULES_TOTAL_CHARS = 160 * 1024;
+
 /** Read each rule's body (frontmatter stripped), dropping empty/unreadable ones. */
 function renderRuleBodies(rules: Rule[]): string[] {
 	const parts: string[] = [];
+	let spent = 0;
+	const left: string[] = [];
 	for (const rule of rules) {
 		try {
 			const { body } = parseFrontmatter(readFileSync(rule.filePath, "utf-8"));
-			if (body.trim()) parts.push(clampRuleBody(body.trim(), rule.filePath));
+			if (!body.trim()) continue;
+			const clamped = clampRuleBody(body.trim(), rule.filePath);
+			if (spent + clamped.length > MAX_RULES_TOTAL_CHARS) {
+				left.push(rule.filePath);
+				continue;
+			}
+			spent += clamped.length;
+			parts.push(clamped);
 		} catch {
 			// Unreadable — skip.
 		}
+	}
+	if (left.length > 0) {
+		parts.push(
+			`[${left.length} more rule${left.length === 1 ? "" : "s"} left out: the rules together passed ${MAX_RULES_TOTAL_CHARS} characters. Read ${left.join(", ")} when the task needs ${left.length === 1 ? "it" : "them"}, or shorten the rules.]`,
+		);
 	}
 	return parts;
 }
@@ -685,11 +797,18 @@ export function formatLazyRulesForPrompt(rules: Rule[]): string {
 	const lazy = rules.filter((r) => r.applyMode === "lazy");
 	if (lazy.length === 0) return "";
 
+	// A budget, as the skill list has: every turn pays for this list. Descriptions are cut to an even share, never
+	// under a line's worth, and the names and paths always stay.
+	const fixed = lazy.reduce((n, r) => n + r.name.length + r.filePath.length + LISTING_ENTRY_OVERHEAD, 0);
+	const evenShare = Math.max(MIN_LISTING_DESCRIPTION, Math.floor((LAZY_LISTING_BUDGET - fixed) / lazy.length));
+	const cap = Math.min(MAX_LISTING_DESCRIPTION, evenShare);
 	const lines = ["", "", RULES_INSTRUCTIONS, "", "<available_rules>"];
 	for (const rule of lazy) {
+		const description =
+			rule.description.length > cap ? `${rule.description.slice(0, cap - 1).trimEnd()}…` : rule.description;
 		lines.push("  <rule>");
 		lines.push(`    <name>${escapeXml(rule.name)}</name>`);
-		lines.push(`    <description>${escapeXml(rule.description)}</description>`);
+		lines.push(`    <description>${escapeXml(description)}</description>`);
 		lines.push(`    <location>${escapeXml(rule.filePath)}</location>`);
 		lines.push("  </rule>");
 	}
@@ -719,4 +838,93 @@ export function formatRuleInvocation(rule: Rule): string {
 		return `<rule name="${escapeXml(rule.name)}" location="${escapeXml(rule.filePath)}">\nThis rule's file could not be read (it may have been moved or deleted). Continue without it, and mention that it was unavailable.\n</rule>`;
 	}
 	return `<rule name="${escapeXml(rule.name)}" location="${escapeXml(rule.filePath)}">\nReferences are relative to ${rule.baseDir}.\n\n${content}\n</rule>`;
+}
+
+// ============================================================================
+// /rules listing (shared by the terminal and the daemon)
+// ============================================================================
+
+export interface RulesListInput {
+	/** The rules this session has loaded: what applies. */
+	loaded: Rule[];
+	/** The rules on disk now, when that is a different read (a file added since the last /reload). */
+	onDisk?: Rule[];
+	/** Ids of the rules that have latched this session (auto-attached, mentioned, or always-apply whose scope is active). */
+	stickyIds: ReadonlySet<string>;
+	/** Rule files that could not be read. */
+	problems: string[];
+	/** What is worth knowing about rules that did load. */
+	notes: string[];
+	/** Paths under this folder are shown relative to it, and under the home folder as `~`: a note names two files. */
+	relativeTo?: string;
+	/** The session's folder relative to the project root: a nested rule around it is not waiting for anything. */
+	cwdRel?: string;
+}
+
+function shortPaths(text: string, relativeTo?: string): string {
+	let out = relativeTo ? text.split(`${relativeTo}/`).join("") : text;
+	const home = homedir();
+	if (home && home !== "/") out = out.split(`${home}/`).join("~/");
+	return out;
+}
+
+function ruleTag(rule: Rule, sticky: boolean, cwdRel?: string): string {
+	if (rule.applyMode === "always") {
+		const waiting = rule.scope && !sticky && !(cwdRel !== undefined && scopeContainsCwd(rule.scope, cwdRel));
+		return waiting ? " [always:waiting]" : " [always]";
+	}
+	if (rule.applyMode === "auto") return sticky ? " [auto:sticky]" : " [auto:globs]";
+	// A lazy or manual rule is in force once an @-mention latched it.
+	const base = rule.applyMode === "lazy" ? "lazy" : "manual";
+	return sticky ? ` [${base}:sticky]` : ` [${base}]`;
+}
+
+/**
+ * The `/rules` text: one line per rule with its mode, globs, scope and source, then the files that did not load and
+ * the notes. `[always:waiting]` is a nested always-apply rule whose subtree has not been touched yet; a rule on disk
+ * that this session has not loaded says so, since `/reload` is what brings it in.
+ */
+export function formatRulesList(input: RulesListInput): string {
+	const loadedIds = new Set(input.loaded.map((r) => r.id));
+	const all = [...input.loaded, ...(input.onDisk ?? []).filter((r) => !loadedIds.has(r.id))];
+	const lines = all.map((r) => {
+		const notLoaded = loadedIds.has(r.id) ? "" : " [on disk, not loaded: /reload]";
+		const globs = r.globs.length > 0 ? ` globs=${JSON.stringify(r.globs)}` : "";
+		const scope = r.scope ? ` scope=${r.scope}` : "";
+		const tag = notLoaded || ruleTag(r, input.stickyIds.has(r.id), input.cwdRel);
+		return `  ${r.id}${tag}${globs}${scope} (${r.source}) — ${r.description || "no description"}`;
+	});
+	const blocks: string[] = [];
+	blocks.push(
+		lines.length > 0 ? `Rules\n${lines.join("\n")}` : "No rules loaded. Create .cast/rules/*.md files to add rules.",
+	);
+	const show = (line: string) => `  ${shortPaths(line, input.relativeTo)}`;
+	if (input.problems.length > 0) {
+		blocks.push(
+			`Could not load ${input.problems.length} rule file${input.problems.length === 1 ? "" : "s"}:\n${input.problems.map(show).join("\n")}`,
+		);
+	}
+	if (input.notes.length > 0) blocks.push(`Notes:\n${input.notes.map(show).join("\n")}`);
+	return blocks.join("\n\n");
+}
+
+// ============================================================================
+// Latched rules across a restart
+// ============================================================================
+
+/**
+ * The rule ids worth keeping for a session: the ones that latched (auto-attached or @-mentioned). An always-apply
+ * rule needs no keeping, it qualifies again by itself, and keeping it would hold it in force after its file stopped
+ * being always-apply.
+ */
+export function latchedRuleIds(sticky: Rule[]): string[] | undefined {
+	const ids = sticky.filter((r) => r.applyMode !== "always").map((r) => r.id);
+	return ids.length > 0 ? ids : undefined;
+}
+
+/** The rules a session latched before, found again by id in this catalog; one that is gone is dropped. */
+export function restoreLatchedRules(ids: string[] | undefined, catalog: Rule[]): Rule[] {
+	if (!ids?.length) return [];
+	const wanted = new Set(ids);
+	return catalog.filter((r) => wanted.has(r.id) && r.applyMode !== "always");
 }

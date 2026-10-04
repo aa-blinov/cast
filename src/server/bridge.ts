@@ -64,13 +64,16 @@ import {
 	resolveProjectTrustForCwd,
 	resolveRulesForCwd,
 	resolveSkillsForCwd,
+	rulesCwd,
 } from "../core/project.ts";
 import { clearProjectRootCache } from "../core/project-root.ts";
 import { getModelsCache, setModelsCache } from "../core/readline.ts";
 import {
 	formatRulesForTurn,
+	latchedRuleIds,
 	matchAutoRules,
 	type Rule,
+	restoreLatchedRules,
 	selectMentionedRules,
 	unionStickyRules,
 } from "../core/rules.ts";
@@ -654,6 +657,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	let rulesLazySuffix = result.rulesLazySuffix;
 	let directoryRules = result.directoryRules;
 	let ruleDiagnostics = result.ruleDiagnostics ?? [];
+	let ruleNotes = result.ruleNotes ?? [];
 	let skills = result.skills;
 
 	/**
@@ -878,6 +882,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				lazySuffix: rulesLazySuffix,
 				directoryRules,
 				diagnostics: ruleDiagnostics,
+				notes: ruleNotes,
 			};
 		}
 		const cached = rulesByCwd.get(sessionCwd);
@@ -2069,11 +2074,15 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				const sessionCwd = ws.session.cwd ?? cwd;
 				const sessionRules = rulesForSessionCwd(sessionCwd);
 				// Mentioned rules latch like auto ones, see the app model.
-				const sticky = unionStickyRules(ws.activeAutoRules ?? [], [
-					...matchAutoRules(sessionRules.directoryRules, ctxFiles),
+				// A session opened again starts from the rules it had latched, saved with it.
+				const before =
+					ws.activeAutoRules ?? restoreLatchedRules(ws.session.activeRuleIds, sessionRules.directoryRules);
+				const sticky = unionStickyRules(before, [
+					...matchAutoRules(sessionRules.directoryRules, ctxFiles, rulesCwd(sessionCwd)),
 					...selectMentionedRules(sessionRules.directoryRules, userText),
 				]);
 				ws.activeAutoRules = sticky;
+				ws.session.activeRuleIds = latchedRuleIds(sticky);
 				const rulesBlock = formatRulesForTurn(sticky, []);
 				const nestedContext = trustForSessionCwd(sessionCwd)
 					? formatContextFilesForPrompt(resolveNestedContextFiles(sessionCwd, ctxFiles))
@@ -3498,6 +3507,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					rulesLazySuffix = rules.lazySuffix;
 					directoryRules = rules.directoryRules;
 					ruleDiagnostics = rules.diagnostics;
+					ruleNotes = rules.notes;
 					personas = resolvePersonasForCwd(sessionCwd, trustForSessionCwd(sessionCwd)).personas;
 					await reloadMcpFromDisk(sessionCwd);
 					recomputeAllSystemPrompts();

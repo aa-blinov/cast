@@ -880,6 +880,17 @@ END;
 `);
 		},
 	},
+	{
+		version: 40,
+		name: "session-active-rules",
+		up: (db) => {
+			// The rules a session has latched (auto-attached by a file, or @-mentioned), by id: a rule a conversation
+			// was built on has to still be in force when the session is opened again.
+			if (!columnExists(db, "sessions", "active_rules_json")) {
+				db.exec("ALTER TABLE sessions ADD COLUMN active_rules_json TEXT");
+			}
+		},
+	},
 ];
 
 const MIGRATION_TABLE_SCHEMA = `

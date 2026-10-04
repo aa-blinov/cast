@@ -907,6 +907,23 @@ describe("session persistence", () => {
 		expect(getMessagesAfterCheckpoint(session.id)).toEqual([pending]);
 	});
 
+	it("keeps the rules a session latched when it is saved and loaded again, and gives a fork the same ones", () => {
+		const source = createSession("gpt-4o", projectA);
+		source.messages = [{ role: "user", content: "hello" }];
+		source.activeRuleIds = ["ts-style", "apps/web/style"];
+		saveSession(source);
+		expect(loadSession(source.id)?.activeRuleIds).toEqual(["ts-style", "apps/web/style"]);
+
+		const fork = forkSession(loadSession(source.id)!);
+		expect(fork.activeRuleIds).toEqual(["ts-style", "apps/web/style"]);
+		fork.activeRuleIds!.push("changed-in-the-fork");
+		expect(source.activeRuleIds).toEqual(["ts-style", "apps/web/style"]);
+
+		source.activeRuleIds = undefined;
+		saveSession(source);
+		expect(loadSession(source.id)?.activeRuleIds).toBeUndefined();
+	});
+
 	it("forkSession copies the active context into an independent new session", () => {
 		const source = createSession("gpt-4o", projectA);
 		source.persona = "coding";

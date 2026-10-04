@@ -72,7 +72,7 @@ import {
 	listAutomaticMemoryRuns,
 } from "../../core/memory.ts";
 import type { Persona } from "../../core/personas.ts";
-import type { ProjectResolverDeps, resolveRulesForCwd } from "../../core/project.ts";
+import type { ProjectResolverDeps } from "../../core/project.ts";
 import {
 	discoverSkillsForCwd,
 	listHooksForCwdSettings,
@@ -81,11 +81,14 @@ import {
 	removeMcpServerFromDisk,
 	resolveHooksForCwd,
 	resolveMcpForCwd,
+	resolveRulesForCwd,
+	rulesCwd,
 	skillDiagnosticsForCwd,
 } from "../../core/project.ts";
+import { findProjectRoot } from "../../core/project-root.ts";
 import { setModelsCache } from "../../core/readline.ts";
 import { REWIND_MODES, type RewindMode } from "../../core/rewind.ts";
-import { formatRuleInvocation } from "../../core/rules.ts";
+import { formatRuleInvocation, formatRulesList } from "../../core/rules.ts";
 import { clearScratchpad, describeScratchpad, formatScratchpadListing, scratchpadFor } from "../../core/scratchpad.ts";
 import type { getHistoryPage, SessionState } from "../../core/session.ts";
 import {
@@ -1255,21 +1258,45 @@ const commandHandlers: Record<string, CommandHandler> = {
 			})),
 		};
 	},
-	"/rules": ({ ws, cwd, rulesForSessionCwd }) => {
+	"/rules": ({ ws, cwd, rulesForSessionCwd, trustForCwd }) => {
 		// `sticky` is what the *daemon* has latched this session. The agent
 		// loop runs here, so a TUI attached as a thin client has no idea which
 		// auto rules already attached — it was reporting every one of them as
 		// still waiting for a match, for the whole session.
-		const stickyIds = new Set((ws.activeAutoRules ?? []).map((r) => r.id));
+		// Before the first turn after a restart nothing is in memory: what the session saved is what is latched.
+		const stickyIds = new Set(
+			ws.activeAutoRules ? ws.activeAutoRules.map((r) => r.id) : (ws.session.activeRuleIds ?? []),
+		);
+		const sessionCwd = ws.session.cwd ?? cwd;
+		const loaded = rulesForSessionCwd(sessionCwd);
+		// What is on disk now, for the files that did not load and the ones added since: the list and its problems
+		// have to come from the same read, or a broken new file is reported against a list that does not hold it.
+		const fresh = resolveRulesForCwd(sessionCwd, trustForCwd(sessionCwd));
 		return {
 			ok: true,
-			result: rulesForSessionCwd(ws.session.cwd ?? cwd).directoryRules.map((r) => ({
-				id: r.id,
-				name: r.name,
-				description: r.description,
-				applyMode: r.applyMode,
-				sticky: stickyIds.has(r.id),
-			})),
+			result: {
+				rules: loaded.directoryRules.map((r) => ({
+					id: r.id,
+					name: r.name,
+					description: r.description,
+					applyMode: r.applyMode,
+					globs: r.globs,
+					scope: r.scope,
+					source: r.source,
+					sticky: stickyIds.has(r.id),
+				})),
+				problems: fresh.diagnostics,
+				notes: fresh.notes,
+				text: formatRulesList({
+					loaded: loaded.directoryRules,
+					onDisk: fresh.directoryRules,
+					stickyIds,
+					problems: fresh.diagnostics,
+					notes: fresh.notes,
+					relativeTo: findProjectRoot(sessionCwd),
+					cwdRel: rulesCwd(sessionCwd),
+				}),
+			},
 		};
 	},
 	"/scratchpad": ({ ws, cwd, arg }) => {
@@ -1288,8 +1315,9 @@ const commandHandlers: Record<string, CommandHandler> = {
 		const listing = describeScratchpad(dir);
 		return { ok: true, result: { ...listing, text: formatScratchpadListing(listing) } };
 	},
-	"/rule:": ({ ws, cwd, cmd, rulesForSessionCwd, fireUserPromptExpansion, submit }) => {
-		const ruleId = cmd.slice("/rule:".length);
+	"/rule:": ({ ws, cwd, cmd, arg, rulesForSessionCwd, fireUserPromptExpansion, submit }) => {
+		// A rule's name can hold spaces ("Spaces In Name.md"), and the command is split at the first one.
+		const ruleId = `${cmd.slice("/rule:".length)}${arg ? ` ${arg}` : ""}`.trim();
 		if (!ruleId) return { ok: false, error: "Usage: /rule:<name>" };
 		// Submits the rule body as a real user turn (matches the TUI's
 		// agent.submit(formatRuleInvocation(rule)) — it's not a silent system-

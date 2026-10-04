@@ -22,9 +22,17 @@ import {
 	parseMcpPromptArguments,
 } from "../mcp.ts";
 import { createPlanState, type PlanState, resolvePlanQuestion, resolvePlanTransition } from "../plan.ts";
-import { buildSystemPrompt, resolvePromptContextForCwd, resolveRulesForCwd } from "../project.ts";
+import { buildSystemPrompt, resolvePromptContextForCwd, resolveRulesForCwd, rulesCwd } from "../project.ts";
 import { sessionIsInProject } from "../project-cwd.ts";
-import { formatRulesForTurn, matchAutoRules, type Rule, selectMentionedRules, unionStickyRules } from "../rules.ts";
+import {
+	formatRulesForTurn,
+	latchedRuleIds,
+	matchAutoRules,
+	type Rule,
+	restoreLatchedRules,
+	selectMentionedRules,
+	unionStickyRules,
+} from "../rules.ts";
 import type { AgentRunner } from "../runner.ts";
 import { createAgentRunner } from "../runner.ts";
 import type { SessionState } from "../session.ts";
@@ -603,10 +611,14 @@ function turnPromptBuilder(
 	const context = startup.persona.agentsMd ? formatContextFilesForPrompt(loadProjectContextFiles(cwd, trusted)) : "";
 	const mcpSuffix = formatMcpForPrompt(mergedMcp(session));
 	return ({ userText, contextFiles }) => {
-		session.activeAutoRules = unionStickyRules(session.activeAutoRules ?? [], [
-			...matchAutoRules(rules.directoryRules, contextFiles),
-			...selectMentionedRules(rules.directoryRules, userText),
-		]);
+		session.activeAutoRules = unionStickyRules(
+			session.activeAutoRules ?? restoreLatchedRules(state.activeRuleIds, rules.directoryRules),
+			[
+				...matchAutoRules(rules.directoryRules, contextFiles, rulesCwd(cwd)),
+				...selectMentionedRules(rules.directoryRules, userText),
+			],
+		);
+		state.activeRuleIds = latchedRuleIds(session.activeAutoRules);
 		const nested =
 			trusted && startup.persona.agentsMd
 				? formatContextFilesForPrompt(resolveNestedContextFiles(cwd, contextFiles))

@@ -22,6 +22,9 @@ import { planOpenQuestionBlocksDone } from "./plan-open-question-blocks-done.ts"
 import { planReentryReusesExistingPlan } from "./plan-reentry-reuses-existing-plan.ts";
 import { readBeforeEdit } from "./read-before-edit.ts";
 import { readErrorThenRecover } from "./read-error-then-recover.ts";
+import { ruleAlwaysApplyFollowed } from "./rule-always-apply-followed.ts";
+import { ruleLazyNotReadWhenIrrelevant } from "./rule-lazy-not-read-when-irrelevant.ts";
+import { ruleLazyReadWhenRelevant } from "./rule-lazy-read-when-relevant.ts";
 import { searchThenRead } from "./search-then-read.ts";
 import { skillArgumentsReachTheBody } from "./skill-arguments-reach-the-body.ts";
 import { skillLoadsMatchingWorkflow } from "./skill-loads-matching-workflow.ts";
@@ -71,4 +74,7 @@ export const chainCases: EvalCase[] = [
 	cleanContextPlanTodoState,
 	skillReadsItsReferenceFile,
 	skillArgumentsReachTheBody,
+	ruleAlwaysApplyFollowed,
+	ruleLazyReadWhenRelevant,
+	ruleLazyNotReadWhenIrrelevant,
 ];
