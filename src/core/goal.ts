@@ -392,6 +392,9 @@ const GOAL_NUDGE_PREFIX = "That pass changed nothing:";
 const GOAL_BUDGET_PREFIX = "The goal has used its continuation budget";
 
 const REVIEW_PROMPT_PREFIX = "Review the work done in this session as a careful senior engineer.";
+const INIT_PROMPT_PREFIX = "Create or update AGENTS.md in the project root";
+const COMMIT_PROMPT_PREFIX = "Commit the current changes in this git repository.";
+const USER_ADDED_RE = /\n\nThe user added: ([\s\S]*)$/;
 const CODE_REVIEW_BRIEF_PREFIX = "Review the changes in ";
 const CODE_REVIEW_RANGE_RE = /^Review the changes in (.+?)\. The scope below was computed, not guessed/;
 
@@ -404,6 +407,14 @@ const CODE_REVIEW_RANGE_RE = /^Review the changes in (.+?)\. The scope below was
 export function goalPromptDisplay(text: string): GoalPromptDisplay | undefined {
 	// /review and /code-review are the same kind of thing: a command whose prompt is a page of instructions.
 	if (text.startsWith(REVIEW_PROMPT_PREFIX)) return { role: "user", content: "/review" };
+	for (const [prefix, command] of [
+		[INIT_PROMPT_PREFIX, "/init"],
+		[COMMIT_PROMPT_PREFIX, "/commit"],
+	] as const) {
+		if (!text.startsWith(prefix)) continue;
+		const added = USER_ADDED_RE.exec(text)?.[1]?.trim();
+		return { role: "user", content: added ? `${command} ${added}` : command };
+	}
 	if (text.startsWith(CODE_REVIEW_BRIEF_PREFIX)) {
 		const range = CODE_REVIEW_RANGE_RE.exec(text)?.[1];
 		return {

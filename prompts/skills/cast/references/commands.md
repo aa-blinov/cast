@@ -42,6 +42,11 @@
 | `/evolve` | Let the agent propose/update its own skills based on session experience |
 | `/hooks [enable\|disable <id>]` | List hooks for this project, or enable/disable one by id |
 | `/agents` | This session's subagents: open one's session, or stop a running one |
+| `/init [focus]` | Write or refresh AGENTS.md from the tracked files of the repository (a turn) |
+| `/commit [hint]` | Commit the current changes: explicit paths, secrets left out, no push (a turn) |
+| `/cost` | What the session has spent, by kind of request |
+| `/export` | Save the conversation as Markdown in `~/.cast/exports/` |
+| `/doctor` | Check the provider, the model, git, ripgrep, the database and MCP servers |
 | `/context` | List the loaded AGENTS.md / CLAUDE.md context files |
 | `/steer <message>` (`/s`) | Inject a message while the agent is running |
 | `/btw <question>` | Ask a side question: answered from the conversation with no tools, kept out of it (not saved, no steering); works while a turn runs |

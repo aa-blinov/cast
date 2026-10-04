@@ -10,12 +10,14 @@ import { btwDuringToolSeesRunningWork } from "./btw-during-tool-sees-running-wor
 import { btwSaysWhenUnknown } from "./btw-says-when-unknown.ts";
 import { buildModeFlagsPlanDivergence } from "./build-mode-flags-plan-divergence.ts";
 import { cleanContextPlanTodoState } from "./clean-context-plan-todo-state.ts";
+import { commitStagesExplicitPaths } from "./commit-stages-explicit-paths.ts";
 import { editAmbiguousNotWriteFallback } from "./edit-ambiguous-not-write-fallback.ts";
 import { editTargetsOneDuplicateBlock } from "./edit-targets-one-duplicate-block.ts";
 import { goalBlocksOnlyAfterRepeats } from "./goal-blocks-only-after-repeats.ts";
 import { goalContinuesPastFirstStop } from "./goal-continues-past-first-stop.ts";
 import { goalSurvivesCascadingFailures } from "./goal-survives-cascading-failures.ts";
 import { independentReadsShareTurn } from "./independent-reads-share-turn.ts";
+import { initWritesAgentsMdFromRepo } from "./init-writes-agents-md-from-repo.ts";
 import { mcpLookupReportsNotFound } from "./mcp-lookup-reports-not-found.ts";
 import { mcpReleaseLookupChain } from "./mcp-release-lookup-chain.ts";
 import { mcpResourceAnswersFromIt } from "./mcp-resource-answers-from-it.ts";
@@ -84,5 +86,7 @@ export const chainCases: EvalCase[] = [
 	btwAnswersFromContext,
 	btwSaysWhenUnknown,
 	btwDoesNotReadFiles,
+	commitStagesExplicitPaths,
+	initWritesAgentsMdFromRepo,
 	btwDuringToolSeesRunningWork,
 ];

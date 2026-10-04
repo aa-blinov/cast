@@ -65,6 +65,14 @@ export function goalPromptDisplay(content) {
 	if (content.startsWith("Review the work done in this session as a careful senior engineer.")) {
 		return { role: "user", content: "/review" };
 	}
+	for (const [prefix, command] of [
+		["Create or update AGENTS.md in the project root", "/init"],
+		["Commit the current changes in this git repository.", "/commit"],
+	]) {
+		if (!content.startsWith(prefix)) continue;
+		const added = /\n\nThe user added: ([\s\S]*)$/.exec(content)?.[1]?.trim();
+		return { role: "user", content: added ? `${command} ${added}` : command };
+	}
 	if (content.startsWith("Review the changes in ")) {
 		const range = CODE_REVIEW_RANGE_RE.exec(content)?.[1];
 		return { role: "user", content: range && !range.startsWith("working tree") ? `/code-review ${range}` : "/code-review" };

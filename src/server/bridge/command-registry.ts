@@ -54,6 +54,7 @@ const WORKTREE_FORCE_STRIP_RE = /(^|\s)(--force|-f)(?=\s|$)/g;
 import { askSideQuestion, describeInFlight } from "../../core/btw.ts";
 import type { AppConfig, ModelInfo } from "../../core/config.ts";
 import { fetchModels, probeProvider } from "../../core/config.ts";
+import { formatDoctor, runDoctor } from "../../core/doctor.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
 import type { Message } from "../../core/llm.ts";
 import { compactSessionMessages, runMemoryMaintenanceAgent } from "../../core/loop.ts";
@@ -99,6 +100,7 @@ import {
 	listSubagentSessions,
 	recordCompaction,
 } from "../../core/session.ts";
+import { saveExport, sessionCostText } from "../../core/session-report.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import {
 	checkpointFork,
@@ -129,7 +131,9 @@ import { DEFAULT_THEME_ID, WEB_THEMES } from "../../ui/themes/index.ts";
 import type { SessionSummary, WebAgentSession, WebAgentStatus } from "../bridge.ts";
 import {
 	buildGoalPrompt,
+	commitPrompt,
 	GOAL_MAX_OUTER_ITERATIONS,
+	initPrompt,
 	parseGoalInput,
 	REVIEW_PROMPT,
 	SLASH_COMMANDS,
@@ -388,6 +392,24 @@ function getHelpText(): string {
 const commandHandlers: Record<string, CommandHandler> = {
 	"/help": () => ({ ok: true, result: getHelpText() }),
 	"/usage": ({ ws }) => ({ ok: true, result: ws.session.usage }),
+	"/doctor": async ({ ws, cwd, config, mcpForSessionCwd }) => {
+		const sessionCwd = ws.session.cwd ?? cwd;
+		const checks = await runDoctor({
+			config,
+			model: ws.session.model,
+			cwd: sessionCwd,
+			mcp: mcpForSessionCwd(sessionCwd),
+		});
+		return { ok: true, result: formatDoctor(checks) };
+	},
+	"/cost": ({ ws }) => ({ ok: true, result: sessionCostText(ws.session) }),
+	"/export": ({ ws }) => {
+		try {
+			return { ok: true, result: `Exported to ${saveExport(ws.session)}` };
+		} catch (error) {
+			return { ok: false, error: `Export failed: ${error instanceof Error ? error.message : String(error)}` };
+		}
+	},
 	"/current": (ctx) => {
 		const {
 			ws,
@@ -1245,6 +1267,18 @@ const commandHandlers: Record<string, CommandHandler> = {
 			ok: true,
 			result: `Working toward the goal autonomously (budget: ${maxIterations})…${replaces ? " This replaces the previous goal." : ""}`,
 		};
+	},
+	"/init": ({ ws, arg, submit }) => {
+		void submit(ws.id, initPrompt(arg.trim())).catch((error) => {
+			console.error(`[cast server] /init submit failed:`, error);
+		});
+		return { ok: true, result: "Writing AGENTS.md…" };
+	},
+	"/commit": ({ ws, arg, submit }) => {
+		void submit(ws.id, commitPrompt(arg.trim())).catch((error) => {
+			console.error(`[cast server] /commit submit failed:`, error);
+		});
+		return { ok: true, result: "Committing…" };
 	},
 	"/review": ({ ws, submit }) => {
 		// /review is blocking (isCommandBlocking), so this only runs idle.

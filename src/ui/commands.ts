@@ -6,6 +6,7 @@ import { filesLostByRestore, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
+import { formatDoctor, runDoctor } from "../core/doctor.ts";
 import { previewForkFiles } from "../core/fork-files.ts";
 import {
 	clearGoal,
@@ -86,6 +87,7 @@ import {
 	saveSession,
 	updateSessionIdentity,
 } from "../core/session.ts";
+import { saveExport, sessionCostText } from "../core/session-report.ts";
 import {
 	type HeaderConfig,
 	isMemoryWriteEnabled,
@@ -134,7 +136,14 @@ import {
 	selectSkills,
 } from "../pickers/domain.ts";
 import type { Pickers, PickOption } from "../pickers/types.ts";
-import { buildGoalPrompt, GOAL_MAX_OUTER_ITERATIONS, parseGoalInput, REVIEW_PROMPT } from "../server/commands.ts";
+import {
+	buildGoalPrompt,
+	commitPrompt,
+	GOAL_MAX_OUTER_ITERATIONS,
+	initPrompt,
+	parseGoalInput,
+	REVIEW_PROMPT,
+} from "../server/commands.ts";
 import { copyToClipboard } from "./clipboard.ts";
 import { headerSegments } from "./header.ts";
 import { getKeybindings, type Keybinding, TUI_KEYBINDINGS } from "./input/keybindings.ts";
@@ -262,15 +271,19 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 		description: "Review a diff with computed scope and language rules — [range] [-- path…]",
 		takesArgs: true,
 	},
+	{ name: "/commit", description: "Commit the current changes with a message that fits the repository" },
 	{ name: "/compact", description: "Compact context now" },
 	{ name: "/context", description: "List loaded AGENTS.md / CLAUDE.md context files" },
 	{ name: "/continue", description: "Resume the most recent session" },
 	{ name: "/copy", description: "Copy last assistant response" },
+	{ name: "/cost", description: "Show what this session has spent, by kind of request" },
 	{ name: "/current", description: "Show all status bar data" },
 	{ name: "/distill", description: "Package a repeated workflow as a reusable project artifact" },
+	{ name: "/doctor", description: "Check the provider, model, tools and MCP servers" },
 	{ name: "/dream", description: "Consolidate durable project memory" },
 	{ name: "/evolve", description: "Propose reusable skills for this project from the session" },
 	{ name: "/exit", description: "Save and exit (alias for /quit)" },
+	{ name: "/export", description: "Save the conversation as Markdown in ~/.cast/exports" },
 	{ name: "/fork", description: "Fork the conversation, whole or from before one of your messages" },
 	{ name: "/goal", description: "Work toward a goal autonomously until done — goal text", takesArgs: true },
 	{ name: "/header", description: "Choose and order the parts of the top row" },
@@ -279,6 +292,7 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/hooks disable", description: "Disable a hook — id", takesArgs: true },
 	{ name: "/hooks enable", description: "Enable a hook — id", takesArgs: true },
 	{ name: "/hooks help", description: "Show hooks command cheat sheet" },
+	{ name: "/init", description: "Write or refresh AGENTS.md from what the repository shows" },
 	{ name: "/keys", description: "List all keybindings" },
 	{ name: "/lsp", description: "Show the language servers cast is running" },
 	{ name: "/mcp", description: "Toggle MCP servers on/off" },
@@ -1532,6 +1546,30 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		match: (input) => isCommand(input, "/abort", "/stop"),
 		whileRunning: "submit",
 		run: ({ agent }) => agent.abort(),
+	},
+	{
+		match: (input) => input === "/doctor",
+		whileRunning: "submit",
+		run: async ({ agent, session, config, deps }) => {
+			agent.addDisplayMessage({ role: "warning", content: "doctor: checking…" });
+			const text = agent.daemonMode
+				? String(await agent.runCommand("/doctor"))
+				: formatDoctor(await runDoctor({ config, model: session.model, cwd: deps.cwd, mcp: deps.mcpResult }));
+			agent.addDisplayMessage({ role: "warning", content: text });
+		},
+	},
+	{
+		match: (input) => input === "/cost" || input === "/export",
+		whileRunning: "submit",
+		run: async ({ input, agent, session }) => {
+			// The daemon holds the live session; the terminal's own copy is stale there.
+			const text = agent.daemonMode
+				? String(await agent.runCommand(input))
+				: input === "/cost"
+					? sessionCostText(session)
+					: `Exported to ${saveExport(session)}`;
+			agent.addDisplayMessage({ role: "warning", content: text });
+		},
 	},
 	{
 		// A question on the side: answered from the conversation, kept out of it, and fine while a turn runs.
@@ -4055,6 +4093,18 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			await startReviewState(session.id, deps.cwd, scope);
 			await agent.submit(formatReviewBrief(scope, { delegate: deps.currentPersona.subagents }), images);
 			return;
+		},
+	},
+	{
+		match: (input) => isCommand(input, "/init", "/commit"),
+		run: async ({ input, images, deps, agent, showNotice }) => {
+			const [name = "", ...rest] = input.split(WHITESPACE_SPLIT_RE);
+			if (deps.running) {
+				showNotice(`[Agent is running — wait for it to finish, or use /steer, before ${name}]`);
+				return;
+			}
+			const arg = rest.join(" ");
+			await agent.submit(name === "/init" ? initPrompt(arg) : commitPrompt(arg), images);
 		},
 	},
 	{

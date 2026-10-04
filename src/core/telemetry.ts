@@ -847,3 +847,32 @@ export function queryTurnMetrics(sinceMs: number): TurnMetrics {
 		avgDurationMs: num((durRow as { a: number | null }).a),
 	};
 }
+
+export interface SessionCostRow {
+	kind: LlmRequestKind;
+	requests: number;
+	promptTokens: number;
+	completionTokens: number;
+	cacheReadTokens: number;
+	/** Null when the provider reported no price on any of these requests. */
+	cost: number | null;
+}
+
+/** What one session spent, per kind of request (main, subagent, compaction, side...). */
+export function querySessionCost(sessionId: string): SessionCostRow[] {
+	const rows = getDb()
+		.prepare(
+			`SELECT kind, COUNT(*) AS n, SUM(prompt_tokens) AS p, SUM(completion_tokens) AS c,
+			        SUM(cache_read_tokens) AS cr, SUM(cost) AS cost
+			 FROM llm_requests WHERE session_id = ? GROUP BY kind ORDER BY n DESC`,
+		)
+		.all(sessionId) as { kind: LlmRequestKind; n: number; p: number; c: number; cr: number; cost: number | null }[];
+	return rows.map((r) => ({
+		kind: r.kind,
+		requests: r.n,
+		promptTokens: r.p ?? 0,
+		completionTokens: r.c ?? 0,
+		cacheReadTokens: r.cr ?? 0,
+		cost: r.cost,
+	}));
+}

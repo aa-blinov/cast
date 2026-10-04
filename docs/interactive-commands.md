@@ -148,6 +148,8 @@ See [Plan Mode](plan-mode.md) for the full workflow.
 |---------|-------------|
 | `/goal <description>` | Work autonomously toward a goal until it's done (bounded, never-ask) |
 | `/review` | Ask the agent to review and verify its own work |
+| `/init [focus]` | Write or refresh `AGENTS.md` from what the repository shows (a turn; needs an idle session) |
+| `/commit [hint]` | Commit the current changes with a message that fits the repository (a turn; needs an idle session) |
 | `/code-review [range] [-- path…]` | Review a diff: scope, groups and language rules computed before the model sees it |
 
 **`/goal [N] <description>`** sets a goal for the session and starts working on it without stopping to ask. The goal is saved and stays in the agent's prompt until it's closed, so it survives compaction and later turns.
@@ -195,6 +197,8 @@ These commands work while the agent is running:
 - **Cost.** It is billed like any request (a provider that caches prefixes serves the conversation from its cache, since it is sent as the turns send it). Idle, the tokens join the session's usage; during a turn they go to the usage dashboard only. A conversation that fills the model's window is refused with a pointer to `/compact`.
 - **Over `cast run`** send it as a `command` action (`{"type":"command","name":"btw","args":" what changed?"}`); the answer comes back as a notice. Not available over ACP.
 
+**`/init`** and **`/commit`** are turns like `/review`: they send a prompt, and the agent does the work with its own tools, so the usual permission prompts apply. `/init` reads the tracked files, runs the cheap commands it is about to write down, and keeps the file to a page; text after the command narrows it (`/init monorepo, packages/*`). `/commit` reads the diff and `git log`, follows the repository's message style, stages explicit paths only (never `git add -A`), leaves out anything that looks like a secret and says so, makes one commit per unrelated concern, and does not push or amend; text after it is a hint (`/commit only the parser`). The thread shows the command you typed, not the prompt.
+
 **`/steer`** interrupts the current turn with new context: the message is injected immediately into the conversation, and the agent sees it on the next tool-call iteration. Useful for correcting course mid-execution.
 
 **`/queue`** saves a message to run after the agent finishes its current turn. The message becomes a new turn automatically.
@@ -214,6 +218,9 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 | Command | Description |
 |---------|-------------|
 | `/current` | All status bar data: model, context, tokens in/out with cache %, cost, sub-agent tokens, repo, session |
+| `/cost` | What this session has spent: tokens, cache share, subagent share, the provider's price when it reports one, and a line per kind of request (main, subagent, compaction, `/btw`) from telemetry |
+| `/export` | Save the conversation as Markdown in `~/.cast/exports/` (system prompts left out, tool results cut at 2,000 characters), and print the path |
+| `/doctor` | Check what makes cast fail without saying why: Node version, the provider answers and serves the session's model, git, ripgrep, the sessions database, each MCP server |
 | `/context` | The AGENTS.md / CLAUDE.md files loaded for this directory, with their size, plus any file that could not be read |
 
 ## Configuration

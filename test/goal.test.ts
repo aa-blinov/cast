@@ -306,4 +306,16 @@ describe("goalPromptDisplay", () => {
 		expect(goalPromptDisplay(brief("working tree vs HEAD"))).toEqual({ role: "user", content: "/code-review" });
 		expect(goalPromptDisplay(brief("main..HEAD"))).toEqual({ role: "user", content: "/code-review main..HEAD" });
 	});
+
+	it("shows /init and /commit as typed, with what the user added", async () => {
+		const { commitPrompt, initPrompt } = await import("../src/server/commands.ts");
+		const { goalPromptDisplay } = await import("../src/core/goal.ts");
+		expect(goalPromptDisplay(initPrompt(""))).toEqual({ role: "user", content: "/init" });
+		expect(goalPromptDisplay(initPrompt("monorepo"))).toEqual({ role: "user", content: "/init monorepo" });
+		expect(goalPromptDisplay(commitPrompt(""))).toEqual({ role: "user", content: "/commit" });
+		expect(goalPromptDisplay(commitPrompt("only the parser"))).toEqual({
+			role: "user",
+			content: "/commit only the parser",
+		});
+	});
 });
