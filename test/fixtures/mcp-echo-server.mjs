@@ -4,10 +4,16 @@
 // official SDK on both ends. Runs as stdio by default (`node mcp-echo-server.mjs`),
 // or as a real HTTP server with `--http` (prints "LISTENING <port>" once up).
 import { createServer } from "node:http";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+	CallToolRequestSchema,
+	ListResourcesRequestSchema,
+	ListResourceTemplatesRequestSchema,
+	ListToolsRequestSchema,
+	ReadResourceRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 // Set from the raw HTTP handler (below, HTTP mode only) before each request
@@ -18,6 +24,14 @@ import { z } from "zod";
 let lastAuthHeader = "none";
 
 function buildServer() {
+	// A docs-style server: resources and nothing else, so no tools/list at all.
+	if (process.argv.includes("--resources-only")) {
+		const only = new McpServer({ name: "resources-only-fixture", version: "1.0.0" });
+		only.registerResource("note", "notes:///only", { mimeType: "text/plain" }, async (uri) => ({
+			contents: [{ uri: uri.href, mimeType: "text/plain", text: "the only note" }],
+		}));
+		return only;
+	}
 	const server = new McpServer({ name: "echo-fixture", version: "1.0.0" });
 
 	server.registerTool(
@@ -89,6 +103,72 @@ function buildServer() {
 		// Returns a payload far larger than any context window, to pin the cap.
 		server.registerTool("fat", { description: "Returns a huge blob." }, async () => ({
 			content: [{ type: "text", text: "A".repeat(3 * 1024 * 1024) }],
+		}));
+	}
+
+	// Gated behind --resources: a server that offers resources besides tools (text, an image, other binary, and a
+	// template), so the default fixture keeps declaring no `resources` capability.
+	if (process.argv.includes("--resources")) {
+		server.registerResource(
+			"readme",
+			"file:///docs/readme.md",
+			{ title: "Readme", description: "the project readme", mimeType: "text/markdown" },
+			async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: "# Readme\nDeploy step 3 is: flush the cache." }] }),
+		);
+		server.registerResource(
+			"logo",
+			"blob:///assets/logo.png",
+			{ description: "the logo", mimeType: "image/png" },
+			async (uri) => ({ contents: [{ uri: uri.href, mimeType: "image/png", blob: "aGVsbG8=" }] }),
+		);
+		server.registerResource(
+			"archive",
+			"blob:///assets/data.bin",
+			{ description: "an archive", mimeType: "application/octet-stream" },
+			async (uri) => ({ contents: [{ uri: uri.href, mimeType: "application/octet-stream", blob: "AAECAwQFBgcICQ==" }] }),
+		);
+		server.registerResource(
+			"note",
+			new ResourceTemplate("notes://{id}", { list: undefined }),
+			{ description: "a note by id", mimeType: "text/plain" },
+			async (uri, { id }) => ({ contents: [{ uri: uri.href, mimeType: "text/plain", text: `note ${id}` }] }),
+		);
+	}
+
+	// Gated behind --resources-paged: resources across two pages, to prove the listing follows nextCursor.
+	if (process.argv.includes("--resources-paged")) {
+		server.server.registerCapabilities({ resources: {} });
+		server.server.setRequestHandler(ListResourcesRequestSchema, async (request) =>
+			request.params?.cursor
+				? { resources: [{ uri: "page:///two", name: "page two" }] }
+				: { resources: [{ uri: "page:///one", name: "page one" }], nextCursor: "p2" },
+		);
+		server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [] }));
+		server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => ({
+			contents: [{ uri: request.params.uri, text: `read ${request.params.uri}` }],
+		}));
+	}
+
+	// Declares the capability but refuses to list: a server that is broken for resources, not for tools.
+	if (process.argv.includes("--resources-broken")) {
+		server.server.registerCapabilities({ resources: {} });
+		server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+			throw new Error("resources are down");
+		});
+		server.server.setRequestHandler(ReadResourceRequestSchema, async () => {
+			throw new Error("no such thing");
+		});
+	}
+
+	// Has a tool of its own with the name the resource tools would take, and offers resources.
+	if (process.argv.includes("--resources-own-tool")) {
+		server.registerTool("list_resources", { description: "The server's own listing." }, async () => ({
+			content: [{ type: "text", text: "own listing" }],
+		}));
+		server.server.registerCapabilities({ resources: {} });
+		server.server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
+		server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => ({
+			contents: [{ uri: request.params.uri, text: "own read" }],
 		}));
 	}
 

@@ -857,13 +857,18 @@ async function uninstallMcpInteractive(deps: CommandDeps): Promise<void> {
 	const disabled = new Set(loadSettings().disabledMcpServers ?? []);
 	const toolCounts: Record<string, number> = {};
 	for (const c of deps.mcpResult.connections) toolCounts[c.serverName] = c.toolCount;
+	const withResources = new Set(deps.mcpResult.connections.filter((c) => c.resources).map((c) => c.serverName));
 	const blurbs = mcpServerToolBlurbs(deps.mcpResult);
 	const picked = await deps.pickers.pickOption(
 		[...removable]
 			.sort((a, b) => a.name.localeCompare(b.name))
 			.map((s) => {
 				const count = toolCounts[s.name];
-				const status = disabled.has(s.name) ? "disabled" : count !== undefined ? `${count} tools` : "disconnected";
+				const status = disabled.has(s.name)
+					? "disabled"
+					: count !== undefined
+						? `${count} tools${withResources.has(s.name) ? " + resources" : ""}`
+						: "disconnected";
 				return {
 					value: s.name,
 					label: `${s.name} (${s.origin}, ${status})`,
@@ -906,6 +911,7 @@ function formatMcpList(deps: CommandDeps): string {
 	const disabled = new Set(loadSettings().disabledMcpServers ?? []);
 	const toolCounts: Record<string, number> = {};
 	for (const c of deps.mcpResult.connections) toolCounts[c.serverName] = c.toolCount;
+	const withResources = new Set(deps.mcpResult.connections.filter((c) => c.resources).map((c) => c.serverName));
 	const ownership = new Map(listUninstallableMcpServers(deps.cwd, deps.projectTrusted).map((s) => [s.name, s.origin]));
 	const lines = [...allNames]
 		.sort((a, b) => a.localeCompare(b))
@@ -913,7 +919,11 @@ function formatMcpList(deps: CommandDeps): string {
 			const count = toolCounts[name];
 			const origin = ownership.get(name) ?? "cli";
 			const notUp = deps.mcpResult.connectPending ? "connecting" : "disconnected";
-			const status = disabled.has(name) ? "disabled" : count !== undefined ? `${count} tools` : notUp;
+			const status = disabled.has(name)
+				? "disabled"
+				: count !== undefined
+					? `${count} tools${withResources.has(name) ? " + resources" : ""}`
+					: notUp;
 			return `${disabled.has(name) ? "off" : "on "} ${name} (${origin}, ${status})`;
 		});
 	return `MCP\n${lines.join("\n")}`;

@@ -31,6 +31,8 @@ Global servers load first, project and CLI override them on name collision.
 
 **Tool names** are namespaced as `mcp_<server>_<tool>` to avoid collisions.
 
+**Resources:** a server that declares them gets `mcp_<server>_list_resources` (resources with URIs, and templates) and `mcp_<server>_read_resource` (by `uri`) beside its own tools; a server with only resources connects with no tools. `/mcp list` shows `+ resources`. Subscriptions and `@`-mentions are not supported.
+
 Same command shape as skills: `/mcp` toggle, `list`, `enable`/`disable <name>`, `uninstall` (confirm), `help`. Disabled servers persist in `disabledMcpServers`. Only enabled servers appear in `<available_mcp>`.
 
 `/mcp uninstall` removes a server from global or project `mcp.json`. CLI `--mcp` paths are not removable here.

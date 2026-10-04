@@ -75,6 +75,21 @@ MCP tools are namespaced as `mcp_<server>_<tool>`:
 
 Non-alphanumeric characters in names are replaced with `_`.
 
+## Resources
+
+A server can offer more than tools: **resources**, the documents, files or records it can show (a docs or wiki server is often only that). A server that declares the `resources` capability gets two tools beside its own:
+
+| Tool | What it does |
+|------|--------------|
+| `mcp_<server>_list_resources` | The server's resources with their URIs, names, types and sizes, and its resource templates (`docs://faq/{topic}`) |
+| `mcp_<server>_read_resource` | Reads one resource by its `uri`: text as it is, an image as an image, any other binary content only described (type and size) |
+
+The model lists, then reads; a URI built from a template reads like any other. A long listing is followed across pages and cut at 200 entries; what is read is cut at the same limits as any tool output (`maxToolOutputBytes`, `maxToolOutputLines`). They are namespaced like the server's other tools, so a persona's `mcp:` allowlist, `/mcp disable` and a reconnect treat them the same way, a subagent has them under the same rules, and `<available_mcp>` marks the server `resources="true"`. `/mcp list` shows `+ resources` beside the tool count. A tool the server already has under one of those names (servers that predate resources often do) keeps its name and wins.
+
+A server with only resources, or only prompts, has no `tools/list`: it connects with no tools of its own and not as a failed server.
+
+Not supported: subscribing to a resource's changes, and `@`-mentioning a resource in a message.
+
 ## Connection
 
 Servers connect in parallel during startup. Each gets a 30-second timeout, enough for `npx -y` cold cache resolution (~12s) without leaving a hung server unnoticed.
@@ -145,3 +160,4 @@ The picker shows all servers from all config sources, regardless of connection s
 - **Transports**: stdio and Streamable HTTP are primary. Cast also retries a failed Streamable HTTP initialization once through legacy HTTP+SSE for older servers; new server deployments should use Streamable HTTP.
 - **Auth**: Static header/token authentication only. OAuth (browser redirect, token storage/refresh) is not supported.
 - **Tool output**: Text, images, resource links, and embedded resources are handled. Audio content is noted but omitted.
+- **Resources**: listing and reading only (see above); no subscriptions to changes, no `@`-mention. MCP prompts are not used.

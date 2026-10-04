@@ -14,6 +14,9 @@ import { goalSurvivesCascadingFailures } from "./goal-survives-cascading-failure
 import { independentReadsShareTurn } from "./independent-reads-share-turn.ts";
 import { mcpLookupReportsNotFound } from "./mcp-lookup-reports-not-found.ts";
 import { mcpReleaseLookupChain } from "./mcp-release-lookup-chain.ts";
+import { mcpResourceAnswersFromIt } from "./mcp-resource-answers-from-it.ts";
+import { mcpResourceMissingIsReported } from "./mcp-resource-missing-is-reported.ts";
+import { mcpResourceTemplate } from "./mcp-resource-template.ts";
 import { planDoneSignal } from "./plan-done-signal.ts";
 import { planOpenQuestionBlocksDone } from "./plan-open-question-blocks-done.ts";
 import { planReentryReusesExistingPlan } from "./plan-reentry-reuses-existing-plan.ts";
@@ -53,6 +56,9 @@ export const chainCases: EvalCase[] = [
 	taskParallelDelegation,
 	todoWriteMarksStepDone,
 	mcpLookupReportsNotFound,
+	mcpResourceAnswersFromIt,
+	mcpResourceTemplate,
+	mcpResourceMissingIsReported,
 	planReentryReusesExistingPlan,
 	planOpenQuestionBlocksDone,
 	buildModeFlagsPlanDivergence,
