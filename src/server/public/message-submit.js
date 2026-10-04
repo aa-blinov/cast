@@ -333,6 +333,9 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				const mode = text === "/plan" ? "plan" : "build";
 				setSession((prev) => (prev ? { ...prev, mode } : prev));
 				addNotice(result.result);
+			} else if (commandName === "/btw" && typeof result?.result === "string") {
+				// A side question: shown as a notice, never part of the conversation (the daemon keeps it out).
+				addNotice(`btw: ${result.result}`);
 			} else if (commandName === "/rules" && typeof result?.result?.text === "string") {
 				addNotice(result.result.text);
 			} else if (result?.result && typeof result.result === "string") {

@@ -36,6 +36,12 @@ const runAgentLoop = vi.fn().mockImplementation(async (messages: unknown) => mes
 function loopRunsFor(sessionId: string): unknown[] {
 	return runAgentLoop.mock.calls.filter((call) => (call[1] as { sessionId?: string })?.sessionId === sessionId);
 }
+const mockAskSideQuestion = vi.fn();
+vi.mock("../src/core/btw.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/core/btw.ts")>()),
+	askSideQuestion: (...args: unknown[]) => mockAskSideQuestion(...args),
+}));
+
 vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/loop.ts")>();
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
@@ -539,6 +545,76 @@ describe("web bridge", () => {
 			skillsshSource: "owner/repo",
 		});
 		expect(skills.find((skill) => skill.name === "from-amp")).toMatchObject({ skillssh: false });
+	});
+
+	describe("/btw (a question on the side)", () => {
+		beforeEach(() => {
+			mockAskSideQuestion.mockReset();
+			mockAskSideQuestion.mockResolvedValue({
+				text: "It has two passes.",
+				usage: { promptTokens: 100, completionTokens: 5, totalTokens: 105 },
+			});
+		});
+
+		it("answers from the conversation and keeps both the question and the answer out of it", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			ws.session.messages = [{ role: "user", content: "refactor the parser" }];
+			const before = JSON.stringify(ws.session.messages);
+			const result = await bridge.executeCommand(ws.id, "/btw how many passes?");
+			expect(result).toEqual({ ok: true, result: "It has two passes." });
+			expect(JSON.stringify(ws.session.messages)).toBe(before);
+			const [input, question] = mockAskSideQuestion.mock.calls[0]!;
+			expect(question).toBe("how many passes?");
+			expect(input.history).toEqual(ws.session.messages);
+			expect(input.model).toBe(ws.session.model);
+			expect(input.inFlight).toBeUndefined();
+		});
+
+		it("needs a question", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			expect(await bridge.executeCommand(ws.id, "/btw")).toEqual({ ok: false, error: "Usage: /btw <question>" });
+			expect(mockAskSideQuestion).not.toHaveBeenCalled();
+		});
+
+		it("works while a turn is running, and tells the model what that turn has done so far", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			ws.status = "running";
+			ws.activeStream = [
+				{ order: 1, kind: "content", text: "Running the tests now." },
+				{
+					order: 2,
+					kind: "tool",
+					call: { id: "t1", name: "bash", args: '{"command":"npm test"}', status: "running" },
+				},
+			] as never;
+			const usageBefore = ws.session.usage.totalTokens;
+			const result = await bridge.executeCommand(ws.id, "/btw what are you doing?");
+			expect(result.ok).toBe(true);
+			const inFlight = mockAskSideQuestion.mock.calls[0]![0].inFlight as string;
+			expect(inFlight).toContain("Running the tests now.");
+			expect(inFlight).toContain("The tool bash");
+			// The running turn owns the session's totals; the answer's tokens are not written over them.
+			expect(ws.session.usage.totalTokens).toBe(usageBefore);
+		});
+
+		it("adds the answer's tokens to the session when idle, and reports a failure as one", async () => {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const before = ws.session.usage.totalTokens;
+			await bridge.executeCommand(ws.id, "/btw q");
+			expect(ws.session.usage.totalTokens).toBe(before + 105);
+			mockAskSideQuestion.mockRejectedValueOnce(
+				new Error("The conversation is too long to ask about on the side: run /compact first."),
+			);
+			const failed = await bridge.executeCommand(ws.id, "/btw q");
+			expect(failed).toEqual({
+				ok: false,
+				error: "The conversation is too long to ask about on the side: run /compact first.",
+			});
+		});
 	});
 
 	describe("!command (runShell)", () => {
