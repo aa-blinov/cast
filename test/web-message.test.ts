@@ -25,7 +25,7 @@ import {
 	GOAL_NUDGE_PROMPT,
 } from "../src/core/goal.ts";
 import { parseUserShellMessage as coreParseUserShellMessage, userShellMessage } from "../src/core/user-shell.ts";
-import { buildGoalPrompt } from "../src/server/commands.ts";
+import { buildGoalPrompt, commitPrompt, initPrompt } from "../src/server/commands.ts";
 import {
 	goalPromptDisplay,
 	isForkableAnswer,
@@ -123,6 +123,10 @@ describe("goalPromptDisplay", () => {
 			"Review the work done in this session as a careful senior engineer.\n\n1. Identify",
 			"Review the changes in main..HEAD. The scope below was computed, not guessed: review every group.",
 			"Review the changes in working tree vs HEAD. The scope below was computed, not guessed: x",
+			initPrompt(""),
+			initPrompt("monorepo, packages/*"),
+			commitPrompt(""),
+			commitPrompt("only the parser"),
 			"fix the tests please",
 		]) {
 			expect(goalPromptDisplay(text) ?? undefined, text.slice(0, 40)).toEqual(coreGoalPromptDisplay(text));

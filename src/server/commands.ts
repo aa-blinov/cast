@@ -18,6 +18,9 @@ export const NON_BLOCKING_COMMANDS = new Set([
 	"/help",
 	"/memory",
 	"/usage",
+	"/cost",
+	"/doctor",
+	"/export",
 	"/sessions",
 	"/queue",
 	"/q",
@@ -99,12 +102,15 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/compact", description: "Compact context now", blocking: true },
 	{ name: "/continue", description: "Resume the most recent session", blocking: true, hidden: true },
 	{ name: "/copy", description: "Copy last assistant response", blocking: false },
+	{ name: "/cost", description: "Show what this session has spent, by kind of request", blocking: false },
 	{ name: "/fork", description: "Fork the current safe context into a new session", blocking: true },
 	{ name: "/current", description: "Show session status", blocking: false, hidden: true },
 	{ name: "/diff", description: "Toggle the diff panel", blocking: false, hidden: true },
 	{ name: "/distill", description: "Package a repeated workflow as a reusable project artifact", blocking: true },
+	{ name: "/doctor", description: "Check the provider, model, tools and MCP servers", blocking: false },
 	{ name: "/dream", description: "Consolidate durable project memory", blocking: true },
 	{ name: "/evolve", description: "Propose reusable skills for this project from the session", blocking: true },
+	{ name: "/export", description: "Save the conversation as Markdown in ~/.cast/exports", blocking: false },
 	{ name: "/help", description: "Show this command list", blocking: false },
 	{ name: "/hooks", description: "List/enable/disable hooks", takesArgs: true, blocking: false, hidden: true },
 	{ name: "/mcp", description: "Manage MCP servers", takesArgs: true, blocking: false, hidden: true },
@@ -143,6 +149,18 @@ export const SLASH_COMMANDS: Array<{
 	{ name: "/repo", description: "Show cwd and git branch", blocking: false, hidden: true },
 	{ name: "/lsp", description: "Show the language servers cast is running", blocking: false },
 	{ name: "/goal", description: "Work toward a goal autonomously until done", takesArgs: true, blocking: true },
+	{
+		name: "/init",
+		description: "Write or refresh AGENTS.md from what the repository shows — focus",
+		takesArgs: true,
+		blocking: true,
+	},
+	{
+		name: "/commit",
+		description: "Commit the current changes with a message that fits the repository — hint",
+		takesArgs: true,
+		blocking: true,
+	},
 	{ name: "/review", description: "Ask the agent to review and verify its own work", blocking: true },
 	{ name: "/rule:", description: "Invoke a rule by name", takesArgs: true, blocking: false },
 	{ name: "/rules", description: "List loaded rules", blocking: false },
@@ -225,6 +243,37 @@ export const REVIEW_PROMPT = `Review the work done in this session as a careful 
 1. Identify what changed: run git status and git diff if this is a git repo, otherwise list the files touched in this session.
 2. Verify it actually holds together: find and run the project's test and lint commands (inspect package.json, pyproject.toml, Cargo.toml, deno.json, go.mod, Makefile, etc.). Fix quick, obvious breakage only if it's safe.
 3. Report concisely and honestly: what was implemented, what was verified (name the exact commands you ran and their result), and what remains open, risky, or unverified. Do not claim a check passed unless you actually ran it — if you didn't run something, say so.`;
+
+const withFocus = (prompt: string, focus: string) => (focus ? `${prompt}\n\nThe user added: ${focus}` : prompt);
+
+/** The prompt /init submits: write or refresh AGENTS.md from what the repository shows, not from the model's guesses. */
+export function initPrompt(focus: string): string {
+	return withFocus(
+		`Create or update AGENTS.md in the project root: the file that tells a coding agent how to work in this repository.
+
+1. If AGENTS.md (or CLAUDE.md) exists, read it first and keep what is still true; this is an update, not a rewrite.
+2. Learn the project from the repository itself, from tracked files only (git ls-files): untracked and ignored files, .env files and keys are not part of the project, and a secret's value never goes into AGENTS.md. The manifest (package.json, pyproject.toml, Cargo.toml, go.mod, Makefile...), the README, CI config, the directory layout, and a few representative source and test files.
+3. Write only what an agent could not guess in a minute and would get wrong: the exact commands to build, test, lint and run one test; the layout of the source tree; conventions that differ from the language's defaults; traps and rules that exist for a reason. Take every command from a file you read, and run the cheap ones (a lint or a single test) to confirm they work.
+4. Keep it short: a page, no marketing, no restating the README, no generic advice about clean code.
+5. Report which sections you wrote and which commands you ran and confirmed.`,
+		focus,
+	);
+}
+
+/** The prompt /commit submits: commit this session's changes, and nothing else, without pushing. */
+export function commitPrompt(hint: string): string {
+	return withFocus(
+		`Commit the current changes in this git repository.
+
+1. Run git status and git diff (staged and unstaged) and read what actually changed. If there is nothing to commit, say so and stop.
+2. Look at git log -10 --oneline and follow the repository's commit message style (and any commit rules in AGENTS.md or CLAUDE.md).
+3. If the changes are unrelated to each other, make one commit per concern. Stage explicit paths with git add <path>..., never git add -A or git add . : leave out files that are not part of this work, and files that look like secrets (.env, keys, credentials); name them if you leave any out.
+4. Commit with a short imperative subject line and, when the why is not obvious from the diff, a body that explains it. Describe the change as it is, not as the task was worded.
+5. Do not push, amend, or rewrite history, and do not skip hooks. If a hook fails, say what failed instead of working around it.
+6. Report the commit hash and subject, and anything left uncommitted.`,
+		hint,
+	);
+}
 
 // The prompt /goal submits — an autonomous "keep going until done" directive,
 // MiMo-Code-style: work through iterations without yielding for permission,
