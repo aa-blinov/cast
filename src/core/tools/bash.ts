@@ -275,7 +275,7 @@ function formatBackgroundStart(task: BackgroundTask, warnPrefix: string, automat
 	// and waiting for it is the right thing. Either way the result reaches the model once, not twice.
 	const next = automatic
 		? `It was still running, so it was moved to the background and is not finished. If you need its output to carry on, wait for it with bash_output({task_id:"${task.id}",wait:60000}): that result is then yours and no separate notice follows. If you do not need it yet, carry on: the result arrives on its own when it finishes.`
-		: "Its result arrives on its own when it finishes: do not poll it or wait for it. Carry on with other work, or end your turn.";
+		: `Its result arrives on its own when it finishes, so do not poll it. Carry on with other work and end your turn when there is none. If your answer needs its output, wait for it with bash_output({task_id:"${task.id}",wait:60000}) rather than ending your turn: that result is then yours and no separate notice follows.`;
 	return {
 		content: `${warnPrefix}${automatic ? "Moved to the background" : "Started in the background"} as ${task.id}. ${next} bash_output({task_id:"${task.id}"}) shows its progress; bash_kill({task_id:"${task.id}"}) stops it.`,
 	};

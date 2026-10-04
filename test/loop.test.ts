@@ -2050,6 +2050,54 @@ describe("runAgentLoop — steering and follow-up injection", () => {
 		expect(events.find((e) => e.type === "end")).toEqual({ type: "end", reason: "stop" });
 	});
 
+	it("tells the model what cast queued for it on its next step, and keeps a person's queued message for the end of the turn", async () => {
+		const followUpQueue = new MessageQueue();
+		const events: AgentEvent[] = [];
+		const seen: string[][] = [];
+		const text = (messages: Message[]) => messages.map((m) => (typeof m.content === "string" ? m.content : ""));
+
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => {
+				// A background task finishes and a person queues a message, both while the model works.
+				followUpQueue.enqueue({
+					role: "user",
+					content: "<system-reminder>\nBackground task bg-1 (`x`) exited.\n</system-reminder>",
+				});
+				followUpQueue.enqueue({ role: "user", content: "after you are done, say hi" });
+				return {
+					content: "",
+					thinking: "",
+					finishReason: "tool_calls",
+					toolCalls: [{ id: "t1", name: "bash", arguments: '{"command":"echo hi"}' }],
+				};
+			})
+			.mockImplementationOnce(async (_c, _m, messages) => {
+				seen.push(text(messages as Message[]));
+				return { content: "second", thinking: "", finishReason: "stop" };
+			})
+			.mockImplementationOnce(async (_c, _m, messages) => {
+				seen.push(text(messages as Message[]));
+				return { content: "third", thinking: "", finishReason: "stop" };
+			});
+
+		await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			followUpQueue,
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		// The step right after the tool call already knows the task finished; the person's message is not there yet.
+		expect(seen[0]!.some((t) => t.includes("Background task bg-1"))).toBe(true);
+		expect(seen[0]!.some((t) => t.includes("after you are done"))).toBe(false);
+		// It comes at the end of the turn, as before.
+		expect(seen[1]!.some((t) => t.includes("after you are done"))).toBe(true);
+		expect(events.filter((e) => e.type === "followup_injected")).toHaveLength(2);
+		expect(events.some((e) => e.type === "steering_injected")).toBe(false);
+	});
+
 	it("does not duplicate an earlier turn's committed content in the persisted partial on a later abort", async () => {
 		// A multi-message run (follow-up turn inside the same runAgentLoop call)
 		// used to leave turn 1's already-committed content in the partialContent

@@ -145,7 +145,7 @@ export function getToolDefinitions(
 										description:
 											"Start a managed background task and return its task id immediately. Use for dev servers, watchers, " +
 											"or long work whose result is not needed before the next action. " +
-											"The result arrives on its own when it finishes: do not poll or wait for it, carry on or end your turn. " +
+											"The result arrives on its own when it finishes: do not poll for it; carry on with other work. If your answer to the user needs its output, wait for it with bash_output instead of ending your turn. " +
 											"bash_kill({task_id}) stops it. If omitted, a command that runs long is moved to the background for you.",
 									},
 								}
