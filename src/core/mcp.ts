@@ -24,6 +24,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { Agent } from "undici";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import type { Tool } from "./llm.ts";
@@ -144,6 +145,8 @@ export interface McpToolHandle {
 export interface McpConnection {
 	serverName: string;
 	toolCount: number;
+	/** The server declared the `resources` capability: it has list_resources and read_resource tools beside its own. */
+	resources?: boolean;
 	client: Client;
 	/** Cleared when the transport closes or errors — a stdio server that
 	 *  crashed, an HTTP one that started refusing. Nothing used to notice:
@@ -248,6 +251,215 @@ export async function listMcpTools(
 		cursor = page.nextCursor;
 	} while (cursor);
 	return tools;
+}
+
+/** Pages of resources/list or resources/templates/list followed, and entries listed, before the rest is only counted. */
+const RESOURCE_MAX_PAGES = 20;
+const RESOURCE_MAX_LISTED = 200;
+
+interface ResourceEntry {
+	uri: string;
+	name?: string;
+	title?: string;
+	description?: string;
+	mimeType?: string;
+	size?: number;
+}
+
+interface ResourceTemplateEntry {
+	uriTemplate: string;
+	name?: string;
+	title?: string;
+	description?: string;
+	mimeType?: string;
+}
+
+async function listAllPages<T>(
+	fetchPage: (cursor: string | undefined) => Promise<{ items: T[]; nextCursor?: string }>,
+): Promise<{ items: T[]; more: boolean }> {
+	const items: T[] = [];
+	const seen = new Set<string>();
+	let cursor: string | undefined;
+	for (let page = 0; page < RESOURCE_MAX_PAGES; page++) {
+		// biome-ignore lint/performance/noAwaitInLoops: pagination — each page's cursor depends on the previous response
+		const got = await fetchPage(cursor);
+		items.push(...got.items);
+		cursor = got.nextCursor;
+		if (!cursor || seen.has(cursor) || items.length >= RESOURCE_MAX_LISTED) {
+			return {
+				items: items.slice(0, RESOURCE_MAX_LISTED),
+				more: Boolean(cursor) || items.length > RESOURCE_MAX_LISTED,
+			};
+		}
+		seen.add(cursor);
+	}
+	return { items, more: true };
+}
+
+const describeEntry = (entry: {
+	name?: string;
+	title?: string;
+	description?: string;
+	mimeType?: string;
+	size?: number;
+}) => {
+	const label = entry.title ?? entry.name;
+	const facts = [entry.mimeType, entry.size !== undefined ? formatBytes(entry.size) : undefined]
+		.filter(Boolean)
+		.join(", ");
+	return [label, facts ? `(${facts})` : "", entry.description ? `— ${entry.description}` : ""]
+		.filter(Boolean)
+		.join(" ");
+};
+
+/** The text a model reads for resources/list and resources/templates/list: URIs first, since read_resource takes one. */
+export function formatResourceListing(
+	serverName: string,
+	resources: ResourceEntry[],
+	templates: ResourceTemplateEntry[],
+	more: boolean,
+): string {
+	if (resources.length === 0 && templates.length === 0) return `The MCP server "${serverName}" offers no resources.`;
+	const lines: string[] = [`Resources of "${serverName}" (read one with read_resource and its URI):`];
+	for (const r of resources) lines.push(`- ${r.uri}  ${describeEntry(r)}`.trimEnd());
+	if (templates.length > 0) {
+		lines.push("", "Resource templates (fill in the {placeholders} to make a URI for read_resource):");
+		for (const t of templates) lines.push(`- ${t.uriTemplate}  ${describeEntry(t)}`.trimEnd());
+	}
+	if (more) lines.push("", `[the server has more than the ${RESOURCE_MAX_LISTED} listed]`);
+	return lines.join("\n");
+}
+
+interface ResourceContent {
+	uri: string;
+	mimeType?: string;
+	text?: string;
+	blob?: string;
+}
+
+/** What read_resource returns: text as it is, an image as an image, any other binary as a note of what it was. */
+export function formatResourceContents(uri: string, contents: ResourceContent[]): ToolResult {
+	const fragments: string[] = [];
+	let image: ResourceContent | undefined;
+	let extraImages = 0;
+	for (const c of contents) {
+		const heading = contents.length > 1 ? `[${c.uri}${c.mimeType ? ` (${c.mimeType})` : ""}]\n` : "";
+		if (c.text !== undefined) {
+			fragments.push(`${heading}${c.text}`);
+		} else if (c.blob !== undefined && c.mimeType?.startsWith("image/")) {
+			if (!image) image = c;
+			else extraImages++;
+		} else if (c.blob !== undefined) {
+			fragments.push(
+				`${heading}[binary resource omitted: ${c.mimeType ?? "unknown type"}, ${formatBytes(Buffer.byteLength(c.blob, "base64"))}]`,
+			);
+		}
+	}
+	if (extraImages > 0) fragments.push(`[${extraImages} additional image(s) omitted]`);
+	const text = capMcpText(fragments.join("\n\n"));
+	return {
+		content: text || (image ? `[image resource ${image.uri}]` : `The resource ${uri} is empty.`),
+		imageDataUrl: image ? `data:${image.mimeType};base64,${image.blob}` : undefined,
+	};
+}
+
+/**
+ * Gives a server that offers resources a pair of tools for them (`mcp_<server>_list_resources` and
+ * `mcp_<server>_read_resource`), in the same index as its own tools so persona allowlists, reconnects and the prompt
+ * treat them like any other. A tool the server already has under one of those names wins: servers that predate
+ * resource support often expose a tool of that name for the same purpose.
+ */
+function addResourceTools(
+	result: McpSetupResult,
+	serverName: string,
+	client: Client,
+	connectionRef: { value?: McpConnection },
+): void {
+	const deadServer = (): ToolResult | undefined =>
+		connectionRef.value?.alive
+			? undefined
+			: {
+					content: `The MCP server "${serverName}" is no longer connected${
+						connectionRef.value?.deadReason ? ` (${connectionRef.value.deadReason})` : ""
+					}. Its resources are unavailable until the user runs /mcp reconnect — do not keep retrying.`,
+					isError: true,
+				};
+	const failed = (what: string, error: unknown): ToolResult => ({
+		content: `MCP server "${serverName}" ${what} failed: ${error instanceof Error ? error.message : String(error)}. Check the server connection and the URI, then retry.`,
+		isError: true,
+	});
+	const add = (
+		toolName: string,
+		description: string,
+		parameters: Record<string, unknown>,
+		call: McpToolHandle["call"],
+	) => {
+		const name = mcpToolName(serverName, toolName);
+		if (result.toolIndex.has(name)) return;
+		const definition: Tool = {
+			type: "function",
+			function: { name, description: `[${serverName}] ${description}`, parameters },
+		};
+		result.toolDefinitions.push(definition);
+		result.toolIndex.set(name, { definition, call });
+	};
+
+	add(
+		"list_resources",
+		"List what this server can show you besides tools: its resources (documents, files, records) with their URIs, and its resource templates. Read one with read_resource.",
+		{ type: "object", properties: {} },
+		async (_args, signal): Promise<ToolResult> => {
+			const dead = deadServer();
+			if (dead) return dead;
+			const timeout = mcpToolTimeoutMs();
+			const options = { signal, ...(timeout === undefined ? {} : { timeout }) };
+			try {
+				const resources = await listAllPages<ResourceEntry>(async (cursor) => {
+					const page = await client.listResources(cursor ? { cursor } : undefined, options);
+					return { items: page.resources as ResourceEntry[], nextCursor: page.nextCursor };
+				});
+				// Templates are optional even for a server that has resources: a refusal to list them is not a failure.
+				const templates = await listAllPages<ResourceTemplateEntry>(async (cursor) => {
+					const page = await client.listResourceTemplates(cursor ? { cursor } : undefined, options);
+					return { items: page.resourceTemplates as ResourceTemplateEntry[], nextCursor: page.nextCursor };
+				}).catch(() => ({ items: [] as ResourceTemplateEntry[], more: false }));
+				return {
+					content: capMcpText(
+						formatResourceListing(serverName, resources.items, templates.items, resources.more || templates.more),
+					),
+				};
+			} catch (error) {
+				return failed("resources/list", error);
+			}
+		},
+	);
+
+	add(
+		"read_resource",
+		"Read one resource by its URI, as given by list_resources (or built from one of its templates). Returns its text; an image is shown, other binary content is only described.",
+		{
+			type: "object",
+			properties: { uri: { type: "string", description: "The resource's URI, exactly as listed" } },
+			required: ["uri"],
+		},
+		async (args, signal): Promise<ToolResult> => {
+			const uri = typeof args.uri === "string" ? args.uri.trim() : "";
+			if (!uri)
+				return {
+					content: "Error: uri is required — the URI of a resource, as list_resources gives it.",
+					isError: true,
+				};
+			const dead = deadServer();
+			if (dead) return dead;
+			try {
+				const timeout = mcpToolTimeoutMs();
+				const read = await client.readResource({ uri }, { signal, ...(timeout === undefined ? {} : { timeout }) });
+				return formatResourceContents(uri, read.contents as ResourceContent[]);
+			} catch (error) {
+				return failed(`resource "${uri}"`, error);
+			}
+		},
+	);
 }
 
 interface McpContentPart {
@@ -401,7 +613,12 @@ export async function connectMcpServers(
 						throw new Error(`Streamable HTTP: ${trim(msg)}; SSE fallback: ${trim(sseMsg)}`);
 					}
 				}
-				const tools = await listMcpTools(client, connectTimeoutMs);
+				// A server that offers only resources (a docs or wiki server) or only prompts has no tools/list: it answers
+				// "Method not found", and that is not a failed connection.
+				const tools = await listMcpTools(client, connectTimeoutMs).catch((error: unknown) => {
+					if (error instanceof McpError && error.code === ErrorCode.MethodNotFound) return [];
+					throw error;
+				});
 
 				// Filled in just below, once the connection object exists — the tool
 				// handles close over it so a call can see the server has since died.
@@ -505,9 +722,14 @@ export async function connectMcpServers(
 					});
 				}
 
+				// What the server offers besides tools. One with only tools declares no `resources` capability.
+				const offersResources = Boolean(client.getServerCapabilities()?.resources);
+				if (offersResources) addResourceTools(setupResult, serverName, client, connectionRef);
+
 				const connection: McpConnection = {
 					serverName,
 					toolCount: tools.length,
+					resources: offersResources || undefined,
 					client,
 					alive: true,
 					config: cfg,
@@ -595,8 +817,15 @@ export function formatMcpForPrompt(result: McpSetupResult, personaMcpAllowlist?:
 			: live;
 	if (servers.length === 0) return "";
 	const lines = ["\n<available_mcp>", "  <!-- Only enabled MCP servers are listed. -->"];
+	if (servers.some((c) => c.resources)) {
+		lines.push(
+			'  <!-- resources="true": the server also offers resources (documents, files, records); list and read them with its list_resources and read_resource tools. -->',
+		);
+	}
 	for (const c of servers) {
-		lines.push(`  <server name="${escapeXml(c.serverName)}" tools="${c.toolCount}">`);
+		lines.push(
+			`  <server name="${escapeXml(c.serverName)}" tools="${c.toolCount}"${c.resources ? ' resources="true"' : ""}>`,
+		);
 		for (const t of result.toolDefinitions) {
 			if (t.function.description?.startsWith(`[${c.serverName}]`)) {
 				lines.push(`    <tool>${escapeXml(t.function.name)}</tool>`);

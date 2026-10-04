@@ -7,6 +7,8 @@ import {
 	closeMcpConnections,
 	connectMcpServers,
 	formatMcpForPrompt,
+	formatResourceContents,
+	formatResourceListing,
 	listMcpTools,
 	loadMcpConfig,
 	mcpHttpFetch,
@@ -555,6 +557,164 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		} finally {
 			await closeMcpConnections(result.connections);
 		}
+	});
+});
+
+describe("MCP resources (real spawned server, not mocked)", () => {
+	const connect = (...flags: string[]) =>
+		connectMcpServers({ docs: { command: "node", args: [FIXTURE_SERVER, ...flags] } });
+	const call = async (result: Awaited<ReturnType<typeof connect>>, tool: string, args: Record<string, unknown> = {}) =>
+		result.toolIndex.get(`mcp_docs_${tool}`)!.call(args);
+
+	it("gives a server that offers resources a list and a read tool, and says so in the prompt", async () => {
+		const result = await connect("--resources");
+		try {
+			expect(result.diagnostics).toEqual([]);
+			expect(result.connections[0]?.resources).toBe(true);
+			expect([...result.toolIndex.keys()]).toEqual(
+				expect.arrayContaining(["mcp_docs_list_resources", "mcp_docs_read_resource"]),
+			);
+			expect(result.toolDefinitions.filter((t) => t.function.description?.startsWith("[docs]")).length).toBe(6);
+			expect(formatMcpForPrompt(result)).toContain('resources="true"');
+			expect(formatMcpForPrompt(result)).toContain("mcp_docs_read_resource");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("connects a server that offers only resources and has no tools/list", async () => {
+		const result = await connect("--resources-only");
+		try {
+			expect(result.diagnostics).toEqual([]);
+			expect(result.connections[0]).toMatchObject({
+				serverName: "docs",
+				toolCount: 0,
+				resources: true,
+				alive: true,
+			});
+			expect([...result.toolIndex.keys()].sort()).toEqual(["mcp_docs_list_resources", "mcp_docs_read_resource"]);
+			expect((await call(result, "read_resource", { uri: "notes:///only" })).content).toBe("the only note");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("gives a server with only tools neither, and does not claim resources", async () => {
+		const result = await connect();
+		try {
+			expect([...result.toolIndex.keys()].some((name) => name.includes("resource"))).toBe(false);
+			expect(result.connections[0]?.resources).toBeUndefined();
+			expect(formatMcpForPrompt(result)).not.toContain("resources=");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("lists the resources with their URIs, and the templates", async () => {
+		const result = await connect("--resources");
+		try {
+			const listed = await call(result, "list_resources");
+			expect(listed.isError).toBeFalsy();
+			expect(listed.content).toContain("file:///docs/readme.md");
+			expect(listed.content).toContain("Readme (text/markdown) — the project readme");
+			expect(listed.content).toContain("blob:///assets/logo.png");
+			expect(listed.content).toContain("notes://{id}");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("follows the pages of a long listing", async () => {
+		const result = await connect("--resources-paged");
+		try {
+			const listed = await call(result, "list_resources");
+			expect(listed.content).toContain("page:///one");
+			expect(listed.content).toContain("page:///two");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("reads a text resource, an image as an image, and other binary as a note", async () => {
+		const result = await connect("--resources");
+		try {
+			const text = await call(result, "read_resource", { uri: "file:///docs/readme.md" });
+			expect(text.content).toBe("# Readme\nDeploy step 3 is: flush the cache.");
+			const image = await call(result, "read_resource", { uri: "blob:///assets/logo.png" });
+			expect(image.imageDataUrl).toBe("data:image/png;base64,aGVsbG8=");
+			const binary = await call(result, "read_resource", { uri: "blob:///assets/data.bin" });
+			expect(binary.imageDataUrl).toBeUndefined();
+			expect(binary.content).toBe("[binary resource omitted: application/octet-stream, 10B]");
+			const templated = await call(result, "read_resource", { uri: "notes://42" });
+			expect(templated.content).toBe("note 42");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("says what went wrong: no URI, an unknown one, a server that is down for resources", async () => {
+		const result = await connect("--resources");
+		const broken = await connect("--resources-broken");
+		try {
+			expect((await call(result, "read_resource", {})).content).toMatch(/uri is required/);
+			const unknown = await call(result, "read_resource", { uri: "file:///nope" });
+			expect(unknown.isError).toBe(true);
+			expect(unknown.content).toContain('MCP server "docs" resource "file:///nope" failed');
+			const down = await call(broken, "list_resources");
+			expect(down.isError).toBe(true);
+			expect(down.content).toContain("resources are down");
+		} finally {
+			await closeMcpConnections([...result.connections, ...broken.connections]);
+		}
+	});
+
+	it("keeps a tool the server already has under that name", async () => {
+		const result = await connect("--resources-own-tool");
+		try {
+			expect((await call(result, "list_resources")).content).toBe("own listing");
+			expect((await call(result, "read_resource", { uri: "x://y" })).content).toBe("own read");
+			expect(result.toolDefinitions.filter((t) => t.function.name === "mcp_docs_list_resources")).toHaveLength(1);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("tells the model the server is gone, and not to keep trying", async () => {
+		const result = await connect("--resources");
+		const handle = result.toolIndex.get("mcp_docs_read_resource")!;
+		result.connections[0]!.alive = false;
+		result.connections[0]!.deadReason = "the connection closed";
+		try {
+			const res = await handle.call({ uri: "file:///docs/readme.md" });
+			expect(res.isError).toBe(true);
+			expect(res.content).toContain("no longer connected");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+});
+
+describe("formatResourceListing / formatResourceContents", () => {
+	it("says when there is nothing, and when there is more than was listed", () => {
+		expect(formatResourceListing("s", [], [], false)).toBe('The MCP server "s" offers no resources.');
+		expect(formatResourceListing("s", [{ uri: "a://b", name: "b" }], [], true)).toContain("more than the 200 listed");
+	});
+
+	it("headings each part when a resource has several, and notes extra images", () => {
+		const result = formatResourceContents("multi://x", [
+			{ uri: "multi://x/1", mimeType: "text/plain", text: "one" },
+			{ uri: "multi://x/2", text: "two" },
+			{ uri: "multi://x/3", mimeType: "image/png", blob: "aGk=" },
+			{ uri: "multi://x/4", mimeType: "image/png", blob: "aGk=" },
+		]);
+		expect(result.content).toContain("[multi://x/1 (text/plain)]\none");
+		expect(result.content).toContain("[multi://x/2]\ntwo");
+		expect(result.content).toContain("[1 additional image(s) omitted]");
+		expect(result.imageDataUrl).toBe("data:image/png;base64,aGk=");
+	});
+
+	it("says an empty resource is empty", () => {
+		expect(formatResourceContents("e://x", []).content).toBe("The resource e://x is empty.");
 	});
 });
 
