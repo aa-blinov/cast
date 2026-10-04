@@ -12,6 +12,7 @@ const WHITESPACE_RE = /\s+/;
 /** Commands that work while the agent is running. */
 export const NON_BLOCKING_COMMANDS = new Set([
 	"/abort",
+	"/btw",
 	"/stop",
 	"/current",
 	"/help",
@@ -81,6 +82,12 @@ export const SLASH_COMMANDS: Array<{
 	hidden?: boolean;
 }> = [
 	{ name: "/abort", description: "Abort the current run", blocking: false, hidden: true },
+	{
+		name: "/btw",
+		description: "Ask a side question: answered from the conversation, kept out of it — question",
+		takesArgs: true,
+		blocking: false,
+	},
 	{ name: "/build", description: "Exit plan mode, restore full toolset", blocking: true },
 	{ name: "/clear", description: "Clear context (and save)", blocking: true },
 	{

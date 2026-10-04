@@ -237,6 +237,62 @@ function displayMessageText(calls: Calls, index = 1): string {
 }
 
 describe("handleInput", () => {
+	describe("/btw", () => {
+		const answer = (text: string) =>
+			vi.mocked(streamAndCollect).mockResolvedValueOnce({
+				content: text,
+				finishReason: "stop",
+				usage: { promptTokens: 50, completionTokens: 4, totalTokens: 54 },
+			} as never);
+
+		it("answers from the conversation as a notice, and does not add it to the conversation", async () => {
+			const { deps, calls } = createFakeDeps();
+			deps.session.messages = [{ role: "user", content: "refactor the parser" }] as never;
+			answer("Two passes.");
+			await handleInput("/btw how many passes?", undefined, deps);
+			expect(calls["agent.submit"]).toBeUndefined();
+			const shown = calls["agent.addDisplayMessage"]!.map((c) => (c[0] as { content: string }).content);
+			expect(shown).toContain("btw: Two passes.");
+			expect(deps.session.messages).toHaveLength(1);
+			const request = vi.mocked(streamAndCollect).mock.calls.at(-1)![2] as Array<{ role: string; content: string }>;
+			expect(request.at(-1)!.content).toContain("how many passes?");
+			expect(vi.mocked(streamAndCollect).mock.calls.at(-1)![3]).toEqual([]);
+			expect(deps.session.usage.totalTokens).toBe(204);
+		});
+
+		it("is accepted while a turn runs, and then leaves the session's totals alone", async () => {
+			const { deps, calls } = createFakeDeps({ running: true });
+			answer("Still on it.");
+			await handleInput("/btw status?", undefined, deps);
+			expect(noticeText(calls)).not.toContain("Agent running");
+			expect((calls["agent.addDisplayMessage"]!.at(-1)![0] as { content: string }).content).toBe(
+				"btw: Still on it.",
+			);
+			expect(deps.session.usage.totalTokens).toBe(150);
+		});
+
+		it("asks the daemon when attached to one", async () => {
+			const { deps, calls } = createFakeDeps();
+			(deps.agent as { daemonMode: boolean }).daemonMode = true;
+			const runCommand = vi.fn(async () => "From the daemon.");
+			(deps.agent as unknown as { runCommand: typeof runCommand }).runCommand = runCommand;
+			await handleInput("/btw what now?", undefined, deps);
+			expect(runCommand).toHaveBeenCalledWith("/btw what now?");
+			expect((calls["agent.addDisplayMessage"]!.at(-1)![0] as { content: string }).content).toBe(
+				"btw: From the daemon.",
+			);
+		});
+
+		it("needs a question, and says what went wrong", async () => {
+			const { deps, calls } = createFakeDeps();
+			await handleInput("/btw", undefined, deps);
+			expect(noticeText(calls)).toContain("Usage: /btw");
+			vi.mocked(streamAndCollect).mockRejectedValueOnce(new Error("provider down"));
+			await handleInput("/btw hello?", undefined, deps);
+			expect(calls.showNotice!.at(-1)![0]).toContain("btw failed: provider down");
+		});
+	});
+
 	describe("!command", () => {
 		it("runs it for the person: no model turn, the result goes into the conversation and the screen refreshes", async () => {
 			const { deps, calls } = createFakeDeps();

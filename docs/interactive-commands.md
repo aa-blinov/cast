@@ -185,7 +185,15 @@ These commands work while the agent is running:
 | `/steer <message>` | `/s` | Inject a message into the running turn |
 | `/queue <message>` | `/q` | Queue a message for after the current turn |
 | `/queue-reset` | `/qr` | Clear the message queue |
+| `/btw <question>` | | Ask a question on the side: answered from the conversation, kept out of it |
 | `/abort`, `/stop` | | Stop current agent run |
+
+**`/btw`** asks the model something without touching the work. It sends the conversation so far, with your question, to the model with **no tools**, and shows the answer as a notice (`btw: ...`) in the terminal and the web UI. **Neither the question nor the answer joins the conversation**: it is not saved, not summarised by a compaction, and the model's next turn knows nothing of it. Use it for "what did that flag do again?" or "which file did you change?" in the middle of a long task, without steering it or paying for a new turn of the agent.
+
+- **While a turn runs** it works too, and it also hears what that turn has said and done so far (its text and tool calls, newest last), which the saved conversation does not hold until the turn ends. Typing the question as an ordinary message would steer the work instead; `/btw` never does.
+- **The model answers from what is in the conversation.** It is told to say so when the answer is not there instead of guessing; it cannot read files or run anything for this. Ask for that as a message.
+- **Cost.** It is billed like any request (a provider that caches prefixes serves the conversation from its cache, since it is sent as the turns send it). Idle, the tokens join the session's usage; during a turn they go to the usage dashboard only. A conversation that fills the model's window is refused with a pointer to `/compact`.
+- **Over `cast run`** send it as a `command` action (`{"type":"command","name":"btw","args":" what changed?"}`); the answer comes back as a notice. Not available over ACP.
 
 **`/steer`** interrupts the current turn with new context: the message is injected immediately into the conversation, and the agent sees it on the next tool-call iteration. Useful for correcting course mid-execution.
 
@@ -288,6 +296,7 @@ Action ids are the ones in [`keybindings.ts`](https://github.com/aa-blinov/cast/
 Typing a plain message steers the running turn. No command needed. Besides that, these commands are accepted while the agent is executing:
 
 - `/steer` / `/s`: inject context
+- `/btw`: ask on the side, without steering
 - `/queue` / `/q`: queue follow-up
 - `/queue-reset` / `/qr`: clear queue
 - `/abort` / `/stop`: stop the run

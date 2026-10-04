@@ -51,6 +51,7 @@ const WORKTREE_REMOVE_PREFIX_RE = /^(?:remove|rm)\s*(.*)$/;
 const WORKTREE_FORCE_FLAG_RE = /(^|\s)(--force|-f)(\s|$)/;
 const WORKTREE_FORCE_STRIP_RE = /(^|\s)(--force|-f)(?=\s|$)/g;
 
+import { askSideQuestion, describeInFlight } from "../../core/btw.ts";
 import type { AppConfig, ModelInfo } from "../../core/config.ts";
 import { fetchModels, probeProvider } from "../../core/config.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
@@ -907,6 +908,58 @@ const commandHandlers: Record<string, CommandHandler> = {
 		ws.session.lastPromptTokens = undefined;
 		saveSession(ws.session);
 		return { ok: true, result: "Context cleared" };
+	},
+	"/btw": async ({ ws, arg, config, loadSettings, saveSession }) => {
+		const question = arg.trim();
+		if (!question) return { ok: false, error: "Usage: /btw <question>" };
+		// The session's own provider, matched the way a turn matches it.
+		const providers = loadSettings().providers ?? [];
+		const sessionProvider = ws.session.providerName
+			? providers.find((p) => p.name === ws.session.providerName)
+			: ws.session.providerUrl
+				? providers.find((p) => p.url === ws.session.providerUrl)
+				: undefined;
+		const running = ws.status === "running";
+		try {
+			const answer = await askSideQuestion(
+				{
+					config: {
+						...config,
+						baseURL: sessionProvider?.url ?? config.baseURL,
+						apiKey: sessionProvider?.apiKey ?? config.apiKey,
+					},
+					model: ws.session.model,
+					systemPrompt: ws.systemPrompt,
+					history: ws.session.messages,
+					inFlight: running ? describeInFlight(ws.activeStream) : undefined,
+					sessionId: ws.id,
+				},
+				question,
+			);
+			if (answer.usage) {
+				// Billed like any request. While a turn runs the session object belongs to it (it writes its own copy
+				// back at the end), so the cost goes to the dashboard only; idle, it joins the session's total too.
+				if (!running && ws.status !== "running") {
+					addUsage(ws.session, answer.usage);
+					saveSession(ws.session);
+				}
+				recordLlmRequest({
+					sessionId: ws.id,
+					provider: ws.session.providerName ?? loadSettings().modelProvider ?? "default",
+					model: ws.session.model,
+					kind: "side",
+					promptTokens: answer.usage.promptTokens,
+					completionTokens: answer.usage.completionTokens,
+					cacheReadTokens: answer.usage.cacheReadTokens,
+					cacheWriteTokens: answer.usage.cacheWriteTokens,
+					cost: answer.usage.cost,
+					contextWindow: config.contextWindow,
+				});
+			}
+			return { ok: true, result: answer.text };
+		} catch (error) {
+			return { ok: false, error: error instanceof Error ? error.message : String(error) };
+		}
 	},
 	"/compact": async ({ ws, cwd, config, trustForSessionCwd, broadcaster, saveSession, syncFsWatcher }) => {
 		if (ws.session.messages.length === 0) return { ok: true, result: "Nothing to compact yet" };

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
+import { askSideQuestion, describeInFlight } from "../core/btw.ts";
 import { filesLostByRestore, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
@@ -249,6 +250,11 @@ const SETTING_COMMANDS = new Set([
 export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArgs?: boolean; hidden?: boolean }> = [
 	{ name: "/abort", description: "Abort the current run" },
 	{ name: "/agents", description: "This session's subagents: show one, or stop a running one" },
+	{
+		name: "/btw",
+		description: "Ask a side question: answered from the conversation, kept out of it",
+		takesArgs: true,
+	},
 	{ name: "/build", description: "Exit plan mode, restore full toolset" },
 	{ name: "/clear", description: "Clear context (and save)" },
 	{
@@ -1526,6 +1532,48 @@ const COMMAND_ROUTES: CommandRoute[] = [
 		match: (input) => isCommand(input, "/abort", "/stop"),
 		whileRunning: "submit",
 		run: ({ agent }) => agent.abort(),
+	},
+	{
+		// A question on the side: answered from the conversation, kept out of it, and fine while a turn runs.
+		match: (input) => isCommand(input, "/btw"),
+		whileRunning: "submit",
+		run: async ({ input, deps, agent, session, config, running, showNotice }) => {
+			echoCommand(deps, input);
+			const question = input.slice("/btw".length).trim();
+			if (!question) {
+				showNotice("[Usage: /btw <question>, answered from this conversation and kept out of it]");
+				return;
+			}
+			showNotice("[btw: asking…]");
+			try {
+				let text: string;
+				if (agent.daemonMode) {
+					// The daemon holds the conversation, and what its running turn has done so far.
+					text = String(await agent.runCommand(`/btw ${question}`));
+				} else {
+					const answer = await askSideQuestion(
+						{
+							config,
+							model: session.model,
+							systemPrompt: deps.systemPrompt,
+							history: session.messages,
+							inFlight: running ? describeInFlight(agent.streaming?.blocks) : undefined,
+							sessionId: session.id,
+						},
+						question,
+					);
+					// While a turn runs the session belongs to it; idle, the answer's tokens join the session's total.
+					if (answer.usage && !running) {
+						addUsage(session, answer.usage);
+						saveSession(session);
+					}
+					text = answer.text;
+				}
+				agent.addDisplayMessage({ role: "warning", content: `btw: ${text}` });
+			} catch (error) {
+				showNotice(`[btw failed: ${error instanceof Error ? error.message : String(error)}]`);
+			}
+		},
 	},
 	{
 		match: (input) => isCommand(input, "/steer", "/s"),

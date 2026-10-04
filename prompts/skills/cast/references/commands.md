@@ -44,6 +44,7 @@
 | `/agents` | This session's subagents: open one's session, or stop a running one |
 | `/context` | List the loaded AGENTS.md / CLAUDE.md context files |
 | `/steer <message>` (`/s`) | Inject a message while the agent is running |
+| `/btw <question>` | Ask a side question: answered from the conversation with no tools, kept out of it (not saved, no steering); works while a turn runs |
 | `/queue <message>` (`/q`) | Queue a message for after the agent stops |
 | `/queue-reset` (`/qr`) | Clear the message queue |
 | `/reasoning` | Change reasoning level |
