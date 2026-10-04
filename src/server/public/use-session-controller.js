@@ -180,6 +180,31 @@ export function useSessionController({
 		}
 	}, [setSessions, sessionsOffsetRef, sessionsTotalRef]);
 
+	// Grouping by project and filtering by one need every session, not the first pages: fetch the rest in big pages.
+	const loadAllSessions = useCallback(async () => {
+		if (loadingMoreRef.current) return;
+		loadingMoreRef.current = true;
+		setLoadingMore(true);
+		try {
+			for (;;) {
+				const offset = sessionsOffsetRef.current;
+				if (offset >= sessionsTotalRef.current) break;
+				const data = await api("GET", `/api/sessions?limit=200&offset=${offset}`);
+				const page = Array.isArray(data) ? data : (data.sessions ?? []);
+				if (page.length === 0) break;
+				setSessions((prev) => {
+					const seen = new Set(prev.map((s) => s.id));
+					return [...prev, ...page.filter((s) => !seen.has(s.id))];
+				});
+				sessionsOffsetRef.current += page.length;
+			}
+		} catch {
+		} finally {
+			loadingMoreRef.current = false;
+			setLoadingMore(false);
+		}
+	}, [setSessions, sessionsOffsetRef, sessionsTotalRef]);
+
 	// Select session — `push` controls whether this lands as a new browser
 	// history entry (a real click) or just replaces the current URL
 	// (programmatic: initial bootstrap, reconnect recovery, popstate).
@@ -618,6 +643,7 @@ export function useSessionController({
 
 	return {
 		loadSessions,
+		loadAllSessions,
 		loadMoreSessions,
 		loadingMore,
 		selectSession,

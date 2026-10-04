@@ -4,9 +4,30 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { SidebarSessionItem } from "./sidebar-session-item.js";
-import { groupSessionsByDate, SANDBOX_CWD, sortSessionsByActivity, visibleSessions } from "./sidebar-utils.js";
+import {
+	groupSessionsByDate,
+	groupSessionsByProject,
+	listProjects,
+	projectLabels,
+	projectOf,
+	SANDBOX_CWD,
+	splitPinned,
+	visibleSessions,
+} from "./sidebar-utils.js";
 
 const html = htm.bind(h);
+
+const GROUP_KEY = "cast:sidebarGroup";
+// Asks for the rest of the sessions: only the first pages are loaded, and the project list is made of what is loaded.
+const MORE_PROJECTS = "__more";
+
+function readGroupBy() {
+	try {
+		return localStorage.getItem(GROUP_KEY) === "project" ? "project" : "date";
+	} catch {
+		return "date";
+	}
+}
 
 export function Sidebar({
 	sessions,
@@ -32,6 +53,7 @@ export function Sidebar({
 	resizeHandleProps,
 	hasMore,
 	onLoadMore,
+	onLoadAll,
 	loadingMore,
 }) {
 	const [search, setSearch] = useState("");
@@ -175,11 +197,40 @@ export function Sidebar({
 	// you mean this specific session").
 	const isSearching = search.trim().length > 0;
 	const searching = isSearching && searchResults === null;
-	const filtered = isSearching ? (searchResults ?? []) : visibleSessions(sessions, activeId);
-	const sessionGroups = isSearching ? [] : groupSessionsByDate(filtered);
+	const [groupBy, setGroupBy] = useState(readGroupBy);
+	const [project, setProject] = useState(null);
+	const chooseGroupBy = (next) => {
+		setGroupBy(next);
+		try {
+			localStorage.setItem(GROUP_KEY, next);
+		} catch {}
+	};
+	const shown = visibleSessions(sessions, activeId);
+	const projects = listProjects(shown);
+	const labels = projectLabels(projects.map((p) => p.key));
+	// A project whose sessions are all gone is not a filter anymore.
+	const activeProject = project && projects.some((p) => p.key === project) ? project : null;
+	const base = isSearching ? (searchResults ?? []) : shown;
+	const filtered = activeProject ? base.filter((s) => projectOf(s) === activeProject) : base;
+	// Pinned sessions are one list above the groups, not each in its own month; a search keeps the server's ranking.
+	const { pinned, rest } = isSearching ? { pinned: [], rest: filtered } : splitPinned(filtered);
+	const byProject = groupBy === "project" && !activeProject;
+	const sessionGroups = isSearching
+		? []
+		: byProject
+			? groupSessionsByProject(rest).map((g) => [
+					g.key,
+					{ label: labels.get(g.key), title: g.key === SANDBOX_CWD ? "Throwaway sandbox folders" : g.key, count: g.sessions.length, sessions: g.sessions, project: true },
+				])
+			: groupSessionsByDate(rest);
+	// Grouping by project and filtering by one need all of the sessions, not the pages loaded so far.
+	const needsAll = (groupBy === "project" || activeProject !== null) && !isSearching;
+	useEffect(() => {
+		if (needsAll && hasMore && onLoadAll) onLoadAll();
+	}, [needsAll, hasMore, onLoadAll]);
 
 	useEffect(() => {
-		if (!hasMore || !onLoadMore || isSearching) return;
+		if (!hasMore || !onLoadMore || isSearching || needsAll) return;
 		const el = loadMoreRef.current;
 		if (!el) return;
 		const obs = new IntersectionObserver((entries) => {
@@ -187,7 +238,7 @@ export function Sidebar({
 		}, { root: el.closest(".sidebar-scroll"), threshold: 0.1 });
 		obs.observe(el);
 		return () => obs.disconnect();
-	}, [hasMore, onLoadMore, isSearching, sessions.length]);
+	}, [hasMore, onLoadMore, isSearching, needsAll, sessions.length]);
 
 	// Escape unmounts the focused input, and the browser fires blur on the way out: without this the blur
 	// handler saved the text that Escape was meant to throw away.
@@ -231,7 +282,7 @@ export function Sidebar({
 		if (await confirm(message)) onDeleteSession(s.id);
 	};
 
-	const renderItem = (s) => html`<${SidebarSessionItem}
+	const renderItem = (s, hideFolder = false) => html`<${SidebarSessionItem}
 		session=${s}
 		activeId=${activeId}
 		selectingId=${selectingId}
@@ -245,7 +296,9 @@ export function Sidebar({
 		startEdit=${startEdit}
 		menuFor=${menuFor}
 		openMenu=${openMenu}
+		hideFolder=${hideFolder}
 	/>`;
+	const itemsOf = (list, hideFolder = false) => list.map((s) => renderItem(s, hideFolder));
 	// The open row's menu — rendered once here, at the <nav> level, rather
 	// than inline inside the row. Rows live inside content-visibility:auto
 	// containers (list virtualization for long session lists); a
@@ -255,18 +308,12 @@ export function Sidebar({
 	// to work around that forces a relayout of the whole group, which jumps
 	// the scroll position. Rendering at the top level sidesteps all of it.
 	const menuSession = menuFor ? filtered.find((s) => s.id === menuFor) : null;
-	const renderGroup = ([key, group]) => {
-		const groupSessions = [...group.sessions].sort((a, b) => {
-			if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-			return sortSessionsByActivity(a, b);
-		});
-		return html`
-			<div key=${key} class="sidebar-session-group">
-				<h3 class="sidebar-group-label">${group.label}</h3>
-				${groupSessions.map(renderItem)}
-			</div>
-		`;
-	};
+	const renderGroup = ([key, group]) => html`
+		<div key=${key} class="sidebar-session-group">
+			<h3 class="sidebar-group-label${group.project ? " sidebar-group-label-project" : ""}" title=${group.title}>${group.label}${group.count ? html`<span class="sidebar-group-count">${group.count}</span>` : null}</h3>
+			${itemsOf(group.sessions, Boolean(group.project))}
+		</div>
+	`;
 
 	return html`
 		<nav class="sidebar${open ? " open" : ""}" aria-label="Sessions" inert=${collapsed}>
@@ -288,7 +335,16 @@ export function Sidebar({
 			<div class="sidebar-divider" />
 			<div class="sidebar-scroll">
 				<div class="sidebar-section">
-					<h2 class="sidebar-section-title">Sessions</h2>
+					<div class="sidebar-section-head">
+						<h2 class="sidebar-section-title">Sessions</h2>
+						${
+							sessions.length > 4 &&
+							html`<div class="sidebar-group-toggle" role="group" aria-label="Group sessions">
+								<button type="button" class="sidebar-group-btn" aria-pressed=${groupBy === "date"} onClick=${() => chooseGroupBy("date")}>Date</button>
+								<button type="button" class="sidebar-group-btn" aria-pressed=${groupBy === "project"} onClick=${() => chooseGroupBy("project")}>Project</button>
+							</div>`
+						}
+					</div>
 					${
 						sessions.length > 4 &&
 						html`
@@ -308,12 +364,31 @@ export function Sidebar({
 						/>
 					`
 					}
+					${
+						projects.length > 1 &&
+						html`<select class="sidebar-project-select" aria-label="Filter by project" value=${activeProject ?? ""} onChange=${(e) => {
+							if (e.target.value === MORE_PROJECTS) {
+								onLoadAll?.();
+								return;
+							}
+							setProject(e.target.value || null);
+						}}>
+							<option value="">All projects</option>
+							${projects.map((p) => html`<option key=${p.key} value=${p.key}>${labels.get(p.key)}${hasMore ? "" : ` (${p.count})`}</option>`)}
+							${hasMore && html`<option value=${MORE_PROJECTS}>Load all projects…</option>`}
+						</select>`
+					}
 					${isSearching && !searching ? html`<div class="sr-only" role="status">${filtered.length === 1 ? "1 session found" : `${filtered.length} sessions found`}</div>` : null}
-					${isSearching ? filtered.map(renderItem) : sessionGroups.map(renderGroup)}
+					${
+						pinned.length > 0 &&
+						html`<div class="sidebar-session-group sidebar-pinned"><h3 class="sidebar-group-label">Pinned</h3>${itemsOf(pinned)}</div>`
+					}
+					${isSearching ? itemsOf(filtered) : sessionGroups.map(renderGroup)}
+					${needsAll && loadingMore && html`<div class="sidebar-hint" role="status">Loading the rest of the sessions…</div>`}
 					${!sessionsLoaded && html`<div class="sidebar-empty" role="status">Loading</div>`}
 					${sessionsLoaded && searching && html`<div class="sidebar-empty" role="status">Searching…</div>`}
-					${sessionsLoaded && !searching && (isSearching ? filtered.length === 0 : sessionGroups.length === 0) && html`<div class="sidebar-empty" role="status">${isSearching ? `No sessions match "${search}"` : "No sessions yet"}</div>`}
-					${!isSearching && hasMore && sessionsLoaded && html`<button ref=${loadMoreRef} class="sidebar-load-more" onClick=${onLoadMore} disabled=${loadingMore} aria-busy=${loadingMore ? "true" : "false"}>${loadingMore ? html`<${icons.spinner} class="sidebar-load-more-spinner" />` : "Load more"}</button>`}
+					${sessionsLoaded && !searching && (isSearching ? filtered.length === 0 : sessionGroups.length === 0 && pinned.length === 0) && html`<div class="sidebar-empty" role="status">${isSearching ? `No sessions match "${search}"` : "No sessions yet"}</div>`}
+					${!isSearching && !needsAll && hasMore && sessionsLoaded && html`<button ref=${loadMoreRef} class="sidebar-load-more" onClick=${onLoadMore} disabled=${loadingMore} aria-busy=${loadingMore ? "true" : "false"}>${loadingMore ? html`<${icons.spinner} class="sidebar-load-more-spinner" />` : "Load more"}</button>`}
 				</div>
 			</div>
 			<div class="sidebar-footer" title=${defaultModel || (defaultModelLoaded ? "No model selected" : "Loading")}>

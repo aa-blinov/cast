@@ -133,7 +133,7 @@ The `/sessions` picker shows each session's project, first message, last-updated
 
 ### Web UI Sidebar
 
-The Web UI groups sessions by their working directory. Quick sessions created with the `new` action use a dedicated `Sandbox` group; project sessions are grouped by the final directory name rather than the full path. Groups are ordered by latest activity. Within each group, pinned sessions come first, followed by running sessions and then the remaining sessions ordered by `updatedAt`. Pinning stays local to the current directory group, and hovering a group name reveals the full path. Search results remain a flat relevance-ranked list. Use the `…` menu on an idle session and choose **Fork** to branch it; running sessions cannot be forked.
+The Web UI lists sessions by date (Today, Yesterday, Previous 7 days, Previous 30 days, Older). Pinned sessions are one **Pinned** list above everything, newest first, whatever their date. A **Date / Project** switch in the heading groups them by working directory instead, the choice is remembered in the browser: every quick-session sandbox folder is one `Sandbox` group, a project is named by its folder (with its parent where two folders share a name), groups are ordered by latest activity and each is running sessions first, then newest. Hovering a group name shows the full path. A **Filter by project** box under the search narrows either view (and a search) to one project. Grouping by project and filtering load every session, not just the first pages. Search results remain a flat relevance-ranked list. Use the `…` menu on an idle session and choose **Fork** to branch it; running sessions cannot be forked.
 
 ## Creating New Sessions
 

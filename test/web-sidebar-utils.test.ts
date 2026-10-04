@@ -4,13 +4,18 @@ import {
 	DATE_BUCKETS,
 	dateBucketFor,
 	groupSessionsByDate,
+	groupSessionsByProject,
 	isSandboxSessionCwd,
+	listProjects,
+	projectLabels,
+	projectOf,
 	relativeAge,
 	SANDBOX_CWD,
 	sessionLabel,
 	sessionMeta,
 	shortPath,
 	sortSessionsByActivity,
+	splitPinned,
 	visibleSessions,
 } from "../src/server/public/sidebar-utils.js";
 
@@ -124,4 +129,69 @@ it("hides unused sessions except the open, pinned and running ones", () => {
 		{ id: "e", messageCount: 2 },
 	];
 	expect(visibleSessions(list, "b").map((s) => s.id)).toEqual(["b", "c", "d", "e"]);
+});
+
+describe("grouping by project and pinned", () => {
+	const s = (id: string, cwd: string, updatedAt: string, extra: Record<string, unknown> = {}) => ({
+		id,
+		cwd,
+		updatedAt,
+		...extra,
+	});
+	const sessions = [
+		s("a1", "/work/api", "2026-10-01T10:00:00Z"),
+		s("w1", "/work/web", "2026-10-03T10:00:00Z"),
+		s("a2", "/work/api", "2026-10-02T10:00:00Z", { status: "running" }),
+		s("x1", "/tmp/.cast/sandbox/cast-1", "2026-09-01T10:00:00Z"),
+		s("x2", "/tmp/.cast/sandbox/cast-2", "2026-09-02T10:00:00Z"),
+	];
+
+	it("treats every throwaway sandbox folder as one project", () => {
+		expect(projectOf(sessions[3])).toBe(SANDBOX_CWD);
+		expect(projectOf(sessions[4])).toBe(SANDBOX_CWD);
+		expect(projectOf(sessions[0])).toBe("/work/api");
+		expect(projectOf({ id: "n", updatedAt: "2026-10-01T00:00:00Z" })).toBe("");
+	});
+
+	it("lists projects with a count, the most recently used first", () => {
+		expect(listProjects(sessions)).toEqual([
+			{ key: "/work/web", count: 1, updatedAt: "2026-10-03T10:00:00Z" },
+			{ key: "/work/api", count: 2, updatedAt: "2026-10-02T10:00:00Z" },
+			{ key: SANDBOX_CWD, count: 2, updatedAt: "2026-09-02T10:00:00Z" },
+		]);
+	});
+
+	it("groups by project, newest project first, running then newest inside", () => {
+		const groups = groupSessionsByProject(sessions);
+		expect(groups.map((g) => g.key)).toEqual(["/work/web", "/work/api", SANDBOX_CWD]);
+		expect(groups[1].sessions.map((x) => x.id)).toEqual(["a2", "a1"]);
+	});
+
+	it("names a project by its folder, and by the parent too when two share a name", () => {
+		const labels = projectLabels(["/work/api", "/home/me/web", "/srv/web", SANDBOX_CWD, ""]);
+		expect(labels.get("/work/api")).toBe("api");
+		expect(labels.get("/home/me/web")).toBe("me/web");
+		expect(labels.get("/srv/web")).toBe("srv/web");
+		expect(labels.get(SANDBOX_CWD)).toBe("Sandbox");
+		expect(labels.get("")).toBe("No folder");
+	});
+
+	it("takes pinned sessions out of the list, newest first, wherever their date is", () => {
+		const list = [
+			s("old", "/work/api", "2026-01-01T00:00:00Z", { pinned: true }),
+			s("new", "/work/web", "2026-10-03T00:00:00Z"),
+			s("mid", "/work/web", "2026-06-01T00:00:00Z", { pinned: true }),
+		];
+		const { pinned, rest } = splitPinned(list);
+		expect(pinned.map((x) => x.id)).toEqual(["mid", "old"]);
+		expect(rest.map((x) => x.id)).toEqual(["new"]);
+	});
+
+	it("leaves the folder out of the meta line when the group already names it", () => {
+		const now = Date.parse("2026-10-02T12:00:00Z");
+		const session = { cwd: "/work/api", updatedAt: "2026-10-02T11:30:00Z" };
+		expect(sessionMeta(session, now)).toBe("api · 30m");
+		expect(sessionMeta(session, now, { hideFolder: true })).toBe("30m");
+		expect(sessionMeta({ ...session, status: "running" }, now, { hideFolder: true })).toBe("running · 30m");
+	});
 });
