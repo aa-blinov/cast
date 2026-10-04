@@ -276,6 +276,14 @@ describe("shared live relay", () => {
 		expect((ended.result as { isError?: boolean }).isError).toBe(false);
 	});
 
+	it("does not show a viewer of the shared page what is still waiting to be sent", async () => {
+		const { sanitizeSharedLiveEvent } = await import("../src/server/server.ts");
+		expect(sanitizeSharedLiveEvent({ type: "queue_update", items: ["my password is hunter2"] })).toEqual({
+			type: "queue_update",
+			items: [],
+		});
+	});
+
 	it("passes non-tool events through untouched", async () => {
 		const { sanitizeSharedLiveEvent } = await import("../src/server/server.ts");
 		const event = { type: "token", text: "hello" };

@@ -77,6 +77,15 @@ describe("web SSE events", () => {
 		expect(getToolProgress("t1")).toBeUndefined();
 	});
 
+	it("shows the queue the daemon sends, whole, and does not cut it again when a message leaves it", () => {
+		const state = createContext();
+		handleSseEvent({ type: "queue_update", items: ["one", "two"] }, state);
+		expect(state.setPendingQueue).toHaveBeenLastCalledWith(["one", "two"]);
+		state.setPendingQueue.mockClear();
+		handleSseEvent({ type: "followup_injected", messages: [{ role: "user", content: "one" }] }, state);
+		expect(state.setPendingQueue).not.toHaveBeenCalled();
+	});
+
 	it("names the queued and steering messages a stopped run took with it", async () => {
 		const state = createContext();
 		handleSseEvent({ type: "end", reason: "aborted" }, state);

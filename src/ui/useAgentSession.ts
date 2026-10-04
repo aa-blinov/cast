@@ -363,6 +363,8 @@ export interface UseAgentSession {
 	 */
 	loadOlder: () => boolean;
 	resetQueue: () => void;
+	/** Drops the queued message numbered `n` (1-based); resolves to false when there is none. */
+	removeQueued: (n: number) => Promise<boolean>;
 	addDisplayMessage: (message: ChatMessage) => void;
 	/**
 	 * Pending question from the daemon (thin-client mode). The daemon owns
@@ -2044,13 +2046,15 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 						return [...msgs, ...injected];
 					});
 					setError(null);
+					// The queue list itself comes from the daemon's queue_update.
 					if (event.type === "steering_injected") {
 						setPendingSteers((pending) => pending.slice(event.messages.length));
-					} else {
-						setPendingQueue((pending) => pending.slice(event.messages.length));
 					}
 					break;
 				}
+				case "queue_update":
+					setPendingQueue(event.items);
+					break;
 				case "turn_meta":
 					break;
 				case "session_end": {
@@ -2138,9 +2142,9 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		(text: string) => {
 			if (isClient && effectiveDaemonUrl) {
 				if (!serverClient) return;
-				void followUpServerSession(serverClient, session.id, text)
-					.then(() => setPendingQueue((p) => [...p, text]))
-					.catch((err) => setError(err instanceof Error ? err.message : "Could not queue follow-up"));
+				void followUpServerSession(serverClient, session.id, text).catch((err) =>
+					setError(err instanceof Error ? err.message : "Could not queue follow-up"),
+				);
 				return;
 			}
 			runner.followUpQueue.enqueue({ role: "user", content: text });
@@ -2290,11 +2294,30 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	}, [session]);
 
 	const resetQueue = useCallback(() => {
+		// The daemon holds the queue in thin-client mode: clearing the local runner's would clear nothing.
+		if (isClient && serverClient) void runServerCommand(serverClient, session.id, "/queue-reset").catch(() => {});
 		runner.followUpQueue.clear();
 		runner.steeringQueue.clear();
 		setPendingQueue([]);
 		setPendingSteers([]);
-	}, [runner]);
+	}, [runner, isClient, serverClient, session.id]);
+
+	const removeQueued = useCallback(
+		async (n: number): Promise<boolean> => {
+			if (isClient && serverClient) {
+				try {
+					await runServerCommand(serverClient, session.id, `/queue-remove ${n}`);
+					return true;
+				} catch {
+					return false;
+				}
+			}
+			if (!runner.followUpQueue.removeAt(n - 1)) return false;
+			setPendingQueue((p) => p.filter((_, i) => i !== n - 1));
+			return true;
+		},
+		[runner, isClient, serverClient, session.id],
+	);
 
 	const addDisplayMessage = useCallback(
 		(message: ChatMessage) => {
@@ -2339,6 +2362,7 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		hasOlder,
 		loadOlder,
 		resetQueue,
+		removeQueued,
 		addDisplayMessage,
 		pendingQuestion,
 		pendingPlanTransition,

@@ -182,6 +182,33 @@ describe("web message submission", () => {
 		expect(setPendingQueue).toHaveBeenLastCalledWith([]);
 	});
 
+	it("sends a plain message typed during a turn as /queue when the daemon is set to queue", async () => {
+		const context = {
+			planRefineArmedRef: { current: false },
+			session: { id: "session-1", messages: [] },
+			draftVersionRef: { current: 0 },
+			activeId: "session-1",
+			setSession: vi.fn(),
+			pendingOutgoingRef: { current: new Map() },
+			waitForSessionStream: vi.fn().mockResolvedValue(true),
+			setRunning: vi.fn(),
+			running: true,
+			showToast: vi.fn(),
+			addNotice: vi.fn(),
+			setPendingQueue: vi.fn(),
+			setPendingSteers: vi.fn(),
+		};
+		vi.mocked(api)
+			.mockResolvedValueOnce({ ok: true, result: { runningInput: "queue" } })
+			.mockResolvedValueOnce({ ok: true, result: "Queued for after this turn" });
+		await submitMessage("  then run the tests ", undefined, undefined, context);
+		expect(vi.mocked(api)).toHaveBeenLastCalledWith("POST", "/api/sessions/session-1/command", {
+			command: "/queue then run the tests",
+		});
+		// The daemon's queue_update shows it: the page does not add a chip of its own.
+		expect(context.setPendingQueue).not.toHaveBeenCalled();
+	});
+
 	it("hands a refused command back to the composer and says why", async () => {
 		const addNotice = vi.fn();
 		const context = {

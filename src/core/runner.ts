@@ -42,7 +42,7 @@ export function createAgentRunner(): AgentRunner {
 			// otherwise a /steer or /queue typed just before /abort would
 			// silently surface at the start of the next, unrelated prompt.
 			runner.steeringQueue.clear();
-			runner.followUpQueue.clear();
+			runner.followUpQueue.clear(false);
 		},
 
 		waitForIdle() {

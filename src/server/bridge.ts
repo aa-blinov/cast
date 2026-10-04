@@ -225,6 +225,8 @@ export type WebAgentStatus = "idle" | "running" | "error";
 
 export type WebEvent =
 	| AgentEvent
+	/** The messages waiting for the turn to end, in order: the daemon owns the queue, every client shows this list. */
+	| { type: "queue_update"; items: string[] }
 	| { type: "status"; status: WebAgentStatus; startedAt?: number }
 	| {
 			type: "user_message";
@@ -1216,6 +1218,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		}
 
 		const runner = createAgentRunner();
+		runner.followUpQueue.onChange = () => announceQueue(session.id);
 		const ws: WebAgentSession = {
 			id: session.id,
 			session,
@@ -1305,6 +1308,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		rehomeForkedAttachments(source.session.id, session);
 		const persona = resolvePersona(session.persona ?? "") ?? currentPersona;
 		const runner = createAgentRunner();
+		runner.followUpQueue.onChange = () => announceQueue(session.id);
 		const ws: WebAgentSession = {
 			id: session.id,
 			session,
@@ -1634,6 +1638,11 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 * closed would take down every other session with it. The message is lost
 	 * either way at that point; the process shouldn't be.
 	 */
+	function announceQueue(sessionId: string): void {
+		const ws = sessions.get(sessionId);
+		if (ws) broadcaster.broadcast(ws, { type: "queue_update", items: ws.runner.followUpQueue.texts() });
+	}
+
 	function startDeferredSubmit(sessionId: string, ws: WebAgentSession, text: string, queued: Message[]): void {
 		void submit(sessionId, text, undefined, undefined, queued).catch((err) => {
 			console.error("[cast server] deferred submit failed:", err);
@@ -3049,6 +3058,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (existing) return existing;
 		const persona = resolvePersona(session.persona ?? "") ?? currentPersona;
 		const runner = createAgentRunner();
+		runner.followUpQueue.onChange = () => announceQueue(session.id);
 		const ws: WebAgentSession = {
 			id: session.id,
 			session,

@@ -574,6 +574,17 @@ const commandHandlers: Record<string, CommandHandler> = {
 		ws.runner.followUpQueue.enqueue({ role: "user", content: arg });
 		return { ok: true, result: "Queued for after this turn" };
 	},
+	"/queue-remove": ({ ws, arg }) => {
+		const n = Number(arg.trim());
+		if (!ws.runner.followUpQueue.removeAt(n - 1)) {
+			const waiting = ws.runner.followUpQueue.length;
+			return {
+				ok: false,
+				error: waiting === 0 ? "Nothing is queued" : `Usage: /queue-remove <1-${waiting}> (see the Queued list)`,
+			};
+		}
+		return { ok: true, result: `Removed queued message ${n}` };
+	},
 	"/queue-reset": ({ ws }) => {
 		ws.runner.followUpQueue.clear();
 		return { ok: true, result: "Queue cleared" };
