@@ -17,7 +17,7 @@ import type { AppModel } from "../ui/app-model.ts";
 import { SLASH_COMMANDS } from "../ui/commands.ts";
 import { editInExternalEditor } from "../ui/external-editor.ts";
 import { headerTexts } from "../ui/header.ts";
-import { getKeybindings } from "../ui/input/keybindings.ts";
+import { getKeybindings, keyLabel } from "../ui/input/keybindings.ts";
 import type { ClipboardPasteResult } from "../ui/readClipboardImage.ts";
 import { railMuted } from "../ui/span-style.ts";
 import { type SegmentContext, tildePath } from "../ui/statusbar.ts";
@@ -231,6 +231,12 @@ export class PiApp {
 			this.tui.requestRender();
 			return { consume: true };
 		}
+		// Ctrl+Q: exit at once, in every state, a question open or not. The session is saved on the way out, as for
+		// /quit and the confirmed Ctrl+C.
+		if (keys.matches(data, "input.quit")) {
+			this.onQuit();
+			return { consume: true };
+		}
 		// Ctrl+C: exit, after confirming, in every state. Stopping a turn is Esc's job.
 		if (!keys.matches(data, "input.abort") && !data.startsWith("\x1b[<")) this.lastCtrlC = 0;
 		if (keys.matches(data, "input.abort")) {
@@ -240,7 +246,8 @@ export class PiApp {
 				this.onQuit();
 			} else {
 				this.lastCtrlC = now;
-				this.flash("Press Ctrl+C again to exit");
+				const quit = keys.keysFor("input.quit")[0];
+				this.flash(quit ? `Ctrl+C again to exit, or ${keyLabel(quit)} at once` : "Press Ctrl+C again to exit");
 			}
 			return { consume: true };
 		}

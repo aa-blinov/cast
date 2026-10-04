@@ -34,6 +34,7 @@ export const TUI_KEYBINDINGS = {
 		description: "Insert a line break (or end the line with \\ and press Enter)",
 	},
 	"input.abort": { defaultKeys: "ctrl+c" },
+	"input.quit": { defaultKeys: "ctrl+q", description: "Quit at once, with no second press" },
 	"input.escape": { defaultKeys: "escape" },
 	"input.attachImage": { defaultKeys: "ctrl+g" },
 	"input.externalEditor": { defaultKeys: "ctrl+x", description: "Edit the prompt in $VISUAL / $EDITOR" },
@@ -91,4 +92,12 @@ export function sanitizeKeybindings(raw: unknown): KeybindingsConfig {
 export function getKeybindings(): KeybindingsManager {
 	if (!globalKeybindings) globalKeybindings = new KeybindingsManager(sanitizeKeybindings(loadSettings().keybindings));
 	return globalKeybindings;
+}
+
+/** A key as the screen writes it: `ctrl+q` is "Ctrl+Q", `alt+left` is "Alt+left". */
+export function keyLabel(key: string): string {
+	return key
+		.split("+")
+		.map((part) => (part.length === 1 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1)))
+		.join("+");
 }

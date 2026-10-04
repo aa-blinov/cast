@@ -13,7 +13,7 @@ cast --resume             # pick a session: this folder's first, all of them one
 
 ```
 CAST(1) * v0.52.3
-/ commands * /settings * Esc Esc stops a turn * PageUp scrolls * Ctrl+C twice quits
+/ commands * Ctrl+Q quits * /settings * Esc Esc stops a turn * PageUp scrolls
 
 YOU
     run ls on src and show a short example
@@ -52,7 +52,7 @@ Senior Developer * BUILD * mimo-v2.6-flash * ~/pet/cast * ctx 9.1k/168k (5%) * t
 | Clear the draft | Ctrl+L |
 | Steer a running turn | Just type and press Enter |
 | Stop a turn | Esc twice within two seconds |
-| Leave | Ctrl+C twice within two seconds (or `/quit`) |
+| Leave | Ctrl+Q at once, or Ctrl+C twice within two seconds, or `/quit` |
 
 A command you mistype is not sent to the model: `/nonsense` says `Unknown command /nonsense` and suggests the nearest ones. A path that starts with a slash (`/tmp/shot.png`) is still text. All keys can be rebound; see [Interactive Commands](interactive-commands.md#keybindings).
 

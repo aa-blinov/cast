@@ -252,6 +252,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 | Stop turn (2×) | Esc |
 | Clear the input | Ctrl+L |
 | Exit (2× to confirm) | Ctrl+C |
+| Quit at once | Ctrl+Q |
 | Attach image | Ctrl+G |
 | Edit the prompt in `$VISUAL` / `$EDITOR` | Ctrl+X |
 | Complete a command, or a file path | Tab |
@@ -267,6 +268,8 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 **A long draft wraps** at the terminal's edge, on word boundaries. The composer draws at most three rows and follows the cursor, with `↑`/`↓` in the prompt column where the draft continues past them. ↑/↓ move between rows, wrapped ones included.
 
 **Ctrl+C**: press twice within 2s to exit. Does not stop a turn. Use Esc for that.
+
+**Ctrl+Q**: exits at once, with no second press, in any state (while a turn runs, with a question open). The session is saved on the way out, the same as `/quit`, and the resume line is printed. It is the `input.quit` action: rebind it, or unbind it with `[]` if you would rather keep only the confirmed Ctrl+C. (Ctrl+D is not used: in the composer it deletes the character under the cursor.)
 
 **Ctrl+X** opens the draft in `$VISUAL`, or `$EDITOR` when that is unset, like `git commit` does. The TUI steps aside while the editor runs; save and quit to bring the text back into the composer, still unsent. A GUI editor needs its wait flag (`code --wait`). A non-zero exit, such as `:cq` in vim, leaves the draft as it was.
 

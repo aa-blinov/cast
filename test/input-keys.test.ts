@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KeybindingsManager, sanitizeKeybindings } from "../src/ui/input/keybindings.ts";
+import { KeybindingsManager, keyLabel, sanitizeKeybindings } from "../src/ui/input/keybindings.ts";
 import { Key, matchesKey } from "../src/ui/input/keys.ts";
 
 describe("keys.ts — matchesKey", () => {
@@ -135,6 +135,21 @@ describe("keybindings.ts — KeybindingsManager", () => {
 	it("matches abort binding to Ctrl-C", () => {
 		const km = new KeybindingsManager();
 		expect(km.matches("\x03", "input.abort")).toBe(true);
+	});
+
+	it("matches the one-press quit binding to Ctrl-Q, which is not the confirmed Ctrl-C", () => {
+		const km = new KeybindingsManager();
+		expect(km.matches("\x11", "input.quit")).toBe(true);
+		expect(km.matches("\x11", "input.abort")).toBe(false);
+		expect(km.matches("\x03", "input.quit")).toBe(false);
+	});
+
+	it("lets the quit key be rebound or unbound, and writes keys the way the screen shows them", () => {
+		expect(new KeybindingsManager({ "input.quit": "ctrl+e" }).keysFor("input.quit")).toEqual(["ctrl+e"]);
+		expect(new KeybindingsManager({ "input.quit": [] }).keysFor("input.quit")).toEqual([]);
+		expect(keyLabel("ctrl+q")).toBe("Ctrl+Q");
+		expect(keyLabel("alt+left")).toBe("Alt+Left");
+		expect(keyLabel("f")).toBe("F");
 	});
 
 	it("matches escape binding to Esc", () => {
