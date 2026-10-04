@@ -9,6 +9,7 @@ import type { EvalCase } from "../lib/runner.ts";
 import { chainCases } from "./behavior/tools/chain/index.ts";
 import { coreCases } from "./behavior/tools/core/index.ts";
 import { scratchpadCases } from "./behavior/tools/scratchpad/index.ts";
+import { worktreeCases } from "./behavior/tools/worktree/index.ts";
 
 export interface Bench {
 	id: string;
@@ -21,7 +22,7 @@ export const BENCHES: Bench[] = [
 	{
 		id: "behavior",
 		description: "Real-agent behavioral contracts: tool traces, mode transitions, and grounded file changes.",
-		cases: [...coreCases, ...chainCases, ...scratchpadCases],
+		cases: [...coreCases, ...chainCases, ...scratchpadCases, ...worktreeCases],
 	},
 ];
 

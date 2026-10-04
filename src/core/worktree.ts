@@ -25,8 +25,8 @@
  */
 
 import { execFile, execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, realpathSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { runHooksForEvent } from "./hooks.ts";
 import { resolveHooksForCwd } from "./project.ts";
@@ -234,6 +234,8 @@ export async function ensureSessionWorktree(
 	// string-comparing those fails even though they describe the same dir.
 	const existing = findExistingWorktree(repoRoot, worktreePath);
 	if (existing) {
+		// One made by an earlier cast did not hide itself; now it does.
+		excludeWorktreesFromGitStatus(repoRoot);
 		return {
 			path: existing.path,
 			branch,
@@ -261,6 +263,7 @@ export async function ensureSessionWorktree(
 	const finalPath = afterCreate?.path ?? worktreePath;
 
 	copyIgnoredConfigFiles(repoRoot, finalPath);
+	excludeWorktreesFromGitStatus(repoRoot);
 
 	return {
 		path: finalPath,
@@ -270,6 +273,25 @@ export async function ensureSessionWorktree(
 		headCommit,
 		createdAt: new Date().toISOString(),
 	};
+}
+
+/**
+ * Keeps `.cast/worktrees/` out of `git status` and out of searches in the main checkout: it is where cast puts its
+ * own copies of the project, not part of it. Through the repository's local `info/exclude`, so no tracked file (and no
+ * .gitignore the team shares) changes. Best-effort: a read-only .git leaves the folder showing, as before.
+ */
+export function excludeWorktreesFromGitStatus(repoRoot: string): void {
+	try {
+		const file = runGit(repoRoot, ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"]);
+		if (!file) return;
+		const line = "/.cast/worktrees/";
+		const current = existsSync(file) ? readFileSync(file, "utf8") : "";
+		if (current.split(/\r?\n/).includes(line)) return;
+		mkdirSync(dirname(file), { recursive: true });
+		appendFileSync(file, `${current === "" || current.endsWith("\n") ? "" : "\n"}${line}\n`);
+	} catch {
+		// Not worth failing a worktree over.
+	}
 }
 
 /**

@@ -90,6 +90,7 @@ const DEFAULT_IGNORE_DIRS = new Set([
 	".turbo",
 ]);
 
+const WORKTREES_DIR = join(".cast", "worktrees");
 const MAX_WALK_FILES = 20_000;
 const MAX_GREP_FILE_BYTES = 5 * 1024 * 1024;
 
@@ -238,6 +239,8 @@ async function walkFiles(
 			const isDir = entry.isDirectory();
 
 			if (isDir && DEFAULT_IGNORE_DIRS.has(entry.name)) continue;
+			// cast's own worktrees: copies of this project, not part of it (fd and rg get this from .git/info/exclude).
+			if (isDir && relPath === WORKTREES_DIR) continue;
 
 			// Resolve symlinks to detect cycles — a symlink pointing to an
 			// ancestor directory would loop forever without this.
