@@ -3,6 +3,7 @@ import { approvedPlanTodoProgress } from "./approved-plan-todo-progress.ts";
 import { backgroundBashExplicitTimeout } from "./background-bash-explicit-timeout.ts";
 import { backgroundBashKill } from "./background-bash-kill.ts";
 import { backgroundBashOutput } from "./background-bash-output.ts";
+import { backgroundWaitNoDuplicateNotice } from "./background-wait-no-duplicate-notice.ts";
 import { bashFixRerunsCheck } from "./bash-fix-reruns-check.ts";
 import { btwAnswersFromContext } from "./btw-answers-from-context.ts";
 import { btwDoesNotReadFiles } from "./btw-does-not-read-files.ts";
@@ -85,6 +86,7 @@ export const chainCases: EvalCase[] = [
 	ruleLazyNotReadWhenIrrelevant,
 	btwAnswersFromContext,
 	btwSaysWhenUnknown,
+	backgroundWaitNoDuplicateNotice,
 	btwDoesNotReadFiles,
 	commitStagesExplicitPaths,
 	initWritesAgentsMdFromRepo,
