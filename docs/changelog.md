@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.56.1
 
 ### Fixed
 - **A background task's result is not told to the model twice.** When the model waited on a task with `bash_output` (or read it after it finished, or killed it itself), the completion notice still arrived later as a message of its own, and the model spent a turn on each one answering that it already knew. The notice is taken back once the model has the result. Two evals (`background-wait-no-duplicate-notice`, `background-kill-no-notice`) check it with a real model.
