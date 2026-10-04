@@ -52,7 +52,8 @@ vi.mock("../src/core/plan.ts", () => ({
 	resolvePlanTransition: vi.fn(),
 }));
 
-vi.mock("../src/core/mcp.ts", () => ({
+vi.mock("../src/core/mcp.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/core/mcp.ts")>()),
 	closeMcpConnections: vi.fn(),
 	formatMcpForPrompt: vi.fn(() => ""),
 	connectMcpServers: vi.fn(),
@@ -584,6 +585,63 @@ describe("ACP adapter", () => {
 		const calls = mockClient.notify.mock.calls;
 		const usageCall = calls.find((c: unknown[]) => (c[1] as any).update?.sessionUpdate === "usage_update");
 		expect(usageCall).toBeUndefined();
+	});
+
+	it("offers an MCP server's prompts as commands and runs one: the server renders it, the model is asked that", async () => {
+		const { closeMcpConnections, connectMcpServers } =
+			await vi.importActual<typeof import("../src/core/mcp.ts")>("../src/core/mcp.ts");
+		const fixture = join(import.meta.dirname, "fixtures", "mcp-echo-server.mjs");
+		const mcp = await connectMcpServers({ docs: { command: "node", args: [fixture, "--prompts"] } });
+		try {
+			const { session } = makeSession();
+			session.startup.mcpResult = mcp;
+			const opts = { version: "test", permissionMode: "bypass" as const };
+			runAgentLoopSpy.mockImplementationOnce(async (msgs: unknown) => msgs as undefined);
+			await adapter.submitPrompt(
+				"sid",
+				[{ type: "text", text: "/mcp:docs:explain tea" }],
+				session,
+				mockClient as any,
+				opts,
+			);
+
+			const update = mockClient.notify.mock.calls.find(
+				(c: unknown[]) => (c[1] as any).update?.sessionUpdate === "available_commands_update",
+			)!;
+			const offered = (update[1] as any).update.availableCommands as Array<{
+				name: string;
+				input: { hint: string } | null;
+			}>;
+			expect(offered.find((c) => c.name === "mcp:docs:explain")?.input).toEqual({ hint: "<topic>" });
+			expect(offered.find((c) => c.name === "mcp:docs:triage")?.input).toBeNull();
+
+			const { appendMessage } = await import("../src/core/session.ts");
+			const asked = vi.mocked(appendMessage).mock.calls.at(-1)![1] as { content: unknown };
+			expect(JSON.stringify(asked.content)).toContain("Explain tea.");
+		} finally {
+			await closeMcpConnections(mcp.connections);
+		}
+	});
+
+	it("says what is wrong with an MCP prompt command instead of sending it to the model", async () => {
+		const { session } = makeSession();
+		runAgentLoopSpy.mockClear();
+		const result = await adapter.submitPrompt(
+			"sid",
+			[{ type: "text", text: "/mcp:docs:nope" }],
+			session,
+			mockClient as any,
+			{
+				version: "test",
+				permissionMode: "bypass",
+			},
+		);
+		expect(result.stopReason).toBe("end_turn");
+		expect(runAgentLoopSpy).not.toHaveBeenCalled();
+		const chunk = mockClient.notify.mock.calls.find(
+			(c: unknown[]) => (c[1] as any).update?.sessionUpdate === "agent_message_chunk",
+		);
+		expect((chunk![1] as any).update.content.text).toContain("No MCP prompt /mcp:docs:nope");
 	});
 
 	it("submitPrompt in bypass mode calls runAgentLoop without confirmBash", async () => {

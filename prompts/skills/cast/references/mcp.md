@@ -31,9 +31,11 @@ Global servers load first, project and CLI override them on name collision.
 
 **Tool names** are namespaced as `mcp_<server>_<tool>` to avoid collisions.
 
-**Resources:** a server that declares them gets `mcp_<server>_list_resources` (resources with URIs, and templates) and `mcp_<server>_read_resource` (by `uri`) beside its own tools; a server with only resources connects with no tools. `/mcp list` shows `+ resources`. Subscriptions and `@`-mentions are not supported.
+**Resources:** a server that declares them gets `mcp_<server>_list_resources` (resources with URIs, and templates) and `mcp_<server>_read_resource` (by `uri`) beside its own tools; a server with only resources connects with no tools. `/mcp list` shows `+ resources`. `@<server>:<uri>` in a message reads that resource into the turn; a server that offers subscriptions tells the model, once, which resources it read have changed.
 
-**Prompts:** a server that declares them gets `/mcp:<server>:<prompt> [args]` commands (positional or `name=value`, quote values with spaces); the server renders the prompt and the result is sent as the user's next message. The model does not call them; not available over ACP or `cast run`.
+**Prompts:** a server that declares them gets `/mcp:<server>:<prompt> [args]` commands (positional or `name=value`, quote values with spaces); the server renders the prompt and the result is sent as the user's next message. The model does not call them; also offered over ACP and as a `command` action in `cast run`.
+
+**Beyond tools:** list and prompt changes are picked up live; `/mcp logs <name>` shows a server's log; progress shows on long calls; a server may ask for a model answer (sampling, confirmed first) or for input (elicitation, a form); `/mcp auth <name>` signs in to an OAuth server (`/mcp logout <name>` forgets it).
 
 Same command shape as skills: `/mcp` toggle, `list`, `enable`/`disable <name>`, `uninstall` (confirm), `help`. Disabled servers persist in `disabledMcpServers`. Only enabled servers appear in `<available_mcp>`.
 

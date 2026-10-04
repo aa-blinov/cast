@@ -91,7 +91,7 @@ See [Personas](personas.md) for the full list.
 | `/skills` | Toggle skills on/off (multi-select). Also: `list`, `enable`/`disable`, `uninstall`, `sources` (turn whole sources on/off), `help` |
 | `/skills-sh` | skills.sh: search / list-available / install / uninstall universal skills |
 | `/skill:<name> [args]` | Force-load and run a skill by name |
-| `/mcp` | Toggle MCP servers on/off. Also: `list`, `enable`/`disable`, `uninstall`, `help` |
+| `/mcp` | Toggle MCP servers on/off. Also: `list`, `logs`, `auth`, `logout`, `enable`/`disable`, `uninstall`, `help` |
 | `/hooks` | List lifecycle hooks; also `enable`/`disable <id>` and `help` |
 | `/reload` | Re-scan skills, rules, MCP servers, personas, and context files for cwd |
 

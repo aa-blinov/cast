@@ -44,7 +44,8 @@ vi.mock("../src/core/plan.ts", () => ({
 	resolvePlanTransition: vi.fn(),
 }));
 
-vi.mock("../src/core/mcp.ts", () => ({
+vi.mock("../src/core/mcp.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../src/core/mcp.ts")>()),
 	closeMcpConnections: vi.fn(),
 	formatMcpForPrompt: vi.fn(() => ""),
 	connectMcpServers: vi.fn(),

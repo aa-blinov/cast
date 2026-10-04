@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatContextFilesForPrompt, resolveNestedContextFiles } from "../core/context-files.ts";
 import { lspStatus } from "../core/lsp/index.ts";
 import { closeMcpConnections, formatMcpForPrompt } from "../core/mcp.ts";
+import type { AskMcpForm } from "../core/mcp-interaction.ts";
 import { findPersona, listPersonas, type Persona } from "../core/personas.ts";
 import {
 	createPlanState,
@@ -37,6 +38,7 @@ import { fetchLatestVersion, isNewerVersion, isReleaseInstall } from "../core/up
 import { canSubmitDuringRun, handleInput } from "./commands.ts";
 import { displayWidth } from "./display-width.ts";
 import { defaultHeaderConfig } from "./header.ts";
+import { runMcpForm } from "./mcp-form.ts";
 import { imageFilePathsInText } from "./paste.ts";
 import { useModalBridge } from "./pickerBridge.ts";
 import { resolvePlanQuestionWithPicker } from "./plan-question.ts";
@@ -284,6 +286,13 @@ export function useAppModel(props: AppModelProps) {
 		};
 	}, [pickers, permissionMode]);
 
+	// A server's form is asked on the same pickers; nothing to ask in a non-interactive run, so it is declined there.
+	const askMcpForm = useCallback<AskMcpForm>(
+		(server, params, signal) =>
+			process.stdin.isTTY ? runMcpForm(pickers, server, params, signal) : Promise.resolve({ action: "decline" }),
+		[pickers],
+	);
+
 	// Per-turn system prompt rebuild for sticky rules + @-mention.
 	// Called by the loop at the start of each outer iteration.
 	const rebuildSystemPrompt = useCallback(
@@ -447,6 +456,7 @@ export function useAppModel(props: AppModelProps) {
 		permissionMode,
 		mcpResult,
 		confirmBash,
+		askMcpForm,
 		rebuildSystemPrompt,
 		refreshPersonasForTurn,
 		personas,

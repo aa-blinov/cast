@@ -13,6 +13,7 @@ import {
 	getMcpPrompt,
 	listMcpTools,
 	loadMcpConfig,
+	type McpToolHandle,
 	mcpHttpFetch,
 	mcpPromptArgumentHint,
 	mcpPromptCommand,
@@ -24,6 +25,7 @@ import {
 	saveMcpConfig,
 	syncMcpServers,
 } from "../src/core/mcp.ts";
+import type { McpInteraction } from "../src/core/mcp-interaction.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__mcp_test_tmp__");
 const FIXTURE_SERVER = join(import.meta.dirname, "fixtures", "mcp-echo-server.mjs");
@@ -777,6 +779,168 @@ describe("MCP prompts (real spawned server, not mocked)", () => {
 			result.connections[0]!.deadReason = "the connection closed";
 			const gone = await getMcpPrompt(result, review, { code: "x" });
 			expect((gone as { error: string }).error).toContain("no longer connected");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+});
+
+describe("what a server sends and asks (real spawned server, not mocked)", () => {
+	const connect = (...flags: string[]) =>
+		connectMcpServers({ docs: { command: "node", args: [FIXTURE_SERVER, ...flags] } });
+	const call = (
+		result: Awaited<ReturnType<typeof connect>>,
+		tool: string,
+		args: Record<string, unknown> = {},
+		options?: Parameters<McpToolHandle["call"]>[2],
+	) => result.toolIndex.get(`mcp_docs_${tool}`)!.call(args, undefined, options);
+	const until = async (condition: () => boolean) => {
+		for (let i = 0; i < 100 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(condition()).toBe(true);
+	};
+
+	it("picks up tools and prompts a server adds or removes while connected", async () => {
+		const result = await connect("--dynamic");
+		try {
+			expect(result.toolIndex.has("mcp_docs_grown")).toBe(false);
+			await call(result, "grow");
+			await until(() => result.toolIndex.has("mcp_docs_grown"));
+			expect(result.toolDefinitions.some((t) => t.function.name === "mcp_docs_grown")).toBe(true);
+			expect(result.connections[0]!.toolCount).toBe(7);
+			await until(() => mcpPromptCommands(result).some((c) => c.name === "/mcp:docs:fresh"));
+			await call(result, "shrink");
+			await until(() => !result.toolIndex.has("mcp_docs_grown"));
+			expect(result.toolDefinitions.some((t) => t.function.name === "mcp_docs_grown")).toBe(false);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("hands the steps of a long call to the caller", async () => {
+		const result = await connect("--progress");
+		try {
+			const steps: Array<{ progress: number; total?: number; message?: string }> = [];
+			const done = await call(result, "slow", {}, { onProgress: (p) => steps.push(p) });
+			expect(done.content).toBe("done");
+			expect(steps).toEqual([
+				{ progress: 1, total: 3, message: "step 1" },
+				{ progress: 2, total: 3, message: "step 2" },
+				{ progress: 3, total: 3, message: "step 3" },
+			]);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("keeps the server's own log", async () => {
+		const result = await connect("--progress");
+		try {
+			await call(result, "chatty");
+			await until(() => (result.connections[0]!.logs?.length ?? 0) >= 2);
+			expect(result.connections[0]!.logs).toEqual(["[info] fixture: first line", '[warning] {"code":7}']);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("tells a server which folders it may use", async () => {
+		const result = await connect("--progress");
+		try {
+			result.roots = ["/work/alpha", "/work/beta"];
+			const listed = await call(result, "roots");
+			expect(listed.content).toBe("alpha file:///work/alpha\nbeta file:///work/beta");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("reads a tool that returns only structured output", async () => {
+		const result = await connect("--progress");
+		try {
+			expect((await call(result, "structured")).content).toBe('{\n  "temperature": 21\n}');
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("lets the call's own interaction answer a model request and a question for the person", async () => {
+		const interaction: McpInteraction = {
+			sample: async (server, params) => ({
+				role: "assistant",
+				model: "test",
+				content: { type: "text", text: `${server} asked ${params.messages.length}` },
+			}),
+			elicit: async () => ({ action: "accept", content: { name: "Ada" } }),
+		};
+		const result = await connect("--ask");
+		try {
+			expect((await call(result, "ask-model", { prompt: "hi" }, { interaction })).content).toBe(
+				"model said: docs asked 1",
+			);
+			expect((await call(result, "ask-user", {}, { interaction })).content).toBe('accept: {"name":"Ada"}');
+			expect(result.connections[0]!.interactions?.size).toBe(0);
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	});
+
+	it("hears list changes from a Streamable HTTP server that keeps a session", async () => {
+		const http = spawn("node", [FIXTURE_SERVER, "--http", "--stateful", "--dynamic"]);
+		try {
+			const port = await new Promise<number>((resolve, reject) => {
+				let out = "";
+				http.stdout.on("data", (chunk) => {
+					out += chunk.toString();
+					const match = out.match(/LISTENING (\d+)/);
+					if (match) resolve(Number(match[1]));
+				});
+				http.on("error", reject);
+				setTimeout(() => reject(new Error("fixture HTTP server didn't start in time")), 10_000);
+			});
+			const result = await connectMcpServers({ docs: { url: `http://127.0.0.1:${port}/` } });
+			try {
+				expect(result.diagnostics).toEqual([]);
+				await call(result, "grow");
+				await until(() => result.toolIndex.has("mcp_docs_grown"));
+			} finally {
+				await closeMcpConnections(result.connections);
+			}
+		} finally {
+			http.kill();
+		}
+	});
+
+	it("falls back to the legacy HTTP+SSE transport for a server that only speaks it", async () => {
+		const legacy = spawn("node", [FIXTURE_SERVER, "--legacy-sse"]);
+		try {
+			const port = await new Promise<number>((resolve, reject) => {
+				let out = "";
+				legacy.stdout.on("data", (chunk) => {
+					out += chunk.toString();
+					const match = out.match(/LISTENING (\d+)/);
+					if (match) resolve(Number(match[1]));
+				});
+				legacy.on("error", reject);
+				setTimeout(() => reject(new Error("fixture SSE server didn't start in time")), 10_000);
+			});
+			const result = await connectMcpServers({ docs: { url: `http://127.0.0.1:${port}/sse` } });
+			try {
+				expect(result.diagnostics).toEqual([]);
+				expect((await call(result, "echo", { text: "over sse" })).content).toBe("over sse");
+			} finally {
+				await closeMcpConnections(result.connections);
+			}
+		} finally {
+			legacy.kill();
+		}
+	});
+
+	it("refuses what a server asks when no call has anyone to answer", async () => {
+		const result = await connect("--ask");
+		try {
+			const refused = await call(result, "ask-model", { prompt: "hi" });
+			expect(refused.isError).toBe(true);
+			expect(refused.content).toMatch(/No turn is running/);
 		} finally {
 			await closeMcpConnections(result.connections);
 		}

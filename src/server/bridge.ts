@@ -9,6 +9,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, wr
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import type { ElicitRequest, ElicitRequestFormParams, ElicitResult } from "@modelcontextprotocol/sdk/types.js";
 import { subscribeAgentActorNotifications } from "../core/actor-events.ts";
 import { type AgentActorNotification, agentActorRegistry } from "../core/actors.ts";
 import { backupFileForCheckpoint, capCheckpointBackups, createCheckpoint } from "../core/checkpoint.ts";
@@ -250,7 +251,19 @@ export type WebEvent =
 	| { type: "bash_confirm"; id: string; command: string; reason: string; rule?: string }
 	/** That confirmation is settled (answered anywhere, timed out, or replaced),
 	 * so every client drops its prompt for it. */
-	| { type: "bash_confirm_resolved"; id: string };
+	| { type: "bash_confirm_resolved"; id: string }
+	/** An MCP server asked the person for input (elicitation) while one of its tools runs. The call is blocked until a
+	 * client answers via `answerMcpElicit`, or the request times out (cancelled). */
+	| ({ type: "mcp_elicit" } & PendingMcpElicit)
+	| { type: "mcp_elicit_resolved"; id: string };
+
+/** A form an MCP server wants filled in: its message and the JSON schema of the fields it asks for. */
+export interface PendingMcpElicit {
+	id: string;
+	server: string;
+	message: string;
+	schema: ElicitRequestFormParams["requestedSchema"];
+}
 
 export interface PendingBashConfirm {
 	id: string;
@@ -318,6 +331,8 @@ export interface WebAgentSession {
 		rule?: string;
 		settle: (allow: boolean) => void;
 	};
+	/** An MCP server's form the call is blocked on; one at a time, a newer one cancels the older. */
+	pendingMcpElicit?: PendingMcpElicit & { settle: (result: ElicitResult) => void };
 	/** Files touched (read/write/edit) this session, relative to cwd — grown
 	 * in place by loop.ts across turns AND across separate runAgentLoop
 	 * invocations (passed by reference, same array every call) so a nested
@@ -501,6 +516,9 @@ export interface ServerBridge {
 	/** Answer a pending dangerous-command confirmation. False when the id names
 	 * no live request (already answered, timed out, or the turn moved on). */
 	answerBashConfirm(sessionId: string, id: string, allow: boolean, always?: boolean): boolean;
+	/** Answer a pending MCP form. False when none is pending or the id is an older one. */
+	answerMcpElicit(sessionId: string, id: string, result: ElicitResult): boolean;
+	getMcpElicit(sessionId: string): PendingMcpElicit | undefined;
 	/** The confirmation this session is blocked on, if any — so a client that
 	 * connects mid-turn can render it instead of waiting for a replayed event. */
 	getBashConfirm(sessionId: string): PendingBashConfirm | undefined;
@@ -685,7 +703,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		const entry: { result?: McpSetupResult; pending?: Promise<void> } = {};
 		// Every configured name, disabled ones too: a server switched off still has to be listed to be switched on.
 		const names = Object.keys(configured).sort((a, b) => a.localeCompare(b));
-		entry.pending = connectMcpServers(servers)
+		entry.pending = connectMcpServers(servers, undefined, undefined, [sessionCwd])
 			.then((result: McpSetupResult) => {
 				// connectMcpServers reports tools and connections; the names and
 				// their origin are the caller's to fill in (resolveMcpForCwd does
@@ -1358,6 +1376,49 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		broadcaster.broadcast(ws, { type: "bash_confirm_resolved", id: `restored-${restored.askedAt}` });
 	}
 
+	/** Ask the connected clients to fill in an MCP server's form, and block the call until one does. No client, a
+	 * server asking for a URL visit rather than a form, or silence for the timeout all end in a refusal the server
+	 * can handle. */
+	function requestMcpElicit(
+		ws: WebAgentSession,
+		server: string,
+		params: ElicitRequest["params"],
+		signal: AbortSignal,
+	): Promise<ElicitResult> {
+		if (ws.listeners.size === 0 || params.mode === "url") return Promise.resolve({ action: "decline" });
+		ws.pendingMcpElicit?.settle({ action: "cancel" });
+		const id = randomBytes(8).toString("hex");
+		return new Promise<ElicitResult>((resolve) => {
+			const timer = setTimeout(() => settle({ action: "cancel" }), BASH_CONFIRM_TIMEOUT_MS);
+			timer.unref?.();
+			const settle = (result: ElicitResult) => {
+				if (ws.pendingMcpElicit?.id !== id) return;
+				clearTimeout(timer);
+				signal.removeEventListener("abort", onAbort);
+				ws.pendingMcpElicit = undefined;
+				broadcaster.broadcast(ws, { type: "mcp_elicit_resolved", id });
+				resolve(result);
+			};
+			const onAbort = () => settle({ action: "cancel" });
+			signal.addEventListener("abort", onAbort, { once: true });
+			const pending = { id, server, message: params.message, schema: params.requestedSchema };
+			ws.pendingMcpElicit = { ...pending, settle };
+			broadcaster.broadcast(ws, { type: "mcp_elicit", ...pending });
+		});
+	}
+
+	function getMcpElicit(sessionId: string): PendingMcpElicit | undefined {
+		const pending = sessions.get(sessionId)?.pendingMcpElicit;
+		return pending && { id: pending.id, server: pending.server, message: pending.message, schema: pending.schema };
+	}
+
+	function answerMcpElicit(sessionId: string, id: string, result: ElicitResult): boolean {
+		const pending = sessions.get(sessionId)?.pendingMcpElicit;
+		if (!pending || pending.id !== id) return false;
+		pending.settle(result);
+		return true;
+	}
+
 	function getBashConfirm(sessionId: string): PendingBashConfirm | undefined {
 		const ws = sessions.get(sessionId);
 		const pending = ws?.pendingBashConfirm;
@@ -2014,6 +2075,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				effectiveMode === "bypass"
 					? undefined
 					: (command, reason, rule) => requestBashConfirm(ws, command, reason, rule),
+			askMcpForm: (server, params, signal) => requestMcpElicit(ws, server, params, signal),
 			disabledTools,
 			planState,
 			initialTodos: ws.session.todos,
@@ -2576,6 +2638,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// A turn stopped while waiting on a confirmation must not keep waiting
 		// on it until the timeout.
 		ws.pendingBashConfirm?.settle(false);
+		ws.pendingMcpElicit?.settle({ action: "cancel" });
 		ws.runner.abort();
 	}
 
@@ -3786,6 +3849,8 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		answerQuestion,
 		answerBashConfirm,
 		getBashConfirm,
+		answerMcpElicit,
+		getMcpElicit,
 		getPlanTransition,
 		resolvePlanTransition: resolvePersistedPlanTransition,
 		setSessionMode,

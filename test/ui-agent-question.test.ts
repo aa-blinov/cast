@@ -72,6 +72,20 @@ describe("parseDaemonPendingState", () => {
 		});
 	});
 
+	it("restores an MCP form the daemon is waiting on, and ignores one without a schema", () => {
+		const schema = { type: "object", properties: { name: { type: "string" } } };
+		expect(
+			parseDaemonPendingState({ mcpElicit: { id: "e1", server: "crm", message: "Who?", schema } }).mcpElicit,
+		).toEqual({
+			id: "e1",
+			server: "crm",
+			message: "Who?",
+			schema,
+		});
+		expect(parseDaemonPendingState({ mcpElicit: { id: "e1", server: "crm" } }).mcpElicit).toBeUndefined();
+		expect(parseDaemonPendingState({ mcpElicit: null }).mcpElicit).toBeUndefined();
+	});
+
 	it("restores a confirmation the daemon is still waiting on, and ignores a malformed one", () => {
 		expect(
 			parseDaemonPendingState({

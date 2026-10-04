@@ -23,7 +23,7 @@ import { describeFork } from "./fork-flow.js";
 import { rewindTo } from "./rewind-flow.js";
 import { undoLastTurn } from "./undo-flow.js";
 import { useModalFocusTrap } from "./modal-focus.js";
-import { BashConfirmCard, latestPlan, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
+import { BashConfirmCard, latestPlan, McpElicitCard, PlanDecisionCard, QuestionCard } from "./plan-cards.js";
 import { Sidebar as SidebarModule } from "./sidebar.js";
 import { closeSseConnection, openSseConnection } from "./sse-connection.js";
 import { handleSseEvent } from "./sse-events.js";
@@ -1428,6 +1428,20 @@ function App() {
 		[activeId, session?.question, showToast, setSession],
 	);
 
+	const answerMcpElicit = useCallback(
+		async (id, action, content) => {
+			if (!activeId) return;
+			try {
+				await api("POST", `/api/sessions/${activeId}/mcp-elicit`, { id, action, content });
+			} catch (err) {
+				// A 409 means the form is already settled elsewhere, so only its card is stale.
+				if (!/pending/i.test(err.message)) showToast(err.message, "error");
+			}
+			setSession((prev) => (prev?.mcpElicit?.id === id ? { ...prev, mcpElicit: undefined } : prev));
+		},
+		[activeId, showToast, setSession],
+	);
+
 	const answerBashConfirm = useCallback(
 		async (id, allow, always = false) => {
 			if (!activeId) return;
@@ -2351,6 +2365,7 @@ function App() {
 								`
 							}
 							${session?.bashConfirm && html`<${BashConfirmCard} request=${session.bashConfirm} onAnswer=${answerBashConfirm} />`}
+							${session?.mcpElicit && html`<${McpElicitCard} key=${session.mcpElicit.id} request=${session.mcpElicit} onAnswer=${answerMcpElicit} />`}
 						`
 					}
 				</div>

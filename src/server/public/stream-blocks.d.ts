@@ -10,6 +10,8 @@ export interface StreamToolCall {
 	images?: string[];
 	/** A `task` call's latest subagent progress. */
 	progress?: SubagentProgress;
+	/** A running MCP call's latest step ("3/10 reading"), shown by the terminal. */
+	toolProgress?: string;
 }
 
 export type StreamBlock =

@@ -18,16 +18,31 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { Agent } from "undici";
+import {
+	type CreateMessageRequest,
+	CreateMessageRequestSchema,
+	type CreateMessageResult,
+	type ElicitRequest,
+	ElicitRequestSchema,
+	type ElicitResult,
+	ErrorCode,
+	ListRootsRequestSchema,
+	LoggingMessageNotificationSchema,
+	McpError,
+	ResourceUpdatedNotificationSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import { Agent, fetch as undiciFetch } from "undici";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import type { Tool } from "./llm.ts";
+import { createMcpAuthProvider, hasMcpLogin } from "./mcp-auth.ts";
+import type { McpInteraction } from "./mcp-interaction.ts";
 import { maxToolOutputBytesSetting, maxToolOutputLinesSetting, mcpToolTimeoutMs } from "./settings.ts";
 import type { ToolResult } from "./tools.ts";
 
@@ -76,6 +91,10 @@ const MCP_AMP_RE = /&/g;
 const MCP_LT_RE = /</g;
 const MCP_GT_RE = />/g;
 const MCP_QUOTE_RE = /"/g;
+const MCP_UNAUTHORIZED_RE = /\b401\b|unauthorized/i;
+function hasAuthorizationHeader(headers: Record<string, string> | undefined): boolean {
+	return Object.keys(headers ?? {}).some((name) => name.toLowerCase() === "authorization");
+}
 const MCP_DIDNT_RESPOND_RE = /didn't respond within/;
 const clientTransports = new WeakMap<Client, Transport>();
 
@@ -137,10 +156,36 @@ export function mcpServerNameFromDescription(description: string | undefined): s
 	return description?.match(MCP_BRACKET_NAME_RE)?.[1];
 }
 
+/** The last lines a server logged, or why there are none. */
+export function formatMcpLogs(result: Pick<McpSetupResult, "connections">, serverName: string, limit = 50): string {
+	const connection = result.connections.find((c) => c.serverName === serverName);
+	if (!connection) return `MCP server "${serverName}" is not connected.`;
+	if (!connection.logs?.length) return `MCP server "${serverName}" has not logged anything.`;
+	return connection.logs.slice(-limit).join("\n");
+}
+
+/** A step of a long tool call, as the server reports it (`notifications/progress`). */
+export interface McpProgress {
+	progress: number;
+	total?: number;
+	message?: string;
+}
+
 export interface McpToolHandle {
 	definition: Tool;
-	call: (args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolResult>;
+	/** On a server's read_resource tool: the URIs it has told us changed since they were read, handed over once. */
+	takeResourceUpdates?: () => string[];
+	call: (args: Record<string, unknown>, signal?: AbortSignal, options?: McpCallOptions) => Promise<ToolResult>;
 }
+
+/** What a call is given beyond its arguments. */
+export interface McpCallOptions {
+	onProgress?: (progress: McpProgress) => void;
+	/** Who answers the server if it asks something while this call runs (a model answer, a person's input). */
+	interaction?: McpInteraction;
+}
+
+const LOG_LINES_KEPT = 200;
 
 export interface McpPromptArgument {
 	name: string;
@@ -161,6 +206,14 @@ export interface McpConnection {
 	toolCount: number;
 	/** The prompts the server offered when it connected (empty when it declares none). */
 	prompts?: McpPromptInfo[];
+	/** Calls in flight with someone to answer a server's questions; the newest answers. */
+	interactions?: Set<McpInteraction>;
+	/** Resources this connection watches (the ones read from a server that offers subscriptions). */
+	subscribedResources?: Set<string>;
+	/** Watched resources the server has said changed, not yet passed on to the model. */
+	resourceUpdates?: Set<string>;
+	/** The server's own log (`notifications/message`), newest last, for `/mcp logs`. */
+	logs?: string[];
 	/** The server declared the `resources` capability: it has list_resources and read_resource tools beside its own. */
 	resources?: boolean;
 	client: Client;
@@ -198,6 +251,8 @@ export interface McpSetupResult {
 	connectPending?: boolean;
 	/** Per-server source: "global" or "project". */
 	serverSources: Record<string, "global" | "project">;
+	/** Folders offered to the servers as roots (`roots/list`); the process's own folder when unset. */
+	roots?: string[];
 }
 
 type McpListedTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
@@ -596,6 +651,16 @@ export function formatResourceContents(uri: string, contents: ResourceContent[])
 	};
 }
 
+/** Ask a server that offers subscriptions to tell us when a resource we read changes, once per resource. */
+function watchResource(client: Client, connection: McpConnection | undefined, uri: string): void {
+	if (!connection || !client.getServerCapabilities()?.resources?.subscribe) return;
+	connection.subscribedResources ??= new Set();
+	if (connection.subscribedResources.has(uri)) return;
+	connection.subscribedResources.add(uri);
+	// Not knowing about changes is what we had before; a refusal costs nothing but that.
+	void client.subscribeResource({ uri }).catch(() => connection.subscribedResources?.delete(uri));
+}
+
 /**
  * Gives a server that offers resources a pair of tools for them (`mcp_<server>_list_resources` and
  * `mcp_<server>_read_resource`), in the same index as its own tools so persona allowlists, reconnects and the prompt
@@ -634,7 +699,19 @@ function addResourceTools(
 			function: { name, description: `[${serverName}] ${description}`, parameters },
 		};
 		result.toolDefinitions.push(definition);
-		result.toolIndex.set(name, { definition, call });
+		result.toolIndex.set(name, {
+			definition,
+			call,
+			...(toolName === "read_resource"
+				? {
+						takeResourceUpdates: () => {
+							const updates = [...(connectionRef.value?.resourceUpdates ?? [])];
+							connectionRef.value?.resourceUpdates?.clear();
+							return updates;
+						},
+					}
+				: {}),
+		});
 	};
 
 	add(
@@ -687,6 +764,7 @@ function addResourceTools(
 			try {
 				const timeout = mcpToolTimeoutMs();
 				const read = await client.readResource({ uri }, { signal, ...(timeout === undefined ? {} : { timeout }) });
+				watchResource(client, connectionRef.value, uri);
 				return formatResourceContents(uri, read.contents as ResourceContent[]);
 			} catch (error) {
 				return failed(`resource "${uri}"`, error);
@@ -737,13 +815,11 @@ interface McpContentPart {
  */
 const sseAgent = new Agent({ pipelining: 0 });
 function sseFetch(url: string | URL, init?: RequestInit): Promise<Response> {
-	return fetch(
-		url as Parameters<typeof fetch>[0],
-		{
-			...init,
-			dispatcher: sseAgent,
-		} as RequestInit,
-	);
+	// The package's own fetch: its Agent speaks a newer dispatch interface than the fetch built into Node, which
+	// refuses it ("invalid onRequestStart method").
+	return undiciFetch(url, { ...init, dispatcher: sseAgent } as Parameters<
+		typeof undiciFetch
+	>[1]) as unknown as Promise<Response>;
 }
 
 export function mcpHttpFetch(url: string | URL | Request, init?: RequestInit): Promise<Response> {
@@ -751,6 +827,199 @@ export function mcpHttpFetch(url: string | URL | Request, init?: RequestInit): P
 		return Promise.resolve(new Response(null, { status: 405, statusText: "SSE listening stream declined" }));
 	}
 	return fetch(url as Parameters<typeof fetch>[0], init);
+}
+
+/** What the server declared that it can only deliver unasked: list changes, resource updates, its log. */
+export function serverSendsUnasked(capabilities: ReturnType<Client["getServerCapabilities"]>): boolean {
+	return Boolean(
+		capabilities?.logging ||
+			capabilities?.tools?.listChanged ||
+			capabilities?.prompts?.listChanged ||
+			capabilities?.resources?.listChanged ||
+			capabilities?.resources?.subscribe,
+	);
+}
+
+/**
+ * The fetch for a Streamable HTTP server, decided once the server has said what it needs. One that sends nothing
+ * unasked gets mcpHttpFetch's treatment (no listening stream, which some servers answer by hanging every POST). One
+ * that does gets the stream, and its POSTs move to connections of their own so the open stream cannot hold them up,
+ * the arrangement the legacy SSE transport already uses.
+ */
+export function mcpHttpFetchFor(wantsStream: () => boolean): typeof mcpHttpFetch {
+	return (url, init) => {
+		if (!wantsStream()) return mcpHttpFetch(url, init);
+		if ((init?.method ?? "GET") === "GET") return fetch(url as Parameters<typeof fetch>[0], init);
+		return sseFetch(url as string | URL, init);
+	};
+}
+
+/** Runs a call with its interaction on the connection, so a question the server asks meanwhile has someone to answer it. */
+async function withInteraction<T>(
+	connection: McpConnection | undefined,
+	interaction: McpInteraction | undefined,
+	run: () => Promise<T>,
+): Promise<T> {
+	if (!connection || !interaction) return run();
+	connection.interactions ??= new Set();
+	connection.interactions.add(interaction);
+	try {
+		return await run();
+	} finally {
+		connection.interactions.delete(interaction);
+	}
+}
+
+/** Register a server's tools in the live result (a connect, or a refresh after the server said its list changed). */
+function addServerTools(
+	setupResult: McpSetupResult,
+	serverName: string,
+	client: Client,
+	connectionRef: { value?: McpConnection },
+	tools: McpListedTool[],
+): void {
+	for (const t of tools) {
+		const name = mcpToolName(serverName, t.name);
+		const definition: Tool = {
+			type: "function",
+			function: {
+				name,
+				description: `[${serverName}] ${t.description ?? t.name}`,
+				parameters: t.inputSchema as Record<string, unknown>,
+			},
+		};
+		// Two different (server, tool) pairs can sanitize to the same
+		// name — `[^a-zA-Z0-9_-]` all becomes `_`, so a server called
+		// "github.api" with tool "x" collides with "github" + "api_x".
+		// The index was last-wins while the definitions kept both, so
+		// the provider received duplicate function names and calls
+		// silently routed to whichever server happened to connect
+		// last: non-deterministic between runs, with no diagnostic.
+		// Keep the first and say what was dropped.
+		const clash = setupResult.toolIndex.get(name);
+		if (clash) {
+			const owner = MCP_DESCRIPTION_SERVER_RE.exec(clash.definition.function.description ?? "")?.[1];
+			setupResult.diagnostics.push(
+				`mcp tool name collision: "${serverName}"/"${t.name}" maps to "${name}", already provided by ${
+					owner ? `"${owner}"` : "another server"
+				} — keeping the first; the second is unavailable.`,
+			);
+			continue;
+		}
+		setupResult.toolDefinitions.push(definition);
+		setupResult.toolIndex.set(name, {
+			definition,
+			call: async (args, signal, options): Promise<ToolResult> => {
+				if (!connectionRef.value?.alive) {
+					return {
+						content: `The MCP server "${serverName}" is no longer connected${
+							connectionRef.value?.deadReason ? ` (${connectionRef.value.deadReason})` : ""
+						}. Its tools are unavailable until the user runs /mcp reconnect — do not keep retrying them.`,
+						isError: true,
+					};
+				}
+				try {
+					// The SDK caps a call at 60s by default; a slow-but-legitimate
+					// tool (a browser step, a heavy query) needs a way past that,
+					// and it's read per call so a settings change applies without
+					// a reconnect.
+					const timeout = mcpToolTimeoutMs();
+					const result = await withInteraction(connectionRef.value, options?.interaction, () =>
+						client.callTool({ name: t.name, arguments: args }, undefined, {
+							signal,
+							...(options?.onProgress
+								? {
+										onprogress: (p) =>
+											options.onProgress?.({ progress: p.progress, total: p.total, message: p.message }),
+										// A server that reports progress is working: do not give up on the first 60s of silence.
+										resetTimeoutOnProgress: true,
+									}
+								: {}),
+							...(timeout === undefined ? {} : { timeout }),
+						}),
+					);
+					const parts = (result.content ?? []) as McpContentPart[];
+					const fragments: string[] = [];
+					let image: McpContentPart | undefined;
+					let extraImages = 0;
+
+					for (const p of parts) {
+						if (p.type === "text" && p.text) {
+							fragments.push(p.text);
+						} else if (p.type === "image" && p.data && p.mimeType) {
+							if (!image) image = p;
+							else extraImages++;
+						} else if (p.type === "audio" && p.mimeType) {
+							fragments.push(`[audio content omitted: ${p.mimeType}]`);
+						} else if (p.type === "resource_link" && p.uri) {
+							const label = p.name ?? p.uri;
+							fragments.push(
+								`[resource link: ${label} (${p.uri})${p.description ? ` — ${p.description}` : ""}]`,
+							);
+						} else if (p.type === "resource" && p.resource) {
+							if (p.resource.text !== undefined) {
+								fragments.push(p.resource.text);
+							} else {
+								fragments.push(
+									`[embedded resource: ${p.resource.uri}${p.resource.mimeType ? ` (${p.resource.mimeType})` : ""}]`,
+								);
+							}
+						}
+					}
+					if (extraImages > 0) fragments.push(`[${extraImages} additional image(s) omitted]`);
+
+					// A tool that declares an output schema may return only the structured value.
+					if (fragments.length === 0 && result.structuredContent !== undefined) {
+						fragments.push(JSON.stringify(result.structuredContent, null, 2));
+					}
+					const text = capMcpText(fragments.join("\n"));
+					return {
+						content: result.isError
+							? `MCP server "${serverName}", tool "${t.name}" reported an error:\n${text || "(no details provided)"}`
+							: text || "(no output)",
+						isError: Boolean(result.isError),
+						imageDataUrl: image ? `data:${image.mimeType};base64,${image.data}` : undefined,
+					};
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					return {
+						content: `MCP server "${serverName}", tool "${t.name}" failed: ${message}. Check the server connection and tool arguments, then retry.`,
+						isError: true,
+					};
+				}
+			},
+		});
+	}
+}
+
+/** The server said its tools changed: read the list again and swap this server's tools in place. */
+async function refreshServerTools(
+	setupResult: McpSetupResult,
+	serverName: string,
+	client: Client,
+	connectionRef: { value?: McpConnection },
+): Promise<void> {
+	const connection = connectionRef.value;
+	if (!connection?.alive) return;
+	try {
+		const tools = await listMcpTools(client, CONNECT_TIMEOUT_MS);
+		forgetServerTools(setupResult, serverName);
+		addServerTools(setupResult, serverName, client, connectionRef, tools);
+		if (connection.resources) addResourceTools(setupResult, serverName, client, connectionRef);
+		connection.toolCount = tools.length;
+	} catch (error) {
+		// The old list stays: a server that cannot be read now is better served by what it offered than by nothing.
+		setupResult.diagnostics.push(
+			`mcp server "${serverName}": could not refresh its tools: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+async function refreshServerPrompts(client: Client, connectionRef: { value?: McpConnection }): Promise<void> {
+	const connection = connectionRef.value;
+	if (!connection?.alive) return;
+	const prompts = await listMcpPrompts(client, CONNECT_TIMEOUT_MS).catch(() => undefined);
+	if (prompts) connection.prompts = prompts.length > 0 ? prompts : undefined;
 }
 
 /**
@@ -766,6 +1035,8 @@ export async function connectMcpServers(
 	 *  holds. Reconnecting through a separate result left the handlers of the new connection tending that copy, so a
 	 *  server that dropped a second time was never brought back in the real one. */
 	target?: McpSetupResult,
+	/** The folders the servers may treat as the work's roots (`roots/list`), for a result made here. */
+	roots?: string[],
 ): Promise<McpSetupResult> {
 	// Built before the connects so a server's disconnect handler can hand the
 	// live result to the reconnect scheduler — it swaps that server's tools in
@@ -777,19 +1048,80 @@ export async function connectMcpServers(
 		diagnostics: [],
 		allServerNames: Object.keys(servers),
 		serverSources: {},
+		roots,
 	};
 
 	await Promise.all(
 		Object.entries(servers).map(async ([serverName, cfg]) => {
-			const client = new Client({ name: "cast", version: "1.0.0" });
+			// Filled in once the connection object exists; the handlers below close over it.
+			const connectionRef: { value?: McpConnection } = {};
+			const client = new Client(
+				{ name: "cast", version: "1.0.0" },
+				{
+					capabilities: {
+						roots: {},
+						sampling: {},
+						elicitation: { form: {} },
+					},
+					// Refreshed by hand below: the SDK's own refresh reads only the first page.
+					listChanged: {
+						tools: {
+							autoRefresh: false,
+							onChanged: () => void refreshServerTools(setupResult, serverName, client, connectionRef),
+						},
+						prompts: { autoRefresh: false, onChanged: () => void refreshServerPrompts(client, connectionRef) },
+					},
+				},
+			);
+			client.setRequestHandler(ListRootsRequestSchema, async () => ({
+				roots: (setupResult.roots ?? [process.cwd()]).map((path) => ({
+					uri: pathToFileURL(path).href,
+					name: basename(path),
+				})),
+			}));
+			// A server asks during a call, so the call's own interaction answers; with none running there is nobody to ask.
+			const currentInteraction = (): McpInteraction => {
+				const open = connectionRef.value?.interactions;
+				const latest = open && [...open].at(-1);
+				if (!latest)
+					throw new McpError(ErrorCode.InvalidRequest, "No turn is running that could answer this request");
+				return latest;
+			};
+			client.setRequestHandler(CreateMessageRequestSchema, async (request, extra) =>
+				currentInteraction().sample(serverName, request.params, extra.signal),
+			);
+			client.setRequestHandler(ElicitRequestSchema, async (request, extra) =>
+				currentInteraction().elicit(serverName, request.params, extra.signal),
+			);
+			client.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+				const connection = connectionRef.value;
+				if (!connection?.subscribedResources?.has(notification.params.uri)) return;
+				connection.resourceUpdates ??= new Set();
+				connection.resourceUpdates.add(notification.params.uri);
+			});
+			client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+				const { level, logger, data } = notification.params;
+				const text = typeof data === "string" ? data : JSON.stringify(data);
+				const connection = connectionRef.value;
+				if (!connection) return;
+				connection.logs ??= [];
+				const kept = connection.logs;
+				kept.push(`[${level}]${logger ? ` ${logger}:` : ""} ${text}`);
+				if (kept.length > LOG_LINES_KEPT) kept.splice(0, kept.length - LOG_LINES_KEPT);
+			});
 
+			// A login on file (from /mcp auth) rides along and is refreshed by the SDK. One that is not there is never
+			// started from here: a connect has no one to send to a browser.
+			const authProvider =
+				cfg.url && hasMcpLogin(serverName, cfg.url) ? createMcpAuthProvider(serverName, cfg.url) : undefined;
 			let transport: Transport;
 			if (cfg.url) {
 				// Streamable HTTP first; legacy SSE servers reject it below and
 				// get a second connect attempt over SSEClientTransport.
 				transport = new StreamableHTTPClientTransport(new URL(cfg.url), {
 					requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
-					fetch: mcpHttpFetch,
+					fetch: mcpHttpFetchFor(() => serverSendsUnasked(client.getServerCapabilities())),
+					...(authProvider ? { authProvider } : {}),
 				});
 			} else if (cfg.command) {
 				transport = new StdioClientTransport({
@@ -823,6 +1155,7 @@ export async function connectMcpServers(
 					const msg = error instanceof Error ? error.message : String(error);
 					if (!cfg.url || MCP_DIDNT_RESPOND_RE.test(msg)) throw error;
 					transport = new SSEClientTransport(new URL(cfg.url), {
+						...(authProvider ? { authProvider } : {}),
 						requestInit: cfg.headers ? { headers: cfg.headers } : undefined,
 						// POSTs go through the dedicated agent; the long-lived GET
 						// stream stays on the default pool. See sseFetch.
@@ -853,107 +1186,7 @@ export async function connectMcpServers(
 					throw error;
 				});
 
-				// Filled in just below, once the connection object exists — the tool
-				// handles close over it so a call can see the server has since died.
-				const connectionRef: { value?: McpConnection } = {};
-				for (const t of tools) {
-					const name = mcpToolName(serverName, t.name);
-					const definition: Tool = {
-						type: "function",
-						function: {
-							name,
-							description: `[${serverName}] ${t.description ?? t.name}`,
-							parameters: t.inputSchema as Record<string, unknown>,
-						},
-					};
-					// Two different (server, tool) pairs can sanitize to the same
-					// name — `[^a-zA-Z0-9_-]` all becomes `_`, so a server called
-					// "github.api" with tool "x" collides with "github" + "api_x".
-					// The index was last-wins while the definitions kept both, so
-					// the provider received duplicate function names and calls
-					// silently routed to whichever server happened to connect
-					// last: non-deterministic between runs, with no diagnostic.
-					// Keep the first and say what was dropped.
-					const clash = setupResult.toolIndex.get(name);
-					if (clash) {
-						const owner = MCP_DESCRIPTION_SERVER_RE.exec(clash.definition.function.description ?? "")?.[1];
-						setupResult.diagnostics.push(
-							`mcp tool name collision: "${serverName}"/"${t.name}" maps to "${name}", already provided by ${
-								owner ? `"${owner}"` : "another server"
-							} — keeping the first; the second is unavailable.`,
-						);
-						continue;
-					}
-					setupResult.toolDefinitions.push(definition);
-					setupResult.toolIndex.set(name, {
-						definition,
-						call: async (args, signal): Promise<ToolResult> => {
-							if (!connectionRef.value?.alive) {
-								return {
-									content: `The MCP server "${serverName}" is no longer connected${
-										connectionRef.value?.deadReason ? ` (${connectionRef.value.deadReason})` : ""
-									}. Its tools are unavailable until the user runs /mcp reconnect — do not keep retrying them.`,
-									isError: true,
-								};
-							}
-							try {
-								// The SDK caps a call at 60s by default; a slow-but-legitimate
-								// tool (a browser step, a heavy query) needs a way past that,
-								// and it's read per call so a settings change applies without
-								// a reconnect.
-								const timeout = mcpToolTimeoutMs();
-								const result = await client.callTool({ name: t.name, arguments: args }, undefined, {
-									signal,
-									...(timeout === undefined ? {} : { timeout }),
-								});
-								const parts = (result.content ?? []) as McpContentPart[];
-								const fragments: string[] = [];
-								let image: McpContentPart | undefined;
-								let extraImages = 0;
-
-								for (const p of parts) {
-									if (p.type === "text" && p.text) {
-										fragments.push(p.text);
-									} else if (p.type === "image" && p.data && p.mimeType) {
-										if (!image) image = p;
-										else extraImages++;
-									} else if (p.type === "audio" && p.mimeType) {
-										fragments.push(`[audio content omitted: ${p.mimeType}]`);
-									} else if (p.type === "resource_link" && p.uri) {
-										const label = p.name ?? p.uri;
-										fragments.push(
-											`[resource link: ${label} (${p.uri})${p.description ? ` — ${p.description}` : ""}]`,
-										);
-									} else if (p.type === "resource" && p.resource) {
-										if (p.resource.text !== undefined) {
-											fragments.push(p.resource.text);
-										} else {
-											fragments.push(
-												`[embedded resource: ${p.resource.uri}${p.resource.mimeType ? ` (${p.resource.mimeType})` : ""}]`,
-											);
-										}
-									}
-								}
-								if (extraImages > 0) fragments.push(`[${extraImages} additional image(s) omitted]`);
-
-								const text = capMcpText(fragments.join("\n"));
-								return {
-									content: result.isError
-										? `MCP server "${serverName}", tool "${t.name}" reported an error:\n${text || "(no details provided)"}`
-										: text || "(no output)",
-									isError: Boolean(result.isError),
-									imageDataUrl: image ? `data:${image.mimeType};base64,${image.data}` : undefined,
-								};
-							} catch (error) {
-								const message = error instanceof Error ? error.message : String(error);
-								return {
-									content: `MCP server "${serverName}", tool "${t.name}" failed: ${message}. Check the server connection and tool arguments, then retry.`,
-									isError: true,
-								};
-							}
-						},
-					});
-				}
+				addServerTools(setupResult, serverName, client, connectionRef, tools);
 
 				// What the server offers besides tools. One with only tools declares no `resources` capability.
 				const offersResources = Boolean(client.getServerCapabilities()?.resources);
@@ -1002,10 +1235,16 @@ export async function connectMcpServers(
 					markDead(error instanceof Error ? error.message : String(error) || "transport error");
 				connectionRef.value = connection;
 				setupResult.connections.push(connection);
+				// A server only sends its log once asked for a level; "info" keeps the chatter of debug out.
+				if (client.getServerCapabilities()?.logging) void client.setLoggingLevel("info").catch(() => {});
 			} catch (error) {
-				setupResult.diagnostics.push(
-					`mcp server "${serverName}": ${error instanceof Error ? error.message : String(error)}`,
-				);
+				const reason = error instanceof Error ? error.message : String(error);
+				// A server that wants OAuth answers 401; with no Authorization header configured, that is the cue.
+				const hint =
+					cfg.url && MCP_UNAUTHORIZED_RE.test(reason) && !hasAuthorizationHeader(cfg.headers)
+						? ` If it signs in with OAuth, run /mcp auth ${serverName}.`
+						: "";
+				setupResult.diagnostics.push(`mcp server "${serverName}": ${reason}${hint}`);
 				await closeClient(client);
 			}
 		}),
@@ -1103,6 +1342,15 @@ function isNonRetryableMcpFailure(reason: string): boolean {
  *  startup would otherwise be respawned in a tight loop. */
 const MCP_RECONNECT_BASE_MS = 1000;
 
+/** Remove a server's tools (its own and the resource ones) from the index and the definitions. */
+function forgetServerTools(result: McpSetupResult, serverName: string): void {
+	const prefix = `[${serverName}]`;
+	for (const [name, handle] of [...result.toolIndex]) {
+		if (handle.definition.function.description?.startsWith(prefix)) result.toolIndex.delete(name);
+	}
+	result.toolDefinitions = result.toolDefinitions.filter((t) => !t.function.description?.startsWith(prefix));
+}
+
 /** Take one server out of a live result: close it and forget its tools, its diagnostics and its connection. */
 async function dropMcpServer(result: McpSetupResult, serverName: string): Promise<McpConnection | undefined> {
 	const previous = result.connections.find((c) => c.serverName === serverName);
@@ -1112,11 +1360,7 @@ async function dropMcpServer(result: McpSetupResult, serverName: string): Promis
 		await closeClient(previous.client);
 		result.connections.splice(result.connections.indexOf(previous), 1);
 	}
-	const prefix = `[${serverName}]`;
-	for (const [name, handle] of [...result.toolIndex]) {
-		if (handle.definition.function.description?.startsWith(prefix)) result.toolIndex.delete(name);
-	}
-	result.toolDefinitions = result.toolDefinitions.filter((t) => !t.function.description?.startsWith(prefix));
+	forgetServerTools(result, serverName);
 	const diagnosticPrefix = `mcp server "${serverName}": `;
 	for (let i = result.diagnostics.length - 1; i >= 0; i--) {
 		if (result.diagnostics[i]!.startsWith(diagnosticPrefix)) result.diagnostics.splice(i, 1);

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { handleSseEvent } from "../src/server/public/sse-events.js";
-import { getSubagentProgress, subscribeSubagentProgress } from "../src/server/public/tool-card-state.js";
+import {
+	getSubagentProgress,
+	getToolProgress,
+	subscribeSubagentProgress,
+} from "../src/server/public/tool-card-state.js";
 
 function createContext() {
 	return {
@@ -40,6 +44,37 @@ describe("web SSE events", () => {
 		handleSseEvent({ type: "bash_confirm_resolved", id: "c1" }, state);
 		const clear = state.setSession.mock.calls[1]![0] as (prev: unknown) => { bashConfirm?: unknown };
 		expect(clear(card).bashConfirm).toBeUndefined();
+	});
+
+	it("opens an MCP form from the event and closes only the one that was settled", () => {
+		const state = createContext();
+		const schema = { type: "object", properties: {} };
+		handleSseEvent({ type: "mcp_elicit", id: "f1", server: "docs", message: "name?", schema }, state);
+		const open = state.setSession.mock.calls[0]![0] as (prev: unknown) => { mcpElicit?: unknown };
+		expect(open({ id: "s1" }).mcpElicit).toEqual({ id: "f1", server: "docs", message: "name?", schema });
+		handleSseEvent({ type: "mcp_elicit_resolved", id: "old" }, state);
+		const card = { id: "s1", mcpElicit: { id: "f1" } };
+		expect((state.setSession.mock.calls[1]![0] as (prev: unknown) => unknown)(card)).toBe(card);
+		handleSseEvent({ type: "mcp_elicit_resolved", id: "f1" }, state);
+		expect(
+			(state.setSession.mock.calls[2]![0] as (prev: unknown) => { mcpElicit?: unknown })(card).mcpElicit,
+		).toBeUndefined();
+	});
+
+	it("keeps the latest progress of a running tool call until it ends, and ignores an unknown call", () => {
+		const state = createContext();
+		handleSseEvent(
+			{ type: "tool_progress", id: "t1", name: "mcp_x_slow", progress: 1, total: 3, message: "step 1" },
+			state,
+		);
+		handleSseEvent({ type: "tool_progress", id: "t1", name: "mcp_x_slow", progress: 2, total: 3 }, state);
+		expect(getToolProgress("t1")).toEqual({ progress: 2, total: 3, message: undefined });
+		handleSseEvent({ type: "tool_progress", id: "nobody", name: "mcp_x_slow", progress: 1 }, state);
+		handleSseEvent(
+			{ type: "tool_end", id: "t1", name: "mcp_x_slow", status: "success", result: { content: "ok" } },
+			state,
+		);
+		expect(getToolProgress("t1")).toBeUndefined();
 	});
 
 	it("names the queued and steering messages a stopped run took with it", async () => {

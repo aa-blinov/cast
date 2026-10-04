@@ -7,11 +7,13 @@ import { icons } from "./icons.js";
 import { pressable } from "./modal-focus.js";
 import {
 	getSubagentProgress,
+	getToolProgress,
 	getToolCardOpen,
 	getToolCardPreviewSrc,
 	setToolCardOpen,
 	setToolCardPreviewSrc,
 	subscribeSubagentProgress,
+	subscribeToolProgress,
 } from "./tool-card-state.js";
 
 const UNICODE_ESCAPE_RE = /\\u[\dA-Fa-f]{4}/;
@@ -146,6 +148,27 @@ function TaskLine({ call }) {
 	`;
 }
 
+/** How far a running MCP call has got: a thin bar when the server gave a total, else a counter, and its message. */
+function ToolProgressLine({ call }) {
+	const [progress, setProgress] = useState(() => getToolProgress(call.id));
+	useEffect(
+		() =>
+			subscribeToolProgress((id) => {
+				if (id === call.id) setProgress(getToolProgress(id));
+			}),
+		[call.id],
+	);
+	if (!progress || call.status !== "running") return null;
+	const known = progress.total > 0;
+	const text = known ? `${progress.progress}/${progress.total}` : String(progress.progress);
+	return html`
+		<div class="tool-card-progress">
+			${known && html`<progress class="tool-card-progress-bar" max=${progress.total} value=${Math.min(progress.progress, progress.total)} aria-label="Progress"></progress>`}
+			<span class="tool-card-progress-text">${[text, progress.message].filter(Boolean).join(" · ")}</span>
+		</div>
+	`;
+}
+
 export function ToolCard({ call, renderMarkdown }) {
 	// Local useState wraps reads from the shared map: the initializer pulls
 	// the saved value on mount (so a ToolCard that re-mounts inside a
@@ -196,6 +219,7 @@ export function ToolCard({ call, renderMarkdown }) {
 				${expandable && html`<${open ? icons.chevronUp : icons.chevronDown} class="tool-card-toggle" />`}
 			</div>
 			${call.name === "task" && html`<${TaskLine} call=${call} />`}
+			${mcp && html`<${ToolProgressLine} call=${call} />`}
 			${open && args && html`<div class="tool-card-body">${args}</div>`}
 			${
 				open &&

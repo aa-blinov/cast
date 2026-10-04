@@ -1,6 +1,6 @@
 import { latestPageUrl } from "./history-merge.js";
 import { blocksFromAssistantCompletion } from "./stream-blocks.js";
-import { setSubagentProgress } from "./tool-card-state.js";
+import { setSubagentProgress, setToolProgress } from "./tool-card-state.js";
 
 function normalizeUserContent(content) {
 	if (typeof content === "string") return { text: content, images: [], audios: [] };
@@ -217,10 +217,14 @@ export function handleSseEvent(event, context) {
 				return messages === prev.messages ? prev : { ...prev, messages };
 			});
 			break;
+		case "tool_progress":
+			setToolProgress(event.id, { progress: event.progress, total: event.total, message: event.message });
+			break;
 		case "subagent_progress":
 			setSubagentProgress(event);
 			break;
 		case "tool_end":
+			setToolProgress(event.id, undefined);
 			updateStreaming({
 				type: "tool_end",
 				id: event.id,
@@ -364,6 +368,13 @@ export function handleSseEvent(event, context) {
 		case "bash_confirm_resolved":
 			// Answered in another tab or the TUI, or timed out: the card is stale.
 			setSession((prev) => (prev?.bashConfirm?.id === event.id ? { ...prev, bashConfirm: undefined } : prev));
+			break;
+		case "mcp_elicit":
+			setSession((prev) => (prev ? { ...prev, mcpElicit: { id: event.id, server: event.server, message: event.message, schema: event.schema } } : prev));
+			notifyIfHidden(`Cast: ${event.server} asks for input`, event.message);
+			break;
+		case "mcp_elicit_resolved":
+			setSession((prev) => (prev?.mcpElicit?.id === event.id ? { ...prev, mcpElicit: undefined } : prev));
 			break;
 		case "agent_actor": {
 			const actor = event.actor;

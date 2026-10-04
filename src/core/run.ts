@@ -5,6 +5,7 @@ import type { WebEvent } from "../server/bridge.ts";
 import {
 	abortServerSession,
 	answerServerBashConfirm,
+	answerServerMcpElicit,
 	answerServerQuestion,
 	ensureServerClient,
 	ensureServerSession,
@@ -283,6 +284,12 @@ export async function runInteractive(args: ParsedArgs): Promise<void> {
 			case "notice":
 				emit("notice", { text: event.message });
 				break;
+			case "mcp_elicit":
+				void answerServerMcpElicit(client, sessionId, event.id, "decline").catch(() => {});
+				emit("notice", {
+					text: `MCP server "${event.server}" asked for input (${event.message}); cast run has no one to ask.`,
+				});
+				break;
 			case "bash_confirm":
 				// The protocol has no answer message, so this can only be a no;
 				// giving it at once beats the turn waiting out the timeout.
@@ -540,6 +547,12 @@ export async function runNonInteractive(args: ParsedArgs, options: RunOptions): 
 						process.stderr.write(`  ${event.message}${EOL}`);
 					}
 					break;
+				case "mcp_elicit": {
+					const message = `MCP server "${event.server}" asked for input (${event.message}); cast run has no one to ask.`;
+					void answerServerMcpElicit(client, sessionId, event.id, "decline").catch(() => {});
+					if (!emit("notice", { text: message })) process.stderr.write(`  ${message}${EOL}`);
+					break;
+				}
 				case "bash_confirm": {
 					// Nobody here can answer, and leaving it unanswered held the
 					// turn for the daemon's full timeout before the same refusal.

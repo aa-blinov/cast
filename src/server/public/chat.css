@@ -455,3 +455,24 @@ pre:hover .code-copy-btn, .code-copy-btn:focus-visible { opacity: 1; }
 @media (pointer: coarse), (max-width: 768px) {
 	.subagent-banner-back { min-height: 40px; padding: 8px 14px; }
 }
+
+/* An MCP server's form, drawn inside the approval card's frame. */
+.elicit-form { display: grid; gap: 10px; }
+.elicit-message { margin: 0; color: var(--text); line-height: 1.45; }
+.elicit-field { display: grid; gap: 4px; }
+.elicit-label { color: var(--text); font-weight: 600; }
+.elicit-input {
+	width: 100%; min-height: 36px; padding: 6px 8px; box-sizing: border-box;
+	border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit;
+}
+.elicit-input:focus { outline: none; border-color: var(--cyan); }
+.elicit-input[aria-invalid="true"] { border-color: var(--rose); }
+.elicit-group { display: grid; gap: 2px; }
+.elicit-check { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
+.elicit-note { min-height: 1em; color: var(--text-dim); font-size: var(--fs-micro); }
+.elicit-note.error { color: var(--rose); }
+.elicit-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 6px; }
+.elicit-actions .plan-decision-option:disabled { opacity: .5; cursor: default; }
+@media (pointer: coarse) {
+	.elicit-input, .elicit-check, .elicit-actions .plan-decision-option { min-height: 44px; }
+}

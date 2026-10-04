@@ -2767,7 +2767,8 @@ describe("web bridge", () => {
 		const result = await bridge.executeCommand(ws.id, "/mcp help");
 		expect(result).toEqual({
 			ok: true,
-			result: "/mcp list – /mcp enable <name> – /mcp disable <name> – /mcp reconnect <name> – /mcp uninstall <name>",
+			result:
+				"/mcp list – /mcp logs <name> – /mcp auth <name> – /mcp logout <name> – /mcp enable <name> – /mcp disable <name> – /mcp reconnect <name> – /mcp uninstall <name>",
 		});
 	});
 
@@ -3726,6 +3727,75 @@ describe("web bridge", () => {
 	// unconditional "yes", so rm -rf, sudo, git push --force and the rest ran
 	// without asking anyone — including for a TUI attached as a thin client,
 	// whose picker never got a say.
+	describe("an MCP server's form (elicitation)", () => {
+		type AskForm = (
+			server: string,
+			params: { message: string; requestedSchema: unknown; mode?: string },
+			signal: AbortSignal,
+		) => Promise<{ action: string; content?: unknown }>;
+		const schema = { type: "object", properties: { name: { type: "string" } } };
+
+		async function askFromLoop(): Promise<AskForm> {
+			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+			const opts = runAgentLoop.mock.calls.at(-1)![1] as { askMcpForm?: AskForm };
+			expect(opts.askMcpForm).toBeTypeOf("function");
+			return opts.askMcpForm!;
+		}
+
+		async function open() {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			const events: Array<{ type: string; id?: string; server?: string; message?: string }> = [];
+			bridge.subscribe(ws.id, (event) => events.push(event as { type: string }));
+			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
+			await bridge.submit(ws.id, "go");
+			return { bridge, ws, events, ask: await askFromLoop() };
+		}
+
+		it("shows the form to the clients and returns what they answer", async () => {
+			const { bridge, ws, events, ask } = await open();
+			const pending = ask(
+				"docs",
+				{ message: "Who are you?", requestedSchema: schema },
+				new AbortController().signal,
+			);
+			await vi.waitFor(() => expect(bridge.getMcpElicit(ws.id)).toBeDefined());
+			const asked = events.find((e) => e.type === "mcp_elicit")!;
+			expect(asked).toMatchObject({ server: "docs", message: "Who are you?" });
+			expect(bridge.getMcpElicit(ws.id)).toEqual({ id: asked.id, server: "docs", message: "Who are you?", schema });
+
+			expect(bridge.answerMcpElicit(ws.id, asked.id!, { action: "accept", content: { name: "Ada" } })).toBe(true);
+			await expect(pending).resolves.toEqual({ action: "accept", content: { name: "Ada" } });
+			expect(events.some((e) => e.type === "mcp_elicit_resolved" && e.id === asked.id)).toBe(true);
+			expect(bridge.answerMcpElicit(ws.id, asked.id!, { action: "decline" })).toBe(false);
+			expect(bridge.getMcpElicit(ws.id)).toBeUndefined();
+		});
+
+		it("ignores an id that is not pending", async () => {
+			const { bridge, ws, ask } = await open();
+			const pending = ask("docs", { message: "?", requestedSchema: schema }, new AbortController().signal);
+			await vi.waitFor(() => expect(bridge.getMcpElicit(ws.id)).toBeDefined());
+			expect(bridge.answerMcpElicit(ws.id, "other", { action: "accept", content: {} })).toBe(false);
+			bridge.abort(ws.id);
+			await expect(pending).resolves.toEqual({ action: "cancel" });
+		});
+
+		it("cancels when the call is aborted, and declines a request to open a URL", async () => {
+			const { bridge, ws, ask } = await open();
+			const controller = new AbortController();
+			const pending = ask("docs", { message: "?", requestedSchema: schema }, controller.signal);
+			await vi.waitFor(() => expect(bridge.getMcpElicit(ws.id)).toBeDefined());
+			controller.abort();
+			await expect(pending).resolves.toEqual({ action: "cancel" });
+			expect(bridge.getMcpElicit(ws.id)).toBeUndefined();
+			await expect(
+				ask("docs", { message: "go there", requestedSchema: schema, mode: "url" }, new AbortController().signal),
+			).resolves.toEqual({
+				action: "decline",
+			});
+		});
+	});
+
 	describe("dangerous-command confirmation", () => {
 		// The loop is started by an async submit; wait for it to be called instead of guessing how many ticks that takes.
 		async function confirmFromLoop(): Promise<(command: string, reason: string) => Promise<boolean>> {
@@ -3906,7 +3976,12 @@ describe("web bridge", () => {
 			const ws = bridge.createSession(undefined, undefined, projectDir);
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 
-			expect(mockConnectMcpServers).toHaveBeenCalledWith({ "project-srv": { command: "true", args: [] } });
+			expect(mockConnectMcpServers).toHaveBeenCalledWith(
+				{ "project-srv": { command: "true", args: [] } },
+				undefined,
+				undefined,
+				[projectDir],
+			);
 			// The connect resolves on a microtask; the turn after it lands carries
 			// the tools.
 			await new Promise<void>((resolve) => setImmediate(resolve));

@@ -15,8 +15,11 @@ import {
 	closeMcpConnections,
 	connectMcpServers,
 	formatMcpForPrompt,
+	getMcpPrompt,
 	type McpServerConfig,
 	type McpSetupResult,
+	mcpPromptCommands,
+	parseMcpPromptArguments,
 } from "../mcp.ts";
 import { createPlanState, type PlanState, resolvePlanQuestion, resolvePlanTransition } from "../plan.ts";
 import { buildSystemPrompt, resolvePromptContextForCwd, resolveRulesForCwd } from "../project.ts";
@@ -65,6 +68,8 @@ export interface AcpAdapterSession {
 	 * startup's MCP pool for the duration of the run. Connections are
 	 * closed when the session ends. */
 	clientMcpResult: McpSetupResult | null;
+	/** The MCP prompt commands the editor was last told about, to send the list again when it changes. */
+	commandsKey?: string;
 	/** Set after the first `available_commands_update` notification has
 	 * been sent for this session. The slash command list is stable across
 	 * prompts within a session, so we only need to ship it once —
@@ -207,7 +212,7 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			let clientMcpResult: McpSetupResult | null = null;
 			if (mcpServers && mcpServers.length > 0) {
 				const config = mcpServersToConfig(mcpServers);
-				clientMcpResult = await connectMcpServers(config);
+				clientMcpResult = await connectMcpServers(config, undefined, undefined, [startup.cwd]);
 			}
 			const planState = createPlanState(startup.cwd, session.id, {
 				onChange: (question, transition) => {
@@ -435,13 +440,34 @@ export function createAcpAdapter(options: AcpAdapterOptions): AcpAdapter {
 			// Slash command list is stable across prompts — only ship it on the
 			// first prompt of each session. Subsequent prompts re-use the
 			// already-emitted list; the editor keeps it in its own UI state.
-			if (!session.commandsEmitted) {
+			// The prompts of MCP servers come and go (a connect that lands after the first prompt, a list that
+			// changes), so the list is sent again when it differs from the one the editor has.
+			const promptsKey = mcpPromptCommands(mergedMcp(session))
+				.map((c) => c.name.replace(SLASH_PREFIX_RE, ""))
+				.join(",");
+			if (!session.commandsEmitted || promptsKey !== session.commandsKey) {
 				emitAvailableCommands(session, client);
 				session.commandsEmitted = true;
 			}
 			const { runner } = session;
-			const text = promptContentToText(promptContent);
-			const message = promptContentToMessage(sessionId, promptContent);
+			let text = promptContentToText(promptContent);
+			let message = promptContentToMessage(sessionId, promptContent);
+
+			// /mcp:<server>:<prompt> args: the server renders the prompt and that text is what the model is asked.
+			if (text.trim().startsWith("/mcp:") && !runner.isRunning) {
+				const rendered = await renderMcpPrompt(session, text.trim());
+				if (!rendered.ok) {
+					client
+						.notify("session/update", {
+							sessionId: session.state.id,
+							update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: rendered.error } },
+						})
+						.catch(() => {});
+					return { stopReason: "end_turn" };
+				}
+				text = rendered.text;
+				message = { role: "user", content: [{ type: "text", text: rendered.text }] };
+			}
 
 			if (text.trim() === "/abort") {
 				runner.abort("acp /abort");
@@ -1039,6 +1065,13 @@ function emitAvailableCommands(
 	session: AcpAdapterSession,
 	client: { notify(method: string, params: unknown): Promise<void> },
 ): void {
+	// The prompts of the servers that are up, as the editor's own slash commands.
+	const mcpCommands = mcpPromptCommands(mergedMcp(session)).map((cmd) => ({
+		name: cmd.name.replace(SLASH_PREFIX_RE, ""),
+		description: cmd.description,
+		input: cmd.takesArgs ? { hint: cmd.argumentHint ?? "args" } : null,
+	}));
+	session.commandsKey = mcpCommands.map((c) => c.name).join(",");
 	const availableCommands = SLASH_COMMANDS.filter((cmd) => ACP_COMMANDS.has(cmd.name)).map((cmd) => {
 		// Strip leading `/` — ACP `name` is a verb like `compact`, not `/compact`.
 		const name = cmd.name.replace(SLASH_PREFIX_RE, "");
@@ -1058,7 +1091,7 @@ function emitAvailableCommands(
 			sessionId: session.state.id,
 			update: {
 				sessionUpdate: "available_commands_update",
-				availableCommands,
+				availableCommands: [...availableCommands, ...mcpCommands],
 			},
 		})
 		.catch(() => {});
@@ -1170,6 +1203,24 @@ function mergedMcp(session: AcpAdapterSession): McpSetupResult {
 		allServerNames: [...startup.allServerNames, ...client.allServerNames],
 		serverSources: { ...startup.serverSources, ...client.serverSources },
 	};
+}
+
+async function renderMcpPrompt(
+	session: AcpAdapterSession,
+	typed: string,
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+	const space = typed.search(/\s/);
+	const name = space === -1 ? typed : typed.slice(0, space);
+	const command = mcpPromptCommands(mergedMcp(session)).find((c) => c.name === name);
+	if (!command)
+		return {
+			ok: false,
+			error: `No MCP prompt ${name}. Servers that are up and offer prompts list them when you type /mcp:.`,
+		};
+	const parsed = parseMcpPromptArguments(command.prompt, space === -1 ? "" : typed.slice(space + 1));
+	if (!parsed.ok) return { ok: false, error: `${name}: ${parsed.error}` };
+	const got = await getMcpPrompt(mergedMcp(session), command, parsed.arguments);
+	return got.ok ? { ok: true, text: got.text } : { ok: false, error: `${name}: ${got.error}` };
 }
 
 function mergedMcpTools(session: AcpAdapterSession) {
