@@ -250,3 +250,15 @@ describe("spawnBind", () => {
 		expect(spawnBind(undefined, true)).toEqual({ host: "127.0.0.1", port: 0 });
 	});
 });
+
+describe("commandTimeoutMs", () => {
+	it("gives the commands that ask the model as long as the model takes, and leaves the quick ones on the default", async () => {
+		const { commandTimeoutMs } = await import("../src/server/client.ts");
+		for (const command of ["/evolve", "/compact", "/btw what changed?", "/distill", "/dream"]) {
+			expect(commandTimeoutMs(command), command).toBe(60_000);
+		}
+		for (const command of ["/current", "/queue next", "/evolvement", "/compaction", "/help"]) {
+			expect(commandTimeoutMs(command), command).toBeUndefined();
+		}
+	});
+});

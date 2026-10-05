@@ -42,6 +42,17 @@ vi.mock("../src/core/btw.ts", async (importOriginal) => ({
 	askSideQuestion: (...args: unknown[]) => mockAskSideQuestion(...args),
 }));
 
+// What /evolve's analysis asks the model: a test answers it by hand; every other test reaches the real function.
+const mockEvolveAnswer = vi.fn();
+vi.mock("../src/core/llm.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/core/llm.ts")>();
+	return {
+		...actual,
+		streamAndCollect: (...args: Parameters<typeof actual.streamAndCollect>) =>
+			mockEvolveAnswer.getMockImplementation() ? mockEvolveAnswer(...args) : actual.streamAndCollect(...args),
+	};
+});
+
 vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/loop.ts")>();
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
@@ -1402,6 +1413,38 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		const result = await bridge.executeCommand(ws.id, "/evolve");
 		expect(result).toEqual({ ok: false, error: "Session is empty — nothing to evolve from." });
+	});
+
+	it("/evolve says it is analyzing, and a second one meanwhile is told so instead of running the same work again", async () => {
+		let answer!: (value: { content: string }) => void;
+		mockEvolveAnswer.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					answer = resolve;
+				}),
+		);
+		try {
+			const bridge = createServerBridge(makeResult());
+			const ws = bridge.createSession();
+			ws.session.messages.push({ role: "user", content: "release routine" }, { role: "assistant", content: "ok" });
+			const notices: string[] = [];
+			bridge.subscribe(ws.id, (event) => {
+				if (event.type === "notice") notices.push(event.message);
+			});
+			const first = bridge.executeCommand(ws.id, "/evolve");
+			await vi.waitFor(() => expect(notices).toEqual(["Analyzing the session for reusable skills…"]));
+			const second = await bridge.executeCommand(ws.id, "/evolve");
+			expect(second.ok).toBe(false);
+			expect(second.error).toContain("Already analyzing");
+			expect(mockEvolveAnswer).toHaveBeenCalledTimes(1);
+			answer({ content: "[]" });
+			expect((await first).result).toBe("No reusable project skills to create from this session.");
+			// Free again once it has answered.
+			mockEvolveAnswer.mockImplementation(async () => ({ content: "[]" }));
+			expect((await bridge.executeCommand(ws.id, "/evolve")).ok).toBe(true);
+		} finally {
+			mockEvolveAnswer.mockReset();
+		}
 	});
 
 	it("/evolve while the agent is running fails with the running error", async () => {

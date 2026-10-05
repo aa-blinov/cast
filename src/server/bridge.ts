@@ -283,6 +283,8 @@ export interface WebAgentSession {
 	session: SessionState;
 	/** True while /undo is rewinding the folder: a message sent now must wait. */
 	undoing?: boolean;
+	/** True while /evolve is analyzing the session: a second one would run the same work twice and answer twice. */
+	evolving?: boolean;
 	/** Per-session override of the bridge-wide permission mode. Set by a
 	 * client that created the session with one (`cast run
 	 * --bypass-permissions`), which otherwise had nowhere to go: the flag never
@@ -2632,14 +2634,24 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	 *  was found. */
 	async function evolveSkills(ws: WebAgentSession): Promise<{ ok: boolean; result?: string; error?: string }> {
 		if (ws.status === "running") return { ok: false, error: "Agent running" };
+		if (ws.evolving) return { ok: false, error: "Already analyzing this session for skills: wait for its answer." };
 		const transcript = compactTurnTranscript(ws.session.messages);
 		if (transcript.trim().length === 0) return { ok: false, error: "Session is empty — nothing to evolve from." };
 		const project = projectTypicalTasks(ws.session.cwd ?? cwd);
-		const resp = await runCompactLlm(
-			EVOLVE_SYSTEM_PROMPT,
-			EVOLVE_PROMPT.replace("{{PROJECT}}", project).replace("{{TRANSCRIPT}}", transcript),
-			800,
-		);
+		// The analysis is a model request of its own and takes a while on a long session; saying so is what stops a
+		// second press of Enter.
+		ws.evolving = true;
+		broadcaster.broadcast(ws, { type: "notice", message: "Analyzing the session for reusable skills…" });
+		let resp: Awaited<ReturnType<typeof runCompactLlm>>;
+		try {
+			resp = await runCompactLlm(
+				EVOLVE_SYSTEM_PROMPT,
+				EVOLVE_PROMPT.replace("{{PROJECT}}", project).replace("{{TRANSCRIPT}}", transcript),
+				800,
+			);
+		} finally {
+			ws.evolving = false;
+		}
 		if (!resp) return { ok: false, error: "Could not analyze the session." };
 		const suggestions = parseEvolveJson(resp.content)
 			.map((s) => ({ ...s, name: normalizeSkillName(s.name) }))
