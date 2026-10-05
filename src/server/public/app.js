@@ -537,6 +537,20 @@ function App() {
 		pendingPlanSignalRef,
 		planRefineArmedRef,
 	} = useSessionState();
+	// A new session (a draft) has no turn to ask whether its model takes voice, so the page asks by model name:
+	// otherwise the microphone is missing on the page you land on and shows only after the first message.
+	const [draftAudioInput, setDraftAudioInput] = useState(false);
+	const draftModel = session?.isDraft ? (session.model ?? "") : null;
+	useEffect(() => {
+		if (draftModel === null) return;
+		let live = true;
+		api("GET", `/api/model-audio?model=${encodeURIComponent(draftModel)}`)
+			.then((res) => live && setDraftAudioInput(res?.audioInput === true))
+			.catch(() => live && setDraftAudioInput(false));
+		return () => {
+			live = false;
+		};
+	}, [draftModel]);
 	// Earliest send time among in-flight (pending) user messages — it starts the
 	// composer timer the moment the user hits send, instead of a round trip
 	// later when the daemon's status:running lands (see ElapsedTimer).
@@ -2441,7 +2455,7 @@ function App() {
 							${session.parentSessionId && html`<button type="button" class="subagent-banner-back" onClick=${() => selectSession(session.parentSessionId)}>← Back to the thread</button>`}
 						</div>
 					`
-							: html`<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} audioInput=${Boolean(session?.audioInput)} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />`
+							: html`<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} audioInput=${Boolean(session?.isDraft ? draftAudioInput : session?.audioInput)} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />`
 					}
 				</div>
 			</main>

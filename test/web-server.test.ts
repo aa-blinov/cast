@@ -960,6 +960,31 @@ describe("voice messages on the chat route", () => {
 			body: JSON.stringify({ text: "", images }),
 		});
 
+	it("answers by model name whether a model takes voice, so a new session's page can show the microphone", async () => {
+		await stopTestServer();
+		const asked: string[] = [];
+		server = startServer({
+			port: 0,
+			host: "127.0.0.1",
+			bridge: { modelAcceptsAudio: (model: string) => (asked.push(model), model === "hears") } as never,
+			webUser: "cast",
+			serverPassword: "test-password",
+			version: "test",
+		});
+		await once(server, "listening");
+		origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		const cookie = await login();
+		const ask = async (query: string) =>
+			(await (await fetch(`${origin}/api/model-audio${query}`, { headers: { Cookie: cookie } })).json()) as {
+				audioInput: boolean;
+			};
+		expect(await ask("?model=hears")).toEqual({ audioInput: true });
+		expect(await ask("?model=deaf")).toEqual({ audioInput: false });
+		expect(await ask("")).toEqual({ audioInput: false });
+		expect(asked).toEqual(["hears", "deaf", ""]);
+		expect((await fetch(`${origin}/api/model-audio?model=hears`)).status).toBe(401);
+	});
+
 	it("refuses a voice note for a model that can't hear it, before it reaches the provider", async () => {
 		const submit = await restartWith(false);
 		const res = await send(["data:audio/wav;base64,UklGRg=="]);

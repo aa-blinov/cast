@@ -560,6 +560,8 @@ export interface ServerBridge {
 	dispose?(): void;
 	executeCommand(sessionId: string, command: string): Promise<{ ok: boolean; result?: unknown; error?: string }>;
 	acceptsAudio(sessionId: string): boolean;
+	/** The same for a model by name (empty: the daemon's own), for a new session that has no turn to ask yet. */
+	modelAcceptsAudio(model?: string): boolean;
 	/** Runs a settings-only command without requiring a visible chat session.
 	 * This is intentionally separate from executeCommand so the TUI keeps its
 	 * session-bound command path unchanged. */
@@ -1584,6 +1586,10 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (!ws) return false;
 		const model = ws.session.mode === "plan" && planModel ? planModel : ws.session.model;
 		return modelInfoFor(model)?.audioInput === true;
+	}
+
+	function modelAcceptsAudio(model?: string): boolean {
+		return modelInfoFor(model || result.session.model)?.audioInput === true;
 	}
 
 	/** Observation-only, fire-and-forget — a skill/rule name expanding into its actual prompt content. */
@@ -3932,6 +3938,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		},
 		executeCommand,
 		acceptsAudio,
+		modelAcceptsAudio,
 		executeSettingsCommand,
 		getConfig,
 		getPersonas,

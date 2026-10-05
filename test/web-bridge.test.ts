@@ -5038,6 +5038,26 @@ describe("web bridge", () => {
 		}
 	});
 
+	it("tells by model name whether it hears audio, for a new session that has no turn to ask, and falls back to the daemon's own model", () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+		const previous = getModelsCache();
+		try {
+			setModelsCache([
+				{ id: "hears", audioInput: true },
+				{ id: "deaf", audioInput: false },
+				{ id: ws.session.model, audioInput: true },
+			]);
+			expect(bridge.modelAcceptsAudio("hears")).toBe(true);
+			expect(bridge.modelAcceptsAudio("deaf")).toBe(false);
+			expect(bridge.modelAcceptsAudio("unknown")).toBe(false);
+			expect(bridge.modelAcceptsAudio("")).toBe(true);
+			expect(bridge.modelAcceptsAudio()).toBe(true);
+		} finally {
+			setModelsCache(previous);
+		}
+	});
+
 	it("submit with no images stays a plain string (unchanged behavior)", async () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
