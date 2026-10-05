@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { commandResultText } from "./command-result.js";
 
 const SYSTEM_REMINDER_STRIP_RE = /\n\n<system-reminder>[\s\S]*<\/system-reminder>/;
 const STEER_CMD_RE = /^\/(steer|s)\s*/;
@@ -350,7 +351,7 @@ export async function submitMessage(text, images, pendingDocs, context) {
 				// Fallback so an object/array result is never silently swallowed —
 				// this exact gap (POST succeeds, nothing visible) is what made
 				// /current, /usage, and /sessions look completely broken before.
-				addNotice(JSON.stringify(result.result));
+				addNotice(commandResultText(result.result));
 			}
 		} catch (err) {
 			addNotice(err.message, "error");

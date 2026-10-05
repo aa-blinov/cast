@@ -5,6 +5,9 @@ All notable user-facing changes to cast, newest first.
 ## Unreleased
 
 ### Fixed
+- **Slash commands that answer with data are readable in the web UI.** `/skills`, `/provider`, `/hooks`, `/memory`, `/permissions`, `/mcp`, `/web-search-provider` and others showed the raw JSON of their answer (`/skills` was five thousand characters of file paths). They show a list, one line each (`* mimo (active) - https://...`), or `key: value` lines, and the answer's own text when it has one (`/lsp`).
+- **A web command that asks the model is not cut off at 15 seconds.** `/evolve`, `/compact`, `/btw`, `/distill` and `/dream` wait up to a minute, like in the terminal; before, the page reported "Request timed out" while the daemon went on and answered nobody.
+- `/cost` says "1 request", not "1 requests".
 - **`/evolve` no longer answers twice, or reports a timeout it did not have.** The analysis is a model request of its own and takes seconds on a long session; nothing said so, and a second press of Enter ran the same work again and answered again. It now says "Analyzing the session for reusable skills…", and a second `/evolve` meanwhile is told "Already analyzing" instead of starting another. In the terminal, a command that asks the model (`/evolve`, `/compact`, `/btw`, `/distill`, `/dream`) waited 5 seconds for the daemon like a quick call and showed "The operation was aborted due to timeout" while the daemon went on and answered a screen that had stopped listening (the picker or the result never appeared); they wait up to a minute now.
 
 ## 0.56.3

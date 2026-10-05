@@ -217,6 +217,7 @@ const IMPORT_REWRITE_TARGETS = [
 	"api",
 	"cast-logo",
 	"chat-scroll",
+	"command-result",
 	"composer",
 	"diff-panel",
 	"directory-browser",
