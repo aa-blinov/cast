@@ -24,6 +24,7 @@ import { type SegmentContext, tildePath } from "../ui/statusbar.ts";
 import { FOCUS_REPORTING_OFF, FOCUS_REPORTING_ON, setTerminalFocused } from "../ui/terminal-notify.ts";
 import { theme } from "../ui/themes/index.ts";
 import { bannerRows } from "./banner.ts";
+import { foldCommandVariants } from "./command-palette.ts";
 import { CastAutocompleteProvider, CastEditor } from "./editor.ts";
 import { ModalHost } from "./modals.ts";
 import { paint } from "./paint.ts";
@@ -304,7 +305,9 @@ export class PiApp {
 			.filter((s) => !builtin.has(`/${s.name}`))
 			.map((s) => ({ name: s.name, description: s.description, argumentHint: s.argumentHint }));
 		const commands: SlashCommand[] = [
-			...SLASH_COMMANDS.filter((c) => !c.hidden).map((c) => ({ name: c.name.slice(1), description: c.description })),
+			...foldCommandVariants(
+				SLASH_COMMANDS.filter((c) => !c.hidden).map((c) => ({ name: c.name.slice(1), description: c.description })),
+			),
 			...skillCommands,
 			...mcpPrompts.map((c) => ({
 				name: c.name.slice(1),

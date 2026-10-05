@@ -13,6 +13,7 @@ import {
 import { searchProjectFiles } from "../core/file-search.ts";
 import { atTokenAt } from "../ui/input/at-mention.ts";
 import { theme } from "../ui/themes/index.ts";
+import { orderSlashSuggestions } from "./command-palette.ts";
 import { paint } from "./paint.ts";
 
 const TRAILING_SPACES_RE = / +$/;
@@ -146,7 +147,14 @@ export class CastAutocompleteProvider implements AutocompleteProvider {
 			if (!options.force) return null;
 		}
 		const mention = atTokenAt(before, before.length);
-		if (!mention) return this.inner.getSuggestions(lines, cursorLine, cursorCol, options);
+		if (!mention) {
+			const found = await this.inner.getSuggestions(lines, cursorLine, cursorCol, options);
+			// A command word at the start of the message (a bare slash, or letters after it): its own order.
+			if (found && cursorLine === 0 && lines.length === 1 && /^\/\S*$/.test(before)) {
+				return { ...found, items: orderSlashSuggestions(found.items, before.slice(1)) };
+			}
+			return found;
+		}
 		const paths = await searchProjectFiles(this.cwd, mention.query);
 		if (options.signal.aborted || paths.length === 0) return null;
 		return { items: paths.map((path) => ({ value: `@${path} `, label: path })), prefix: before.slice(mention.from) };
