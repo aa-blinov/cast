@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **`/evolve` no longer answers twice, or reports a timeout it did not have.** The analysis is a model request of its own and takes seconds on a long session; nothing said so, and a second press of Enter ran the same work again and answered again. It now says "Analyzing the session for reusable skills…", and a second `/evolve` meanwhile is told "Already analyzing" instead of starting another. In the terminal, a command that asks the model (`/evolve`, `/compact`, `/btw`, `/distill`, `/dream`) waited 5 seconds for the daemon like a quick call and showed "The operation was aborted due to timeout" while the daemon went on and answered a screen that had stopped listening (the picker or the result never appeared); they wait up to a minute now.
+
 ## 0.56.3
 
 ### Fixed

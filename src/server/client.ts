@@ -373,10 +373,23 @@ export async function runServerShell(
 	return data as { output: string; failed: boolean; added: boolean };
 }
 
+const MODEL_COMMAND_RE = /^\/(evolve|compact|btw|distill|dream)(\s|$)/;
+const MODEL_COMMAND_TIMEOUT_MS = 60_000;
+
+/**
+ * How long to wait for a command's answer. Most answer at once; the ones that put a request to the model (`/evolve`,
+ * `/compact`, `/btw`, `/distill`, `/dream`) take as long as the model does, and cutting them off at the quick-call
+ * limit reported a timeout while the daemon went on and answered a screen that had stopped listening.
+ */
+export function commandTimeoutMs(command: string): number | undefined {
+	return MODEL_COMMAND_RE.test(command) ? MODEL_COMMAND_TIMEOUT_MS : undefined;
+}
+
 export async function runServerCommand(client: ServerClient, sessionId: string, command: string): Promise<unknown> {
 	const { status, data } = await serverFetch(client, `${API_V1_PREFIX}/sessions/${sessionId}/command`, {
 		method: "POST",
 		body: { command },
+		timeoutMs: commandTimeoutMs(command),
 	});
 	if (status !== 200) {
 		const msg =
