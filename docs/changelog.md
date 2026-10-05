@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.56.3
 
 ### Fixed
 - **The microphone shows on a new session's page.** The button depends on the session's model taking voice, and a new session that has not sent anything has no session to ask, so the page you land on had no microphone until the first message created one. The page now asks the daemon by model name (`GET /api/model-audio`). A model that does not take voice (a text-only one) still has none.
