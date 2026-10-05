@@ -2719,6 +2719,12 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		json(res, { ok: true });
 	});
 
+	// A new session has no turn to ask: the page asks by model name, so its microphone shows before the first message.
+	route("GET", "/api/model-audio", (req, res) => {
+		const model = new URL(req.url ?? "/", `http://localhost:${port}`).searchParams.get("model") ?? "";
+		json(res, { audioInput: bridge.modelAcceptsAudio(model) });
+	});
+
 	route("GET", "/api/models", async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://localhost:${port}`);
 		const provider = url.searchParams.get("provider") ?? undefined;
