@@ -31,7 +31,7 @@ export function formatCost(session: SessionState, rows: SessionCostRow[]): strin
 		for (const r of rows) {
 			const price = r.cost === null ? "" : `, ${usd(r.cost)}`;
 			lines.push(
-				`  ${r.kind}: ${n(r.requests)} requests, ${n(r.promptTokens)} in, ${n(r.completionTokens)} out${price}`,
+				`  ${r.kind}: ${n(r.requests)} request${r.requests === 1 ? "" : "s"}, ${n(r.promptTokens)} in, ${n(r.completionTokens)} out${price}`,
 			);
 		}
 	}

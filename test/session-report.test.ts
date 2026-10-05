@@ -75,7 +75,7 @@ describe("formatCost", () => {
 		]);
 		const text = sessionCostText(s);
 		expect(text).toContain("main: 2 requests, 200 in, 20 out, $0.7500");
-		expect(text.endsWith("side: 1 requests, 40 in, 4 out")).toBe(true);
+		expect(text.endsWith("side: 1 request, 40 in, 4 out")).toBe(true);
 	});
 });
 
