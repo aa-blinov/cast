@@ -2,7 +2,7 @@
 
 All notable user-facing changes to cast, newest first.
 
-## Unreleased
+## 0.56.4
 
 ### Changed
 - **The terminal's command list is ordered for use.** A bare `/` opens with the commands most reached for (`help`, `new`, `sessions`, `compact`, `review`), then the rest: built-in commands A to Z, your skills, MCP prompts. With letters typed, what starts with them comes first (the exact name before all), then what only contains them: `/mo` no longer leads with `queue-remove` and `worktree remove`. A subcommand (`skills-sh install`, `worktree list`) is not a row of its own but is named in its command's description (`… [install | list-available | …]`), and a short name (`/s`, `/q`, `/qr`) is told in the description of the command it stands for; `/s` now lists 19 rows instead of 25, none of them a variant.
