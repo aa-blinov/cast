@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **The sign-in page no longer shows first to someone who is signed in.** The session cookie was `SameSite=Strict`, which browsers leave off a page opened from a link in another app (a chat, a doc, a bookmark manager): the visit went to the sign-in page, and only its own session check sent it on, a flash of the login window. The cookie is `SameSite=Lax` now: still withheld from requests another site makes (a POST, a fetch), sent on a link that opens the page. A session issued as Strict is re-issued as Lax, for the time it has left, by that same check, so no one has to sign in again (the first such visit still meets the sign-in page once).
+
 ## 0.56.1
 
 ### Fixed

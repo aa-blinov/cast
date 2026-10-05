@@ -112,11 +112,34 @@ describe("web session authentication", () => {
 		expect(authenticated.status).toBe(200);
 		const cookie = authenticated.headers.get("set-cookie");
 		expect(cookie).toContain("HttpOnly");
-		expect(cookie).toContain("SameSite=Strict");
+		// Lax: a page opened by a link from another app still carries it (Strict made that visit meet the sign-in page).
+		expect(cookie).toContain("SameSite=Lax");
 
 		const app = await fetch(`${origin}/`, { headers: { Cookie: cookie! } });
 		expect(app.status).toBe(200);
 		expect(await app.text()).toContain('<div id="app"></div>');
+	});
+
+	it("re-issues a session cookie on the session check for the time it has left, and issues none to a visitor who is not signed in", async () => {
+		const login = await fetch(`${origin}/api/auth/login`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ username: "cast", password: "test-password" }),
+		});
+		const issued = login.headers.get("set-cookie")!;
+		const token = /cast_web_session=([^;]+)/.exec(issued)![1]!;
+		const checked = await fetch(`${origin}/api/auth/session`, { headers: { Cookie: `cast_web_session=${token}` } });
+		expect(await checked.json()).toEqual({ authenticated: true });
+		const again = checked.headers.get("set-cookie")!;
+		expect(again).toContain(`cast_web_session=${token}`);
+		expect(again).toContain("SameSite=Lax");
+		const maxAge = Number(/Max-Age=(\d+)/.exec(again)![1]);
+		expect(maxAge).toBeGreaterThan(7 * 24 * 3600 - 60);
+		expect(maxAge).toBeLessThanOrEqual(7 * 24 * 3600);
+
+		const stranger = await fetch(`${origin}/api/auth/session`);
+		expect(await stranger.json()).toEqual({ authenticated: false });
+		expect(stranger.headers.get("set-cookie")).toBeNull();
 	});
 
 	it("keeps an authenticated session across a server restart", async () => {

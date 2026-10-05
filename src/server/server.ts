@@ -374,7 +374,11 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 
 	function sessionCookie(req: IncomingMessage, token: string, maxAge: number): string {
 		const secure = "encrypted" in req.socket || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
-		return `cast_web_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${secure}`;
+		// Lax, not Strict: Strict leaves the cookie off a page opened from a link in another app (a chat, a doc, a
+		// bookmark manager), so a signed-in person met the sign-in page first. Lax still withholds it from a request
+		// another site makes (a POST, a fetch), which is what a session cookie has to be protected from; the routes a
+		// page opened by a link can reach are reads.
+		return `cast_web_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
 	}
 
 	function retryAfterLoginLimit(req: IncomingMessage): number | null {
@@ -810,7 +814,18 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	});
 
 	route("GET", "/api/auth/session", (req, res) => {
-		json(res, { authenticated: isAuthenticated(req) });
+		const authenticated = isAuthenticated(req);
+		// A session issued as SameSite=Strict (before 0.56.2) is re-issued as it is now, for the time it has left, so
+		// nobody has to sign in again to stop meeting the sign-in page.
+		const token = authenticated ? readCookie(req, "cast_web_session") : undefined;
+		if (token) {
+			const row = getDb()
+				.prepare("SELECT expires_at FROM web_sessions WHERE token_hash = ?")
+				.get(createHash("sha256").update(token).digest("hex")) as { expires_at: number } | undefined;
+			const left = row ? Math.floor((row.expires_at - Date.now()) / 1000) : 0;
+			if (left > 0) res.setHeader("Set-Cookie", sessionCookie(req, token, left));
+		}
+		json(res, { authenticated });
 	});
 
 	route("POST", "/api/auth/login", async (req, res) => {
