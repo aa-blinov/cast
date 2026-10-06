@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Fixed
+- **Answers were set as code, indented four columns more, from a point in a session on.** The terminal carries an open code fence from one block of an answer to the next, and it counted two things it should not: the reasoning (shown or not), and a ```` ```python ```` line inside an open block, which it read as the end of that block. A model that opened a fence, forgot to close it and opened another left the transcript believing a block was open, and every answer after it was drawn as code (first row at eight columns, the rest at ten). A fence line with a language tag no longer closes a block (as in Markdown), reasoning keeps fences of its own, and a new prompt starts the text over. In the session that showed it, 30 rows were wrongly indented; now none.
+
 ## 0.57.0
 
 ### Changed

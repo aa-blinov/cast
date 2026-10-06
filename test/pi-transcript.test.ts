@@ -104,6 +104,57 @@ describe("Transcript", () => {
 	});
 });
 
+describe("Transcript: a code fence that is left open", () => {
+	const prose = "Ядро маскирования готово, пишу проверку логики и обязательно тест к нему, чтобы склейка работала.";
+	const agent = (blocks: Array<{ kind: "content" | "thinking"; text: string }>): ChatMessage => ({
+		role: "assistant",
+		content: "",
+		blocks,
+	});
+	const rowsOf = (messages: ChatMessage[], showReasoning = false) => {
+		const transcript = new Transcript();
+		transcript.set({ ...base, showReasoning, messages });
+		return transcript.render(60).map(plain);
+	};
+
+	it("is not set from reasoning the person is not shown: the answers after it stay prose", () => {
+		const rows = rowsOf([
+			user("go"),
+			agent([
+				{ kind: "thinking", text: "plan:\n```\nfirst\n```python\nsecond\n```" },
+				{ kind: "content", text: prose },
+			]),
+			agent([{ kind: "content", text: prose }]),
+		]);
+		const lines = rows.filter((row) => row.includes("маскирования") || row.includes("склейка"));
+		expect(lines.length).toBeGreaterThan(1);
+		for (const row of lines) expect(row.startsWith("    ") && !row.startsWith("     ")).toBe(true);
+	});
+
+	it("does not reach the next prompt's answer from an answer that left one open", () => {
+		const rows = rowsOf([
+			user("one"),
+			agent([{ kind: "content", text: "Here:\n```\nunfinished" }]),
+			user("two"),
+			agent([{ kind: "content", text: prose }]),
+		]);
+		const answer = rows.filter((row) => row.includes("маскирования"));
+		expect(answer).toHaveLength(1);
+		expect(answer[0]!.startsWith("    ") && !answer[0]!.startsWith("     ")).toBe(true);
+	});
+
+	it("still carries an open fence from one block of an answer to the next, which is what the carry is for", () => {
+		const rows = rowsOf([
+			user("one"),
+			agent([
+				{ kind: "content", text: "Here:\n```ts\nconst a = 1;" },
+				{ kind: "content", text: "const b = 2;\n```" },
+			]),
+		]);
+		expect(rows.some((row) => row.includes("const b = 2;") && row.startsWith("        "))).toBe(true);
+	});
+});
+
 describe("Transcript: laying out again after a resize or a theme change", () => {
 	const long = (n: number): ChatMessage[] =>
 		Array.from({ length: n }, (_, i) => ({

@@ -179,7 +179,8 @@ export function blockLines(
 	const text = sanitize(String(block.text ?? "")).replace(THINK_TAG_RE, "");
 	if (block.kind === "thinking") {
 		if (!showReasoning) return [];
-		return sectionLines(markdown(text, { width: bodyWidth(width), openFence }), {
+		// Reasoning has its own fences: an unclosed one in it (hidden or not) is not the answer's.
+		return sectionLines(markdown(text, { width: bodyWidth(width) }), {
 			heading: block.continued ? undefined : "REASONING",
 			quiet: true,
 		});
@@ -194,9 +195,9 @@ export function fenceAfter(message: ChatMessage, incoming: OpenFence | null): Op
 	let fence = incoming;
 	if (message.role !== "assistant") return fence;
 	try {
+		// Only the answer's text carries a fence on: the reasoning has fences of its own, and is not always shown.
 		for (const block of message.blocks ?? []) {
-			if (block.kind === "thinking" || block.kind === "content")
-				fence = trailingOpenFence(String(block.text ?? ""), fence);
+			if (block.kind === "content") fence = trailingOpenFence(String(block.text ?? ""), fence);
 		}
 	} catch {
 		// A message that cannot be read opens no fence; it is reported where it is laid out.
@@ -220,8 +221,7 @@ export function messageLines(
 		const out: string[] = [];
 		for (const block of message.blocks ?? []) {
 			for (const line of blockLines(block, { width, showReasoning, openFence: fence })) out.push(line);
-			if (block.kind === "thinking" || block.kind === "content")
-				fence = trailingOpenFence(String(block.text ?? ""), fence);
+			if (block.kind === "content") fence = trailingOpenFence(String(block.text ?? ""), fence);
 		}
 		return out;
 	}
