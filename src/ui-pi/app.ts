@@ -78,7 +78,9 @@ const runningPlaceholder = () => {
 		hintMode = runningInputMode(loadSettings());
 		hintReadAt = Date.now();
 	}
-	return `type to ${hintMode} * esc esc to stop`;
+	const other = getKeybindings().keysFor("input.otherMode")[0];
+	const otherHint = other ? ` * ${keyLabel(other)} ${hintMode === "steer" ? "queues" : "steers"}` : "";
+	return `type to ${hintMode}${otherHint} * esc esc to stop`;
 };
 const HINT_MS = 2000;
 const SPINNER_MS = 200;
@@ -264,6 +266,13 @@ export class PiApp {
 		// Esc stops a running turn, on the second press within two seconds; the
 		// draft is left as it is. Anything else Esc does (closing the autocomplete)
 		// is the editor's, so it only counts when nothing of the kind is open.
+		// Alt+Enter while a turn runs sends the draft the other way from Enter: queued when Enter steers. Idle, it is
+		// the editor's (a line break), as before.
+		if (model.running && !asking && !this.editor.isShowingAutocomplete() && keys.matches(data, "input.otherMode")) {
+			const text = this.editor.getText();
+			if (text.trim()) this.submit(text, { otherMode: true });
+			return { consume: true };
+		}
 		if (keys.matches(data, "input.escape") && model.running && !asking && !this.editor.isShowingAutocomplete()) {
 			const now = Date.now();
 			if (now - this.lastEsc < HINT_MS) {
@@ -278,7 +287,7 @@ export class PiApp {
 		return undefined;
 	}
 
-	private submit(text: string): void {
+	private submit(text: string, options?: { otherMode?: boolean }): void {
 		const model = this.model;
 		if (!model || !text.trim()) return;
 		// pi-tui has already emptied the composer: a refused message (a command during a turn, a lost daemon) goes
@@ -290,7 +299,7 @@ export class PiApp {
 		this.editor.addToHistory(text);
 		this.historySeen++;
 		this.editor.setText("");
-		void model.handleSubmit(text);
+		void model.handleSubmit(text, options);
 	}
 
 	private syncCommands(model: AppModel): void {

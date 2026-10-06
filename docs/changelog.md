@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.57.0
+
+### Changed
+- **Alt+Enter queues, Enter steers.** While a turn runs, Enter sends a plain message into it (steer) and Alt+Enter (Option+Enter) queues it for after the turn, in the terminal and the web UI. The `/running-input` setting ("Enter while a turn runs" in Settings) now only swaps the two keys, and the hint under the composer and the setting's own text say which does what. Idle, Alt+Enter is a line break as before; while a turn runs Shift+Enter or a trailing `\` is.
+
 ## 0.56.4
 
 ### Changed

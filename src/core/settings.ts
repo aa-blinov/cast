@@ -499,8 +499,8 @@ export function runningInputMode(settings: Settings = loadSettings()): RunningIn
 
 export function runningInputText(mode: RunningInputMode): string {
 	return mode === "queue"
-		? "While a turn runs, a message waits for it to end and then runs as the next turn (/steer injects one now)."
-		: "While a turn runs, a message steers it: the agent reads it on its next step (/queue waits for the turn to end).";
+		? "While a turn runs, Enter queues the message for after the turn, and Alt+Enter steers it into the turn (/queue and /steer do the same by name)."
+		: "While a turn runs, Enter steers the message into the turn, and Alt+Enter queues it for after the turn (/steer and /queue do the same by name).";
 }
 
 export function memorySearchScoreFloor(settings: Settings = loadSettings()): number {

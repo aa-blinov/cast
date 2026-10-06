@@ -363,7 +363,7 @@ describe("handleInput", () => {
 		const { deps, calls } = createFakeDeps({ running: true });
 		await handleInput("/running-input queue", undefined, deps);
 		expect(loadSettings().runningInput).toBe("queue");
-		expect(String(calls.showNotice?.at(-1)?.[0])).toContain("waits for it to end");
+		expect(String(calls.showNotice?.at(-1)?.[0])).toContain("Enter queues");
 		await handleInput("  then run the tests  ", undefined, deps);
 		expect(calls["agent.followUp"]).toEqual([["then run the tests"]]);
 		expect(calls["agent.steer"]).toBeUndefined();
@@ -377,6 +377,19 @@ describe("handleInput", () => {
 		expect(calls["agent.steer"]?.at(-1)).toEqual(["back to steering"]);
 		await handleInput("/running-input sideways", undefined, deps);
 		expect(String(calls.showNotice?.at(-1)?.[0])).toContain("Usage: /running-input");
+	});
+
+	it("sends the message the other way with Alt+Enter: queued when Enter steers, steered when Enter queues, and a command is unchanged", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		await handleInput("  later, please  ", undefined, deps, { otherMode: true });
+		expect(calls["agent.followUp"]).toEqual([["later, please"]]);
+		expect(calls["agent.steer"]).toBeUndefined();
+		await handleInput("/running-input queue", undefined, deps);
+		await handleInput("now, please", undefined, deps, { otherMode: true });
+		expect(calls["agent.steer"]).toEqual([["now, please"]]);
+		await handleInput("/s via command", undefined, deps, { otherMode: true });
+		expect(calls["agent.steer"]?.at(-1)).toEqual(["via command"]);
+		await handleInput("/running-input steer", undefined, deps);
 	});
 
 	// steer carries text only on every path, so an attached image would be
@@ -949,7 +962,7 @@ describe("handleInput", () => {
 		const { loadSettings } = await import("../src/core/settings.ts");
 		const { deps } = createFakeDeps();
 		const form = buildSettingsForm(deps, async () => {});
-		const row = form.rows().find((r) => r.kind === "choice" && r.label === "Message while a turn runs");
+		const row = form.rows().find((r) => r.kind === "choice" && r.label === "Enter while a turn runs");
 		if (row?.kind !== "choice") throw new Error("no running-input row");
 		expect(row.value).toBe("steer");
 		expect(row.set("queue")).toBeUndefined();
@@ -957,7 +970,7 @@ describe("handleInput", () => {
 		expect(
 			buildSettingsForm(deps, async () => {})
 				.rows()
-				.find((r) => r.kind === "choice" && r.label === "Message while a turn runs"),
+				.find((r) => r.kind === "choice" && r.label === "Enter while a turn runs"),
 		).toMatchObject({ value: "queue" });
 		row.set("steer");
 		expect(loadSettings().runningInput).toBeUndefined();

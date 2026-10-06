@@ -171,8 +171,8 @@ export function buildSettingsForm(deps: CommandDeps, runCommand: (input: string)
 				},
 				{
 					kind: "choice",
-					label: "Message while a turn runs",
-					description: "steer: the agent reads it on its next step. queue: it runs after the turn ends",
+					label: "Enter while a turn runs",
+					description: "steer: Enter steers, Alt+Enter queues. queue: the other way round",
 					value: runningInputMode(s),
 					options: [
 						{ value: "steer", label: "steer" },

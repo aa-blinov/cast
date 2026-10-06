@@ -157,6 +157,15 @@ describe("keybindings.ts — KeybindingsManager", () => {
 		expect(km.matches("\x1b", "input.escape")).toBe(true);
 	});
 
+	it("reads Alt+Enter as the other-way send, from the Esc-prefixed byte pair and the Kitty form, and not plain Enter", () => {
+		const km = new KeybindingsManager();
+		expect(km.keysFor("input.otherMode")).toEqual(["alt+enter"]);
+		expect(km.matches("\x1b\r", "input.otherMode")).toBe(true);
+		expect(km.matches("\x1b[13;3u", "input.otherMode")).toBe(true);
+		expect(km.matches("\r", "input.otherMode")).toBe(false);
+		expect(km.matches("\x1b[13;2u", "input.otherMode")).toBe(false);
+	});
+
 	it("matches deleteWordBackward to Ctrl-W", () => {
 		const km = new KeybindingsManager();
 		expect(km.matches("\x17", "editor.deleteWordBackward")).toBe(true);

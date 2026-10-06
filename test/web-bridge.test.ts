@@ -505,12 +505,12 @@ describe("web bridge", () => {
 
 	it("/running-input sets what a plain message does mid-run, through the settings path, and /current reports it", async () => {
 		const bridge = createServerBridge(makeResult());
-		expect((await bridge.executeSettingsCommand("/running-input")).result).toMatch(/steers it/);
-		expect((await bridge.executeSettingsCommand("/running-input queue")).result).toMatch(/waits for it to end/);
-		expect((await bridge.executeSettingsCommand("/running-input")).result).toMatch(/waits for it to end/);
+		expect((await bridge.executeSettingsCommand("/running-input")).result).toMatch(/Enter steers/);
+		expect((await bridge.executeSettingsCommand("/running-input queue")).result).toMatch(/Enter queues/);
+		expect((await bridge.executeSettingsCommand("/running-input")).result).toMatch(/Enter queues/);
 		expect((await bridge.executeSettingsCommand("/running-input sideways")).ok).toBe(false);
 		await bridge.executeSettingsCommand("/running-input steer");
-		expect((await bridge.executeSettingsCommand("/running-input")).result).toMatch(/steers it/);
+		expect((await bridge.executeSettingsCommand("/running-input")).result).toMatch(/Enter steers/);
 	});
 
 	it("resets each secondary model slot atomically", async () => {

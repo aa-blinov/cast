@@ -877,7 +877,7 @@ export function useAppModel(props: AppModelProps) {
 		}
 	}, [agent, onRepaintHistory, showNotice]);
 
-	const handleSubmit = useCallback(async (text: string) => {
+	const handleSubmit = useCallback(async (text: string, options?: { otherMode?: boolean }) => {
 		let input = text;
 		// Refine armed (see the approval dialog): the next real message is the
 		// plan feedback — wrap it so the model updates the plan instead of
@@ -897,7 +897,7 @@ export function useAppModel(props: AppModelProps) {
 		// the same PendingImage pipeline the web client uses, instead of
 		// leaving the model to guess it should `read` the bare path.
 		const images = await readImageFilesFromText(input);
-		await handleInput(input, images.length > 0 ? images : undefined, depsRef.current);
+		await handleInput(input, images.length > 0 ? images : undefined, depsRef.current, options);
 	}, []);
 
 	return {

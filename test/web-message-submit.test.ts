@@ -209,6 +209,39 @@ describe("web message submission", () => {
 		expect(context.setPendingQueue).not.toHaveBeenCalled();
 	});
 
+	it("sends a plain message during a turn the other way with Alt+Enter: /queue when Enter steers, /steer when Enter queues", async () => {
+		const context = () => ({
+			planRefineArmedRef: { current: false },
+			session: { id: "session-1", messages: [] },
+			draftVersionRef: { current: 0 },
+			activeId: "session-1",
+			setSession: vi.fn(),
+			pendingOutgoingRef: { current: new Map() },
+			waitForSessionStream: vi.fn().mockResolvedValue(true),
+			setRunning: vi.fn(),
+			running: true,
+			showToast: vi.fn(),
+			addNotice: vi.fn(),
+			setPendingQueue: vi.fn(),
+			setPendingSteers: vi.fn(),
+		});
+		const sent = () => vi.mocked(api).mock.calls.at(-1)![2] as { command?: string };
+		vi.mocked(api)
+			.mockResolvedValueOnce({ ok: true, result: {} })
+			.mockResolvedValueOnce({ ok: true, result: "Queued" });
+		await submitMessage("later", undefined, undefined, context(), { otherMode: true });
+		expect(sent().command).toBe("/queue later");
+		vi.mocked(api)
+			.mockResolvedValueOnce({ ok: true, result: { runningInput: "queue" } })
+			.mockResolvedValueOnce({ ok: true, result: "Steered" });
+		await submitMessage("now", undefined, undefined, context(), { otherMode: true });
+		expect(sent().command).toBe("/steer now");
+		// Without Alt+Enter and with the default, the message goes as it is: the daemon steers it.
+		vi.mocked(api).mockResolvedValueOnce({ ok: true, result: {} }).mockResolvedValueOnce({ ok: true });
+		await submitMessage("plain", undefined, undefined, context());
+		expect(vi.mocked(api).mock.calls.at(-1)![1]).toContain("/chat");
+	});
+
 	it("hands a refused command back to the composer and says why", async () => {
 		const addNotice = vi.fn();
 		const context = {

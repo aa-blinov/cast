@@ -301,7 +301,7 @@ export function Composer({
 	useEffect(() => () => { if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current); }, []);
 
 	const [sending, setSending] = useState(false);
-	const handleSubmit = useCallback(() => {
+	const handleSubmit = useCallback((options) => {
 		// `sendReady` (the daemon connection) is deliberately not a gate here:
 		// submitMessage asks for a reconnect and waits a few seconds, which
 		// beats a tap that does nothing while the page is catching up.
@@ -352,7 +352,7 @@ export function Composer({
 		// reconnect and releasing the button early would send it twice.
 		if (sendReady) setTimeout(() => setSending(false), 400);
 		const attachments = voice ? [...images, voice.dataUrl] : images;
-		Promise.resolve(onSubmit(text, attachments, pendingDocs.length > 0 ? pendingDocs : undefined))
+		Promise.resolve(onSubmit(text, attachments, pendingDocs.length > 0 ? pendingDocs : undefined, options))
 			.finally(() => {
 				if (!sendReady) setSending(false);
 			})
@@ -552,7 +552,8 @@ export function Composer({
 			}
 			if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
 				e.preventDefault();
-				handleSubmit();
+				// Alt+Enter (Option+Enter) during a turn sends the message the other way from Enter.
+				handleSubmit(e.altKey && running ? { otherMode: true } : undefined);
 			}
 		},
 		// biome-ignore lint/correctness/useExhaustiveDependencies: pickerItems/pickerSelect are plain values recomputed every render (not memoized) — already fine since this callback is rebuilt on every keystroke (`value` is a dep) regardless.
@@ -693,7 +694,7 @@ export function Composer({
 				${
 						running
 						? html`<button class="composer-abort" onPointerDown=${keepComposerFocus} onClick=${onAbort} disabled=${aborting} aria-label=${aborting ? "Aborting…" : "Abort"} title=${aborting ? "Aborting…" : sendReady ? "Abort (Esc)" : "Abort — waiting for connection"} aria-busy=${aborting ? "true" : "false"}><${aborting ? icons.spinner : icons.stop} /></button>`
-						: html`<button class="composer-send" onPointerDown=${keepComposerFocus} onClick=${handleSubmit} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs && !voice)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></button>`
+						: html`<button class="composer-send" onPointerDown=${keepComposerFocus} onClick=${() => handleSubmit()} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs && !voice)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></button>`
 				}
 			</div>
 		</div>
