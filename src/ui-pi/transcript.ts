@@ -64,6 +64,8 @@ export class Transcript implements Component {
 			const fences: Array<OpenFence | null> = [];
 			let fence: OpenFence | null = null;
 			for (const message of state.messages) {
+				// A new prompt starts the text over: a fence left open in an answer does not reach the next one.
+				if (message.role === "user") fence = null;
 				fences.push(fence);
 				fence = fenceAfter(message, fence);
 			}
@@ -141,7 +143,7 @@ export class Transcript implements Component {
 				for (const line of hit.lines) out.push(line);
 				if (block.kind === "tool") {
 					if (block.call.status === "running") runningTool = true;
-				} else fence = trailingOpenFence(String(block.text ?? ""), fence);
+				} else if (block.kind === "content") fence = trailingOpenFence(String(block.text ?? ""), fence);
 			}
 			// Between a finished text block and the next tool call the model may still
 			// be deciding; one activity row until something running can speak for itself.

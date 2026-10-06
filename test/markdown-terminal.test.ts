@@ -257,6 +257,10 @@ describe("fenced blocks across chunk boundaries", () => {
 		expect(trailingOpenFence("text\n```ts\nconst x = 1;")).toEqual({ language: "ts" });
 		expect(trailingOpenFence("```ts\nconst x = 1;\n```")).toBeNull();
 		expect(trailingOpenFence("```\nplain")).toEqual({});
+		// A fence line with a language is text of the open block, not its end: a model that forgets to close one and
+		// opens the next must not flip every block after it.
+		expect(trailingOpenFence("```\nfirst\n```python\nsecond\n```")).toBeNull();
+		expect(trailingOpenFence("```\nfirst\n```python\nsecond")).toEqual({});
 		expect(trailingOpenFence("still code")).toBeNull();
 		// Threaded: the chunk starts inside a fence and closes it.
 		expect(trailingOpenFence("```\nprose", { language: "ts" })).toBeNull();

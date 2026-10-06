@@ -41,6 +41,15 @@ export interface RenderedLine {
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
 const FENCE_RE = /^\s*(```+|~~~+)\s*(\S*)/;
+
+/**
+ * Whether a fence line closes the block that is open. A closer has no language tag (CommonMark): a ```` ```python ````
+ * inside a block is text of it. Models do write a fence, forget to close it, and open the next one; read as a closer,
+ * that line flipped every later block, and the answers after it were set as code.
+ */
+function closesFence(fence: RegExpExecArray, marker: string): boolean {
+	return fence[1]!.startsWith(marker) && !fence[2];
+}
 const BULLET_RE = /^(\s*)([-*+])\s+(.*)$/;
 /** GitHub task list: `- [ ] todo`, `- [x] done`. */
 const TASK_RE = /^\[([ xX])\]\s+(.*)$/;
@@ -431,7 +440,7 @@ export function renderMarkdownLines(text: string, options: MarkdownRenderOptions
 				inFence = true;
 				fenceMarker = fence[1]!.slice(0, 3);
 				fenceLang = fence[2] || undefined;
-			} else if (fence[1]!.startsWith(fenceMarker)) {
+			} else if (closesFence(fence, fenceMarker)) {
 				inFence = false;
 				flushFence();
 				fenceLang = undefined;
@@ -563,7 +572,7 @@ export function trailingOpenFence(text: string, incoming?: OpenFence | null): Op
 		if (!open) {
 			open = fence[2] ? { language: fence[2] } : {};
 			marker = fence[1]!.slice(0, 3);
-		} else if (fence[1]!.startsWith(marker)) {
+		} else if (closesFence(fence, marker)) {
 			open = null;
 		}
 	}
