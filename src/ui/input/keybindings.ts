@@ -33,6 +33,11 @@ export const TUI_KEYBINDINGS = {
 		defaultKeys: ["shift+enter", "alt+enter"],
 		description: "Insert a line break (or end the line with \\ and press Enter)",
 	},
+	"input.otherMode": {
+		defaultKeys: "alt+enter",
+		description:
+			"While a turn runs: send the message the other way (queue it after the turn, or steer it into the turn)",
+	},
 	"input.abort": { defaultKeys: "ctrl+c" },
 	"input.quit": { defaultKeys: "ctrl+q", description: "Quit at once, with no second press" },
 	"input.escape": { defaultKeys: "escape" },

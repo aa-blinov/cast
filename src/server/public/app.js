@@ -1325,7 +1325,7 @@ function App() {
 	// Diff panel drag-to-resize — pointer events so mouse and touch both work.
 	// Submit message
 	const submitMessage = useCallback(
-		(text, images, pendingDocs) =>
+		(text, images, pendingDocs, options) =>
 			submitMessageRequest(text, images, pendingDocs, {
 				planRefineArmedRef,
 				session,
@@ -1352,7 +1352,7 @@ function App() {
 				canSend: () => Boolean(session && connectionUsable()),
 				awaitConnection,
 				undoTurn,
-		}),
+			}, options),
 		[
 			planRefineArmedRef,
 			session,

@@ -109,8 +109,8 @@ function SettingsBash({ data, busy, act }) {
 				<button class="modal-btn${perm.permissionMode === "default" ? " modal-btn-primary" : ""}" title="Confirm dangerous commands" disabled=${busy} onClick=${() => act("/permissions default")}>Default</button>
 				<button class="modal-btn${perm.permissionMode === "bypass" ? " modal-btn-primary" : ""}" title="Skip confirmation prompts" disabled=${busy} onClick=${() => act("/permissions bypass")}>Bypass</button>
 			</div>
-			<div class="settings-section-title">Message while a turn runs</div>
-			<p class="settings-intro"><span>Steer: the agent reads a new message on its next step. Queue: it waits for the turn to end and runs next. <code>/steer</code> and <code>/queue</code> always do their own thing.</span></p>
+			<div class="settings-section-title">Enter while a turn runs</div>
+			<p class="settings-intro"><span>Steer: Enter sends the message into the turn (the agent reads it on its next step), and Alt+Enter (Option+Enter) queues it for after the turn. Queue: the other way round. <code>/steer</code> and <code>/queue</code> always do their own thing.</span></p>
 			<div class="settings-form-row">
 				<button class="modal-btn${data.runningInput !== "queue" ? " modal-btn-primary" : ""}" title="Inject the message into the running turn" disabled=${busy} onClick=${() => act("/running-input steer")}>Steer</button>
 				<button class="modal-btn${data.runningInput === "queue" ? " modal-btn-primary" : ""}" title="Run the message after the turn ends" disabled=${busy} onClick=${() => act("/running-input queue")}>Queue</button>

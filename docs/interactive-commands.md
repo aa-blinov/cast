@@ -265,7 +265,8 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 | Delete to line start | Ctrl+U |
 | Delete to line end | Ctrl+K |
 | Submit | Enter |
-| Line break | Shift+Enter or Alt+Enter, or end the line with `\` and press Enter, which works on any terminal |
+| Line break | Shift+Enter (Alt+Enter too when no turn is running), or end the line with `\` and press Enter, which works on any terminal |
+| While a turn runs: send the message into it / after it | Enter steers, Alt+Enter queues (swapped by `/running-input`) |
 | Stop turn (2×) | Esc |
 | Clear the input | Ctrl+L |
 | Exit (2× to confirm) | Ctrl+C |
@@ -302,7 +303,7 @@ Action ids are the ones in [`keybindings.ts`](https://github.com/aa-blinov/cast/
 
 ## During a Running Agent
 
-Typing a plain message steers the running turn by default: no command needed. `/running-input queue` (or Settings, "Message while a turn runs") makes a plain message wait for the turn to end and run as the next one instead; `/running-input steer` goes back. `/steer` and `/queue` do their own thing in either mode, and an attachment cannot ride a queued message. Besides that, these commands are accepted while the agent is executing:
+While a turn runs, **Enter steers** a plain message into it (no command needed) and **Alt+Enter** (Option+Enter) **queues** it for after the turn; in the web UI the same keys. `/running-input queue` (or Settings, "Enter while a turn runs") swaps the two: Enter queues, Alt+Enter steers; `/running-input steer` goes back. `/steer` and `/queue` do their own thing in either mode, and an attachment cannot ride either. Idle, Alt+Enter is a line break as before; while a turn runs it is the queue key, and Shift+Enter or a trailing `\` is the line break. Besides that, these commands are accepted while the agent is executing:
 
 - `/steer` / `/s`: inject context
 - `/btw`: ask on the side, without steering

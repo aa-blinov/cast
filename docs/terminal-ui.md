@@ -32,7 +32,7 @@ Senior Developer * BUILD * mimo-v2.6-flash * ~/pet/cast * ctx 9.1k/168k (5%) * t
 - **Hint row.** The keys worth remembering; it drops hints from the end when the screen is narrow.
 - **The conversation** reads like a man page. Whoever speaks is a bold heading (`YOU`, `AGENT`, and `REASONING` when you have turned reasoning on), and the text sits four columns in; code sits four columns further. There are no coloured stripes: weight and indent do the work.
 - **Tool rows** sit at the same margin: `* bash ls src` is a finished call, `… bash …` one that is running, `✗ bash … failed` one that failed. The tool name is bold, the arguments quiet. A bash row ends with the deadline it runs under, the default or the one the model chose: ` * timeout 3m`. A long command is cut with an ellipsis while it runs, but the deadline stays; once finished it wraps in full under its text.
-- **The composer** is the text between the two lines. While a turn runs, whatever you type steers it.
+- **The composer** is the text between the two lines. While a turn runs, Enter steers it with what you typed and Alt+Enter queues it for after the turn (`/running-input` swaps them).
 - **The status row** is one row joined by ` * `: persona, mode (`BUILD` or `PLAN`), model, the working folder (`~/pet/cast`), the share of the context used (`ctx 9.1k/168k (5%)`, amber from 70%, red from 90%), and `took 3s` once a turn ends. Choose and order the segments with `/statusbar`.
 - **Notices** (`Cancelled — …`, `New session: …`) appear in one line above the composer.
 
@@ -41,7 +41,7 @@ Senior Developer * BUILD * mimo-v2.6-flash * ~/pet/cast * ctx 9.1k/168k (5%) * t
 | You want | Do |
 |----------|----|
 | Send | Enter |
-| A line break | Shift+Enter or Alt+Enter; on any terminal, end the line with `\` and press Enter |
+| A line break | Shift+Enter (Alt+Enter too when no turn is running); on any terminal, end the line with `\` and press Enter |
 | A command | Type `/`: a list opens; keep typing to filter, ↑↓ to move, Tab or Enter to take it |
 | A skill in the middle of a message | Type `/` after other text (`review it with /fo`): the skills that match open as a list; Tab takes one. Enter sends what you typed unless you moved the highlight with the arrows, so a word or a path with a slash is never turned into a skill |
 | A file | Type `@` and part of a name; ↑↓ choose, Tab or Enter insert `@path` |

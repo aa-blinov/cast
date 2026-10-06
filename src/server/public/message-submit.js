@@ -5,7 +5,7 @@ const SYSTEM_REMINDER_STRIP_RE = /\n\n<system-reminder>[\s\S]*<\/system-reminder
 const STEER_CMD_RE = /^\/(steer|s)\s*/;
 const UNDO_FORCE_RE = /\s(--force|-f)(\s|$)/;
 
-export async function submitMessage(text, images, pendingDocs, context) {
+export async function submitMessage(text, images, pendingDocs, context, options) {
 	const {
 		undoTurn,
 		planRefineArmedRef,
@@ -82,12 +82,16 @@ export async function submitMessage(text, images, pendingDocs, context) {
 		planRefineArmedRef.current = false;
 		text = `The user wants to refine the plan. Update it using this feedback:\n\n${text}`;
 	}
-	// A plain message during a turn steers it unless the setting says to queue it: then it is sent as `/queue`, which
-	// shows in the pending list and runs when the turn ends. An attachment cannot ride a queued message.
+	// A plain message during a turn steers it (Enter, by default) or queues behind it, as the setting says; Alt+Enter
+	// sends it the other way. A queued one is sent as `/queue`, which shows in the pending list and runs when the turn
+	// ends; a steered one that was asked for with Alt+Enter as `/steer`. An attachment cannot ride either.
 	if (running && activeId && !images?.length && !pendingDocs?.length && text.trim() && !text.trim().startsWith("/")) {
 		try {
 			const current = await api("POST", `/api/sessions/${activeId}/command`, { command: "/current" });
-			if (current?.result?.runningInput === "queue") text = `/queue ${text.trim()}`;
+			const queueByDefault = current?.result?.runningInput === "queue";
+			const queue = options?.otherMode ? !queueByDefault : queueByDefault;
+			if (queue) text = `/queue ${text.trim()}`;
+			else if (options?.otherMode) text = `/steer ${text.trim()}`;
 		} catch {}
 	}
 	const draftVersion = session?.isDraft ? session.draftVersion : null;

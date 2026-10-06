@@ -424,7 +424,7 @@ export function helpMarkdown(): string {
 		"",
 		"Settings (model, provider, persona, permissions, reasoning, theme, status bar, header, web tools, skills, MCP, memory, turn cap, keys): **/settings**",
 		"",
-		"A loaded skill runs as **/<skill>** (or **/skill:<name>**), a rule as **/rule:<name>**. Plain text while a turn runs steers it. **!<command>** runs a shell command yourself, with no model turn (**!!** sends a message that starts with !).",
+		"A loaded skill runs as **/<skill>** (or **/skill:<name>**), a rule as **/rule:<name>**. Plain text while a turn runs steers it with Enter and queues with Alt+Enter. **!<command>** runs a shell command yourself, with no model turn (**!!** sends a message that starts with !).",
 	].join("\n");
 }
 
@@ -4460,12 +4460,20 @@ async function handleUserShell(shell: Exclude<UserShellInput, { kind: "text" }>,
 }
 
 /** A plain message typed during a turn: it steers the turn, or waits for it, as the setting says. */
-function sendWhileRunning(agent: CommandDeps["agent"], text: string): void {
-	if (runningInputMode(loadSettings()) === "queue") agent.followUp(text);
+function sendWhileRunning(agent: CommandDeps["agent"], text: string, otherMode = false): void {
+	const mode = runningInputMode(loadSettings());
+	// The other way is Alt+Enter's: queue when Enter steers (the default), steer when Enter queues.
+	const queue = otherMode ? mode === "steer" : mode === "queue";
+	if (queue) agent.followUp(text);
 	else agent.steer(text);
 }
 
-export async function handleInput(text: string, images: PendingImage[] | undefined, deps: CommandDeps): Promise<void> {
+export async function handleInput(
+	text: string,
+	images: PendingImage[] | undefined,
+	deps: CommandDeps,
+	options: { otherMode?: boolean } = {},
+): Promise<void> {
 	const { agent, session, config, running, onQuit, showNotice } = deps;
 	const input = lowerCommandWord(text.trim());
 
@@ -4474,7 +4482,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 	// `!command` runs a command for the person, with no model turn; `!!text` is a message that starts with a `!`.
 	const shell = parseUserShellInput(text.trim());
 	if (shell?.kind === "text") {
-		if (running) sendWhileRunning(agent, shell.text);
+		if (running) sendWhileRunning(agent, shell.text, options.otherMode);
 		else await agent.submit(shell.text, images);
 		return;
 	}
@@ -4497,7 +4505,7 @@ export async function handleInput(text: string, images: PendingImage[] | undefin
 				showNotice("[An image can't be injected mid-turn — send it once the turn ends]");
 				return;
 			}
-			sendWhileRunning(agent, input);
+			sendWhileRunning(agent, input, options.otherMode);
 			return;
 		}
 		await agent.submit(text, images);
