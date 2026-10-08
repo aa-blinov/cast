@@ -11,12 +11,16 @@ import { fileURLToPath } from "node:url";
 import { API_V1_PREFIX } from "../server/api-v1.ts";
 import { rememberedBind } from "../server/daemon-bind.ts";
 import {
+	acquireStartLock,
 	clearServerState,
 	daemonBaseUrl,
 	isCurrentDaemonInstance,
 	isProcessAlive,
+	readLiveServerState,
 	readServerState,
+	releaseStartLock,
 	type ServerDaemonState,
+	START_LOCK_WAIT_ATTEMPTS,
 } from "../server/daemon-state.ts";
 
 const V_PREFIX_RE = /^v/;
@@ -216,36 +220,69 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 		);
 		return true;
 	}
-	console.log(`\n[cast server] daemon was running (pid ${state.pid}) — restarting it on the new build...`);
-	try {
-		process.kill(state.pid, "SIGTERM");
-	} catch {
-		// already gone
-	}
-	if (!(await waitForDaemonExit(state))) {
+	// Serialize with every other daemon starter (ensureDaemon and
+	// ensureServerClient both take this lock). Without it, a `cast run` racing
+	// the restart binds the port first with a private address, takes the state
+	// file, and leaves this upgrade with two daemons plus a "could not be
+	// verified" failure for a restart that actually happened.
+	if (!(await acquireStartLockBounded())) {
 		console.log(
-			"[cast server] daemon did not stop cleanly; leaving restart to the user to avoid interrupting active work.",
+			"[cast server] another cast process is starting a daemon; leaving this one running to avoid stacking a second. Restart it later: 'cast server stop && cast server start'.",
 		);
 		return false;
 	}
-	clearServerState();
-	const started = spawnSync("cast", ["server", "start", ...startArgs(state)], { stdio: "inherit" });
-	if (started.status !== 0) {
-		console.log("[cast server] note: the new daemon failed to start — run 'cast server start' manually.");
-		return false;
+	try {
+		// The daemon may have changed while we waited for the lock (another
+		// process restarted it). Signalling the pid read before the lock would
+		// then miss, and clearServerState below would wipe a newer daemon's
+		// record on top of that.
+		const current = readLiveServerState();
+		if (!current || current.pid !== state.pid) return true;
+		console.log(`\n[cast server] daemon was running (pid ${state.pid}) — restarting it on the new build...`);
+		try {
+			process.kill(state.pid, "SIGTERM");
+		} catch {
+			// already gone
+		}
+		if (!(await waitForDaemonExit(state))) {
+			console.log(
+				"[cast server] daemon did not stop cleanly; leaving restart to the user to avoid interrupting active work.",
+			);
+			return false;
+		}
+		clearServerState();
+		const started = spawnSync("cast", ["server", "start", ...startArgs(state)], { stdio: "inherit" });
+		if (started.status !== 0) {
+			console.log("[cast server] note: the new daemon failed to start — run 'cast server start' manually.");
+			return false;
+		}
+		const restarted = readServerState();
+		if (
+			!restarted ||
+			restarted.pid === state.pid ||
+			!isProcessAlive(restarted.pid) ||
+			!(await isCurrentDaemonInstance(restarted))
+		) {
+			console.log("[cast server] upgrade completed, but the new daemon could not be verified.");
+			return false;
+		}
+		console.log(`[cast server] running (pid ${restarted.pid}) — http://${restarted.host}:${restarted.port}`);
+		return true;
+	} finally {
+		releaseStartLock();
 	}
-	const restarted = readServerState();
-	if (
-		!restarted ||
-		restarted.pid === state.pid ||
-		!isProcessAlive(restarted.pid) ||
-		!(await isCurrentDaemonInstance(restarted))
-	) {
-		console.log("[cast server] upgrade completed, but the new daemon could not be verified.");
-		return false;
+}
+
+/** Waits (bounded like the other daemon starters) for the shared start lock.
+ *  The wait must outlast a peer's own start, which is the same startup budget
+ *  every launcher shares. */
+async function acquireStartLockBounded(): Promise<boolean> {
+	for (let attempt = 0; attempt < START_LOCK_WAIT_ATTEMPTS; attempt++) {
+		if (acquireStartLock()) return true;
+		// biome-ignore lint/performance/noAwaitInLoops: polls until the other starter releases the lock
+		await new Promise((resolve) => setTimeout(resolve, 100));
 	}
-	console.log(`[cast server] running (pid ${restarted.pid}) — http://${restarted.host}:${restarted.port}`);
-	return true;
+	return false;
 }
 
 /**
