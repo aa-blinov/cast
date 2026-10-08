@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.57.2
+
+### Fixed
+- **A loop that alternates two calls is stopped, not run out to the iteration cap.** The doom-loop detector compared only *consecutive* identical calls (same tool, same arguments), so a model that repeated a pair — `bash`, `todo_write`, `bash`, `todo_write`, … — never had two of one name next to each other and the check never fired. One live session ran that way for ~100 iterations, the same pair hundreds of times with the model itself saying "I'm stuck in a loop" in between, until a different backstop ended the turn. A call is now blocked once the same tool with the same arguments has appeared three times anywhere in the recent window, so an alternating loop is caught on its third repeat instead of never.
+- **A repeated tool output stops the turn at 25, not 100.** When the model keeps calling and keeps getting the identical answer back, the reminder that repeating won't change anything now gives way to stopping the turn at 25 repeats instead of 100: a runaway costs ~25 model calls rather than ~100. Polling a running background task (`bash_output`) is still exempt, and re-running a check a few times after a real change still runs.
+
 ## 0.57.1
 
 ### Fixed
