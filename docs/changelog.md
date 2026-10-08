@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.57.3
+
+### Fixed
+- **`cast upgrade` no longer leaves two daemons behind or reports a false failure after restarting the server.** The upgrade stops the old daemon and starts the replacement without taking the shared start lock every other launcher uses, so a `cast run` (or a second `cast`) starting at that moment could win the port first, register itself under a private address, and make the upgrade both stack a second daemon and end with "the new daemon could not be verified" for a restart that did happen. The restart now holds the shared start lock, re-reads the recorded daemon after taking it and skips a pid that changed meanwhile instead of signalling it or clearing a newer daemon's record, and releases the lock when it is done.
+
 ## 0.57.2
 
 ### Fixed
