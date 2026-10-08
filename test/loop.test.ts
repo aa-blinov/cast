@@ -4218,6 +4218,54 @@ describe("runAgentLoop — doom loop detection", () => {
 		expect(events.filter((e) => e.type === "doom_loop")).toHaveLength(0);
 	});
 
+	it("blocks an identical call that alternates with another identical call (no consecutive run)", async () => {
+		const events: AgentEvent[] = [];
+		const bashArgs = JSON.stringify({ command: "echo stop" });
+		const readArgs = JSON.stringify({ path: "foo.ts" });
+		const pair = (id: string) => ({
+			content: "",
+			thinking: "",
+			finishReason: "stop" as const,
+			toolCalls: [
+				{ id: `${id}-bash`, name: "bash", arguments: bashArgs },
+				{ id: `${id}-read`, name: "read", arguments: readArgs },
+			],
+		});
+
+		vi.mocked(streamAndCollect)
+			// Four rounds of the same pair. The old run-only check saw nothing
+			// (bash/read/bash/read … never puts two of one name adjacent), so a
+			// loop like this reached 100 iterations live.
+			.mockImplementationOnce(async () => pair("r1"))
+			.mockImplementationOnce(async () => pair("r2"))
+			.mockImplementationOnce(async () => pair("r3"))
+			.mockImplementationOnce(async () => pair("r4"))
+			.mockImplementationOnce(async () => ({
+				content: "changing approach",
+				thinking: "",
+				finishReason: "stop",
+			}));
+
+		await runAgentLoop([{ role: "user", content: "do the thing" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: (event) => events.push(structuredClone(event)),
+		});
+
+		// bash and read each repeat three times inside the window, so round 4
+		// blocks both — despite no two calls ever being adjacent.
+		const doomEvents = events.filter((e) => e.type === "doom_loop");
+		expect(doomEvents).toEqual([
+			{ type: "doom_loop", tool: "bash", attempts: 3 },
+			{ type: "doom_loop", tool: "read", attempts: 3 },
+		]);
+		const blocked = events.find((e) => e.type === "tool_end" && e.id === "r4-bash");
+		expect(blocked && blocked.type === "tool_end" && blocked.result.isError).toBe(true);
+		expect(blocked && blocked.type === "tool_end" ? blocked.result.content : "").toContain("Doom loop detected");
+	});
+
 	it("never blocks bash_output on repeated identical polls of the same task_id", async () => {
 		const events: AgentEvent[] = [];
 		const pollArgs = JSON.stringify({ task_id: "bg-1" });

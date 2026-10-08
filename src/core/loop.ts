@@ -196,10 +196,18 @@ const IMAGE_VISION_RE = /image|vision/i;
 const MEMORY_EMPTY_LINE_RE = /^\(none/;
 const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 
-// How many identical consecutive tool calls (same name + same args) before
-// we treat it as a doom loop and block execution — the model gets an error
-// result and must try something different.
+// How many identical tool calls (same name + same args) inside the recent
+// window before we treat it as a doom loop and block execution — the model
+// gets an error result and must try something different.
 const DOOM_LOOP_THRESHOLD = 3;
+// A call is blocked once the same name+args has been attempted this many times
+// in the last DOOM_LOOP_WINDOW calls. A window, not a run: a loop that
+// alternates two identical calls (bash, todo_write, bash, todo_write, …) has
+// no two consecutive calls equal, so the old run-only check never fired on it —
+// which is exactly how one session reached 100 iterations. 4× the threshold
+// gives the alternating case room to accumulate repeats while still letting a
+// genuinely different call displace old entries quickly.
+const DOOM_LOOP_WINDOW = DOOM_LOOP_THRESHOLD * 4;
 // Safety cap for turns without an explicit /goal budget: a model that keeps
 // calling DIFFERENT tools (so the doom-loop detector can't catch it) must not
 // loop forever. Matches the settings default; the bridge overrides it with the
@@ -3959,10 +3967,15 @@ interface ToolCallResult {
 /** How many times a tool may return the same output before the model is told
  *  that repeating it won't change anything. */
 const REPEATED_OUTPUT_THRESHOLD = 4;
-/** Where the reminder gives way to stopping the turn. A subagent once ran 335
- *  model calls of parallel globs that all found nothing: the reminder was
- *  ignored ~490 times and the iteration cap counts model calls, not tools. */
-const REPEATED_OUTPUT_STOP = 100;
+/** Where the reminder gives way to stopping the turn. The reminder fires every
+ *  REPEATED_OUTPUT_THRESHOLD-th repeat, so this leaves several rounds of
+ *  "you're repeating yourself" before the turn ends. A subagent once ran 335
+ *  model calls of parallel globs that all found nothing and ignored the
+ *  reminder ~490 times, so the stop must exist — but the old 100 meant a turn
+ *  burned ~100 model calls before stopping (observed live: a bash/todo_write
+ *  loop ran to exactly 100). 25 stops a runaway while still tolerating a check
+ *  re-run a few times after a real change. */
+const REPEATED_OUTPUT_STOP = 25;
 const DIGITS_RE = /\d+/g;
 
 /**
@@ -4050,13 +4063,18 @@ async function executeToolCalls(
 	// "consecutive" window around parallel batches. A blocked call is NOT
 	// pushed: repeat attempts stay blocked until a different call breaks the
 	// run of identical entries.
+	const window = doomLoopThreshold * 4;
 	const doomBlocked = new Set<string>();
 	for (const tc of prepared) {
 		if (tc.args === null) continue;
 		if (DOOM_LOOP_EXEMPT.has(tc.name)) continue;
 		const argsKey = JSON.stringify(tc.args);
-		const recent = recentToolCalls.slice(-doomLoopThreshold);
-		if (recent.length === doomLoopThreshold && recent.every((r) => r.name === tc.name && r.argsKey === argsKey)) {
+		const recent = recentToolCalls.slice(-window);
+		// Count every occurrence in the window, not just an unbroken run at the
+		// tail: alternating two identical calls (bash/todo_write/…) never puts
+		// two of one name next to each other, yet repeats the same work.
+		const repeats = recent.reduce((n, r) => n + (r.name === tc.name && r.argsKey === argsKey ? 1 : 0), 0);
+		if (repeats >= doomLoopThreshold) {
 			doomBlocked.add(tc.id);
 			onEvent({ type: "doom_loop", tool: tc.name, attempts: doomLoopThreshold });
 		} else {
@@ -4064,8 +4082,8 @@ async function executeToolCalls(
 		}
 	}
 	// Keep the sliding window bounded.
-	if (recentToolCalls.length > doomLoopThreshold * 2) {
-		recentToolCalls.splice(0, recentToolCalls.length - doomLoopThreshold);
+	if (recentToolCalls.length > window) {
+		recentToolCalls.splice(0, recentToolCalls.length - window);
 	}
 
 	// setMaxListeners(100, signal) is already called once in runLoop — no need
