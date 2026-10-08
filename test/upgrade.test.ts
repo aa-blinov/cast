@@ -2,10 +2,13 @@ import { spawn, spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchLatestVersion, isAlreadyUpToDate, isNewerVersion, restartDaemon } from "../src/core/upgrade.ts";
 import {
+	acquireStartLock,
 	clearServerState,
 	isCurrentDaemonInstance,
 	isProcessAlive,
+	readLiveServerState,
 	readServerState,
+	releaseStartLock,
 } from "../src/server/daemon-state.ts";
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -21,9 +24,13 @@ vi.mock("../src/server/daemon-bind.ts", () => ({ rememberedBind: () => remembere
 vi.mock("../src/server/daemon-state.ts", () => ({
 	daemonBaseUrl: (state: { host: string; port: number }) => `http://${state.host}:${state.port}`,
 	readServerState: vi.fn(),
+	readLiveServerState: vi.fn(),
 	isProcessAlive: vi.fn(),
 	isCurrentDaemonInstance: vi.fn(),
 	clearServerState: vi.fn(),
+	acquireStartLock: vi.fn(() => true),
+	releaseStartLock: vi.fn(),
+	START_LOCK_WAIT_ATTEMPTS: 3,
 }));
 
 describe("isNewerVersion", () => {
@@ -118,8 +125,11 @@ describe("restartDaemon", () => {
 		vi.mocked(spawnSync).mockClear();
 		vi.mocked(clearServerState).mockClear();
 		vi.mocked(readServerState).mockReset();
+		vi.mocked(readLiveServerState).mockReset();
 		vi.mocked(isProcessAlive).mockReset();
 		vi.mocked(isCurrentDaemonInstance).mockReset();
+		vi.mocked(acquireStartLock).mockReset().mockReturnValue(true);
+		vi.mocked(releaseStartLock).mockClear();
 	});
 
 	it("does nothing when no daemon is running", async () => {
@@ -146,6 +156,13 @@ describe("restartDaemon", () => {
 		});
 		vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true);
 		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+		vi.mocked(readLiveServerState).mockReturnValue({
+			pid: 424242,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+		});
 		vi.spyOn(process, "kill").mockImplementation(() => {});
 		expect(await restartDaemon()).toBe(true);
 		expect(clearServerState).toHaveBeenCalled();
@@ -237,6 +254,13 @@ describe("restartDaemon", () => {
 			});
 			vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true);
 			vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+			vi.mocked(readLiveServerState).mockReturnValue({
+				pid: 424242,
+				host: "127.0.0.1",
+				port: 44453,
+				startedAt: "t",
+				foreground: false,
+			});
 			vi.spyOn(process, "kill").mockImplementation(() => {});
 			expect(await restartDaemon()).toBe(true);
 			// And an upgrade is not a choice: it must not remember the address it restarts on.
@@ -265,6 +289,7 @@ describe("restartDaemon", () => {
 		beforeEach(() => {
 			vi.mocked(readServerState).mockReturnValueOnce(daemon);
 			vi.mocked(readServerState).mockReturnValue({ ...daemon, pid: 424243, startedAt: "new" });
+			vi.mocked(readLiveServerState).mockReturnValue(daemon);
 			vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
 		});
 
@@ -308,5 +333,81 @@ describe("restartDaemon", () => {
 			expect(fetchMock).toHaveBeenCalledTimes(1);
 			expect(kill).toHaveBeenCalledWith(424242, "SIGTERM");
 		});
+	});
+
+	it("holds the shared start lock across the restart, so a concurrent starter cannot win the port", async () => {
+		vi.mocked(readServerState).mockReturnValueOnce({
+			pid: 424242,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+		});
+		vi.mocked(readServerState).mockReturnValue({
+			pid: 424243,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "new",
+			foreground: false,
+		});
+		vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true);
+		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+		vi.mocked(readLiveServerState).mockReturnValue({
+			pid: 424242,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+		});
+		vi.spyOn(process, "kill").mockImplementation(() => {});
+
+		expect(await restartDaemon()).toBe(true);
+		expect(acquireStartLock).toHaveBeenCalled();
+		expect(releaseStartLock).toHaveBeenCalled();
+	});
+
+	it("leaves the old daemon alone when another process holds the start lock", async () => {
+		vi.mocked(readServerState).mockReturnValue({
+			pid: 424242,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+		});
+		vi.mocked(isProcessAlive).mockReturnValue(true);
+		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+		vi.mocked(acquireStartLock).mockReturnValue(false);
+		const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
+
+		expect(await restartDaemon()).toBe(false);
+		expect(kill).not.toHaveBeenCalled();
+		expect(spawnSync).not.toHaveBeenCalled();
+		expect(releaseStartLock).not.toHaveBeenCalled();
+	});
+
+	it("does not signal a pid that changed while waiting for the start lock", async () => {
+		vi.mocked(readServerState).mockReturnValue({
+			pid: 424242,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+		});
+		vi.mocked(isProcessAlive).mockReturnValue(true);
+		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+		// Another process restarted the daemon while we waited for the lock.
+		vi.mocked(readLiveServerState).mockReturnValue({
+			pid: 424299,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "other",
+			foreground: false,
+		});
+		const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
+
+		expect(await restartDaemon()).toBe(true);
+		expect(kill).not.toHaveBeenCalled();
+		expect(spawnSync).not.toHaveBeenCalled();
+		expect(releaseStartLock).toHaveBeenCalled();
 	});
 });
