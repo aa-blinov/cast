@@ -117,6 +117,46 @@ describe("execTask — final extract", () => {
 		]);
 	});
 
+	it("records each tool call the child makes under the child's session, errors included", async () => {
+		const parentSession = createSession("test-model", "/tmp");
+		saveSession(parentSession);
+		const result = await execTask({ assignment: "read two files" }, "/tmp", testConfig, {
+			model: "test-model",
+			sessionId: parentSession.id,
+			subagentPrompts: [
+				{ name: "worker", label: "Worker", description: "", systemPrompt: "worker", agentsMd: false },
+			],
+			runAgentLoop: async (messages, config) => {
+				config.onEvent({ type: "tool_start", id: "c1", name: "read", args: "{}", status: "running" });
+				config.onEvent({
+					type: "tool_end",
+					id: "c1",
+					name: "read",
+					result: { content: "ok" },
+					status: "completed",
+				});
+				config.onEvent({ type: "tool_start", id: "c2", name: "read", args: "{}", status: "running" });
+				config.onEvent({
+					type: "tool_end",
+					id: "c2",
+					name: "read",
+					result: { content: "missing", isError: true },
+					status: "failed",
+				});
+				config.onEvent({ type: "end", reason: "stop" });
+				return [...messages, { role: "assistant", content: "done" }];
+			},
+		});
+		const taskId = taskIdOf(result.content);
+		const rows = getDb()
+			.prepare("SELECT tool_name, is_error FROM tool_calls WHERE session_id = ? ORDER BY ts, rowid")
+			.all(taskId);
+		expect(rows).toEqual([
+			{ tool_name: "read", is_error: 0 },
+			{ tool_name: "read", is_error: 1 },
+		]);
+	});
+
 	it("returns the report when the last assistant turn is the placeholder", async () => {
 		const result = await execTask({ assignment: "review mod-a" }, "/tmp", testConfig, {
 			model: "test-model",

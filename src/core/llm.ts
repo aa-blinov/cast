@@ -648,10 +648,14 @@ export async function* streamChat(
 		const noticeMs = Math.min(STREAM_SILENCE_NOTICE_MS, idleMs / 2);
 		const onQuiet = () => onSilence?.(noticeMs, idleMs);
 		let quietTimer = setTimeout(onQuiet, noticeMs);
+		// The connection is alive on any bytes, so the idle limit resets on every chunk. The notice to the person
+		// resets only on something they can see: empty keep-alive deltas used to hold it off for the whole wait.
 		const stillAlive = () => {
 			clearTimeout(idleTimer);
-			clearTimeout(quietTimer);
 			idleTimer = setTimeout(onIdle, idleMs);
+		};
+		const contentArrived = () => {
+			clearTimeout(quietTimer);
 			quietTimer = setTimeout(onQuiet, noticeMs);
 		};
 		try {
@@ -807,6 +811,8 @@ export async function* streamChat(
 				}
 
 				yieldedAny = true;
+				// Only what the person can see counts: usage and empty deltas are not progress for the notice.
+				if (result.content || result.thinking || result.refusal) contentArrived();
 				yield result;
 			}
 			// The SDK ends its iterator quietly on abort instead of throwing, so a

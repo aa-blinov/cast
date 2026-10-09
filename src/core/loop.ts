@@ -172,6 +172,7 @@ import {
 	completedToolCallStatus,
 	normalizeToolResultError,
 	relativeToCwd,
+	toolError,
 	toolOutputDir,
 } from "./tools/shared.ts";
 import type { SubagentProgress } from "./tools/task.ts";
@@ -2611,7 +2612,15 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			}
 			if (name === "todo_write") {
 				const result = validateTodos(finalArgs.todos);
-				if (!result.ok) return { content: `Error: ${result.error}`, isError: true };
+				// A bad list is the model's to fix: say so, instead of the generic INTERNAL_ERROR that a message with
+				// no keyword falls back to (non-retryable, so the model gave up on a fixable argument).
+				if (!result.ok)
+					return toolError(`Error: ${result.error}`, {
+						code: "INVALID_ARGUMENT",
+						retryable: true,
+						suggestedFix:
+							"Shorten or split the todo that is too long, or fix the field named in the message, then retry.",
+					});
 				const previousTodos = todos;
 				const planStepsByContent = new Map(
 					previousTodos.flatMap((todo) => (todo.planStep ? [[todo.content, todo.planStep] as const] : [])),

@@ -21,6 +21,7 @@ import type { Skill } from "../skills.ts";
 import type { SshHost } from "../ssh.ts";
 import type { SubagentPrompt } from "../subagents.ts";
 import { escapeSystemReminderTags } from "../system-reminder.ts";
+import { recordToolCall } from "../telemetry.ts";
 import type { BashBackgroundDeps } from "./bash-background.ts";
 import type { ConfirmBash, ToolResult } from "./shared.ts";
 
@@ -375,6 +376,7 @@ export async function execTask(
 	const readOnly = subagent?.readOnly === true || deps.planState?.enabled === true;
 	const steering = new MessageQueue();
 	let toolCount = 0;
+	const toolStartedAt = new Map<string, number>();
 	const progress = (status: SubagentProgress["status"], extra: Partial<SubagentProgress> = {}) =>
 		deps.onProgress?.({
 			toolCallId: toolCallId ?? "",
@@ -478,9 +480,21 @@ export async function execTask(
 								addUsage(subagentUsage, event.usage);
 							} else if (event.type === "tool_start") {
 								toolCount++;
+								toolStartedAt.set(event.id, Date.now());
 								progress("running", {
 									tool: { name: event.name, summary: summarizeToolArgs(event.args) },
 								});
+							} else if (event.type === "tool_end") {
+								// The parent records only its own calls: a child's are visible in the child's session alone
+								// unless they are written here, under the child's id.
+								const started = toolStartedAt.get(event.id);
+								toolStartedAt.delete(event.id);
+								recordToolCall(
+									taskId,
+									event.name,
+									event.result.isError === true,
+									started !== undefined ? Date.now() - started : undefined,
+								);
 							} else if (event.type === "turn_end") {
 								persist();
 							} else if (event.type === "end") {
