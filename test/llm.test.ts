@@ -1105,3 +1105,40 @@ describe("streamChat — a provider that goes silent", () => {
 		await expect(run()).rejects.toBeInstanceOf(StreamStalledError);
 	});
 });
+
+describe("streamChat — tool results around a read's image", () => {
+	it("does not answer a second result as orphaned when the first result's image sits between them", async () => {
+		const sent: Array<{ role: string; tool_call_id?: string }> = [];
+		const client = {
+			chat: {
+				completions: {
+					create: async (params: { messages: Array<{ role: string; tool_call_id?: string }> }) => {
+						sent.push(...params.messages);
+						throw new Error("stop after capture");
+					},
+				},
+			},
+		} as unknown as OpenAI;
+		const history = [
+			{ role: "user", content: "look at both" },
+			{
+				role: "assistant",
+				content: "",
+				tool_calls: [
+					{ id: "c1", type: "function", function: { name: "read", arguments: "{}" } },
+					{ id: "c2", type: "function", function: { name: "read", arguments: "{}" } },
+				],
+			},
+			{ role: "tool", tool_call_id: "c1", content: "image" },
+			{
+				role: "user",
+				content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AA" } }],
+				castToolCallId: "c1",
+			},
+			{ role: "tool", tool_call_id: "c2", content: "text" },
+		] as unknown as Parameters<typeof streamChat>[2];
+
+		await expect(streamChat(client, "m", history, [], 1000).next()).rejects.toThrow("stop after capture");
+		expect(sent.filter((m) => m.role === "tool").map((m) => m.tool_call_id)).toEqual(["c1", "c2"]);
+	});
+});

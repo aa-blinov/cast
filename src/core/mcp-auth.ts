@@ -11,6 +11,7 @@ import type {
 	OAuthClientMetadata,
 	OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { withFileLock } from "./file-lock.ts";
 
 /**
  * OAuth for remote MCP servers. The login is a person's act (a browser, a consent screen), so it runs only from
@@ -58,12 +59,16 @@ function loadEntry(serverName: string, url: string): StoredAuth | undefined {
 	return entry && entry.url === url ? entry : undefined;
 }
 
+/** Every change to the token file is a read-modify-write, so it runs under the file's lock: two cast processes writing
+ *  different servers at once otherwise drop each other's entries (measured: 2 to 15 of 16 kept without it). */
 function updateEntry(serverName: string, url: string, change: (entry: StoredAuth) => void): void {
-	const all = readAll();
-	const entry = all[serverName]?.url === url ? all[serverName]! : { url };
-	change(entry);
-	all[serverName] = entry;
-	writeAll(all);
+	withFileLock(`${authFilePath()}.lock`, () => {
+		const all = readAll();
+		const entry = all[serverName]?.url === url ? all[serverName]! : { url };
+		change(entry);
+		all[serverName] = entry;
+		writeAll(all);
+	});
 }
 
 /** Whether a login for this server is on file. */
@@ -73,11 +78,15 @@ export function hasMcpLogin(serverName: string, url: string): boolean {
 
 /** Forget a server's login. True when there was one. */
 export function clearMcpLogin(serverName: string): boolean {
-	const all = readAll();
-	if (!(serverName in all)) return false;
-	delete all[serverName];
-	writeAll(all);
-	return true;
+	let removed = false;
+	withFileLock(`${authFilePath()}.lock`, () => {
+		const all = readAll();
+		if (!(serverName in all)) return;
+		delete all[serverName];
+		writeAll(all);
+		removed = true;
+	});
+	return removed;
 }
 
 export function callbackUrl(port = MCP_AUTH_CALLBACK_PORT): string {
@@ -175,6 +184,11 @@ function listenForCallback(port: number, expectedState: string): { server: Serve
 		const url = new URL(req.url ?? "/", callbackUrl(port));
 		if (url.pathname !== "/callback") {
 			res.writeHead(404).end();
+			return;
+		}
+		// A visit without the redirect's query (a reload, a prefetch) carries no code: it must not resolve the login.
+		if (!url.search) {
+			res.writeHead(400).end();
 			return;
 		}
 		try {

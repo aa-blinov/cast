@@ -483,7 +483,9 @@ export const EMPTY_ASSISTANT_PLACEHOLDER = "(no response)";
  *    with a minimal valid JSON error so the request stays well-formed.
  */
 function sanitizeMessages(messages: Message[]): Message[] {
-	const sanitized: Message[] = messages.map((m) => {
+	// Repaired before the tags are stripped below: the image message a `read` adds sits between its tool results,
+	// and only its castToolCallId tag tells the scan that it belongs to that run.
+	const sanitized: Message[] = answerOrphanedToolCalls(messages).map((m) => {
 		// Drop cast-only UI metadata before it reaches the provider.
 		if (m.role === "tool" && m && typeof m === "object" && "castIsError" in m) {
 			const tool = m as { role: "tool"; tool_call_id: string; content: string; castIsError?: boolean };
@@ -507,30 +509,37 @@ function sanitizeMessages(messages: Message[]): Message[] {
 		const hasToolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
 		const hasContent = typeof m.content === "string" ? m.content.length > 0 : Boolean(m.content);
 
-		// Fix malformed tool call arguments in-place
-		if (hasToolCalls) {
-			for (const tc of m.tool_calls!) {
-				if (tc.type !== "function") continue;
-				try {
-					const parsed: unknown = JSON.parse(tc.function.arguments);
-					// Valid JSON but not an object (e.g. a bare array the model
-					// emitted for an array-typed parameter): some providers'
-					// chat templates iterate arguments as a mapping and 400 the
-					// whole request ("Can only get item pairs from a mapping").
-					// Wrap so the history stays replayable everywhere.
-					if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-						tc.function.arguments = JSON.stringify({ value: parsed });
-					}
-				} catch {
-					tc.function.arguments = '{"error": "arguments were truncated"}';
-				}
-			}
-		}
+		// Copies, not writes: the history is the live session's, and a repaired argument must not reach the UI or a
+		// later save as if the model had sent it.
+		const toolCalls = hasToolCalls
+			? m.tool_calls!.map((tc) => {
+					if (tc.type !== "function") return tc;
+					const args = wellFormedArguments(tc.function.arguments);
+					return args === undefined ? tc : { ...tc, function: { ...tc.function, arguments: args } };
+				})
+			: undefined;
 
-		if (hasToolCalls || hasContent) return m;
+		if (toolCalls) return { ...m, tool_calls: toolCalls };
+		if (hasContent) return m;
 		return { ...m, content: EMPTY_ASSISTANT_PLACEHOLDER };
 	});
-	return answerOrphanedToolCalls(sanitized);
+	return sanitized;
+}
+
+/** The tool call arguments a provider can replay, or undefined when the raw string already is one. */
+function wellFormedArguments(raw: string): string | undefined {
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		// Valid JSON but not an object (e.g. a bare array the model emitted for an array-typed parameter): some
+		// providers' chat templates iterate arguments as a mapping and 400 the whole request ("Can only get item
+		// pairs from a mapping"). Wrap so the history stays replayable everywhere.
+		if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return JSON.stringify({ value: parsed });
+		}
+		return undefined;
+	} catch {
+		return '{"error": "arguments were truncated"}';
+	}
 }
 
 /** What an interrupted tool call reports back to the model. */
@@ -558,12 +567,13 @@ function answerOrphanedToolCalls(messages: Message[]): Message[] {
 		if (m.role !== "assistant") continue;
 		const toolCalls = "tool_calls" in m && Array.isArray(m.tool_calls) ? m.tool_calls : [];
 		if (toolCalls.length === 0) continue;
-		// Results always follow their call as one uninterrupted run of `tool`
-		// messages (loop.ts pushes them with no await in between), so the scan
-		// stops at the first message that isn't one.
+		// Results follow their call as one run of `tool` messages (loop.ts pushes them with no await in between).
+		// The one thing allowed inside that run is the image a `read` attaches to its result, which loop.ts pushes
+		// right after that result and tags with castToolCallId; any other message ends the run.
 		const answered = new Set<string>();
 		for (let j = i + 1; j < messages.length; j++) {
 			const next = messages[j];
+			if (next && next.role === "user" && "castToolCallId" in next) continue;
 			if (!next || next.role !== "tool") break;
 			const id = (next as { tool_call_id?: string }).tool_call_id;
 			if (id) answered.add(id);

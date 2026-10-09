@@ -17,9 +17,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { type Dirent, existsSync } from "node:fs";
-import { lstat, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export const MAX_SNAPSHOT_FILES = 3000;
 export const MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024;
@@ -118,8 +118,51 @@ function git(cwd: string, shadowDir: string, args: string[], stdin?: string): Pr
 }
 
 /**
+ * One writer at a time per hidden repository. Sessions in the same folder share the repository, and deleting it
+ * while another session writes into it (or writing while it is deleted) corrupts both. The lock file sits beside
+ * the repository, not in it, so deleting the repository never removes the lock under its holder.
+ *
+ * Returns undefined when the lock could not be had in time: the caller skips its step rather than race.
+ */
+const SHADOW_LOCK_WAIT_MS = 10_000;
+const SHADOW_LOCK_STALE_MS = 60_000;
+
+async function withShadowLock<T>(shadowDir: string, work: () => Promise<T>): Promise<T | undefined> {
+	const lock = `${shadowDir}.lock`;
+	await mkdir(dirname(lock), { recursive: true });
+	const deadline = Date.now() + SHADOW_LOCK_WAIT_MS;
+	// biome-ignore lint/performance/noAwaitInLoops: polls until the other session releases the repository
+	while (!(await createLockFile(lock))) {
+		try {
+			// A holder that died leaves its lock behind; git steps take seconds at most, so an old one is stale.
+			if (Date.now() - (await stat(lock)).mtimeMs > SHADOW_LOCK_STALE_MS) await rm(lock, { force: true });
+		} catch {
+			// Released between the create and the stat: try again.
+		}
+		if (Date.now() >= deadline) return undefined;
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+	try {
+		return await work();
+	} finally {
+		await rm(lock, { force: true });
+	}
+}
+
+/** Exclusive create: true when this call made the file. */
+async function createLockFile(path: string): Promise<boolean> {
+	try {
+		await writeFile(path, String(process.pid), { flag: "wx" });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Commits the folder's current state to its hidden repository and pins the
- * commit with a ref. Null when the folder is too big, missing, or git fails.
+ * commit with a ref. Null when the folder is too big, missing, git fails, or
+ * another session holds the repository.
  */
 export async function createShadowSnapshot(
 	cwd: string,
@@ -127,6 +170,15 @@ export async function createShadowSnapshot(
 ): Promise<{ shadowDir: string; commitSha: string } | null> {
 	const shadowDir = shadowDirFor(cwd);
 	if (!shadowDir || !existsSync(cwd) || !(await fitsInSnapshot(cwd))) return null;
+	const snapshot = await withShadowLock(shadowDir, () => commitShadowSnapshot(cwd, shadowDir, id));
+	return snapshot ?? null;
+}
+
+async function commitShadowSnapshot(
+	cwd: string,
+	shadowDir: string,
+	id: string,
+): Promise<{ shadowDir: string; commitSha: string } | null> {
 	if (!existsSync(join(shadowDir, "HEAD"))) {
 		await mkdir(shadowDir, { recursive: true });
 		if ((await git(cwd, shadowDir, ["init", "-q"])) === null) return null;
@@ -138,11 +190,15 @@ export async function createShadowSnapshot(
 	if (!tree) return null;
 	const commit = await git(cwd, shadowDir, ["commit-tree", tree, "-m", `cast-checkpoint-${id}`]);
 	if (!commit) return null;
-	await git(cwd, shadowDir, ["update-ref", `${CHECKPOINT_REF_PREFIX}${id}`, commit]);
+	// Without the ref the commit is unpinned and a later prune can take it: no snapshot is better than a dangling one.
+	if ((await git(cwd, shadowDir, ["update-ref", `${CHECKPOINT_REF_PREFIX}${id}`, commit])) === null) return null;
 	return { shadowDir, commitSha: commit };
 }
 
-/** Drops the refs of released checkpoints; a repository left with none is deleted. */
+/**
+ * Drops the refs of released checkpoints; a repository left with none is deleted. The deletion and the emptiness
+ * check run under the lock, so a checkpoint written at the same moment is either kept or never deleted under.
+ */
 export async function releaseShadowRefs(shadowDir: string, ids: string[]): Promise<void> {
 	// Run from the repository itself: the session's folder is often already gone
 	// (a deleted sandbox session), and ref operations don't need a work tree.
@@ -152,6 +208,9 @@ export async function releaseShadowRefs(shadowDir: string, ids: string[]): Promi
 		["update-ref", "--stdin"],
 		`${ids.map((id) => `delete ${CHECKPOINT_REF_PREFIX}${id}`).join("\n")}\n`,
 	);
-	const remaining = await git(shadowDir, shadowDir, ["for-each-ref", "--count=1", CHECKPOINT_REF_PREFIX]);
-	if (remaining === "") await rm(shadowDir, { recursive: true, force: true });
+	// A busy lock leaves the repository for the next release to judge.
+	await withShadowLock(shadowDir, async () => {
+		const remaining = await git(shadowDir, shadowDir, ["for-each-ref", "--count=1", CHECKPOINT_REF_PREFIX]);
+		if (remaining === "") await rm(shadowDir, { recursive: true, force: true });
+	});
 }
