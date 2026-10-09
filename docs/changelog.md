@@ -2,6 +2,14 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.57.5
+
+### Fixed
+- **A todo list that is too long, or has two items in progress, is reported as a retryable argument error.** It was labelled an internal error that could not be retried, so the model gave up on something it could fix; the message now names the item and the limit.
+- **A quiet provider is announced again while it streams nothing visible.** Empty keep-alive chunks used to hold off the "waiting for the provider" notice, so a long wait with nothing on screen looked like a hang. The connection is still allowed to stay open on any bytes.
+- **Tool calls made by a subagent are recorded in the usage telemetry**, under the subagent's own session, with their errors and latencies. Before, only the parent's calls were counted.
+- **A glob search that times out is reported**, instead of silently searching again with a different method that applies the limit and ordering differently. A missing `fd` still falls back to the built-in walk.
+
 ## 0.57.4
 
 ### Changed
