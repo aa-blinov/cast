@@ -175,8 +175,10 @@ describe("the token file under concurrent writers", () => {
 			`import { existsSync } from "node:fs";
 import { createMcpAuthProvider } from ${JSON.stringify(authModule)};
 const [name, go] = process.argv.slice(2);
+// Sleep between checks: a spinning child would starve the others of CPU on a loaded machine.
+const pause = new Int32Array(new SharedArrayBuffer(4));
 while (!existsSync(go)) {
-	// wait for the others
+	Atomics.wait(pause, 0, 0, 10);
 }
 createMcpAuthProvider(name, "http://127.0.0.1/" + name).saveTokens({ access_token: name, token_type: "bearer" });
 `,
@@ -189,9 +191,16 @@ createMcpAuthProvider(name, "http://127.0.0.1/" + name).saveTokens({ access_toke
 						const child = spawn(process.execPath, ["--import", "tsx", script, name, go], {
 							cwd: join(import.meta.dirname, ".."),
 							env: { ...process.env, HOME: home },
-							stdio: "ignore",
+							stdio: ["ignore", "ignore", "pipe"],
 						});
-						child.on("exit", (code) => resolve(code));
+						let stderr = "";
+						child.stderr?.on("data", (chunk: Buffer) => {
+							stderr += chunk.toString();
+						});
+						child.on("exit", (code) => {
+							if (code !== 0) console.error(`[${name}] exit ${code}: ${stderr.slice(0, 600)}`);
+							resolve(code);
+						});
 					}),
 			);
 			// Give every child time to start and reach its wait loop before the go file lets them run.
