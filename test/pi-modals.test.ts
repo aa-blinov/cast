@@ -496,3 +496,23 @@ describe("ModalHost", () => {
 		expect(text).toContain("hidden part");
 	});
 });
+
+describe("OptionModal on a short terminal", () => {
+	it("keeps the hint and the bottom border inside 85% of 24 rows when the detail block is long", () => {
+		const rows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+		Object.defineProperty(process.stdout, "rows", { value: 24, configurable: true });
+		try {
+			const many = Array.from({ length: 20 }, (_, i) => ({ value: `v${i}`, label: `Option ${i}` }));
+			const detail = Array.from({ length: 30 }, (_, i) => `detail line ${i} with some words in it`).join("\n");
+			const modal = new OptionModal(many, { title: "Permission", error: "Try again", detail, search: {} }, () => {});
+			const lines = modal.render(60).map(plain);
+			// The overlay clips at 85% of the height, from the bottom: the frame must fit in what it keeps.
+			expect(lines.length).toBeLessThanOrEqual(Math.floor(24 * 0.85));
+			expect(lines.at(-1)).toMatch(/^╰/);
+			expect(lines.some((line) => line.includes("Enter confirm"))).toBe(true);
+		} finally {
+			if (rows) Object.defineProperty(process.stdout, "rows", rows);
+			else delete (process.stdout as { rows?: number }).rows;
+		}
+	});
+});

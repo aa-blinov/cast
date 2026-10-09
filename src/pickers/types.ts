@@ -109,7 +109,13 @@ export interface SettingsForm {
 
 export interface Pickers {
 	pickOption<T>(options: PickOption<T>[], opts?: PickOptions<T>): Promise<T | null>;
-	promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null>;
+	promptText(
+		label: string,
+		defaultValue?: string,
+		placeholder?: string,
+		error?: string,
+		opts?: { signal?: AbortSignal },
+	): Promise<string | null>;
 	/**
 	 * Multi-select picker. Returns null on cancel, array of selected values
 	 * on confirm. `initialSelected` seeds the checked set (=== equality

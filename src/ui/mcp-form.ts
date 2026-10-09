@@ -172,7 +172,7 @@ export async function runMcpForm(
 			if (field.kind === "text" || field.kind === "number") {
 				const initial = field.defaultValue === undefined ? undefined : String(field.defaultValue);
 				// biome-ignore lint/performance/noAwaitInLoops: one question at a time, each waits for the person
-				const raw = await pickers.promptText(label, initial, undefined, error);
+				const raw = await pickers.promptText(label, initial, undefined, error, { signal });
 				if (raw === null || signal.aborted) return cancelled();
 				const parsed = parseFieldInput(field, raw);
 				if (!parsed.ok) {

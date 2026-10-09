@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { type AppConfig, fetchModels, runOnboardingCheck } from "../core/config.ts";
 import { DEFAULT_PERSONA, type LoadPersonasOptions, listPersonas, type Persona } from "../core/personas.ts";
 import { setModelsCache } from "../core/readline.ts";
@@ -183,9 +184,10 @@ function shortenCwd(cwd: string): string {
 	return last.length > 12 ? `…/${last.slice(0, 11)}…` : `…/${last}`;
 }
 
-/** `str` cut with … or padded to exactly `width` cells' worth of characters, so the next column starts where it should. */
+/** `str` cut with … or padded to exactly `width` terminal cells, so the next column starts where it should. */
 function pad(str: string, width: number): string {
-	return str.length >= width ? `${str.slice(0, width - 2)}… ` : str.padEnd(width);
+	const cells = visibleWidth(str);
+	return cells >= width ? `${truncateToWidth(str, width - 2, "")}… ` : str + " ".repeat(width - cells);
 }
 
 type SessionPickValue = { id: string | null; action: "resume" | "fresh" | "delete" | "all" | "here" };
@@ -196,7 +198,7 @@ function sessionRowOptions(sessions: SessionSummary[], withCwd: boolean): PickOp
 		const cwd = shortenCwd(s.cwd || "");
 		const date = s.updatedAt.slice(0, 10);
 		const time = s.updatedAt.slice(11, 16);
-		const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}…` : firstMsg || "(empty)";
+		const msgCol = firstMsg ? truncateToWidth(firstMsg, 40, "…") : "(empty)";
 		const when = `${date.slice(5)} ${time}  ${s.msgCount} msgs`;
 		return {
 			value: { id: s.id, action: "resume" as const },
@@ -298,7 +300,7 @@ export async function selectSession(pickers: Pickers, opts: SelectSessionOptions
 		const delOptions = shown.map((s) => {
 			const firstMsg = s.firstUserMessage;
 			const cwd = shortenCwd(s.cwd || "");
-			const msgCol = firstMsg.length > 40 ? `${firstMsg.slice(0, 40)}…` : firstMsg || "(empty)";
+			const msgCol = firstMsg ? truncateToWidth(firstMsg, 40, "…") : "(empty)";
 			return { value: s.id, label: `${pad(cwd, 18)}${pad(msgCol, 43)}${s.id}` };
 		});
 		const toDelete = await pickers.pickOption(delOptions, { title: "Delete which session?" });

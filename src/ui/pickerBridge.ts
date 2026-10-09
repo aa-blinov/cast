@@ -106,7 +106,13 @@ export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 				open(request);
 			});
 		},
-		promptText(label: string, defaultValue?: string, placeholder?: string, error?: string): Promise<string | null> {
+		promptText(
+			label: string,
+			defaultValue?: string,
+			placeholder?: string,
+			error?: string,
+			opts?: { signal?: AbortSignal },
+		): Promise<string | null> {
 			return new Promise((resolvePromise) => {
 				const request: ModalRequest = {
 					kind: "text",
@@ -115,9 +121,12 @@ export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 					placeholder,
 					error,
 					resolve: (value) => {
+						opts?.signal?.removeEventListener("abort", onAbort);
 						if (close(request)) resolvePromise(value);
 					},
 				};
+				const onAbort = () => request.resolve(null);
+				opts?.signal?.addEventListener("abort", onAbort, { once: true });
 				open(request);
 			});
 		},
@@ -137,11 +146,14 @@ export function createModalBridge(onLog: (text: string) => void): ModalBridge {
 					opts,
 					initialSelected: initialIndices,
 					resolve: (indices) => {
+						opts?.signal?.removeEventListener("abort", onAbort);
 						if (!close(request)) return;
 						if (indices === null) resolvePromise(null);
 						else resolvePromise(indices.map((i) => options[i]!.value));
 					},
 				};
+				const onAbort = () => request.resolve(null);
+				opts?.signal?.addEventListener("abort", onAbort, { once: true });
 				open(request);
 			});
 		},
