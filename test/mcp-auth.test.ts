@@ -187,7 +187,7 @@ createMcpAuthProvider(name, "http://127.0.0.1/" + name).saveTokens({ access_toke
 		try {
 			const children = names.map(
 				(name) =>
-					new Promise<number | null>((resolve) => {
+					new Promise<{ name: string; code: number | null; stderr: string }>((resolve) => {
 						const child = spawn(process.execPath, ["--import", "tsx", script, name, go], {
 							cwd: join(import.meta.dirname, ".."),
 							env: { ...process.env, HOME: home },
@@ -197,16 +197,15 @@ createMcpAuthProvider(name, "http://127.0.0.1/" + name).saveTokens({ access_toke
 						child.stderr?.on("data", (chunk: Buffer) => {
 							stderr += chunk.toString();
 						});
-						child.on("exit", (code) => {
-							if (code !== 0) console.error(`[${name}] exit ${code}: ${stderr.slice(0, 600)}`);
-							resolve(code);
-						});
+						child.on("exit", (code) => resolve({ name, code, stderr: stderr.slice(0, 600) }));
 					}),
 			);
 			// Give every child time to start and reach its wait loop before the go file lets them run.
 			await new Promise((resolve) => setTimeout(resolve, 4_000));
 			writeFileSync(go, "");
-			expect(await Promise.all(children)).toEqual(names.map(() => 0));
+			// A failing child's own error goes into the assertion, so the report shows why it failed, not only its exit code.
+			const results = await Promise.all(children);
+			expect(results.filter((r) => r.code !== 0)).toEqual([]);
 			const saved = JSON.parse(readFileSync(join(home, ".cast", "mcp-auth.json"), "utf-8")) as Record<
 				string,
 				unknown
