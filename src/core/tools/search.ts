@@ -28,6 +28,9 @@ const GREP_READ_NOTE_LIMIT = 3;
 // correctness-neutral but real efficiency cost the async variant avoids.
 const execFileAsync = promisify(execFile);
 
+/** How long fd may run before glob reports a timeout instead of searching again another way. */
+const FD_TIMEOUT_MS = 10_000;
+
 class SearchAbortedError extends Error {}
 
 function abortedSearchResult(): ToolResult {
@@ -382,13 +385,21 @@ export async function execGlob(
 		// print "[fd error]: …" which would otherwise land in the TUI frame.
 		const { stdout } = await execFileAsync("fd", fdArgs, {
 			encoding: "utf-8",
-			timeout: 10_000,
+			timeout: FD_TIMEOUT_MS,
 			cwd: searchPath,
 			signal,
 		});
 		absolutePaths = stdout.trim().split("\n").filter(Boolean);
-	} catch {
+	} catch (error) {
 		if (signal?.aborted) return abortedSearchResult();
+		// A search that ran out of time is not a reason to search again by another method: the walk gives different
+		// results under the same limit, and the timeout would then go unnoticed. Say so and let the model retry.
+		if ((error as { killed?: boolean }).killed === true) {
+			return {
+				content: `Error: glob timed out after ${FD_TIMEOUT_MS / 1000}s under ${searchPath}. Narrow the pattern or the path and retry.`,
+				isError: true,
+			};
+		}
 		// fd isn't installed or returned an error (e.g. invalid glob
 		// pattern) — walk the tree ourselves. Patterns with a directory
 		// component match against the path relative to searchPath (mirrors
