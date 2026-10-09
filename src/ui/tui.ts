@@ -6,11 +6,12 @@ import { listSessionSummaries, saveSession, sessionHasMessages } from "../core/s
 import { type ParsedArgs, runStartup } from "../core/startup.ts";
 import type { Pickers } from "../pickers/types.ts";
 import { daemonBaseUrl, readLiveServerState } from "../server/daemon-state.ts";
+import { paint } from "../ui-pi/paint.ts";
 import { runPiFrontEnd } from "../ui-pi/run.ts";
 import { createStartupUi } from "../ui-pi/startup.ts";
 import { type ClipboardPasteResult, saveClipboardImageToTempFile } from "./readClipboardImage.ts";
 import { resumeCommand, resumeHint, writeLastResume } from "./resume-hint.ts";
-import { loadTheme } from "./themes/index.ts";
+import { loadTheme, theme } from "./themes/index.ts";
 import { logTuiError, reportFatal } from "./tui-errors.ts";
 
 /**
@@ -94,10 +95,10 @@ export async function runTui(args: ParsedArgs, daemonToken?: string): Promise<vo
 		);
 		const session = { id: result.session.id, hasMessages: sessionHasMessages(result.session.id) };
 		writeLastResume(resumeCommand(session, earlier));
-		const line = resumeHint(session, earlier);
-		if (!line) return;
+		const hint = resumeHint(session, earlier);
+		if (!hint) return;
 		resumeHintPrinted = true;
-		process.stdout.write(`${line}\n`);
+		process.stdout.write(`${paint(hint.label, { color: theme().muted })} ${hint.text}\n`);
 	};
 
 	// Ends the session: save it, close what was opened,

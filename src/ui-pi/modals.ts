@@ -231,11 +231,16 @@ export class OptionModal<T> implements Component {
 
 	render(width: number): string[] {
 		const colors = theme();
-		const rows = pickerRows();
+		const detail = this.opts?.detail ? detailRows(this.opts.detail, width - 4) : [];
+		// The list gets what the rest of the box leaves. The overlay clips at 85% of the height from the bottom, so a
+		// long detail block used to push the hint row and the bottom border off a short terminal.
+		const fixed =
+			(this.opts?.error ? 2 : 0) + (this.opts?.detail ? detail.length + 1 : 0) + (this.opts?.search ? 1 : 0);
+		const rows = Math.max(3, pickerRows() - fixed);
 		this.scroll = keepVisible(this.idx, this.scroll, rows, this.shown.length);
 		const body: string[] = [];
 		if (this.opts?.error) body.push(paint(this.opts.error, { color: colors.error }), "");
-		if (this.opts?.detail) body.push(...detailRows(this.opts.detail, width - 4), "");
+		if (this.opts?.detail) body.push(...detail, "");
 		if (this.opts?.search) {
 			const placeholder = !this.query && this.opts.search.placeholder ? this.opts.search.placeholder : "";
 			body.push(

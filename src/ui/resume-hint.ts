@@ -17,16 +17,16 @@ export function resumeCommand(
 
 /**
  * The line printed after the screen is gone, since the exit clears the session id along with the rest of
- * the frame.
+ * the frame. The label comes apart from the command so the caller can paint it through the legibility floor.
  */
 export function resumeHint(
 	session: { id: string; hasMessages: boolean },
 	earlierInThisFolder: boolean,
-): string | undefined {
+): { label: string; text: string } | undefined {
 	const command = resumeCommand(session, earlierInThisFolder);
 	if (!command) return undefined;
-	if (session.hasMessages) return `\x1b[2mResume this session:\x1b[22m ${command}`;
-	return `\x1b[2mEarlier session in this folder:\x1b[22m ${command}  (or cast --resume to pick)`;
+	if (session.hasMessages) return { label: "Resume this session:", text: command };
+	return { label: "Earlier session in this folder:", text: `${command}  (or cast --resume to pick)` };
 }
 
 /** Where the command is left for the shell function from `cast shell-init`, which adds it to the shell's history. */
