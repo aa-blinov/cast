@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -18,7 +19,12 @@ import {
 	releaseCheckpointRefs,
 	restoreCheckpoint,
 } from "../src/core/checkpoint.ts";
-import { fitsInSnapshot, MAX_SNAPSHOT_FILES } from "../src/core/shadow-snapshot.ts";
+import {
+	createShadowSnapshot,
+	fitsInSnapshot,
+	MAX_SNAPSHOT_FILES,
+	releaseShadowRefs,
+} from "../src/core/shadow-snapshot.ts";
 
 let home = "";
 let project = "";
@@ -153,4 +159,33 @@ describe("snapshots of a folder that is not a git repository", () => {
 		expect((await createCheckpoint(home)).shadowDir).toBeUndefined();
 		expect(existsSync(join(home, ".cast", "shadow")) ? readdirSync(join(home, ".cast", "shadow")) : []).toEqual([]);
 	});
+});
+
+describe("concurrent use of one folder's hidden repository", () => {
+	it("keeps a checkpoint written while another session releases the repository", async () => {
+		let lost = 0;
+		let thrown = 0;
+		let broken = 0;
+		for (let round = 0; round < 40; round++) {
+			const first = await createShadowSnapshot(project, `old-${round}`);
+			if (!first) {
+				broken++;
+				continue;
+			}
+			// One session drops its last ref (and deletes the repository when nothing else is pinned) while another
+			// takes a checkpoint in the same folder.
+			const [released, second] = await Promise.all([
+				releaseShadowRefs(first.shadowDir, [`old-${round}`]).then(
+					() => true,
+					() => false,
+				),
+				createShadowSnapshot(project, `new-${round}`),
+			]);
+			if (!released) thrown++;
+			if (!second) continue;
+			const exists = spawnSync("git", ["--git-dir", second.shadowDir, "cat-file", "-e", second.commitSha]);
+			if (exists.status !== 0) lost++;
+		}
+		expect({ lost, thrown, broken }).toEqual({ lost: 0, thrown: 0, broken: 0 });
+	}, 60_000);
 });

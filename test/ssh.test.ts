@@ -380,3 +380,15 @@ describe("execSsh timeout", () => {
 		}
 	});
 });
+
+describe("execSsh host names", () => {
+	it("refuses a host name that ssh would read as an option", async () => {
+		const result = await execSsh(
+			{ host: "evil", command: "true" },
+			[{ name: "evil", host: "-oProxyCommand=touch /tmp/cast-pwned" }],
+			mockConfig,
+		);
+		expect(result.isError).toBe(true);
+		expect(String(result.content)).toContain('cannot start with "-"');
+	});
+});

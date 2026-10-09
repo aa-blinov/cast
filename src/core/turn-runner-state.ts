@@ -27,7 +27,16 @@
  *     read path — a missing or malformed file is the same as "no runner".
  */
 
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	linkSync,
+	mkdirSync,
+	readFileSync,
+	renameSync,
+	statSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -82,6 +91,48 @@ function lockPath(sessionId: string): string {
 	return join(stateDir(), `.lock-${sessionId}.json`);
 }
 
+/** Whether the lock file `raw` (read from `path`) belongs to a holder that stopped reporting. */
+function lockIsStale(path: string, raw: string): boolean {
+	try {
+		const state = JSON.parse(raw) as TurnRunnerState;
+		return !isProcessAlive(state.pid) || Date.now() - state.startedAt > STALE_THRESHOLD_MS;
+	} catch {
+		try {
+			return Date.now() - statSync(path).mtimeMs > STALE_THRESHOLD_MS;
+		} catch {
+			return false;
+		}
+	}
+}
+
+/**
+ * Clears a stale lock without deleting a fresh one: the file is moved aside first and judged by what was moved.
+ * A peer that replaced the stale lock in the meantime gets its file back, so only the stale copy is removed.
+ */
+function clearStaleLock(path: string, raw: string): boolean {
+	const aside = `${path}.${process.pid}.${Date.now()}.stale`;
+	try {
+		renameSync(path, aside);
+	} catch {
+		return false;
+	}
+	try {
+		if (readFileSync(aside, "utf-8") === raw) {
+			unlinkSync(aside);
+			return true;
+		}
+		try {
+			linkSync(aside, path);
+		} catch {
+			// A newer lock already sits at the path; it wins.
+		}
+		unlinkSync(aside);
+	} catch {
+		// The moved copy vanished; nothing here is ours to clear.
+	}
+	return false;
+}
+
 /** Atomically claims the right to start a session turn across processes. */
 export function acquireTurnRunner(sessionId: string, pid: number): boolean {
 	ensureDir();
@@ -91,22 +142,14 @@ export function acquireTurnRunner(sessionId: string, pid: number): boolean {
 			writeFileSync(path, JSON.stringify({ pid, startedAt: Date.now() }), { encoding: "utf-8", flag: "wx" });
 			return true;
 		} catch {
+			let raw: string;
 			try {
-				const state = JSON.parse(readFileSync(path, "utf-8")) as TurnRunnerState;
-				const stale = !isProcessAlive(state.pid) || Date.now() - state.startedAt > STALE_THRESHOLD_MS;
-				if (!stale) return false;
+				raw = readFileSync(path, "utf-8");
 			} catch {
-				try {
-					if (Date.now() - statSync(path).mtimeMs <= STALE_THRESHOLD_MS) return false;
-				} catch {
-					continue;
-				}
+				continue;
 			}
-			try {
-				unlinkSync(path);
-			} catch {
-				return false;
-			}
+			if (!lockIsStale(path, raw)) return false;
+			if (!clearStaleLock(path, raw)) return false;
 		}
 	}
 	return false;

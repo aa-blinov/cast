@@ -486,10 +486,15 @@ function renewProjectMemoryLease(cwd: string, token: string, leaseMs: number): b
 	);
 }
 
+/**
+ * Runs `work` while holding the project's memory lease. `work` gets a signal that aborts when a renewal finds the
+ * lease taken over (this process stalled past the lease): past that point another owner may be writing too, so
+ * the result is an error, not a success.
+ */
 export async function withProjectMemoryLease<T>(
 	cwd: string,
 	operation: string,
-	work: () => Promise<T>,
+	work: (leaseSignal: AbortSignal) => Promise<T>,
 	options: ProjectMemoryLeaseOptions = {},
 ): Promise<T> {
 	const waitMs = options.waitMs ?? MEMORY_OPERATION_WAIT_MS;
@@ -505,15 +510,18 @@ export async function withProjectMemoryLease<T>(
 		// biome-ignore lint/performance/noAwaitInLoops: lease polling must remain sequential
 		await sleepWithAbort(Math.min(MEMORY_OPERATION_POLL_MS, Math.max(1, deadline - Date.now())), options.signal);
 	}
+	const lease = new AbortController();
 	const renewal = setInterval(
 		() => {
-			renewProjectMemoryLease(cwd, token!, leaseMs);
+			if (!renewProjectMemoryLease(cwd, token!, leaseMs)) lease.abort();
 		},
 		Math.max(1_000, Math.floor(leaseMs / 3)),
 	);
 	renewal.unref();
 	try {
-		return await work();
+		const result = await work(lease.signal);
+		if (lease.signal.aborted) throw new Error(`Project memory lease was taken over during ${operation}`);
+		return result;
 	} finally {
 		clearInterval(renewal);
 		releaseProjectMemoryLease(cwd, token);

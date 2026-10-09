@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -160,4 +160,52 @@ describe("authorizationCodeFrom", () => {
 		expect(() => authorizationCodeFrom("?error=access_denied&error_description=No+thanks", "s")).toThrow(/No thanks/);
 		expect(() => authorizationCodeFrom("?state=s", "s")).toThrow(/No authorization code/);
 	});
+});
+
+describe("the token file under concurrent writers", () => {
+	it("keeps every server's entry when processes save at the same moment", async () => {
+		const home = mkdtempSync(join(tmpdir(), "cast-auth-race-home-"));
+		const work = mkdtempSync(join(tmpdir(), "cast-auth-race-work-"));
+		const go = join(work, "go");
+		const script = join(work, "save.ts");
+		const authModule = join(import.meta.dirname, "..", "src", "core", "mcp-auth.ts");
+		// Each child waits for the go file so the saves overlap; without the lock the token file loses entries.
+		writeFileSync(
+			script,
+			`import { existsSync } from "node:fs";
+import { createMcpAuthProvider } from ${JSON.stringify(authModule)};
+const [name, go] = process.argv.slice(2);
+while (!existsSync(go)) {
+	// wait for the others
+}
+createMcpAuthProvider(name, "http://127.0.0.1/" + name).saveTokens({ access_token: name, token_type: "bearer" });
+`,
+		);
+		const names = Array.from({ length: 8 }, (_, i) => `srv${i}`);
+		try {
+			const children = names.map(
+				(name) =>
+					new Promise<number | null>((resolve) => {
+						const child = spawn(process.execPath, ["--import", "tsx", script, name, go], {
+							cwd: join(import.meta.dirname, ".."),
+							env: { ...process.env, HOME: home },
+							stdio: "ignore",
+						});
+						child.on("exit", (code) => resolve(code));
+					}),
+			);
+			// Give every child time to start and reach its wait loop before the go file lets them run.
+			await new Promise((resolve) => setTimeout(resolve, 4_000));
+			writeFileSync(go, "");
+			expect(await Promise.all(children)).toEqual(names.map(() => 0));
+			const saved = JSON.parse(readFileSync(join(home, ".cast", "mcp-auth.json"), "utf-8")) as Record<
+				string,
+				unknown
+			>;
+			expect(Object.keys(saved).sort()).toEqual([...names].sort());
+		} finally {
+			rmSync(home, { recursive: true, force: true });
+			rmSync(work, { recursive: true, force: true });
+		}
+	}, 60_000);
 });

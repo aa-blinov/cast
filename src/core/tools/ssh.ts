@@ -79,6 +79,10 @@ export async function execSsh(
 	// Build SSH args
 	const controlPath = ensureControlDir();
 	registerControlDirCleanup();
+	// A host or user that starts with "-" would be read by ssh as an option (ProxyCommand=... runs a command).
+	if ([hostConfig.host, hostConfig.username].some((value) => value?.startsWith("-"))) {
+		return { content: `Invalid SSH host "${hostName}": host and user names cannot start with "-".`, isError: true };
+	}
 	const target = hostConfig.username ? `${hostConfig.username}@${hostConfig.host}` : hostConfig.host;
 
 	const sshArgs: string[] = [
