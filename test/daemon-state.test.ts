@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -244,5 +244,74 @@ describe("start lock wait", () => {
 	it("outlasts the lock holder's own startup wait, so concurrent launches reuse its daemon", async () => {
 		const { DAEMON_STARTUP_TIMEOUT_MS, START_LOCK_WAIT_ATTEMPTS } = await import("../src/server/daemon-state.ts");
 		expect(START_LOCK_WAIT_ATTEMPTS * 100).toBeGreaterThan(DAEMON_STARTUP_TIMEOUT_MS);
+	});
+});
+
+describe("the start lock when its directory cannot be made", () => {
+	it("refuses the lock instead of starting a second daemon", async () => {
+		const { acquireStartLock } = await import("../src/server/daemon-state.ts");
+		const dir = join(process.env.HOME ?? "", ".cast");
+		rmSync(dir, { recursive: true, force: true });
+		// A file where the directory should be: the lock's directory cannot be created.
+		writeFileSync(dir, "not a directory");
+		try {
+			expect(acquireStartLock()).toBe(false);
+		} finally {
+			rmSync(dir, { force: true });
+			mkdirSync(dir, { recursive: true });
+		}
+	});
+});
+
+describe("daemon identity and the legacy state file", () => {
+	const state = {
+		pid: process.pid,
+		host: "127.0.0.1",
+		port: 1,
+		startedAt: "t",
+		foreground: false,
+		token: "tok",
+		instanceId: "inst",
+	};
+
+	it("confirms a daemon only when its identity endpoint names the same instance", async () => {
+		const { isCurrentDaemonInstance } = await import("../src/server/daemon-state.ts");
+		const realFetch = globalThis.fetch;
+		try {
+			globalThis.fetch = (async () => new Response(JSON.stringify({ instanceId: "inst" }))) as typeof fetch;
+			expect(await isCurrentDaemonInstance(state)).toBe(true);
+
+			globalThis.fetch = (async () => new Response(JSON.stringify({ instanceId: "other" }))) as typeof fetch;
+			expect(await isCurrentDaemonInstance(state)).toBe(false);
+
+			globalThis.fetch = (async () => new Response("", { status: 401 })) as typeof fetch;
+			expect(await isCurrentDaemonInstance(state)).toBe(false);
+
+			globalThis.fetch = (async () => {
+				throw new Error("connection refused");
+			}) as typeof fetch;
+			expect(await isCurrentDaemonInstance(state)).toBe(false);
+
+			// Without an instance id or a token there is nothing to ask, so nothing is confirmed.
+			expect(await isCurrentDaemonInstance({ ...state, instanceId: undefined })).toBe(false);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	});
+
+	it("moves a state file written under the old name to the current one, and drops a corrupt one", async () => {
+		const { readServerState, writeServerState } = await import("../src/server/daemon-state.ts");
+		const dir = join(process.env.HOME ?? "", ".cast");
+		mkdirSync(dir, { recursive: true });
+		const legacy = join(dir, "web.json");
+		writeFileSync(legacy, JSON.stringify(state));
+		expect(readServerState()).toMatchObject({ pid: process.pid, instanceId: "inst" });
+		expect(existsSync(legacy)).toBe(false);
+		writeServerState(state);
+
+		writeFileSync(legacy, "{ not json");
+		expect(readServerState()).toMatchObject({ pid: process.pid });
+		expect(existsSync(legacy)).toBe(true);
+		rmSync(legacy, { force: true });
 	});
 });
