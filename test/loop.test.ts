@@ -4115,6 +4115,37 @@ describe("compactSessionMessages — extraInstructions", () => {
 // runAgentLoop — doom loop detection
 // ============================================================================
 
+describe("runAgentLoop — a tool that keeps returning the same output", () => {
+	it("stops the turn at 25 repeats, the same as the warning promises, not after the iteration cap", async () => {
+		let calls = 0;
+		vi.mocked(streamAndCollect).mockImplementation(async () => {
+			calls++;
+			// A different pattern each time, so the doom-loop guard (identical arguments) stays out of it; the real glob
+			// answers "No files found" to every one of them.
+			if (calls > 80) return { content: "done", thinking: "", finishReason: "stop" };
+			return {
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{ id: `g${calls}`, name: "glob", arguments: JSON.stringify({ pattern: `nomatch-${calls}/**` }) },
+				],
+			};
+		});
+		const warnings: string[] = [];
+		await runAgentLoop([{ role: "user", content: "find it" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			onEvent: () => {},
+			onWarning: (message) => warnings.push(message),
+		});
+		expect(warnings.some((w) => w.includes("same output 25 times"))).toBe(true);
+		expect(calls).toBeLessThanOrEqual(27);
+	});
+});
+
 describe("runAgentLoop — doom loop detection", () => {
 	it("blocks a tool call after DOOM_LOOP_THRESHOLD identical consecutive calls and emits doom_loop event", async () => {
 		const events: AgentEvent[] = [];
@@ -5812,6 +5843,40 @@ describe("runAgentLoop — todo list (build mode only)", () => {
 
 		expect(events.some((e) => e.type === "todos_updated")).toBe(false);
 		expect(events.some((e) => e.type === "tool_end" && e.name === "todo_write" && e.result.isError)).toBe(true);
+	});
+
+	it("reports a todo that is too long as INVALID_ARGUMENT the model can retry, not an internal error", async () => {
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{
+						id: "t1",
+						name: "todo_write",
+						arguments: JSON.stringify({
+							todos: [{ content: "x".repeat(600), status: "pending", priority: "low" }],
+						}),
+					},
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			onEvent: (event) => events.push(event),
+		});
+
+		const end = events.find((e) => e.type === "tool_end" && e.name === "todo_write");
+		expect(end?.type === "tool_end" && end.result.isError).toBe(true);
+		expect(end?.type === "tool_end" && end.result.error).toEqual(
+			expect.objectContaining({ code: "INVALID_ARGUMENT", retryable: true }),
+		);
 	});
 
 	it("runs todo_write through PreToolUse hooks before it updates state", async () => {

@@ -1095,6 +1095,36 @@ describe("streamChat — a provider that goes silent", () => {
 		expect(quiet).toEqual([[25, 50]]);
 	});
 
+	it("still says the provider is quiet when it keeps sending empty deltas that carry no content", async () => {
+		// Empty deltas arrive every 20ms, under the 50ms idle limit, so the attempt is not cut; but nothing reaches the
+		// person, so the wait must still be announced.
+		const client = {
+			chat: {
+				completions: {
+					create: async () => ({
+						async *[Symbol.asyncIterator]() {
+							for (let i = 0; i < 15; i++) {
+								await new Promise((resolve) => setTimeout(resolve, 20));
+								yield { choices: [{ delta: {} }] };
+							}
+							yield { choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] };
+						},
+					}),
+				},
+			},
+		} as unknown as OpenAI;
+		const quiet: number[] = [];
+		const seen: string[] = [];
+		for await (const chunk of streamChat(client, "m", [], [], 100, undefined, {}, {}, (silentMs) =>
+			quiet.push(silentMs),
+		)) {
+			if (chunk.retrying) seen.push(`retry:${chunk.retrying.reason}`);
+			if (chunk.content) seen.push(chunk.content);
+		}
+		expect(quiet.length).toBeGreaterThan(0);
+		expect(seen).toEqual(["hello"]);
+	});
+
 	it("ends a turn whose stream went silent partway instead of hanging it", async () => {
 		const client = stallingClient([[{ choices: [{ delta: { content: "partial" } }] }]]);
 		const run = async () => {
