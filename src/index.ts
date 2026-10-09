@@ -112,15 +112,27 @@ async function main(): Promise<void> {
 	const cliMcpPaths: string[] = [];
 	let worktree: string | undefined;
 
+	// A value-taking flag with no value (or another flag in its place) used to be read as `undefined`: `cast -m`
+	// silently ran with the default model, and `cast -p -c` took `-c` as the persona name.
+	const flagValue = (flag: string, i: number): string => {
+		const value = args[i + 1];
+		if (value === undefined || value.startsWith("-")) {
+			console.error(`${flag} requires a value`);
+			console.error("Run 'cast --help' for options.");
+			process.exit(2);
+		}
+		return value;
+	};
+
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === "--model" || args[i] === "-m") {
-			cliModel = args[i + 1];
+			cliModel = flagValue(args[i]!, i);
 			i++;
 		} else if (args[i] === "--reasoning" || args[i] === "-r") {
-			cliReasoning = args[i + 1];
+			cliReasoning = flagValue(args[i]!, i);
 			i++;
 		} else if (args[i] === "--persona" || args[i] === "-p") {
-			cliPersona = args[i + 1];
+			cliPersona = flagValue(args[i]!, i);
 			i++;
 		} else if (args[i] === "--continue" || args[i] === "-c") {
 			resumeRequested = true;
@@ -140,19 +152,17 @@ async function main(): Promise<void> {
 			resumeId = args[i]!.slice("--resume=".length);
 		} else if (args[i] === "--session" || args[i] === "-s") {
 			resumeRequested = true;
-			resumeId = args[i + 1];
+			resumeId = flagValue(args[i]!, i);
 			i++;
 		} else if (isBypassPermissionsFlag(args[i])) {
 			cliBypassPermissions = true;
 		} else if (args[i] === "--skill") {
-			const path = args[i + 1];
-			if (path) cliSkillPaths.push(path);
+			cliSkillPaths.push(flagValue(args[i]!, i));
 			i++;
 		} else if (args[i] === "--no-skills") {
 			noSkills = true;
 		} else if (args[i] === "--mcp") {
-			const path = args[i + 1];
-			if (path) cliMcpPaths.push(path);
+			cliMcpPaths.push(flagValue(args[i]!, i));
 			i++;
 		} else if (args[i] === "--no-mcp") {
 			noMcp = true;
@@ -177,6 +187,10 @@ async function main(): Promise<void> {
 		} else if (args[i] === "--version" || args[i] === "-v") {
 			console.log(`cast v${VERSION}`);
 			return;
+		} else if (args[i]!.startsWith("-") && args[i] !== "-") {
+			// An unknown flag used to become the first prompt and go to the model as text.
+			console.error(`unknown option ${args[i]} (run 'cast --help' for options)`);
+			process.exit(2);
 		} else {
 			initialPrompt = args.slice(i).join(" ");
 			break;
@@ -283,6 +297,7 @@ async function ensureDaemon(): Promise<string | undefined> {
 					["start", "--port", String(bind?.port ?? 0), ...(bind ? ["--host", bind.host] : [])],
 					{
 						remember: false,
+						fallback: true,
 					},
 				);
 				return tokenFor(readLiveServerState());
@@ -420,8 +435,9 @@ async function handleRunCommand(args: string[], version: string): Promise<void> 
 			// It used to be taken as the start of the message, so a misspelt flag was sent to the model as the prompt.
 			runUsageError(`unknown option ${arg} (to start the message with a dash, put -- before it)`);
 		} else {
-			messageParts.push(...args.slice(i));
-			break;
+			// Flags count anywhere in the line (`cast run fix the bug --format json`), so a word is collected and
+			// parsing goes on; a literal dash-word needs `--` before it.
+			messageParts.push(arg);
 		}
 	}
 
@@ -561,6 +577,14 @@ Neovim) to wire it as an agent.`);
  * server what the `lsp` tool would, from the shell. `cast lsp status` lists
  * the servers once a query has started them.
  */
+const WHOLE_NUMBER_RE = /^\d+$/;
+// Either separator: a Windows release path has backslashes, and a dev run must not match a folder named dist.
+const RELEASE_PATH_RE = /[\\/]dist[\\/]/;
+
+function isWholeNumber(text: string): boolean {
+	return WHOLE_NUMBER_RE.test(text);
+}
+
 async function handleLspCommand(args: string[]): Promise<void> {
 	const [operation, file, a, b] = args;
 	if (!operation || (!file && operation !== "status")) {
@@ -572,6 +596,11 @@ async function handleLspCommand(args: string[]): Promise<void> {
 		return;
 	}
 	const position = a !== undefined && b !== undefined ? { line: Number(a), character: Number(b) } : {};
+	// A non-number used to reach the LSP request as NaN; a position is two whole numbers or it is nothing.
+	if (a !== undefined && b !== undefined && !(isWholeNumber(a) && isWholeNumber(b))) {
+		console.error(`cast lsp: line and character must be whole numbers, got "${a}" and "${b}"`);
+		process.exit(2);
+	}
 	const result = await execLsp({ operation, file_path: file, ...position, query: a }, process.cwd());
 	console.log(result.content);
 	console.log(`\n${formatLspStatus(lspStatus())}`);
@@ -606,7 +635,10 @@ function handleRequestsCommand(args: string[]): void {
 	}
 }
 
-async function handleServerCommand(args: string[], options: { remember?: boolean } = {}): Promise<void> {
+async function handleServerCommand(
+	args: string[],
+	options: { remember?: boolean; fallback?: boolean } = {},
+): Promise<void> {
 	const LOG_FILE = join(homedir(), ".cast", "server.log");
 
 	if (args[0] === "stop") {
@@ -633,7 +665,7 @@ async function handleServerCommand(args: string[], options: { remember?: boolean
 
 	const foreground = args.includes("--foreground");
 	// An address typed on the command line (or set in the environment) wins; with neither, the one chosen last time.
-	const explicit = args.some((a) => a === "--port" || a === "--host" || a === "--public");
+	const explicit = args.some((a) => a === "--public" || a.startsWith("--port") || a.startsWith("--host"));
 	const saved =
 		explicit || process.env.CAST_SERVER_PORT || process.env.CAST_SERVER_HOST ? undefined : rememberedBind();
 	const port = saved?.port ?? getPort(args);
@@ -648,6 +680,7 @@ async function handleServerCommand(args: string[], options: { remember?: boolean
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i]!;
 		if (a === "start" || a === "--foreground" || a === "--public" || a === "--no-remember") continue;
+		if (a.startsWith("--port=") || a.startsWith("--host=")) continue;
 		if (a === "--port" || a === "--host") {
 			i++; // also skip this flag's value
 			continue;
@@ -668,7 +701,7 @@ async function handleServerCommand(args: string[], options: { remember?: boolean
 	// Dev mode (tsx + .ts source) vs release mode (bundled dist/index.js).
 	// import.meta.url is <repo>/src/index.ts in dev, <install>/dist/index.js in release.
 	const selfPath = fileURLToPath(import.meta.url);
-	const isRelease = selfPath.includes("/dist/");
+	const isRelease = RELEASE_PATH_RE.test(selfPath);
 	const spawnCwd = join(dirname(selfPath), "..");
 	const spawnArgs = isRelease
 		? [join(spawnCwd, "dist", "index.js"), "server", ...restArgs, "--port", String(port), "--host", host]
@@ -717,6 +750,7 @@ async function handleServerCommand(args: string[], options: { remember?: boolean
 	const opened = openDaemonLog(LOG_FILE);
 	if (!opened.ok) {
 		for (const line of opened.failure.lines) console.error(line);
+		if (options.fallback) throw new Error("the daemon log cannot be opened");
 		process.exit(1);
 	}
 	const logFd = opened.fd;
@@ -739,6 +773,8 @@ async function handleServerCommand(args: string[], options: { remember?: boolean
 			return;
 		}
 		console.error(`[cast server] failed to start — see ${LOG_FILE} for details`);
+		// A launcher that falls back to a local session (ensureDaemon) gets the error, not a dead process.
+		if (options.fallback) throw new Error("the daemon failed to start");
 		process.exit(1);
 	}
 	console.log(`[cast server] started (pid ${child.pid}) — http://${host}:${port}`);
@@ -848,7 +884,11 @@ async function stopServerDaemon(): Promise<void> {
 	}
 	clearServerState();
 	console.log(`[cast server] stopped (pid ${state.pid}) — was on http://${state.host}:${state.port}`);
-	if (!died) console.log("[cast server] warning: process may not have fully exited");
+	// A non-zero exit keeps `cast server stop && cast server start` from starting a second daemon on a port still held.
+	if (!died) {
+		console.log("[cast server] warning: process may not have fully exited");
+		process.exitCode = 1;
+	}
 }
 
 function printServerStatus(): void {
@@ -867,15 +907,36 @@ function printServerStatus(): void {
 	console.log(`[cast server] started: ${state.startedAt}`);
 }
 
+/** The value of `--name value` or `--name=value`; undefined when the flag is absent. */
+function flagArgument(args: string[], name: string): string | undefined {
+	const joined = args.find((a) => a.startsWith(`${name}=`));
+	if (joined !== undefined) return joined.slice(name.length + 1);
+	const idx = args.indexOf(name);
+	if (idx < 0) return undefined;
+	const value = args[idx + 1];
+	// A negative number is a value (and gets its range error below), not another flag.
+	if (value === undefined || (value.startsWith("-") && Number.isNaN(Number(value)))) {
+		console.error(`${name} requires a value`);
+		process.exit(2);
+	}
+	return value;
+}
+
 function getPort(args: string[]): number {
-	const idx = args.indexOf("--port");
-	if (idx >= 0 && args[idx + 1]) return parseInt(args[idx + 1]!, 10);
-	return parseInt(process.env.CAST_SERVER_PORT ?? "1337", 10);
+	const raw = flagArgument(args, "--port");
+	if (raw === undefined) return parseInt(process.env.CAST_SERVER_PORT ?? "1337", 10);
+	const port = Number(raw);
+	// A non-number used to reach the child as NaN and fail there with only "failed to start".
+	if (!Number.isInteger(port) || port < 0 || port > 65535) {
+		console.error(`--port must be a number from 0 to 65535, got "${raw}"`);
+		process.exit(2);
+	}
+	return port;
 }
 
 function getHost(args: string[]): string {
-	const idx = args.indexOf("--host");
-	if (idx >= 0 && args[idx + 1]) return args[idx + 1]!;
+	const raw = flagArgument(args, "--host");
+	if (raw !== undefined) return raw;
 	if (args.includes("--public")) return "0.0.0.0";
 	return process.env.CAST_SERVER_HOST ?? "127.0.0.1";
 }
