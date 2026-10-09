@@ -2,6 +2,28 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.57.4
+
+### Changed
+- **A mistyped flag is refused, not sent to the model.** `cast --forse` used to open the TUI with `--forse` as the first message, and `cast run fix it --format yaml` ignored the format. Now an unknown flag exits 2 with `unknown option`, a flag is read anywhere on the line (`--` still ends the flags), and a value-taking flag with no value (`cast -m`, `cast -p -c`, `cast --session`) is an error instead of a silent default.
+
+### Fixed
+- **Concurrent cast processes no longer drop each other's saved logins.** Two processes saving MCP tokens at the same moment could each write back a token file without the other's entry: with 16 saving at once, 2 to 15 of 16 servers were kept. The token file is now written under a lock, and a lock whose owner died is taken over at once.
+- **Concurrent sessions in one folder no longer break the shadow repository.** A checkpoint written while another session released its last ref could be deleted under it, leaving the repository broken for later checkpoints. The write and the delete now hold one lock per repository.
+- **Starting or upgrading the daemon under contention.** A stale start lock could block every later start, and the web upgrade's restart could race a `cast run` into a second daemon. The lock names its owner and is reclaimed when the owner is gone, and the in-daemon restart hands the lock on before the old daemon exits. A daemon that died while the upgrade waited is started again.
+- **The web server answers 400 to a body that is not a JSON object**, where it answered 500. A command that is not a string is refused the same way.
+- **An SVG shown inline cannot run script**: it is served in a sandbox.
+- **A folder download survives a machine without `tar`**, and `server.json` (which carries the bearer token) is written owner-only.
+- **The login limiter** counts a client behind a local reverse proxy by its `X-Forwarded-For` address, so one client's failures no longer lock out everyone behind the proxy. Only a loopback peer is trusted to set that header.
+- **An OAuth callback visit without its query** no longer ends the login with an empty code.
+- **A picker inside an MCP form closes when the form is cancelled**, instead of staying on screen; the multi-select and text prompt now honour the abort.
+- **Picker overlays on short terminals** keep their hint row and bottom border: the list gives room to the error, detail and search lines.
+- **The resume hint is painted through the legibility floor**, and session tables align CJK and emoji by terminal width.
+- **`cast server --port`** accepts `--port=N`; a port that is not a number in range is refused before the daemon starts.
+- **An ssh host or user that starts with `-`** is refused, so it cannot be read as an ssh option.
+- **Malformed tool-call arguments are repaired in a copy**: the session history and its saved file keep what the model actually sent.
+- **An interrupted read with an image** no longer gets a second, fabricated result for its tool call.
+
 ## 0.57.3
 
 ### Fixed
