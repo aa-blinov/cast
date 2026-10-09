@@ -21,6 +21,7 @@ import {
 	releaseStartLock,
 	type ServerDaemonState,
 	START_LOCK_WAIT_ATTEMPTS,
+	startLockPath,
 } from "../server/daemon-state.ts";
 
 const V_PREFIX_RE = /^v/;
@@ -182,13 +183,21 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 	// pid is gone, then shut down normally so sessions still drain.
 	if (state.pid === process.pid) {
 		console.log(`\n[cast server] restarting this daemon (pid ${state.pid}) on the new build...`);
+		// The waiter takes the start lock over from this pid before it exits, so a `cast run` starting in the gap
+		// sees a live holder and waits, instead of binding a second daemon beside the replacement.
+		if (!(await acquireStartLockBounded())) {
+			console.log(
+				"[cast server] another cast process is starting a daemon; leaving this one running to avoid stacking a second. Restart it later: 'cast server stop && cast server start'.",
+			);
+			return false;
+		}
 		spawn(
 			"sh",
 			[
 				"-c",
-				`while kill -0 ${state.pid} 2>/dev/null; do sleep 0.2; done; exec cast server start ${startArgs(state).join(" ")}`,
+				`printf %s "$$" > "$LOCK"; while kill -0 ${state.pid} 2>/dev/null; do sleep 0.2; done; cast server start ${startArgs(state).map(shellQuote).join(" ")}; [ "$(cat "$LOCK" 2>/dev/null)" = "$$" ] && rm -f "$LOCK"`,
 			],
-			{ detached: true, stdio: "ignore" },
+			{ detached: true, stdio: "ignore", env: { ...process.env, LOCK: startLockPath() } },
 		).unref();
 		process.kill(state.pid, "SIGTERM");
 		return true;
@@ -203,7 +212,14 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 	// interrupted request that is not resumed. Give turns time to finish before stopping it.
 	const pollMs = options.turnPollMs ?? 1000;
 	const deadline = Date.now() + (options.turnWaitMs ?? TURN_WAIT_MS);
-	let busy = await runningTurns(state);
+	const first = await runningTurns(state);
+	if (first === undefined) {
+		console.log(
+			"[cast server] could not ask the daemon whether turns are running; leaving it on the old build so that nothing is interrupted. Restart it with 'cast server stop && cast server start'.",
+		);
+		return true;
+	}
+	let busy = first;
 	if (busy > 0) {
 		console.log(
 			`\n[cast server] ${busy === 1 ? "a turn is" : `${busy} turns are`} running; waiting for ${busy === 1 ? "it" : "them"} to finish before restarting the daemon...`,
@@ -212,7 +228,8 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 	while (busy > 0 && Date.now() < deadline) {
 		// biome-ignore lint/performance/noAwaitInLoops: polls until the running turns are over
 		await new Promise((resolve) => setTimeout(resolve, pollMs));
-		busy = await runningTurns(state);
+		// A poll that cannot be answered keeps the last known count, so a blip does not end the wait early.
+		busy = (await runningTurns(state)) ?? busy;
 	}
 	if (busy > 0) {
 		console.log(
@@ -236,8 +253,10 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 		// process restarted it). Signalling the pid read before the lock would
 		// then miss, and clearServerState below would wipe a newer daemon's
 		// record on top of that.
+		// Only a peer that already restarted the daemon (a different pid) ends the job here. A daemon that died
+		// while we waited still gets the replacement it was due: the kill below is a no-op and the start runs.
 		const current = readLiveServerState();
-		if (!current || current.pid !== state.pid) return true;
+		if (current && current.pid !== state.pid) return true;
 		console.log(`\n[cast server] daemon was running (pid ${state.pid}) — restarting it on the new build...`);
 		try {
 			process.kill(state.pid, "SIGTERM");
@@ -290,6 +309,11 @@ async function acquireStartLockBounded(): Promise<boolean> {
  * choice, so it does not remember anything (a daemon that had fallen back to a private port must not
  * replace the public address that is remembered).
  */
+/** One word for `sh -c`: a host name from the state file must not be read as shell syntax. */
+function shellQuote(word: string): string {
+	return `'${word.replace(/'/g, `'\\''`)}'`;
+}
+
 function startArgs(state: ServerDaemonState): string[] {
 	const bind = rememberedBind() ?? { host: state.host, port: state.port };
 	return ["--port", String(bind.port), "--host", bind.host, "--no-remember"];
@@ -298,20 +322,24 @@ function startArgs(state: ServerDaemonState): string[] {
 /** How long an upgrade waits for running turns before it leaves the daemon on the old build. */
 const TURN_WAIT_MS = 120_000;
 
-/** How many sessions the daemon is running a turn in right now; 0 when it cannot be asked. */
-async function runningTurns(state: ServerDaemonState): Promise<number> {
+/**
+ * How many sessions the daemon is running a turn in right now. `undefined` when it cannot be asked: an unknown
+ * count must not read as "idle", or the restart would stop a daemon in the middle of a turn.
+ */
+async function runningTurns(state: ServerDaemonState): Promise<number | undefined> {
+	// A record without a token predates the sessions API, so there is nothing to ask: it restarts as before.
 	if (!state.token) return 0;
 	try {
 		const response = await fetch(`${daemonBaseUrl(state)}${API_V1_PREFIX}/sessions`, {
 			headers: { Authorization: `Bearer ${state.token}` },
 			signal: AbortSignal.timeout(4_000),
 		});
-		if (!response.ok) return 0;
+		if (!response.ok) return undefined;
 		const body = (await response.json()) as Array<{ status?: string }> | { sessions?: Array<{ status?: string }> };
 		const sessions = Array.isArray(body) ? body : (body.sessions ?? []);
 		return sessions.filter((session) => session.status === "running").length;
 	} catch {
-		return 0;
+		return undefined;
 	}
 }
 

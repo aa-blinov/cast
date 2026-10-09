@@ -109,6 +109,26 @@ export function bridgeErrorStatus(error: string): number {
 /** The check every /fs/* route relies on; see path-safety.ts. Exported for tests. */
 export { isInsideRoot } from "./path-safety.ts";
 
+/** A request body that must be a JSON object. `null`, numbers and arrays throw, so the caller answers 400 instead of
+ *  failing on a property read of `null` further down. */
+function jsonObject(raw: string): Record<string, unknown> {
+	const parsed: unknown = JSON.parse(raw);
+	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new SyntaxError("Expected a JSON object");
+	}
+	return parsed as Record<string, unknown>;
+}
+
+/** The address a login is counted against. Only a loopback peer (a reverse proxy on this host) may name the real
+ *  client in `X-Forwarded-For`; any other peer is the client itself, so it cannot pick a different bucket. */
+function clientAddress(req: IncomingMessage): string {
+	const peer = req.socket.remoteAddress ?? "unknown";
+	const loopback = peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
+	const forwarded = req.headers["x-forwarded-for"];
+	if (!loopback || typeof forwarded !== "string") return peer;
+	return forwarded.split(",")[0]?.trim() || peer;
+}
+
 /** Constant-time comparison for a credential. Used for both the web password
  *  and the daemon token — the length check leaks only the length, which both
  *  sides already fix. */
@@ -383,7 +403,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	}
 
 	function retryAfterLoginLimit(req: IncomingMessage): number | null {
-		const address = req.socket.remoteAddress ?? "unknown";
+		const address = clientAddress(req);
 		const record = failedLogins.get(address);
 		if (!record) return null;
 		if (record.expiresAt <= Date.now()) {
@@ -394,7 +414,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	}
 
 	function recordFailedLogin(req: IncomingMessage): void {
-		const address = req.socket.remoteAddress ?? "unknown";
+		const address = clientAddress(req);
 		const now = Date.now();
 		const previous = failedLogins.get(address);
 		if (!previous || previous.expiresAt <= now) {
@@ -406,7 +426,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	}
 
 	function clearFailedLogins(req: IncomingMessage): void {
-		failedLogins.delete(req.socket.remoteAddress ?? "unknown");
+		failedLogins.delete(clientAddress(req));
 	}
 
 	function requireAuth(res: ServerResponse, isApi: boolean, returnTo: string): void {
@@ -838,7 +858,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let username = "";
 		let password = "";
 		try {
-			const parsed = JSON.parse(await readBody(req)) as { username?: string; password?: string };
+			const parsed = jsonObject(await readBody(req)) as { username?: string; password?: string };
 			username = parsed.username ?? "";
 			password = parsed.password ?? "";
 		} catch {
@@ -887,7 +907,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let model: string | undefined;
 		let provider: string | undefined;
 		try {
-			const body = JSON.parse(await readBody(req)) as {
+			const body = jsonObject(await readBody(req)) as {
 				name?: string;
 				persona?: string;
 				model?: string;
@@ -958,7 +978,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("PATCH", "/api/agents/:id", async (req, res, params) => {
 		let patch: { persona?: string; model?: string; provider?: string };
 		try {
-			patch = JSON.parse(await readBody(req)) as typeof patch;
+			patch = jsonObject(await readBody(req)) as typeof patch;
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -991,7 +1011,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("POST", "/api/system/upgrade", async (req, res) => {
 		let version: string | undefined;
 		try {
-			const body = JSON.parse(await readBody(req)) as { version?: string };
+			const body = jsonObject(await readBody(req)) as { version?: string };
 			version = body.version?.trim() || undefined;
 		} catch {
 			// no body is fine — upgrade to latest
@@ -1201,7 +1221,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let noMcp = false;
 		let reasoningLevel: string | undefined;
 		try {
-			const parsed = JSON.parse(body) as {
+			const parsed = jsonObject(body) as {
 				persona?: string;
 				model?: string;
 				provider?: string;
@@ -1309,7 +1329,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		if (body.trim()) {
 			try {
-				const parsed = JSON.parse(body) as { beforeSeq?: unknown; afterSeq?: unknown; withFiles?: unknown };
+				const parsed = jsonObject(body) as { beforeSeq?: unknown; afterSeq?: unknown; withFiles?: unknown };
 				if (parsed.withFiles !== undefined && typeof parsed.withFiles !== "boolean") throw new Error();
 				withFiles = parsed.withFiles === true;
 				if (parsed.beforeSeq !== undefined && parsed.afterSeq !== undefined) throw new Error();
@@ -1600,7 +1620,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let title: string;
 		try {
-			const parsed = JSON.parse(body) as { title?: string };
+			const parsed = jsonObject(body) as { title?: string };
 			title = parsed.title ?? "";
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
@@ -1615,7 +1635,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let pinned: boolean;
 		try {
-			const parsed = JSON.parse(body) as { pinned?: boolean };
+			const parsed = jsonObject(body) as { pinned?: boolean };
 			pinned = Boolean(parsed.pinned);
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
@@ -1669,7 +1689,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let clientMessageId: string | undefined;
 		let goal: boolean | number = false;
 		try {
-			const parsed = JSON.parse(body) as {
+			const parsed = jsonObject(body) as {
 				text?: string;
 				images?: string[];
 				clientMessageId?: unknown;
@@ -1739,7 +1759,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let values: Array<string | string[]>;
 		try {
-			const parsed = JSON.parse(body) as { values?: unknown };
+			const parsed = jsonObject(body) as { values?: unknown };
 			const isValue = (v: unknown): v is string | string[] =>
 				typeof v === "string" || (Array.isArray(v) && v.every((x) => typeof x === "string"));
 			values = Array.isArray(parsed.values) && parsed.values.every(isValue) ? parsed.values : [];
@@ -1763,7 +1783,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let allow: boolean;
 		let always: boolean;
 		try {
-			const parsed = JSON.parse(body) as { id?: unknown; allow?: unknown; always?: unknown };
+			const parsed = jsonObject(body) as { id?: unknown; allow?: unknown; always?: unknown };
 			if (typeof parsed.id !== "string" || typeof parsed.allow !== "boolean") {
 				return json(res, { error: "Expected { id: string, allow: boolean, always?: boolean }" }, 400);
 			}
@@ -1784,7 +1804,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
 		let command: unknown;
 		try {
-			command = (JSON.parse(await readBody(req)) as { command?: unknown }).command;
+			command = (jsonObject(await readBody(req)) as { command?: unknown }).command;
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -1800,7 +1820,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!ws) return json(res, { error: "Not found" }, 404);
 		let parsed: { id?: unknown; action?: unknown; content?: unknown };
 		try {
-			parsed = JSON.parse(await readBody(req));
+			parsed = jsonObject(await readBody(req));
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -1829,7 +1849,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let kind: "done";
 		let outcome: "approve" | "continue" = "approve";
 		try {
-			const parsed = JSON.parse(body) as { kind?: string; outcome?: string };
+			const parsed = jsonObject(body) as { kind?: string; outcome?: string };
 			if (parsed.kind !== "done") return json(res, { error: "Invalid plan transition" }, 400);
 			kind = parsed.kind;
 			if (parsed.outcome === "continue") outcome = "continue";
@@ -1845,7 +1865,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let mode: "plan" | "build";
 		try {
-			const parsed = JSON.parse(body) as { mode?: string };
+			const parsed = jsonObject(body) as { mode?: string };
 			if (parsed.mode !== "plan" && parsed.mode !== "build") {
 				return json(res, { error: 'Mode must be "plan" or "build"' }, 400);
 			}
@@ -1885,7 +1905,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let message: string;
 		try {
-			const parsed = JSON.parse(body) as { message?: string };
+			const parsed = jsonObject(body) as { message?: string };
 			message = parsed.message ?? "";
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
@@ -1901,7 +1921,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let message: string;
 		try {
-			const parsed = JSON.parse(body) as { message?: string };
+			const parsed = jsonObject(body) as { message?: string };
 			message = parsed.message ?? "";
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
@@ -1935,7 +1955,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let mode: string;
 		let force: boolean;
 		try {
-			const parsed = JSON.parse(await readBody(req)) as { userSeq?: unknown; mode?: unknown; force?: unknown };
+			const parsed = jsonObject(await readBody(req)) as { userSeq?: unknown; mode?: unknown; force?: unknown };
 			if (!Number.isInteger(parsed.userSeq)) throw new Error();
 			if (parsed.mode !== undefined && !REWIND_MODES.includes(parsed.mode as RewindMode)) throw new Error();
 			if (parsed.force !== undefined && typeof parsed.force !== "boolean") throw new Error();
@@ -1970,8 +1990,11 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let command: string;
 		try {
-			const parsed = JSON.parse(body) as { command?: string };
-			command = parsed.command ?? "";
+			const parsed = jsonObject(body);
+			if (parsed.command !== undefined && typeof parsed.command !== "string") {
+				throw new SyntaxError("command must be a string");
+			}
+			command = typeof parsed.command === "string" ? parsed.command : "";
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -1987,8 +2010,11 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		const body = await readBody(req);
 		let command: string;
 		try {
-			const parsed = JSON.parse(body) as { command?: string };
-			command = parsed.command ?? "";
+			const parsed = jsonObject(body);
+			if (parsed.command !== undefined && typeof parsed.command !== "string") {
+				throw new SyntaxError("command must be a string");
+			}
+			command = typeof parsed.command === "string" ? parsed.command : "";
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2279,6 +2305,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				`${inline ? "inline" : "attachment"}; filename="${fileName.replace(FILENAME_QUOTE_RE, "")}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 			if (st.isDirectory()) {
 				const archive = archiveFolder(dirname(target), name);
+				// A missing `tar` is an 'error' event, not an exception; without this listener the daemon exits.
+				archive.on("error", () => res.destroy());
 				res.writeHead(200, {
 					"Content-Type": "application/gzip",
 					"Content-Disposition": disposition(false, `${name}.tar.gz`),
@@ -2304,6 +2332,8 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 				res.end();
 				return;
 			}
+			// An SVG is markup that can carry script: inline it in a sandbox, so it renders as a picture, not as page code.
+			if (inline && ext === "svg") res.setHeader("Content-Security-Policy", "sandbox");
 			res.writeHead(range ? 206 : 200, {
 				"Content-Type": inline ? (PREVIEW_MIME[ext] ?? "application/octet-stream") : "application/octet-stream",
 				"Content-Length": range ? range.end - range.start + 1 : st.size,
@@ -2340,7 +2370,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!cwd) return json(res, { error: "Not found" }, 404);
 		let parsed: { paths?: unknown };
 		try {
-			parsed = JSON.parse(await readBody(req));
+			parsed = jsonObject(await readBody(req));
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2359,7 +2389,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!cwd) return json(res, { error: "Not found" }, 404);
 		let parsed: { path?: string; name?: string };
 		try {
-			parsed = JSON.parse(await readBody(req));
+			parsed = jsonObject(await readBody(req));
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2377,7 +2407,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!cwd) return json(res, { error: "Not found" }, 404);
 		let parsed: { path?: string; name?: string; type?: string };
 		try {
-			parsed = JSON.parse(await readBody(req));
+			parsed = jsonObject(await readBody(req));
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2396,7 +2426,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!cwd) return json(res, { error: "Not found" }, 404);
 		let parsed: { path?: string; to?: string };
 		try {
-			parsed = JSON.parse(await readBody(req));
+			parsed = jsonObject(await readBody(req));
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2487,7 +2517,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		if (!bridge.getSession(params.id)) return json(res, { error: "Not found" }, 404);
 		let parsed: { name?: string; dataUrl?: string };
 		try {
-			parsed = JSON.parse(await readBody(req));
+			parsed = jsonObject(await readBody(req));
 		} catch (err) {
 			// An oversized drop is the one failure worth naming precisely here —
 			// "Invalid JSON" would be a confusing answer to a 3GB file.
@@ -2587,6 +2617,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			if (!st.isFile()) return json(res, { error: "Not a file" }, 400);
 			const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
 			const inline = url.searchParams.get("inline") === "1";
+			if (inline && ext === "svg") res.setHeader("Content-Security-Policy", "sandbox");
 			res.writeHead(200, {
 				"Content-Type": inline ? (PREVIEW_MIME[ext] ?? "application/octet-stream") : "application/octet-stream",
 				"Content-Length": st.size,
@@ -2651,7 +2682,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("POST", "/api/browse/mkdir", async (req, res) => {
 		let parsed: { path?: string; name?: string };
 		try {
-			parsed = JSON.parse(await readBody(req));
+			parsed = jsonObject(await readBody(req));
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2708,7 +2739,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	route("POST", "/api/settings/appearance", async (req, res) => {
 		let parsed: { showReasoning?: unknown };
 		try {
-			parsed = JSON.parse(await readBody(req)) as { showReasoning?: unknown };
+			parsed = jsonObject(await readBody(req)) as { showReasoning?: unknown };
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2750,7 +2781,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let name: unknown;
 		let key: unknown;
 		try {
-			({ name, key } = JSON.parse(await readBody(req)) as { name?: unknown; key?: unknown });
+			({ name, key } = jsonObject(await readBody(req)) as { name?: unknown; key?: unknown });
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2770,7 +2801,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 			password?: unknown;
 		};
 		try {
-			parsed = JSON.parse(await readBody(req)) as typeof parsed;
+			parsed = jsonObject(await readBody(req)) as typeof parsed;
 		} catch {
 			return json(res, { error: "Invalid JSON" }, 400);
 		}
@@ -2805,7 +2836,7 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 		let apiKey: unknown;
 		let provider: unknown;
 		try {
-			({ url, apiKey, provider } = JSON.parse(await readBody(req)) as {
+			({ url, apiKey, provider } = jsonObject(await readBody(req)) as {
 				url?: unknown;
 				apiKey?: unknown;
 				provider?: unknown;

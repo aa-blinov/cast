@@ -30,6 +30,7 @@ vi.mock("../src/server/daemon-state.ts", () => ({
 	clearServerState: vi.fn(),
 	acquireStartLock: vi.fn(() => true),
 	releaseStartLock: vi.fn(),
+	startLockPath: () => "/tmp/cast-test-start.lock",
 	START_LOCK_WAIT_ATTEMPTS: 3,
 }));
 
@@ -197,10 +198,54 @@ describe("restartDaemon", () => {
 		const [command, args, options] = vi.mocked(spawn).mock.calls[0];
 		expect(command).toBe("sh");
 		expect(String(args?.[1])).toContain(`kill -0 ${process.pid}`);
-		expect(String(args?.[1])).toContain("cast server start --port 1337 --host 127.0.0.1 --no-remember");
-		expect(options).toMatchObject({ detached: true });
+		expect(String(args?.[1])).toContain("cast server start '--port' '1337' '--host' '127.0.0.1' '--no-remember'");
+		// The waiter takes the start lock from this pid before it exits, so a starter in the gap waits.
+		expect(String(args?.[1])).toContain('printf %s "$$" > "$LOCK"');
+		expect(options).toMatchObject({ detached: true, env: expect.objectContaining({ LOCK: expect.any(String) }) });
 		// Still shuts down, so sessions drain — just after the waiter exists.
 		expect(kill).toHaveBeenCalledWith(process.pid, "SIGTERM");
+	});
+
+	it("starts the replacement when the daemon died while the upgrade waited for the start lock", async () => {
+		vi.mocked(readServerState)
+			.mockReturnValueOnce({ pid: 424242, host: "127.0.0.1", port: 1337, startedAt: "t", foreground: false })
+			.mockReturnValue({ pid: 424243, host: "127.0.0.1", port: 1337, startedAt: "new", foreground: false });
+		vi.mocked(isProcessAlive).mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValue(true);
+		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+		// Gone by the time the lock is held: nothing to signal, but the replacement is still due.
+		vi.mocked(readLiveServerState).mockReturnValue(undefined);
+		vi.spyOn(process, "kill").mockImplementation(() => {});
+		expect(await restartDaemon()).toBe(true);
+		expect(spawnSync).toHaveBeenCalledWith(
+			"cast",
+			["server", "start", "--port", "1337", "--host", "127.0.0.1", "--no-remember"],
+			{ stdio: "inherit" },
+		);
+	});
+
+	it("leaves the daemon on the old build when its turns cannot be counted", async () => {
+		vi.mocked(readServerState).mockReturnValue({
+			pid: 424242,
+			host: "127.0.0.1",
+			port: 1337,
+			startedAt: "t",
+			foreground: false,
+			token: "secret",
+		});
+		vi.mocked(isProcessAlive).mockReturnValue(true);
+		vi.mocked(isCurrentDaemonInstance).mockResolvedValue(true);
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = vi.fn(async () => {
+			throw new Error("connection refused");
+		}) as unknown as typeof fetch;
+		const kill = vi.spyOn(process, "kill").mockImplementation(() => {});
+		try {
+			expect(await restartDaemon()).toBe(true);
+			expect(kill).not.toHaveBeenCalled();
+			expect(spawnSync).not.toHaveBeenCalled();
+		} finally {
+			globalThis.fetch = realFetch;
+		}
 	});
 
 	it("does not signal a PID that cannot be verified as the daemon", async () => {
