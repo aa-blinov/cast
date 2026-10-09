@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -164,6 +164,20 @@ describe("daemon-state", () => {
 		expect(acquireStartLock()).toBe(false);
 		// Cleanup: a dead holder is fair game, so acquire steals the lock.
 		writeFileSync(join(fakeHome, ".cast", "server-start.lock"), "2_147_483_646".replaceAll("_", ""));
+		expect(acquireStartLock()).toBe(true);
+		releaseStartLock();
+	});
+
+	it("an empty start lock is held for a grace period, then taken over", async () => {
+		const { acquireStartLock, releaseStartLock, startLockPath } = await import("../src/server/daemon-state.ts");
+		// Creates the directory; the lock is then replaced by an empty file, as a holder that died between create and write leaves it.
+		expect(acquireStartLock()).toBe(true);
+		releaseStartLock();
+		writeFileSync(startLockPath(), "");
+		// Fresh: a holder may still be about to write its pid, so the empty file is not stolen.
+		expect(acquireStartLock()).toBe(false);
+		const old = new Date(Date.now() - 60_000);
+		utimesSync(startLockPath(), old, old);
 		expect(acquireStartLock()).toBe(true);
 		releaseStartLock();
 	});

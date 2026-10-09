@@ -13,19 +13,10 @@
  * on the next read, not via a handler in the dying process.
  */
 
-import {
-	closeSync,
-	existsSync,
-	mkdirSync,
-	openSync,
-	readFileSync,
-	renameSync,
-	unlinkSync,
-	writeFileSync,
-	writeSync,
-} from "node:fs";
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { releaseLock, tryAcquireLock } from "../core/file-lock.ts";
 import { API_V1_PREFIX } from "./api-v1.ts";
 
 /** Increment only when a daemon/client wire contract becomes incompatible. */
@@ -153,7 +144,8 @@ export function readServerState(): ServerDaemonState | undefined {
 export function writeServerState(state: ServerDaemonState): void {
 	const path = stateFile();
 	const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-	writeFileSync(temporaryPath, JSON.stringify(state, null, 2), "utf-8");
+	// The file carries the daemon's bearer token: owner-only, set at creation so no other user ever reads it.
+	writeFileSync(temporaryPath, JSON.stringify(state, null, 2), { encoding: "utf-8", mode: 0o600 });
 	renameSync(temporaryPath, path);
 }
 
@@ -229,7 +221,7 @@ export function yieldsToRegisteredDaemon(
 	return other !== undefined && other.pid !== ownPid && env.CAST_SERVER_FOREGROUND === "0";
 }
 
-function startLockPath(): string {
+export function startLockPath(): string {
 	return join(homedir(), ".cast", "server-start.lock");
 }
 
@@ -243,46 +235,14 @@ function startLockPath(): string {
 // its holder's pid so a crashed holder (who never released) can be detected
 // and taken over instead of wedging every later start forever.
 export function acquireStartLock(): boolean {
-	const path = startLockPath();
-	// A fresh machine (a CI container, a new HOME) has no ~/.cast yet; without it every attempt failed with ENOENT,
-	// which read as "someone else holds the lock", and the caller spun for the whole startup budget in silence.
-	mkdirSync(dirname(path), { recursive: true });
 	try {
-		const fd = openSync(path, "wx");
-		try {
-			writeSync(fd, String(process.pid));
-		} finally {
-			closeSync(fd);
-		}
-		return true;
+		return tryAcquireLock(startLockPath());
 	} catch {
-		try {
-			const holder = Number(readFileSync(path, "utf-8"));
-			if (!isProcessAlive(holder)) {
-				unlinkSync(path);
-				const fd = openSync(path, "wx");
-				try {
-					writeSync(fd, String(process.pid));
-				} finally {
-					closeSync(fd);
-				}
-				return true;
-			}
-		} catch {
-			// Unreadable/corrupt lock — treat as held rather than risk a
-			// duplicate daemon; the holder (if real) writes state soon and
-			// the caller's readLiveServerState loop picks it up.
-		}
+		// Unreadable, or the directory cannot be made: treat as held rather than start a second daemon.
 		return false;
 	}
 }
 
 export function releaseStartLock(): void {
-	const path = startLockPath();
-	try {
-		const holder = Number(readFileSync(path, "utf-8"));
-		if (holder === process.pid) unlinkSync(path);
-	} catch {
-		/* already gone — fine */
-	}
+	releaseLock(startLockPath());
 }
