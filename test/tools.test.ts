@@ -1352,6 +1352,27 @@ describe("glob and grep: dot-directories", () => {
 	});
 });
 
+describe("glob: a timed-out fd", () => {
+	it("reports the timeout instead of searching again another way", async () => {
+		buildNestedTree();
+		// A fake fd that never finishes; `exec` makes sleep the process itself, so the timeout kills the only process.
+		const binDir = join(TEST_DIR, "slow-bin");
+		mkdirSync(binDir, { recursive: true });
+		writeFileSync(join(binDir, "fd"), "#!/bin/sh\nexec sleep 60\n");
+		chmodSync(join(binDir, "fd"), 0o755);
+		const originalPath = process.env.PATH;
+		process.env.PATH = `${binDir}:${originalPath}`;
+		try {
+			const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+			const result = await exec("glob", { pattern: "**/*.ts", path: NESTED_ROOT });
+			expect(result.isError).toBe(true);
+			expect(result.content).toContain("timed out");
+		} finally {
+			process.env.PATH = originalPath;
+		}
+	}, 30_000);
+});
+
 describe("glob: no-fd fallback parity", () => {
 	it("falls back to the JS tree walk when fd is not on PATH", async () => {
 		mkdirSync(NESTED_ROOT, { recursive: true });
