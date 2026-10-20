@@ -1,0 +1,60 @@
+version: 2
+
+# Dependency updates are the cheapest maintenance a repository can do, and
+# dependabot's grouping keeps the pull requests small enough to review.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, ci]
+    groups:
+      actions:
+        # The house standard is excluded on purpose. Dependabot reads the
+        # reference to it as a dependency, but it does not propose a bump for
+        # a standard published in the same repository as its own tooling.
+        # The bump workflow in aa-blinov/golden-repo opens that pull request
+        # instead, and it arrives on its own.
+        patterns: ['*', '!aa-blinov/golden-repo']
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, python]
+    groups:
+      python:
+        patterns: ['*']
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, javascript]
+    groups:
+      npm:
+        patterns: ['*']
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, go]
+    groups:
+      go:
+        patterns: ['*']
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, rust]
+    groups:
+      cargo:
+        patterns: ['*']
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    labels: [dependencies, docker]

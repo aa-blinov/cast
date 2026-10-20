@@ -126,4 +126,3 @@ LLM, Memory, Performance, Reliability, System — with 24h / 7d / 30d ranges.
 - Shortcuts: Ctrl/Cmd+B toggle sidebar, Ctrl/Cmd+Shift+D toggle diff,
   Ctrl/Cmd+Shift+N new session, Ctrl/Cmd+Shift+L clear context,
   Ctrl/Cmd+/ shortcuts. Esc closes open modals.
-
