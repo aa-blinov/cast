@@ -1,3 +1,7 @@
+<!-- house-style: emoji-ok -->
+<!-- The emoji in this file are a vocabulary the document defines:
+     a legend, a column in a table, a flag in a report. Removing them
+     would take the meaning with them. See docs/house-style.md. -->
 # Eval Methodology
 
 How `evals/` debugs and benchmarks `cast`'s own harness: what it measures, why it's built this
