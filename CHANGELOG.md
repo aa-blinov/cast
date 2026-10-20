@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to repo. Versions are ordered newest first.
+All notable changes to cast. Versions are ordered newest first.
 
 <!--
   The format is Keep a Changelog. Each entry says what changed and why it
