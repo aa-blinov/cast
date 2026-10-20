@@ -1,0 +1,44 @@
+name: house style
+
+# The house standard, enforced.
+#
+# The checker is not vendored into this repository. It is pulled from
+# aa-blinov/golden-repo at a pinned version, so that an improvement to the
+# standard reaches every repository that adopts it without a pull request
+# here.
+#
+# Dependabot reads this reference as a dependency and opens the pull request
+# that bumps the pin. That is the whole update mechanism: the standard can
+# change without turning the CI of every dependent repository red, and every
+# repository says which version it follows because the version is in this
+# file.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: house-style-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  housecheck:
+    name: House style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aa-blinov/golden-repo/.github/actions/house-style@v1.0.3
+        with:
+          report: house-style.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: house-style-report
+          path: house-style.json

@@ -1,0 +1,29 @@
+# Normalise line endings: the repository stores LF, every platform gets what
+# it needs.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets never get line-ending treatment.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.mp3 binary
+*.mp4 binary
+*.mov binary
+
+# Keep diffs readable for generated and vendored files.
+*.lock -diff
+*.min.js -diff
+*.min.css -diff
