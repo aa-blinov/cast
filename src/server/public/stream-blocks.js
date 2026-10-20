@@ -157,4 +157,3 @@ export function splitOpenFence(text) {
 	if (!open) return null;
 	return { before: text.slice(0, open.at), lang: open.lang, code: text.slice(open.codeAt) };
 }
-
