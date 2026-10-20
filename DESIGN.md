@@ -63,7 +63,7 @@ components:
     size: "36px"
 ---
 
-# Design System: cast
+# Design system: cast
 
 One system on two surfaces: the terminal screen (`src/ui-pi`) and the browser client (`src/server/public`). Direction contract for the terminal: `.impeccable/surfaces/src-ui-pi.md`. Product truth: `PRODUCT.md`.
 
@@ -98,7 +98,7 @@ Restrained: neutrals plus one accent. Every theme can supply these roles; the st
 ### Status
 - **Success** (#a9b665), **Warning** (#e78a4e), **Error** (#ea6962): state only. The context figure turns warning at 70% and error at 90%.
 
-### Named Rules
+### Named rules
 **The One Voice Rule.** The accent marks state and choice, never decoration. If a second thing is ochre on the same screen, one of them is wrong.
 
 **The Contrast Floor Rule.** Every text colour is held to 4.5:1 against the background it sits on. The terminal lifts colours against the terminal's own background (`legible()`); the browser derives muted and dim text per theme. With `NO_COLOR` no colour is drawn and bold remains.
@@ -114,7 +114,7 @@ Restrained: neutrals plus one accent. Every theme can supply these roles; the st
 - **UI** (400, 0.8rem): controls, rows, metadata.
 - **Label** (600, 0.72rem, 0.06em, uppercase): group labels such as TODAY, in muted text, never the accent. In the terminal, section headings (`YOU`, `AGENT`, `REASONING`) are bold capitals flush left with the text four columns in and code four further.
 
-### Named Rules
+### Named rules
 **The Plain Separator Rule.** Separators are ASCII: ` * ` between header parts, hints and status segments; list markers `*`, `-`, `+` by depth; task boxes `[ ]` / `[x]`; switches `[x] on` / `[ ] off`. A glyph outside the ASCII map breaks the `LANG=C` look (`ui-pi/ascii.ts`).
 
 ## Layout
@@ -129,7 +129,7 @@ Tool rows (terminal) sit at the same margin: `  * ` done, `  … ` running (acce
 
 Flat. Depth is tonal layering (ink, surface, raised, hover) and hairline rules; there is no glow. The one exception is a layer that floats above the page (the menus and the modal), which carries a soft offset shadow so it reads as lifted. The connection dot is colour plus its tooltip, with a pulse only when the connection is genuinely lost. A recording indicator may pulse while recording is live, and stops under reduced motion.
 
-### Named Rules
+### Named rules
 **The Flat-By-Default Rule.** Surfaces are flat at rest; state is shown by tone and a mark, not by shadow.
 
 ## Shapes

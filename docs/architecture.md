@@ -2,7 +2,7 @@
 
 An overview of cast's source layout and key design decisions. For contributors and the curious.
 
-## Source Layout
+## Source layout
 
 ```
 src/
@@ -58,29 +58,29 @@ src/
   index.ts            CLI entry point
 ```
 
-## Key Design Decisions
+## Key design decisions
 
-### Single OpenAI-Compatible Provider
+### One dialect for every provider
 
 cast speaks the OpenAI chat completions format. Supported providers include OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, and Azure OpenAI. A small provider-dialect layer normalizes reasoning controls and native reasoning streams without forking the agent loop.
 
-### Parallel Tool Execution
+### Parallel tool execution
 
 Read-only tool calls within one assistant message run concurrently via `Promise.all`: `read`, `grep`, `glob`, `ls`, `memory`, `session_history`, `web_search`, `web_fetch` and `bash_output`. Everything else (shells, writes, `task`, plan tools, MCP tools) runs in call order, so a sibling mutation can't race another tool in the same response.
 
-### Hashline LRU Cache
+### Hashline LRU cache
 
 `read`, `edit`, and `grep` share a process-local LRU (20 entries, ~4 MB worst case) keyed by absolute path. On hit, mtime validation occurs; on miss, the file is read once and per-line sha1 hashes are computed in a single pass. `write` and `edit` invalidate the entry on success so follow-up reads skip redundant file I/O and line hashing.
 
-### Context Compaction
+### Context compaction
 
 When conversation history exceeds ~75% of the context window, older messages are summarized by the LLM. The split snaps to turn boundaries so tool calls and results stay paired. File paths are extracted deterministically from tool calls and appended to the summary.
 
-### MCP Integration
+### MCP integration
 
 MCP tools are namespaced as `mcp_<server>_<tool>` and converted to built-in `Tool`/`ToolResult` shapes.
 
-### The Agent Loop (`runAgentLoop`)
+### The agent loop (`runAgentLoop`)
 
 `src/core/loop.ts` is the single engine both surfaces drive. One invocation is one **turn**; a session is a sequence of turns. The loop is streaming-by-construction: it never waits to collect a full response before emitting.
 
@@ -145,24 +145,24 @@ sequenceDiagram
 
 For how the TUI, web UI, and the `cast server` daemon are wired around this loop (processes, lifecycles, auth, and the TUI-only `CAST_NO_DAEMON=1` fallback), see [Infrastructure](infrastructure.md).
 
-### Trust Gating
+### Trust gating
 
 A single trust decision per project gates local skills, MCP, context files, personas, rules, hooks, and SSH configuration. Global resources in `~/.cast/` load automatically.
 
-### Plan Mode
+### Plan mode
 
 Plan mode is a restricted agent state: read-only bash (a curated allowlist of inspection binaries), unrestricted read, and `write`/`edit` narrowed to the session plans directory. The same read-only bash gate applies to `ssh`, which is the same primitive aimed at another machine. Plan files persist as markdown with checkbox tracking.
 
-### System Reminders & Open Work Gate
+### System reminders and open work gate
 
 To prevent models from losing context during long turns or date rollovers, cast injects system reminders into the context:
 - **Date Rollover**: Injects an updated system date reminder when a session crosses a calendar boundary.
 - **Compaction Reminder**: Refreshes context guidance after recent compactions.
 - **Open Work Gate**: In Build mode, `open-work-gate.ts` monitors active `todo_write` items. If open work remains (`in_progress` or `pending`), the harness prevents the turn from finishing without updating task statuses.
 
-### Session-Scoped Git Worktrees
+### Session-scoped git worktrees
 
-The worktree module (`worktree.ts`) isolates session execution in `.cast/worktrees/<slug>` on a dedicated `cast-<slug>` branch. `session.cwd` points directly to the worktree root, isolating file tools and bash commands from the user's main checkout while sharing the git object DB. Worktree paths persist in SQLite session state (`SessionState.cwd`), ensuring resumes automatically stay in the worktree.
+The worktree module (`worktree.ts`) isolates session execution in `.cast/worktrees/<slug>` on a dedicated `cast-<slug>` branch. `session.cwd` points directly to the worktree root, isolating file tools and bash commands from the user's main checkout while sharing the git object DB. Worktree paths persist in SQLite session state (`SessionState.cwd`), so a resumed session stays in the worktree.
 
 ## Development
 
