@@ -8,7 +8,7 @@ GET /api/v1/openapi.json
 ```
 
 The same specification is published as a versioned snapshot on this site:
-[OpenAPI v1 JSON](openapi/v1.json). It is generated from the exact object the
+`openapi/v1.json` (the generated document). It is generated from the exact object the
 daemon serves and validated during tests, so it is suitable for inspection,
 code generation, and CI validation.
 
