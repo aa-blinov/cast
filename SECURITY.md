@@ -9,7 +9,7 @@
 ## Reporting a vulnerability
 
 Report it privately through GitHub's
-[private vulnerability reporting](https://github.com/aa-blinov/repo/security/advisories/new),
+[private vulnerability reporting](https://github.com/aa-blinov/cast/security/advisories/new),
 or to the address in the repository owner's profile.
 
 Please include:
