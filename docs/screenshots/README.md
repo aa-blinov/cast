@@ -1,20 +1,36 @@
-<!-- house-style: template — fill this file in, then delete this line -->
-
 # Screenshots
 
-Images referenced from the README and the documents.
+There are no screenshots in this folder. cast has no picture of its own
+interface, and the folder is here because the standard asks for it.
 
-<!--
-  Put the files here and reference them from the README:
+## What the repository does have
 
-  ```markdown
-  ![The main window](docs/screenshots/main.png)
-  ```
+One image, and it lives outside this folder:
 
-  Images are referenced by relative path, so they resolve both on GitHub and
-  in a local checkout. The house-style checker verifies that every image
-  reference points at a file that exists, so a renamed screenshot cannot
-  quietly break the README.
+| Image | Where it is used | Where it comes from |
+| --- | --- | --- |
+| `assets/cast-banner.svg` | The banner at the top of the [README](../../README.md). | Hand-written SVG: a wordmark over a gradient bar of squares. The gradient runs from `#38e0ff` to `#a855f7`. |
 
-  Delete this file once the project has images of its own.
--->
+The browser client also ships `src/server/public/favicon.svg`. The web server
+hands it to the browser as the favicon of the sign-in screen and the control
+room.
+
+## Why there is nothing else
+
+The terminal screen is drawn by the terminal, and the browser client is a
+running application. Neither has a capture in the repository, so there is
+nothing to point a screenshot at. The documents that would need one describe
+the interface instead: [the terminal screen](../terminal-ui.md) and
+[the web UI](../web-ux.md).
+
+## Adding one
+
+Put the file in this folder and reference it by relative path, the way the
+README does:
+
+```markdown
+![The terminal screen](docs/screenshots/terminal.png)
+```
+
+The checker resolves every image reference, so a file that is renamed without
+its reference being updated fails the build.
