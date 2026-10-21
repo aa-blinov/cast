@@ -1,3 +1,7 @@
+<!-- house-style: links-after-build -->
+<!-- The links below resolve against the page the site builds, where
+     the specification is published beside it. The file is not in the
+     repository because the build writes it. -->
 # API v1
 
 Cast exposes a stable local integration API at `/api/v1`. Its OpenAPI 3.1
