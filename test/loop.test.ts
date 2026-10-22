@@ -6355,7 +6355,10 @@ describe("noteRepeatedFailures", () => {
 	// gets thirteen "not found" answers slips through. Measured on
 	// MiniMax-M3.1-Flash, an MCP lookup that could not find its target ran
 	// thirteen calls deep and never reported the miss.
-	const failed = (name: string, content = "no catalog entry"): {
+	const failed = (
+		name: string,
+		content = "no catalog entry",
+	): {
 		id: string;
 		name: string;
 		result: { content: string; isError: boolean };
@@ -6387,7 +6390,7 @@ describe("noteRepeatedFailures", () => {
 
 	it("leaves the doom-loop block alone — it already says to try something else", () => {
 		const seen = new Map<string, number>();
-		const blocked = failed("bash", "Doom loop detected: tool \"bash\" was called 3 times consecutively");
+		const blocked = failed("bash", 'Doom loop detected: tool "bash" was called 3 times consecutively');
 		noteRepeatedFailures([blocked], seen);
 		expect(blocked.result.content).not.toContain("has failed in a row");
 	});
