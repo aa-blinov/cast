@@ -9,4 +9,6 @@
 - On an `edit` error saying `oldString` was not found or matched more than once, the tool already said which — widen `oldString` with surrounding lines until it identifies exactly one location, or pass `replaceAll` when every occurrence should change. Do not re-`read` the whole file and do not call `glob`.
 - On a `File not found` error that lists "Found by name" paths, call `read`/`edit` with one of those paths. Do not call `glob` — the search already ran.
 - After a short `glob` result (a few paths), call `read` on a hit. Do not follow with `ls` or another `glob`.
+- A tool's output is the truth. `read` showed the file's contents — do not re-check them with `wc`, `od` or `head`; run another command only when it answers something the first one did not.
+- A tool that says the thing does not exist has answered the question. Report it as missing; do not try spelling variants of the same name, do not substitute a different item you found instead, and do not answer with the neighbour you passed on the way.
 - If the error says a tool name is unknown, pick a name from the available-tools list in that same error — never invent alternatives.

@@ -50,6 +50,7 @@ const {
 	createAgentForkContext,
 	createAgentForkRuntimeSnapshot,
 	defaultCheckpointThresholds,
+	noteRepeatedFailures,
 } = await import("../src/core/loop.ts");
 const { streamAndCollect } = await import("../src/core/llm.ts");
 type AgentEvent = Parameters<Parameters<typeof runAgentLoop>[1]["onEvent"]>[0];
@@ -6345,5 +6346,49 @@ describe("runAgentLoop — abort always ends a hung tool batch", () => {
 		expect(endEvents.some((e) => (e as { reason?: string }).reason === "aborted")).toBe(true);
 		// 2s grace + margin — pre-fix this never resolved at all.
 		expect(elapsed).toBeLessThan(5000);
+	});
+});
+
+describe("noteRepeatedFailures", () => {
+	// The doom-loop guard sees identical calls and noteRepeatedOutputs sees
+	// identical results; between them a model that tries thirteen names and
+	// gets thirteen "not found" answers slips through. Measured on
+	// MiniMax-M3.1-Flash, an MCP lookup that could not find its target ran
+	// thirteen calls deep and never reported the miss.
+	const failed = (name: string, content = "no catalog entry"): {
+		id: string;
+		name: string;
+		result: { content: string; isError: boolean };
+	} => ({ id: `${name}-${Math.random()}`, name, result: { content, isError: true } });
+
+	it("tells the model once the same tool has failed three times in a row", () => {
+		const seen = new Map<string, number>();
+		const first = failed("mcp_locate");
+		const second = failed("mcp_locate");
+		const third = failed("mcp_locate");
+		noteRepeatedFailures([first], seen);
+		noteRepeatedFailures([second], seen);
+		expect(first.result.content).not.toContain("has failed in a row");
+		expect(second.result.content).not.toContain("has failed in a row");
+		noteRepeatedFailures([third], seen);
+		expect(third.result.content).toContain("3rd time mcp_locate has failed in a row");
+		expect(third.result.content).toContain("will not change the answer");
+	});
+
+	it("forgets the failures when the tool works again", () => {
+		const seen = new Map<string, number>();
+		noteRepeatedFailures([failed("mcp_locate")], seen);
+		noteRepeatedFailures([failed("mcp_locate")], seen);
+		noteRepeatedFailures([{ id: "ok", name: "mcp_locate", result: { content: "found", isError: false } }], seen);
+		const after = failed("mcp_locate");
+		noteRepeatedFailures([after], seen);
+		expect(after.result.content).not.toContain("has failed in a row");
+	});
+
+	it("leaves the doom-loop block alone — it already says to try something else", () => {
+		const seen = new Map<string, number>();
+		const blocked = failed("bash", "Doom loop detected: tool \"bash\" was called 3 times consecutively");
+		noteRepeatedFailures([blocked], seen);
+		expect(blocked.result.content).not.toContain("has failed in a row");
 	});
 });

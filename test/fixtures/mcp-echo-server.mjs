@@ -55,6 +55,16 @@ function buildServer() {
 		isError: true,
 	}));
 
+	// Gated behind --not-found: a tool that answers "I don't have that", so
+	// the client can be checked for telling the model that this is the answer
+	// rather than a failure worth retrying with other spellings.
+	if (process.argv.includes("--not-found")) {
+		server.registerTool("locate", { description: "Looks a component up in the catalog." }, async () => ({
+			content: [{ type: "text", text: 'no catalog entry for component "widget-tracker"' }],
+			isError: true,
+		}));
+	}
+
 	server.registerTool("get-last-auth-header", { description: "Returns the X-Test-Token header of the last HTTP request." }, async () => ({
 		content: [{ type: "text", text: lastAuthHeader }],
 	}));

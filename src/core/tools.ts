@@ -122,7 +122,9 @@ export function getToolDefinitions(
 					"A background result arrives on its own when the task finishes; bash_output waits for one you need now, and bash_kill stops one. " +
 					"Do NOT re-run an identical command to 'double-check' a result you already have — the previous " +
 					"output still holds unless something changed. Running the same command repeatedly is treated as a " +
-					"doom loop and blocked.",
+					"doom loop and blocked. " +
+					"Do not put file content into a file with a shell redirect (`>`): use the write tool, which is the " +
+					"path that asks permission and keeps the file in the session's history.",
 				parameters: {
 					type: "object",
 					properties: {
@@ -207,6 +209,7 @@ export function getToolDefinitions(
 				name: "write",
 				description:
 					"Create a new file or overwrite an entire file. Prefer `edit` for surgical changes to existing files. " +
+					"Use this to put content into a file — not a shell redirect, which is not permission-checked. " +
 					"Do NOT fall back to write because an edit failed — retry the edit with more surrounding context in oldString instead; " +
 					"a from-memory rewrite tends to reproduce stale content. " +
 					"Automatically creates parent directories.",

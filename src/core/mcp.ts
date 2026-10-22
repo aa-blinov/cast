@@ -96,6 +96,26 @@ function hasAuthorizationHeader(headers: Record<string, string> | undefined): bo
 	return Object.keys(headers ?? {}).some((name) => name.toLowerCase() === "authorization");
 }
 const MCP_DIDNT_RESPOND_RE = /didn't respond within/;
+/**
+ * How a server says "I don't have that" — the message shape, not a code:
+ * servers use their own error codes for it (-32603 with a message, in the
+ * case of the docs server), so the wording is what identifies the case.
+ */
+const MCP_NOT_FOUND_RE =
+	/not found|no such|does not exist|unknown resource|no \w+ (?:entry|document|record|file|catalog)/i;
+
+/**
+ * What to tell the model when a server says the thing is not there.
+ *
+ * In the tool result, not only in the system prompt: the model decides what
+ * to do next while it reads this, and a "not found" answer read as a
+ * transient failure sends it off to try spelling variants and then to
+ * substitute an item it did find. Measured on MiniMax-M3.1-Flash: a lookup
+ * for a component the catalog does not have ran nine calls deep — five name
+ * variants, then the neighbouring component it found instead.
+ */
+const MCP_NOT_FOUND_ADVICE =
+	"\nThat is the answer: the server does not have it. Report it as missing — do not retry with other spellings, and do not answer with a different item you found instead.";
 const clientTransports = new WeakMap<Client, Transport>();
 
 export interface McpServerConfig {
@@ -682,10 +702,22 @@ function addResourceTools(
 					}. Its resources are unavailable until the user runs /mcp reconnect — do not keep retrying.`,
 					isError: true,
 				};
-	const failed = (what: string, error: unknown): ToolResult => ({
-		content: `MCP server "${serverName}" ${what} failed: ${error instanceof Error ? error.message : String(error)}. Check the server connection and the URI, then retry.`,
-		isError: true,
-	});
+	const failed = (what: string, error: unknown): ToolResult => {
+		const detail = error instanceof Error ? error.message : String(error);
+		// A resource the server does not have is an answer, not a failure to
+		// retry. "then retry" sent the model through a dozen URI guesses —
+		// each one a paid round trip that could not have succeeded.
+		if (MCP_NOT_FOUND_RE.test(detail)) {
+			return {
+				content: `MCP server "${serverName}" ${what} failed: ${detail}. The server does not have it — do not retry the same URI; report it as missing.`,
+				isError: true,
+			};
+		}
+		return {
+			content: `MCP server "${serverName}" ${what} failed: ${detail}. Check the server connection and the URI, then retry.`,
+			isError: true,
+		};
+	};
 	const add = (
 		toolName: string,
 		description: string,
@@ -746,7 +778,7 @@ function addResourceTools(
 
 	add(
 		"read_resource",
-		"Read one resource by its URI, as given by list_resources (or built from one of its templates). Returns its text; an image is shown, other binary content is only described.",
+		"Read one resource by its URI, as given by list_resources (or built from one of its templates). Returns its text; an image is shown, other binary content is only described. If the URI is not among the listed resources, the server does not have it — report that instead of guessing another URI.",
 		{
 			type: "object",
 			properties: { uri: { type: "string", description: "The resource's URI, exactly as listed" } },
@@ -975,7 +1007,7 @@ function addServerTools(
 					const text = capMcpText(fragments.join("\n"));
 					return {
 						content: result.isError
-							? `MCP server "${serverName}", tool "${t.name}" reported an error:\n${text || "(no details provided)"}`
+							? `MCP server "${serverName}", tool "${t.name}" reported an error:\n${text || "(no details provided)"}${MCP_NOT_FOUND_RE.test(text) ? MCP_NOT_FOUND_ADVICE : ""}`
 							: text || "(no output)",
 						isError: Boolean(result.isError),
 						imageDataUrl: image ? `data:${image.mimeType};base64,${image.data}` : undefined,

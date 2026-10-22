@@ -479,6 +479,26 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		}
 	}, 30_000);
 
+	it("tells the model that a missing item is the answer, not a failure to retry", async () => {
+		// A "not found" from an MCP server used to read like a transient
+		// failure: the model answered it with five spelling variants and then
+		// with a different item it had found instead. The advice belongs in
+		// the tool result — that is where the model decides what to do next.
+		const result = await connectMcpServers({
+			echo: { command: "node", args: [FIXTURE_SERVER, "--not-found"] },
+		});
+		try {
+			const handle = result.toolIndex.get("mcp_echo_locate")!;
+			const callResult = await handle.call({});
+			expect(callResult.isError).toBe(true);
+			expect(callResult.content).toContain("no catalog entry for component");
+			expect(callResult.content).toContain("Report it as missing");
+			expect(callResult.content).toContain("do not answer with a different item");
+		} finally {
+			await closeMcpConnections(result.connections);
+		}
+	}, 30_000);
+
 	it("records a diagnostic instead of throwing when a server's command doesn't exist", async () => {
 		const result = await connectMcpServers({ bad: { command: "this-command-does-not-exist-xyz" } });
 		expect(result.connections).toEqual([]);
