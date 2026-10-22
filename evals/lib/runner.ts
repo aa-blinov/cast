@@ -16,7 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { askSideQuestion, describeInFlight, type InFlightBlock } from "../../src/core/btw.ts";
 import type { AppConfig } from "../../src/core/config.ts";
-import { loadConfig } from "../../src/core/config.ts";
+import { loadConfig, lookupContextWindow } from "../../src/core/config.ts";
 import { clearGoal, readGoal, startGoal } from "../../src/core/goal.ts";
 import type { Message } from "../../src/core/llm.ts";
 import { type AgentEvent, MessageQueue, runAgentLoop } from "../../src/core/loop.ts";
@@ -27,6 +27,7 @@ import {
 	type McpServerConfig,
 	type McpSetupResult,
 } from "../../src/core/mcp.ts";
+import { fetchModelsDevCatalog, lookupContextWindowFromCatalog } from "../../src/core/models-dev.ts";
 import { findPersona } from "../../src/core/personas.ts";
 import { createPlanState, modeDisabledTools } from "../../src/core/plan.ts";
 import { buildSystemPrompt, personaOptionsForCwd, resolvePersonasForCwd } from "../../src/core/project.ts";
@@ -41,7 +42,7 @@ import { builtinSkillsDir, formatSkillsForPrompt, loadSkills } from "../../src/c
 import { loadSubagentPrompts } from "../../src/core/subagents.ts";
 import type { TodoItem } from "../../src/core/todo.ts";
 import { BackgroundTaskRegistry } from "../../src/core/tools/bash-background.ts";
-import { buildReasoningParams } from "../../src/core/vendors.ts";
+import { buildReasoningParams, resolveReasoningLevel } from "../../src/core/vendors.ts";
 
 // ============================================================================
 // Case definition
@@ -637,13 +638,35 @@ async function runAttempt(
 	};
 }
 
+/**
+ * The model's context window, from the hand-verified list first and the
+ * models.dev catalog second — the same order the app's startup uses.
+ */
+async function resolveModelContextWindow(model: string): Promise<number | undefined> {
+	const known = lookupContextWindow(model);
+	if (known) return known;
+	const catalog = await fetchModelsDevCatalog();
+	return catalog ? lookupContextWindowFromCatalog(model, catalog) : undefined;
+}
+
 export async function runCase(evalCase: EvalCase, options: RunnerOptions): Promise<RunResult> {
 	const config = loadConfig(loadConnection(options.provider, options));
-	if (options.reasoningLevel) {
-		config.reasoningLevel = options.reasoningLevel;
-		config.reasoningParams = buildReasoningParams(options.reasoningLevel, config.reasoningFormat);
-	}
 	const model = evalCase.model ?? options.model;
+	if (options.reasoningLevel) {
+		// The level is resolved against the model, exactly as the app does it:
+		// a level the model cannot run (MiniMax's M3.1 family rejects "off")
+		// has to fall back to the model's default rather than 400 every
+		// request and turn the whole case into an infra error.
+		config.reasoningLevel = resolveReasoningLevel(options.reasoningLevel, null, config.reasoningFormat, model);
+		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
+	}
+	// The model's real context window, resolved the way the app resolves it at
+	// startup. Without this every case ran on the 128k default: a 1M model
+	// compacted eight times earlier than it needs to, and a side question
+	// (/btw) was refused for "too long" in a conversation the model had
+	// hundreds of thousands of tokens to spare.
+	const window = await resolveModelContextWindow(model);
+	if (window) config.contextWindow = window;
 	const startTime = Date.now();
 
 	let attempt = await runAttempt(evalCase, options, config, model);

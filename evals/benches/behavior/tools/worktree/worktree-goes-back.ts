@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import type { EvalCase } from "../../../../lib/runner.ts";
 import { git, gitProject } from "./fixture.ts";
 
@@ -16,7 +17,11 @@ export const worktreeGoesBack: EvalCase = {
 		toolsCalled: ["worktree"],
 		noErrors: true,
 		verify: ({ cwd, finalCwd }) => {
-			if (finalCwd !== cwd) return `the agent ended in ${finalCwd}, not the main checkout`;
+			// macOS spells /tmp as /private/tmp, so the same directory has two
+			// names — compare the real paths, not the strings.
+			if (realpathSync(finalCwd) !== realpathSync(cwd)) {
+				return `the agent ended in ${finalCwd}, not the main checkout`;
+			}
 			return git(cwd, ["worktree", "list"]).includes("cast-try-1") ? undefined : "the worktree try-1 was not kept";
 		},
 	},
