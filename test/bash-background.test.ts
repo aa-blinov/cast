@@ -12,6 +12,7 @@ import {
 	execBashOutput,
 	isPtyAvailable,
 	isPtySpawnFailure,
+	probePty,
 	setPtyAvailableForTests,
 } from "../src/core/tools/bash-background.ts";
 
@@ -404,6 +405,17 @@ describe("pty availability", () => {
 		expect(typeof isPtyAvailable()).toBe("boolean");
 		// Cached: a second call must not re-throw or re-import.
 		expect(isPtyAvailable()).toBe(isPtyAvailable());
+	});
+
+	it("reports a backend that cannot start a shell as no PTY at all", () => {
+		// The probe is what turns a broken backend into "no PTY", where plain
+		// foreground execution still runs the command. A backend that throws
+		// is what that looks like.
+		expect(
+			probePty(() => {
+				throw new Error("posix_spawnp failed");
+			}),
+		).toBe(false);
 	});
 
 	it("answers whether a shell can actually start, not just whether the module loaded", () => {

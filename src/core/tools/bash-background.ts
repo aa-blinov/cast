@@ -61,28 +61,34 @@ export function setPtyAvailableForTests(value: boolean | undefined): void {
  * reported as "no PTY" — the caller then uses plain foreground execution,
  * where the command still runs.
  */
-function probePty(): boolean {
-	const pty = loadPty();
-	if (!pty) return false;
-	// An absolute shell, so the probe answers exactly one question: can the
-	// PTY backend start a process at all? A PATH lookup would also fail when
-	// the *shell* is missing — that is a per-call error the harness already
-	// reports properly ("Failed to start bash"), not a broken backend.
-	const isWindows = process.platform === "win32";
-	const shell = isWindows ? getBashResolution().path : "/bin/sh";
+export function probePty(trySpawn: () => void = defaultSpawn): boolean {
 	try {
-		const probe = pty.spawn(shell, isWindows ? ["/c", "exit 0"] : ["-c", "exit 0"], {
-			name: "xterm-256color",
-			cols: 80,
-			rows: 24,
-			cwd: tmpdir(),
-			env: process.env,
-		});
-		probe.kill();
+		trySpawn();
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * An absolute shell, so the probe answers exactly one question: can the PTY
+ * backend start a process at all? A PATH lookup would also fail when the
+ * *shell* is missing — that is a per-call error the harness already reports
+ * properly ("Failed to start bash"), not a broken backend.
+ */
+function defaultSpawn(): void {
+	const pty = loadPty();
+	if (!pty) throw new Error("node-pty could not be loaded");
+	const isWindows = process.platform === "win32";
+	const shell = isWindows ? getBashResolution().path : "/bin/sh";
+	const probe = pty.spawn(shell, isWindows ? ["/c", "exit 0"] : ["-c", "exit 0"], {
+		name: "xterm-256color",
+		cols: 80,
+		rows: 24,
+		cwd: tmpdir(),
+		env: process.env,
+	});
+	probe.kill();
 }
 
 let ptyModule: typeof import("node-pty") | null | undefined;
