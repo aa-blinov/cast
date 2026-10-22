@@ -1,0 +1,1 @@
+{ "name": "report", "type": "module", "scripts": { "test": "node --test test/" } }

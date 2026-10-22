@@ -36,6 +36,7 @@ A terminal coding agent that works with **any** OpenAI-compatible API. Point it 
 | [Non-Interactive Mode](non-interactive-mode.md) | `cast run` and JSON output |
 | [Behavior Evals](eval-behavior.md) | Real-model behavioral contracts and signals |
 | [Eval Methodology](eval-methodology.md) | Scoreboard, repeats, traces, and regressions |
+| [Harness Comparison](harness-comparison.md) | cast against mcode on the same tasks, model and grading |
 | [Architecture](architecture.md) | Source layout and design decisions |
 | [Infrastructure](infrastructure.md) | Daemon, TUI/web clients, lifecycle, and auth |
 | [API v1](api.md) | Stable daemon HTTP/SSE integration contract and OpenAPI document |
