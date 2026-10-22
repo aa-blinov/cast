@@ -2209,6 +2209,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	const recentToolCalls: Array<{ name: string; argsKey: string }> = [];
 	// Outputs seen this user turn, for noteRepeatedOutputs.
 	const repeatedOutputs = new Map<string, number>();
+	// Consecutive failures per tool name, for noteRepeatedFailures.
+	const repeatedFailures = new Map<string, number>();
 	let runawayOutput = false;
 
 	// Hooks in force for this run. Seeded from the caller's set and extended
@@ -3144,6 +3146,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					// the model stuck in a loop.
 					recentToolCalls.length = 0;
 					repeatedOutputs.clear();
+					repeatedFailures.clear();
 					// …and the open-work gate's budget, which is documented as "per
 					// user prompt". The follow-up path already reset it; steering did
 					// not, so a steer sent after the gate had fired twice left the
@@ -3512,6 +3515,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						DOOM_LOOP_THRESHOLD,
 					);
 					if (noteRepeatedOutputs(executedToolBatch, repeatedOutputs)) runawayOutput = true;
+					noteRepeatedFailures(executedToolBatch, repeatedFailures);
 					toolResults.push(...executedToolBatch);
 					hasMoreToolCalls = true;
 
@@ -3713,6 +3717,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				// Same as steering: a new user message resets the doom-loop window.
 				recentToolCalls.length = 0;
 				repeatedOutputs.clear();
+				repeatedFailures.clear();
 				openWorkGateFires = 0;
 				if (skillDisallowedTools.size) {
 					skillDisallowedTools.clear();
@@ -4016,6 +4021,63 @@ export function noteRepeatedOutputs(batch: ToolCallResult[], seen: Map<string, n
 	return runaway;
 }
 
+/** How many failures of the same tool in a row earn the model a reminder. */
+const REPEATED_FAILURE_NUDGE = 3;
+
+/** The doom-loop block's own words — it already tells the model to stop, so
+ *  the repeated-failure nudge has nothing to add to it. */
+const DOOM_LOOP_MESSAGE = "Doom loop detected:";
+
+/**
+ * The same tool failing over and over is the other shape of a stuck model.
+ *
+ * The doom-loop guard sees identical calls, and noteRepeatedOutputs sees
+ * identical results — between them a model that tries thirteen component
+ * names and gets thirteen "not found" answers slips through: the arguments
+ * change, the outcome does not. Measured on MiniMax-M3.1-Flash, an MCP
+ * lookup that cannot find its target ran thirteen calls deep and fifteen
+ * turns long, never once reporting the miss.
+ *
+ * A nudge, not a block: the call still runs and the model still decides.
+ * Only the same tool, failing repeatedly, counts — a tool that succeeds
+ * clears its own count, so a workflow that alternates failures and real
+ * work is untouched.
+ */
+export function noteRepeatedFailures(batch: ToolCallResult[], seen: Map<string, number>): void {
+	for (const call of batch) {
+		if (!call.result.isError) {
+			seen.delete(call.name);
+			continue;
+		}
+		// The doom-loop block already says "try something else" — a second
+		// reminder on the same result only makes the transcript longer.
+		if (call.result.content.startsWith(DOOM_LOOP_MESSAGE)) continue;
+		const count = (seen.get(call.name) ?? 0) + 1;
+		seen.set(call.name, count);
+		if (count % REPEATED_FAILURE_NUDGE !== 0) continue;
+		call.result = {
+			...call.result,
+			content: `${call.result.content}\n\n<system-reminder>This is the ${count}${ordinalSuffix(count)} time ${call.name} has failed in a row. Another attempt with a slightly different argument will not change the answer: either try a materially different approach, or stop and tell the user what is blocking you and what you have already tried.</system-reminder>`,
+		};
+	}
+}
+
+/** "3rd", "21st" — the count in the reminders, in the English the rest of cast uses. */
+function ordinalSuffix(count: number): string {
+	const lastTwo = count % 100;
+	if (lastTwo >= 11 && lastTwo <= 13) return "th";
+	switch (count % 10) {
+		case 1:
+			return "st";
+		case 2:
+			return "nd";
+		case 3:
+			return "rd";
+		default:
+			return "th";
+	}
+}
+
 async function executeToolCalls(
 	toolCalls: Array<{ id: string; name: string; arguments: string }>,
 	executeTool: (
@@ -4118,7 +4180,7 @@ async function executeToolCalls(
 				id: tc.id,
 				name: tc.name,
 				result: {
-					content: `Doom loop detected: tool "${tc.name}" was called ${doomLoopThreshold} times consecutively with the same arguments. You MUST try a completely different approach. Do NOT call this tool with the same arguments again.`,
+					content: `${DOOM_LOOP_MESSAGE} tool "${tc.name}" was called ${doomLoopThreshold} times consecutively with the same arguments. You MUST try a completely different approach. Do NOT call this tool with the same arguments again.`,
 					isError: true,
 				},
 			};

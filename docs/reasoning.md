@@ -83,4 +83,6 @@ The thinking content is displayed separately in the TUI and excluded from the ma
 
 The exact off request depends on the selected dialect. For example, OpenRouter receives `reasoning: { enabled: false }`, OpenAI receives `reasoning_effort: "none"`, and providers that use a `thinking` flag receive their native disabled value. MiniMax reasoning is always enabled; Cast requests its split-reasoning stream format so reasoning and answer text remain separate.
 
+MiniMax's M3.1 family is the exception to "off is a request": `MiniMax-M3.1-Flash` rejects `thinking: { type: "disabled" }` with `400 invalid params, model "MiniMax-M3.1-Flash" requires adaptive thinking`. Cast does not offer an off level for those models, and a level left over from another model falls back to the model's own default instead of failing every request.
+
 When the provider doesn't report reasoning capabilities (`unknown`), cast sends no reasoning params, letting the provider use its own default.
