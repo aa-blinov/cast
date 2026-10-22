@@ -16,10 +16,10 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { type Dirent, existsSync } from "node:fs";
+import { type Dirent, existsSync, realpathSync } from "node:fs";
 import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 export const MAX_SNAPSHOT_FILES = 3000;
 export const MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024;
@@ -53,9 +53,30 @@ const IDENTITY_ENV = {
 function shadowRoot(): string | undefined {
 	const root = join(homedir(), ".cast", "shadow");
 	// Under vitest, refuse the real home rather than fill it with repositories
-	// from tests that forgot to point HOME at a temp directory.
-	if (process.env.VITEST && !root.startsWith(tmpdir())) return undefined;
+	// from tests that forgot to point HOME at a temp directory. The comparison
+	// is on resolved paths: macOS spells the temp directory /var/folders/... and
+	// its real path /private/var/folders/..., so a test that resolves its temp
+	// home would otherwise be told it was about to write into the real one.
+	if (process.env.VITEST && !insideDir(root, tmpdir())) return undefined;
 	return root;
+}
+
+/** The real path of a path that need not exist yet: its nearest existing ancestor, resolved. */
+function realPathOf(path: string): string {
+	try {
+		if (existsSync(path)) return realpathSync(path);
+		const parent = dirname(path);
+		return parent === path ? path : join(realPathOf(parent), basename(path));
+	} catch {
+		return path;
+	}
+}
+
+/** Whether a path is inside a directory, both compared as resolved paths. */
+function insideDir(path: string, dir: string): boolean {
+	const resolvedDir = realPathOf(dir);
+	const resolvedPath = realPathOf(path);
+	return resolvedPath === resolvedDir || resolvedPath.startsWith(`${resolvedDir}${sep}`);
 }
 
 /** The hidden repository for a folder: one per absolute path. */

@@ -18,7 +18,14 @@ const mockConfig: AppConfig = {
 };
 
 /** A stand-in formatter: collapses double spaces in the file named last. */
-function fakeBin(dir: string, name: string, body = 'for f; do :; done; sed -i "s/  */ /g" "$f"') {
+// The default body squeezes repeated spaces in the file named last. `tr -s`
+// rather than `sed -i`: BSD sed (macOS) takes the backup suffix as the next
+// argument, so a GNU-style `sed -i "s/…/…/" file` edits nothing there.
+function fakeBin(
+	dir: string,
+	name: string,
+	body = 'for f; do :; done; tr -s " " < "$f" > "$f.tmp" && mv "$f.tmp" "$f"',
+) {
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, name);
 	writeFileSync(path, `#!/bin/sh\n${body}\n`);

@@ -2,7 +2,7 @@
  * Permission rules from settings, enforced by the agent loop on real tool
  * calls. Only the LLM call is stubbed; HOME and the session DB are throwaway.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -251,10 +251,14 @@ describe("permission rules in the loop", () => {
 			oneCall("read", { path: join(dir, "secret.txt") });
 			const confirm = vi.fn(async () => false);
 			const content = await run(confirm);
+			// The approval names the resolved path: the product compares real
+			// paths so a symlink out of the project is caught, and macOS spells
+			// the temp directory /var/... and its real path /private/var/....
+			const resolved = realpathSync(dir);
 			expect(confirm).toHaveBeenCalledWith(
-				`read ${join(dir, "secret.txt")}`,
+				`read ${join(resolved, "secret.txt")}`,
 				"outside the project",
-				`external_directory(${dir}/**)`,
+				`external_directory(${resolved}/**)`,
 				undefined,
 			);
 			expect(content).toContain("outside the project");
@@ -266,7 +270,7 @@ describe("permission rules in the loop", () => {
 			oneCall("read", { path: join(dir, "notes.txt") });
 			expect(await run(vi.fn(async () => true))).toContain("shared notes");
 
-			rules({ approved: [`external_directory(${dir}/**)`] });
+			rules({ approved: [`external_directory(${realpathSync(dir)}/**)`] });
 			oneCall("read", { path: join(dir, "notes.txt") });
 			const confirm = vi.fn(async () => false);
 			expect(await run(confirm)).toContain("shared notes");
@@ -274,7 +278,7 @@ describe("permission rules in the loop", () => {
 		});
 
 		it("a deny rule blocks, and a tool's own allow rule counts as the answer", async () => {
-			rules({ deny: [`external_directory(${dir}/**)`] });
+			rules({ deny: [`external_directory(${realpathSync(dir)}/**)`] });
 			oneCall("write", { path: join(dir, "x.txt"), content: "x" });
 			expect(await run(vi.fn(async () => true))).toContain("blocks it");
 			expect(() => readFileSync(join(dir, "x.txt"))).toThrow();
