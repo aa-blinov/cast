@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -203,17 +203,23 @@ describe("external directory", () => {
 
 	it("flags a path outside, naming the directory an approval would cover", () => {
 		const proj = join(root, "proj");
+		// The product compares real paths (a symlink out of the project has to
+		// be caught), and macOS spells the temp directory /var/... and its real
+		// path /private/var/... — so the expectation is the resolved one.
+		const other = realpathSync(join(root, "other"));
 		expect(externalTarget("read", { path: "../other/x.txt" }, proj, proj)).toEqual({
-			path: join(root, "other", "x.txt"),
-			dir: join(root, "other"),
+			path: join(other, "x.txt"),
+			dir: other,
 		});
-		expect(externalTarget("ls", { path: join(root, "other") }, proj, proj)?.dir).toBe(join(root, "other"));
+		expect(externalTarget("ls", { path: join(root, "other") }, proj, proj)?.dir).toBe(other);
 	});
 
 	it("follows a symlink that leads out of the project", () => {
 		const proj = join(root, "proj");
 		symlinkSync(join(root, "other"), join(proj, "escape"));
-		expect(externalTarget("write", { path: "escape/x.txt" }, proj, proj)?.path).toBe(join(root, "other", "x.txt"));
+		expect(externalTarget("write", { path: "escape/x.txt" }, proj, proj)?.path).toBe(
+			join(realpathSync(join(root, "other")), "x.txt"),
+		);
 	});
 
 	it("lets reads, not writes, reach the directories cast hands the agent", () => {

@@ -37,12 +37,21 @@ describe("paint legibility floor", () => {
 	});
 
 	it("does not touch decoration painted as given", () => {
-		expect(paint("x", { color: "#101012", bg: "#08080a", exact: true })).toBe(
-			paint("x", { color: "#101012", bg: "#08080a", exact: true }),
-		);
-		expect(paint("x", { color: "#101012", bg: "#08080a", exact: true })).not.toBe(
-			paint("x", { color: "#101012", bg: "#08080a" }),
-		);
+		// The floor only shows up with colour on: under NO_COLOR, paint returns
+		// the text as it is and the two are the same string.
+		const noColor = process.env.NO_COLOR;
+		delete process.env.NO_COLOR;
+		try {
+			expect(paint("x", { color: "#101012", bg: "#08080a", exact: true })).toBe(
+				paint("x", { color: "#101012", bg: "#08080a", exact: true }),
+			);
+			expect(paint("x", { color: "#101012", bg: "#08080a", exact: true })).not.toBe(
+				paint("x", { color: "#101012", bg: "#08080a" }),
+			);
+		} finally {
+			if (noColor === undefined) delete process.env.NO_COLOR;
+			else process.env.NO_COLOR = noColor;
+		}
 	});
 });
 

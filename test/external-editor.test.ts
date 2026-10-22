@@ -25,7 +25,12 @@ describe("editInExternalEditor", () => {
 
 	it("gives the editor a file only the person can read, since a draft may hold a secret", async () => {
 		const seen = join(tmpdir(), `cast-editor-mode-${process.pid}.txt`);
-		const env = { ...process.env, VISUAL: "", EDITOR: `sh -c 'stat -c %a "$1" > "${seen}"' sh` };
+		// GNU stat spells the mode `stat -c %a`, BSD stat (macOS) `stat -f %Lp`.
+		const env = {
+			...process.env,
+			VISUAL: "",
+			EDITOR: `sh -c 'mode=$(stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null); printf "%s" "$mode" > "${seen}"' sh`,
+		};
 		try {
 			await editInExternalEditor("secret", env);
 			expect(readFileSync(seen, "utf8").trim()).toBe("600");
@@ -38,6 +43,8 @@ describe("editInExternalEditor", () => {
 		const env = { ...process.env, VISUAL: "", EDITOR: `sh -c 'kill -TERM $$' sh` };
 		const result = await editInExternalEditor("draft", env);
 		expect(result.ok).toBe(false);
-		expect(result.ok ? "" : result.error).toContain("was stopped (signal 15)");
+		// A shell killed by the signal reports it as a signal; a shell that
+		// exits with 128+signal reports the number. Both say the same thing.
+		expect(result.ok ? "" : result.error).toMatch(/was stopped \((signal 15|SIGTERM)\)/);
 	});
 });

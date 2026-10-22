@@ -15,7 +15,7 @@
  * is project-local and gated behind the unified project trust decision.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 
@@ -44,9 +44,18 @@ function clampContextFile(content: string, filePath: string): string {
 }
 
 function loadContextFileFromDir(dir: string, diagnostics?: string[]): ContextFile | null {
+	// On a case-insensitive filesystem (macOS by default) "AGENTS.md" and
+	// "AGENTS.MD" are one file under two names, and each of them would be
+	// reported as its own context file — the same unreadable file counted
+	// twice. One file, one entry. The identity is the inode: realpath keeps
+	// the spelling that was asked for, so it does not tell the two apart.
+	const seen = new Set<string>();
 	for (const filename of CANDIDATES) {
 		const filePath = join(dir, filename);
 		if (existsSync(filePath)) {
+			const key = fileIdentity(filePath);
+			if (seen.has(key)) continue;
+			seen.add(key);
 			try {
 				const content = readFileSync(filePath, "utf-8");
 				if (content.trim()) return { path: filePath, content: clampContextFile(content, filePath) };
@@ -61,6 +70,16 @@ function loadContextFileFromDir(dir: string, diagnostics?: string[]): ContextFil
 		}
 	}
 	return null;
+}
+
+/** Which file a path names, by inode — the same file under two spellings. */
+function fileIdentity(filePath: string): string {
+	try {
+		const stat = statSync(filePath);
+		return `${stat.dev}:${stat.ino}`;
+	} catch {
+		return filePath;
+	}
 }
 
 /** Check whether a directory contains any context file candidate. */

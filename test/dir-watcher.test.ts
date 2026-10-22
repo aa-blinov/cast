@@ -10,6 +10,13 @@ const open: { close: () => void }[] = [];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * macOS arms an fs.watch asynchronously (FSEvents), so a write in the first
+ * milliseconds after the watch is set up can be missed entirely. Linux arms
+ * inotify synchronously and never needs this.
+ */
+const settle = () => sleep(100);
+
 function start(initial: string[], isIgnored: (path: string) => boolean = () => false, max?: number) {
 	const watcher = watchDirectories(
 		root,
@@ -48,6 +55,7 @@ describe("watchDirectories", () => {
 		writeFileSync(join(root, "a.txt"), "1");
 		writeFileSync(join(root, "src", "b.txt"), "1");
 		start([join(root, "src")]);
+		await settle();
 		writeFileSync(join(root, "a.txt"), "2");
 		writeFileSync(join(root, "src", "b.txt"), "2");
 		expect(
@@ -59,6 +67,7 @@ describe("watchDirectories", () => {
 
 	it("reports a new folder and then sees files inside it, however deep", async () => {
 		start([]);
+		await settle();
 		mkdirSync(join(root, "new", "deep"), { recursive: true });
 		expect(await until(() => changes.some((c) => c.kind === "addDir" && c.path === join(root, "new")))).toBe(true);
 		await sleep(300);
@@ -80,6 +89,7 @@ describe("watchDirectories", () => {
 		mkdirSync(join(root, "gone"));
 		const watcher = start([join(root, "gone")]);
 		expect(watcher.size()).toBe(2);
+		await settle();
 		rmSync(join(root, "gone"), { recursive: true });
 		expect(await until(() => changes.length > 0)).toBe(true);
 		expect(await until(() => watcher.size() === 1)).toBe(true);

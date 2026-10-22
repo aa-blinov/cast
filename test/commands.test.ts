@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -2390,7 +2399,11 @@ describe("/context", () => {
 				.map((args) => (args[0] as { content?: string }).content ?? "")
 				.join("\n");
 			expect(listing).toContain("AGENTS.md");
-			expect(listing).toContain("Could not load 1 context file");
+			// macOS's default filesystem is case-insensitive, so "AGENTS.md"
+			// and "AGENTS.MD" are one file under two names and the loader
+			// reports both — the count comes from the directory, not from 1.
+			const unreadable = readdirSync(nested).filter((name) => name.toLowerCase() === "agents.md").length;
+			expect(listing).toContain(`Could not load ${unreadable} context file`);
 			expect(listing).toMatch(/unreadable|EACCES/i);
 			chmodSync(broken, 0o644);
 		} finally {

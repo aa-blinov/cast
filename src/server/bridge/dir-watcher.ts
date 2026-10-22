@@ -13,7 +13,7 @@
 
 import { type FSWatcher, watch } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 /** Below the common `fs.inotify.max_user_watches` of 8192, which the editor and everything else on the machine share. */
 export const MAX_WATCHED_DIRS = 4000;
@@ -38,6 +38,11 @@ export function watchDirectories(
 	maxDirs = MAX_WATCHED_DIRS,
 ): DirWatcher {
 	const watchers = new Map<string, FSWatcher>();
+	// When each watch went up. macOS reports the directory and everything in
+	// it as changes the moment a watch starts, and the index was built from
+	// that same state a moment earlier — so an entry older than the watch is
+	// the state that was already there, not a change.
+	const startedAt = new Map<string, number>();
 	let closed = false;
 
 	function drop(dir: string): void {
@@ -55,13 +60,18 @@ export function watchDirectories(
 	function add(dir: string): void {
 		if (closed || watchers.has(dir) || watchers.size >= maxDirs || isIgnored(dir)) return;
 		try {
-			const watcher = watch(dir, (event, filename) => handle(dir, event, filename));
+			// A wall-clock timestamp with sub-millisecond precision: a file's
+			// mtime carries one, and Date.now() truncates — the entry that was
+			// already there would look newer than the watch by a fraction.
+			const since = performance.timeOrigin + performance.now();
+			const watcher = watch(dir, (event, filename) => handle(dir, event, filename, since));
 			watcher.on("error", () => {
 				drop(dir);
 				// The root going away (a removed sandbox) leaves nothing to watch.
 				if (dir === root) onError();
 			});
 			watchers.set(dir, watcher);
+			startedAt.set(dir, since);
 		} catch {
 			// A folder that vanished between the listing and the watch, or one we can't read.
 		}
@@ -87,24 +97,35 @@ export function watchDirectories(
 		}
 	}
 
-	function handle(dir: string, event: string, filename: string | Buffer | null): void {
+	function handle(dir: string, event: string, filename: string | Buffer | null, since: number): void {
 		if (closed) return;
 		if (!filename) {
 			onChange("change", dir);
 			return;
 		}
-		const path = join(dir, filename.toString());
+		const name = filename.toString();
+		// macOS names the watched directory itself when something inside it
+		// changes. That is the directory, not a file in it: joining the name
+		// onto the path would report a file that does not exist.
+		const path = name === basename(dir) ? dir : join(dir, name);
 		if (isIgnored(path) || closed) return;
-		if (event !== "rename") {
-			onChange("change", path);
-			return;
-		}
 		// A rename is a create or a delete; only a stat says which, and whether
 		// what appeared is a folder that needs watching too.
 		// The answer can arrive after close(): a closed watcher reports nothing, however late the stat comes back.
 		stat(path).then(
 			(info) => {
 				if (closed) return;
+				// Older than the watch: this is the state that was already
+				// there, which macOS reports when the watch starts. A file
+				// counts by its ctime (the inode's change time), so one that
+				// was copied in with its mtime preserved still counts as new;
+				// the directory itself counts by its mtime, which is what
+				// changes when an entry is added to or removed from it.
+				if (path === dir ? info.mtimeMs < since : info.ctimeMs < since) return;
+				if (event !== "rename") {
+					onChange("change", path);
+					return;
+				}
 				if (info.isDirectory()) {
 					onChange("addDir", path);
 					void addTree(path);
