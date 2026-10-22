@@ -6,7 +6,7 @@ cast is a terminal coding agent harness: one agent loop, a terminal screen and a
 
 ```bash
 npm install --ignore-scripts   # install, and skip the git hooks the prepare script installs
-npm run hooks:install          # install the git hooks by hand
+npm run setup                  # install the git hooks by hand, and fix node-pty's macOS helper
 npm start                      # run from source through tsx
 npm run check                  # tsc --noEmit, then biome check src/ test/
 npm test                       # the vitest suite
@@ -47,6 +47,7 @@ The npm package is `cast`, but the source lives directly under `src/`, with no w
 - **`npm run build` has to run before the tests in CI.** `test/run-interactive-command.test.ts` and `test/worktree-from-worktree.test.ts` spawn the bundled `dist/index.js`. Without a build, `npm ci` leaves `dist/` empty and those two tests fail on the missing module.
 - **The bundle resolves `../prompts` and `../package.json` relative to itself.** esbuild rewrites `import.meta.url` for every module it inlines, so the release archive lays `dist/` out as a sibling of `prompts/` and `package.json`. Moving either one breaks the bundle at runtime, in a way no test catches.
 - **`node-pty` stays outside the bundle.** It is a native addon, and a JavaScript bundle cannot carry the platform binary. It is marked `external` in `scripts/build.mjs` and has to stay a runtime dependency.
+- **On macOS, `npm install --ignore-scripts` leaves node-pty's `spawn-helper` at mode 644.** The module still loads, but every `pty.spawn` throws "posix_spawnp failed" — and because interactive commands run through the PTY, *every* `bash` call in the session dies with that message. `npm run pty:fix` (also part of `npm run setup`) adds the execute bit back; run it after any install that skipped scripts.
 - **The doom-loop detector counts repeats in a window, not in a run.** The threshold is 3 and the window is 12 calls (`DOOM_LOOP_THRESHOLD * 4` in `src/core/loop.ts`), so an alternating pair of identical calls is caught as well. `bash_output` is exempt. The check runs before the parallel dispatch, in call order, because checking inside `Promise.all` hid a whole batch of identical calls from itself.
 - **The parallel-safe tool set is a list, and `read` is not on it.** `glob`, `grep`, `lsp`, `ls`, `memory`, `session_history`, `web_search`, `web_fetch` and `bash_output` may run concurrently inside one assistant message. Everything else, `read` included, runs in call order, so a mutation cannot race a sibling. Adding a name to that set changes the concurrency contract for the whole model.
 - **`cast run` executes inside the daemon.** Its `--skill` and `--mcp` paths are read there, and the daemon does not receive them, so the run says so on stderr and continues without them. Install into `~/.cast/skills/` or `~/.cast/mcp.json`, or run with `CAST_NO_DAEMON=1`.

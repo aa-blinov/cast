@@ -13,6 +13,8 @@
 		"start": "node --disable-warning=DEP0040 --disable-warning=ExperimentalWarning --import tsx ./src/index.ts",
 		"prepare": "bash scripts/install-hooks.sh",
 		"hooks:install": "bash scripts/install-hooks.sh",
+		"pty:fix": "node scripts/fix-pty-helper.mjs",
+		"setup": "bash scripts/install-hooks.sh && node scripts/fix-pty-helper.mjs",
 		"build": "node ./scripts/build.mjs",
 		"check": "tsc --noEmit && biome check src/ test/",
 		"lint": "biome check src/ test/",

@@ -15,7 +15,11 @@ import type { AppConfig } from "../src/core/config.ts";
 import { MessageQueue } from "../src/core/loop.ts";
 import { MAX_PLAN_CHARS, PLAN_TOOL_NAMES, type PlanState } from "../src/core/plan.ts";
 import { BASH_OUTPUT_MAX_CHARS } from "../src/core/tools/bash.ts";
-import { BackgroundTaskRegistry, type BashBackgroundDeps } from "../src/core/tools/bash-background.ts";
+import {
+	BackgroundTaskRegistry,
+	type BashBackgroundDeps,
+	setPtyAvailableForTests,
+} from "../src/core/tools/bash-background.ts";
 import { READ_MAX_BYTES, READ_MAX_LINE_CHARS } from "../src/core/tools/files.ts";
 import { isPermissionError, withAccessNote } from "../src/core/tools/search.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
@@ -385,6 +389,26 @@ describe("bash — run_in_background", () => {
 		// The fallback is right; doing it silently was not — the model asked
 		// for a background task and has to know it did not get one.
 		expect(result.content).toContain("run_in_background is unavailable");
+	});
+
+	it("still runs the command when the PTY backend cannot start a shell", async () => {
+		// A PTY backend that cannot spawn — macOS's prebuilt `spawn-helper`
+		// without its execute bit, which is what an install with
+		// `--ignore-scripts` leaves behind — used to take bash down with it:
+		// every foreground call died with "posix_spawnp failed" and the
+		// command never ran. Without a usable PTY the command runs in the
+		// foreground, and the model is told the background ask did not happen.
+		setPtyAvailableForTests(false);
+		try {
+			const { deps } = makeBackgroundDeps();
+			const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
+			const result = await exec("bash", { command: "echo fallback-ok", run_in_background: true });
+			expect(result.content).toContain("fallback-ok");
+			expect(result.content).toContain("run_in_background is unavailable");
+			expect(result.content).not.toContain("Started in the background");
+		} finally {
+			setPtyAvailableForTests(undefined);
+		}
 	});
 
 	it("delivers completion onto followUpQueue while the runner is still marked running", async () => {
