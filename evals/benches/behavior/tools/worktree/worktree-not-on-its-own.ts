@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import type { EvalCase } from "../../../../lib/runner.ts";
 import { git, gitProject } from "./fixture.ts";
 
@@ -17,7 +18,9 @@ export const worktreeNotOnItsOwn: EvalCase = {
 		toolsNotCalled: ["worktree"],
 		noErrors: true,
 		verify: ({ cwd, finalCwd }) => {
-			if (finalCwd !== cwd) return `the agent moved to ${finalCwd}`;
+			// macOS spells /tmp as /private/tmp, so the same directory has two
+			// names — compare the real paths, not the strings.
+			if (realpathSync(finalCwd) !== realpathSync(cwd)) return `the agent moved to ${finalCwd}`;
 			// Run it rather than look for a word: None can be handled in several ways.
 			try {
 				execFileSync(

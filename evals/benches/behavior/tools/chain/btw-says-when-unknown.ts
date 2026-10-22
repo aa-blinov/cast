@@ -14,7 +14,9 @@ export const btwSaysWhenUnknown: EvalCase = {
 		noErrors: true,
 		verify: ({ sideAnswer }) => {
 			if (sideAnswer?.error) return `the side question failed: ${sideAnswer.error}`;
-			const text = sideAnswer?.text ?? "";
+			// A typographic apostrophe ("isn’t") is the same word as "isn't" —
+			// the answer was right and the check missed it.
+			const text = (sideAnswer?.text ?? "").replace(/[‘’]/g, "'");
 			if (!ADMITS_RE.test(text)) return `it did not say the password was never given: ${JSON.stringify(text)}`;
 			// An invented secret would look like a quoted token or a long word with digits in it.
 			return /[`'"][^`'"\s]{6,}[`'"]/.test(text)
