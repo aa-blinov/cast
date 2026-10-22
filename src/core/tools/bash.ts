@@ -9,7 +9,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD, MAX_BASH_TIMEOUT_MS } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
 import { type BackgroundTask, type BashBackgroundDeps, isPtyAvailable } from "./bash-background.ts";
@@ -180,6 +180,22 @@ function resolveBash(): BashResolution {
  */
 export function getBashResolution(): BashResolution {
 	return resolveBash();
+}
+
+/**
+ * Can the shell be started at all?
+ *
+ * A bare name ("bash") is looked up in PATH by the OS; an absolute path is
+ * used as it is. macOS's PTY helper resolves the name in *its own* process
+ * and its "execvp(3) failed" message never reaches the terminal — so a
+ * missing shell showed up as a command that "exited with code 1" and printed
+ * nothing, which reads like a command that failed rather than a shell that
+ * never started. Doing the same lookup here lets the harness say which one
+ * it was.
+ */
+export function shellResolvable(shellPath: string, env: NodeJS.ProcessEnv = process.env): boolean {
+	if (shellPath.includes("/") || shellPath.includes("\\")) return existsSync(shellPath);
+	return (env.PATH ?? "").split(delimiter).some((dir) => dir !== "" && existsSync(join(dir, shellPath)));
 }
 
 export interface FormatBashResultOptions {
@@ -394,7 +410,7 @@ export async function execBash(
 
 	if (args.run_in_background === true && !managed) {
 		warnPrefix += background
-			? "[warning] run_in_background is unavailable here — the PTY backend (node-pty) could not be loaded, so this ran in the foreground with the normal timeout. Long-running commands will time out; run them yourself or redirect their output to a file.\n\n"
+			? "[warning] run_in_background is unavailable here — the PTY backend could not start a shell (node-pty is unusable in this environment), so this ran in the foreground with the normal timeout. Long-running commands will time out; run them yourself or redirect their output to a file.\n\n"
 			: "[warning] run_in_background is unavailable in this session — this ran in the foreground with the normal timeout.\n\n";
 	}
 
@@ -402,6 +418,10 @@ export async function execBash(
 		// Background tasks are open-ended by default (dev servers, long builds)
 		// — only apply a kill timer when the model explicitly asked for one.
 		const task = managed.registry.start(command, cwd, config, explicitTimeoutMs, managed);
+		// The shell may have failed to start (a broken PTY backend, a missing
+		// binary). Saying "Started in the background as bg-1" then is a lie the
+		// model acts on: it waits for a task that will never produce output.
+		if (task.status !== "running") return formatManagedTaskResult(task, config, warnPrefix, timeoutMs);
 		return formatBackgroundStart(task, warnPrefix, false);
 	}
 
@@ -432,6 +452,7 @@ export async function execBash(
 			return formatManagedTaskResult(task, config, warnPrefix, timeoutMs);
 		}
 		managed.registry.promote(task.id);
+		if (task.status !== "running") return formatManagedTaskResult(task, config, warnPrefix, timeoutMs);
 		return formatBackgroundStart(task, warnPrefix, true);
 	}
 

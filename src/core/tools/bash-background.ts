@@ -18,6 +18,7 @@
 
 import { readSync } from "node:fs";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import type { IPty } from "node-pty";
 
@@ -32,7 +33,56 @@ import type { IPty } from "node-pty";
 /** Whether the PTY backend is usable here — callers fall back to plain
  * foreground execution when it is not. */
 export function isPtyAvailable(): boolean {
-	return loadPty() !== null;
+	if (ptyUsable !== undefined) return ptyUsable;
+	ptyUsable = probePty();
+	return ptyUsable;
+}
+
+let ptyUsable: boolean | undefined;
+
+/** The verdict is cached for the life of the process; a test that needs a
+ *  different one sets it here (undefined restores the real probe). */
+export function setPtyAvailableForTests(value: boolean | undefined): void {
+	ptyUsable = value;
+}
+
+/**
+ * Can the PTY backend actually start a shell?
+ *
+ * Loading node-pty proves nothing. On macOS the prebuilt `spawn-helper` has
+ * to be executable, and an install with `--ignore-scripts` — the install line
+ * in cast's own AGENTS.md — leaves it at mode 644: the module loads, every
+ * `pty.spawn` throws "posix_spawnp failed", and with the managed path
+ * selected every foreground `bash` call in the session dies with that
+ * message instead of running the command.
+ *
+ * One throwaway spawn is the only honest test, and its answer cannot change
+ * while the process lives, so it is paid once. A shell that cannot start is
+ * reported as "no PTY" — the caller then uses plain foreground execution,
+ * where the command still runs.
+ */
+function probePty(): boolean {
+	const pty = loadPty();
+	if (!pty) return false;
+	// An absolute shell, so the probe answers exactly one question: can the
+	// PTY backend start a process at all? A PATH lookup would also fail when
+	// the *shell* is missing — that is a per-call error the harness already
+	// reports properly ("Failed to start bash"), not a broken backend.
+	const isWindows = process.platform === "win32";
+	const shell = isWindows ? getBashResolution().path : "/bin/sh";
+	try {
+		const probe = pty.spawn(shell, isWindows ? ["/c", "exit 0"] : ["-c", "exit 0"], {
+			name: "xterm-256color",
+			cols: 80,
+			rows: 24,
+			cwd: tmpdir(),
+			env: process.env,
+		});
+		probe.kill();
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 let ptyModule: typeof import("node-pty") | null | undefined;
@@ -50,7 +100,7 @@ function loadPty(): typeof import("node-pty") | null {
 import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD } from "../config.ts";
 import type { MessageQueue } from "../loop.ts";
 import { escapeSystemReminderTags } from "../system-reminder.ts";
-import { formatBashResult, getBashResolution, stripAnsi } from "./bash.ts";
+import { formatBashResult, getBashResolution, shellResolvable, stripAnsi } from "./bash.ts";
 import { agentShellEnv, BoundedOutput, formatSize, type ToolResult } from "./shared.ts";
 
 const PTY_EXECVP_FAILURE_RE = /execvp\(3\) failed/i;
@@ -336,6 +386,18 @@ export class BackgroundTaskRegistry {
 			task.endedAt = Date.now();
 			task.errorMessage =
 				"Background bash is unavailable: the node-pty native module could not be loaded in this environment. Run the command in the foreground instead.";
+			resolveExit();
+			this.settle(task, config, deps);
+			return task;
+		}
+		if (!shellResolvable(bash.path, agentShellEnv(cwd, {}))) {
+			// The shell itself is missing (a PATH that doesn't have it). macOS's
+			// PTY helper fails the exec in its own process and its error never
+			// reaches the terminal, so the task would look like a command that
+			// exited 1 with no output. Say what it is.
+			task.status = "error";
+			task.endedAt = Date.now();
+			task.errorMessage = `Failed to start bash ("${bash.path}"): not found in PATH. [${task.id}]`;
 			resolveExit();
 			this.settle(task, config, deps);
 			return task;

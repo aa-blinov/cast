@@ -12,6 +12,7 @@ import {
 	execBashOutput,
 	isPtyAvailable,
 	isPtySpawnFailure,
+	setPtyAvailableForTests,
 } from "../src/core/tools/bash-background.ts";
 
 const mockConfig: AppConfig = {
@@ -403,6 +404,21 @@ describe("pty availability", () => {
 		expect(typeof isPtyAvailable()).toBe("boolean");
 		// Cached: a second call must not re-throw or re-import.
 		expect(isPtyAvailable()).toBe(isPtyAvailable());
+	});
+
+	it("answers whether a shell can actually start, not just whether the module loaded", () => {
+		// On macOS node-pty's prebuilt `spawn-helper` has to be executable, and
+		// an install with `--ignore-scripts` leaves it at mode 644: the module
+		// loads, every pty.spawn throws "posix_spawnp failed", and — because
+		// interactive commands run through the PTY — every bash call in the
+		// session died with it. The probe is what turns that into "no PTY
+		// here", where plain foreground execution still runs the command.
+		setPtyAvailableForTests(undefined);
+		const real = isPtyAvailable();
+		expect(typeof real).toBe("boolean");
+		setPtyAvailableForTests(false);
+		expect(isPtyAvailable()).toBe(false);
+		setPtyAvailableForTests(undefined);
 	});
 });
 
