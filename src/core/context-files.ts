@@ -73,7 +73,7 @@ function loadContextFileFromDir(dir: string, diagnostics?: string[]): ContextFil
 }
 
 /** Which file a path names, by inode — the same file under two spellings. */
-function fileIdentity(filePath: string): string {
+export function fileIdentity(filePath: string): string {
 	try {
 		const stat = statSync(filePath);
 		return `${stat.dev}:${stat.ino}`;

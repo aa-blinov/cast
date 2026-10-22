@@ -1,13 +1,35 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	fileIdentity,
 	formatContextFilesForPrompt,
 	hasContextFileInDir,
 	loadProjectContextFiles,
 	resolveNestedContextFiles,
 } from "../src/core/context-files.ts";
+
+describe("file identity", () => {
+	it("tells one file under two names from two files", () => {
+		// On a case-insensitive filesystem (macOS by default) "AGENTS.md" and
+		// "AGENTS.MD" are one file, and the loader reported it as two context
+		// files. The inode is what tells them apart; a path that cannot be
+		// stat-ed is its own identity.
+		const dir = mkdtempSync(join(tmpdir(), "cast-context-identity-"));
+		try {
+			const file = join(dir, "AGENTS.md");
+			writeFileSync(file, "x");
+			const link = join(dir, "link.md");
+			symlinkSync(file, link);
+			expect(fileIdentity(file)).toBe(fileIdentity(link));
+			expect(fileIdentity(file)).not.toBe(fileIdentity(dir));
+			expect(fileIdentity(join(dir, "missing.md"))).toBe(join(dir, "missing.md"));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
 
 describe("context-files", () => {
 	let realHome: string | undefined;
