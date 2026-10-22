@@ -129,9 +129,9 @@ import { effectiveStatusFromFile } from "../core/turn-runner-state.ts";
 import { runUserShell } from "../core/user-shell.ts";
 import {
 	buildReasoningParams,
-	getDefaultReasoningLevel,
 	getReasoningOptionsForFormat,
 	resolveReasoningFormat,
+	resolveReasoningLevel,
 } from "../core/vendors.ts";
 import type { SessionWorktree } from "../core/worktree.ts";
 import { DEFAULT_THEME_ID, WEB_THEMES } from "../ui/themes/index.ts";
@@ -3268,11 +3268,13 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		requested = config.reasoningLevel,
 	): string {
 		const info = modelInfoFor(model);
-		const options = getReasoningOptionsForFormat(info?.reasoning ?? null, format, model, info?.reasoningSupported);
-		if (options.length === 0 || options.some((option) => option.value === requested)) {
-			return requested;
-		}
-		return getDefaultReasoningLevel(info?.reasoning ?? null, format, model, info?.reasoningSupported);
+		return resolveReasoningLevel(
+			requested,
+			info?.reasoning ?? null,
+			format,
+			model,
+			info?.reasoningSupported ?? false,
+		);
 	}
 
 	/** What /current shows for reasoningLevel — must mirror the same

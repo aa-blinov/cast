@@ -62,7 +62,12 @@ import { loadSubagentPrompts, type SubagentPrompt } from "./subagents.ts";
 import { getBashResolution } from "./tools/bash.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
 import type { ConfirmBash } from "./tools/shared.ts";
-import { buildReasoningParams, type ModelReasoningMeta, resolveReasoningFormat } from "./vendors.ts";
+import {
+	buildReasoningParams,
+	type ModelReasoningMeta,
+	resolveReasoningFormat,
+	resolveReasoningLevel,
+} from "./vendors.ts";
 import { createSessionWorktree } from "./worktree.ts";
 
 export interface ParsedArgs {
@@ -474,8 +479,18 @@ export async function runStartup(
 		config.reasoningLevel = args.cliReasoning;
 		config.reasoningParams = buildReasoningParams(args.cliReasoning, config.reasoningFormat, model);
 	} else if (!modelWasPicked && settings.reasoningLevel && settings.model === model) {
-		config.reasoningLevel = settings.reasoningLevel;
-		config.reasoningParams = buildReasoningParams(settings.reasoningLevel, config.reasoningFormat, model);
+		// A saved level can belong to another model: "off" is valid for most
+		// providers and a 400 for MiniMax's M3.1 family, which requires
+		// thinking on. Normalising here keeps the level the next turn
+		// actually runs with — and the level on screen — the same one.
+		config.reasoningLevel = resolveReasoningLevel(
+			settings.reasoningLevel,
+			reasoningMeta ?? null,
+			config.reasoningFormat,
+			model,
+			reasoningSupported ?? false,
+		);
+		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
 	} else {
 		const selected = await selectReasoningLevel(config, model, pickers, reasoningMeta, reasoningSupported);
 		if (!selected) process.exit(0);

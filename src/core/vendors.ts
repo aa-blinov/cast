@@ -19,6 +19,26 @@
 const LEADING_NL_RE = /^\n+/;
 const QIANFAN_THINKING_MODEL_RE = /deepseek-v4|deepseek-v3\.2|kimi-k2\.5|glm-5/i;
 
+/**
+ * MiniMax models that refuse to turn thinking off.
+ *
+ * Verified live against api.minimax.io on 2026-10-22: `thinking: { type:
+ * "disabled" }` fails on MiniMax-M3.1-Flash with
+ *   400 invalid params, model "MiniMax-M3.1-Flash" requires adaptive
+ *   thinking; thinking.type="disabled" (including reasoning.effort=none) is
+ *   not allowed (2013)
+ * while MiniMax-M3, M2.7 and M2.5 accept the same field. cast's default
+ * reasoning level is "off", so a session left on that level sends the
+ * rejected body and the turn dies before the model sees a token — with no
+ * hint that the reasoning level, not the model, was the problem.
+ */
+const MINIMAX_REQUIRES_THINKING_RE = /minimax[-_. ]?m3\.1/i;
+
+/** True when the model runs only with thinking on. */
+function minimaxRequiresThinking(model: string): boolean {
+	return MINIMAX_REQUIRES_THINKING_RE.test(model);
+}
+
 export interface ModelReasoningMeta {
 	mandatory: boolean;
 	defaultEnabled: boolean;
@@ -194,6 +214,15 @@ export function buildReasoningParams(effort: string, format: ReasoningFormat = "
 			// still arrive here. Funnel them all to adaptive so the body is
 			// always valid for the API.
 			if (effort === "off" || effort === "disabled") {
+				// The M3.1 family rejects "disabled" outright (see
+				// MINIMAX_REQUIRES_THINKING_RE), so a level left over from
+				// another model would fail every request. Omitting the
+				// `thinking` field is the always-on body every MiniMax model
+				// accepts; the level itself is normalised by
+				// resolveReasoningLevel so the UI shows what actually runs.
+				if (minimaxRequiresThinking(model)) {
+					return { body: { reasoning_split: true }, enabled: true };
+				}
 				return {
 					body: { reasoning_split: true, thinking: { type: "disabled" } },
 					enabled: false,
@@ -271,11 +300,15 @@ export function getReasoningOptionsForFormat(
 		// MiniMax's current API exposes a default always-on mode plus explicit
 		// adaptive and disabled modes. `reasoning_split` controls where the
 		// reasoning is returned, not how deeply the model reasons.
-		return [
+		// The M3.1 family rejects "disabled" with a 400, so that option is
+		// not offered for those models — a picker entry that 400s the next
+		// request is worse than no entry at all.
+		const options = [
 			{ value: "enabled", label: "Always on (provider default)" },
 			{ value: "adaptive", label: "Adaptive" },
-			{ value: "disabled", label: "Off" },
 		];
+		if (!minimaxRequiresThinking(model)) options.push({ value: "disabled", label: "Off" });
+		return options;
 	}
 	if (!meta && format === "deepseek" && modelId.includes("deepseek-v4")) {
 		return [
@@ -393,6 +426,33 @@ export function getDefaultReasoningLevel(
 	}
 
 	return options.some((option) => option.value === preferred) ? preferred : (options[0]?.value ?? "unknown");
+}
+
+/**
+ * The reasoning level a model can actually run with.
+ *
+ * A level can be left over from another model — a saved "off" carried over
+ * from a provider that allows it, or a "high" landing on a provider whose
+ * vocabulary is [enabled, adaptive, disabled]. When the level isn't in the
+ * model's option list the request either fails (MiniMax's M3.1 family
+ * rejects `thinking: { type: "disabled" }` with a 400) or silently means
+ * something else, so the level falls back to the model's default.
+ */
+export function resolveReasoningLevel(
+	level: string,
+	meta: ModelReasoningMeta | null,
+	format: ReasoningFormat,
+	model = "",
+	reasoningSupported = false,
+): string {
+	const options = getReasoningOptionsForFormat(meta, format, model, reasoningSupported);
+	if (options.length === 0 || options.some((option) => option.value === level)) return level;
+	// "off" and "disabled" are the same request in every vocabulary that
+	// spells one of them: a saved "off" on a provider whose levels are
+	// spelled "disabled" is a level the model can run, not an unknown one.
+	const alias = level === "off" ? "disabled" : level === "disabled" ? "off" : undefined;
+	if (alias && options.some((option) => option.value === alias)) return alias;
+	return getDefaultReasoningLevel(meta, format, model, reasoningSupported);
 }
 
 // ============================================================================

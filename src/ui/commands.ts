@@ -119,11 +119,11 @@ import { activeTaskIds, cancelTask, queuedTaskIds, summarizeToolArgs } from "../
 import { parseUserShellInput, runUserShell, type UserShellInput } from "../core/user-shell.ts";
 import {
 	buildReasoningParams,
-	getDefaultReasoningLevel,
 	getReasoningOptionsForFormat,
 	type ModelReasoningMeta,
 	type ReasoningParams,
 	resolveReasoningFormat,
+	resolveReasoningLevel,
 } from "../core/vendors.ts";
 import { createSessionWorktree, listWorktrees, removeSessionWorktree } from "../core/worktree.ts";
 import {
@@ -2473,23 +2473,13 @@ const COMMAND_ROUTES: CommandRoute[] = [
 			);
 			config.reasoningFormat = resolveReasoningFormat(config.baseURL, selected);
 			const cached = getModelsCache().find((model) => model.id === session.model);
-			const reasoningOptions = getReasoningOptionsForFormat(
+			config.reasoningLevel = resolveReasoningLevel(
+				config.reasoningLevel,
 				deps.reasoningMeta ?? cached?.reasoning ?? null,
 				config.reasoningFormat,
 				session.model,
-				cached?.reasoningSupported,
+				cached?.reasoningSupported ?? false,
 			);
-			if (
-				reasoningOptions.length > 0 &&
-				!reasoningOptions.some((option) => option.value === config.reasoningLevel)
-			) {
-				config.reasoningLevel = getDefaultReasoningLevel(
-					deps.reasoningMeta ?? cached?.reasoning ?? null,
-					config.reasoningFormat,
-					session.model,
-					cached?.reasoningSupported,
-				);
-			}
 			config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, session.model);
 			updateSettings({ providers, reasoningLevel: config.reasoningLevel });
 			showNotice(`[Reasoning protocol: ${selected}]`);
