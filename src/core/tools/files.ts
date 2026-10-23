@@ -160,6 +160,20 @@ function readMaxBytes(config: AppConfig): number {
 	return config.maxReadBytes ?? Math.min(READ_MAX_BYTES, config.maxToolOutputBytes);
 }
 
+/**
+ * The lines of a file, the way an editor counts them.
+ *
+ * A file that ends with a newline has no last line: "alpha\n" is one line,
+ * and splitting it produced a phantom empty second one. The model read that
+ * phantom as content it had to double-check — it ran `diff` to confirm what
+ * `read` had already shown, on a task that was a single comparison.
+ */
+export function splitIntoLines(text: string): string[] {
+	const lines = text.split("\n");
+	if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+	return lines;
+}
+
 function renderReadLine(lineNumber: number, line: string): string {
 	const text =
 		line.length > READ_MAX_LINE_CHARS
@@ -373,7 +387,7 @@ export async function execRead(args: Record<string, unknown>, cwd: string, confi
 	}
 
 	const fullBuffer = await readFile(absolutePath);
-	const allLines = fullBuffer.toString("utf-8").split("\n");
+	const allLines = splitIntoLines(fullBuffer.toString("utf-8"));
 
 	const startLine = startLineFrom(offset);
 	if (startLine >= allLines.length) {

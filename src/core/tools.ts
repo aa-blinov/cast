@@ -187,6 +187,7 @@ export function getToolDefinitions(
 					"Supports text files and images (jpg, jpeg, png, gif, webp, bmp — " +
 					"shown to you as an image in the next message; only works if the model supports vision). " +
 					"Output is truncated to 2000 lines or 50KB, and a line past 2000 characters is cut. Use offset/limit for large files. " +
+					"When the request names a line range, read that range — pass offset (the first line) and limit (how many lines); reading the whole file to find three lines wastes the context. " +
 					"Large images are automatically downscaled to fit; only rejected if truly huge (25MB+). " +
 					"Each line is prefixed with its line number (`N: content`) — use the exact text (not the number) when calling `edit`. " +
 					"You already have the contents of every file you read earlier in this session — do NOT read the " +
