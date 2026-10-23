@@ -20,23 +20,45 @@ const LEADING_NL_RE = /^\n+/;
 const QIANFAN_THINKING_MODEL_RE = /deepseek-v4|deepseek-v3\.2|kimi-k2\.5|glm-5/i;
 
 /**
- * MiniMax models that refuse to turn thinking off.
+ * MiniMax models whose reasoning is tuned by depth, not by a switch.
  *
- * Verified live against api.minimax.io on 2026-10-22: `thinking: { type:
- * "disabled" }` fails on MiniMax-M3.1-Flash with
- *   400 invalid params, model "MiniMax-M3.1-Flash" requires adaptive
- *   thinking; thinking.type="disabled" (including reasoning.effort=none) is
- *   not allowed (2013)
- * while MiniMax-M3, M2.7 and M2.5 accept the same field. cast's default
- * reasoning level is "off", so a session left on that level sends the
- * rejected body and the turn dies before the model sees a token — with no
- * hint that the reasoning level, not the model, was the problem.
+ * MiniMax's own documentation (platform.minimax.io/docs/guides/text-generation,
+ * read 2026-10-23): for MiniMax-M3.1-Flash "thinking cannot be turned off.
+ * Sending `thinking: {"type": "disabled"}` or `effort: "none"` returns
+ * 400", and the depth is set with `reasoning_effort` — `low`, `medium`,
+ * `high`, `xhigh`, `max`, defaulting to `max`. On the OpenAI-compatible
+ * endpoint the thinking comes back in `reasoning_content` either way, so
+ * `reasoning_split` is not what separates it there.
+ *
+ * The older models (M3, M2.7, M2.5) are the opposite: they take the old
+ * `thinking: { type: "adaptive" | "disabled" }` and ignore `reasoning_effort`
+ * entirely — verified live against api.minimax.io on 2026-10-23.
  */
-const MINIMAX_REQUIRES_THINKING_RE = /minimax[-_. ]?m3\.1/i;
+const MINIMAX_EFFORT_MODEL_RE = /minimax[-_. ]?m3\.1/i;
 
-/** True when the model runs only with thinking on. */
-function minimaxRequiresThinking(model: string): boolean {
-	return MINIMAX_REQUIRES_THINKING_RE.test(model);
+/** The thinking depths MiniMax's M3.1 family accepts, cheapest first. */
+const MINIMAX_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+/** True when the model takes its thinking depth from `reasoning_effort`. */
+function minimaxUsesEffort(model: string): boolean {
+	return MINIMAX_EFFORT_MODEL_RE.test(model);
+}
+
+/**
+ * The depth to ask for, from cast's own level.
+ *
+ * Thinking cannot be off on these models, so "off" — cast's generic default,
+ * and the level a session saved from another provider carries — becomes the
+ * cheapest thinking there is rather than a request the API rejects.
+ */
+function minimaxEffortFor(level: string): string {
+	const wanted = level.toLowerCase();
+	if ((MINIMAX_EFFORT_LEVELS as readonly string[]).includes(wanted)) return wanted;
+	// "off", "on", "enabled", "adaptive" and anything cast does not know mean
+	// "the provider's own default", which for this family is the deepest
+	// thinking there is: it cannot be turned off, and the cheapest depth is
+	// only cheaper when it is asked for by name.
+	return "max";
 }
 
 export interface ModelReasoningMeta {
@@ -213,16 +235,18 @@ export function buildReasoningParams(effort: string, format: ReasoningFormat = "
 			// (e.g. a model that previously returned [low, medium, high]) can
 			// still arrive here. Funnel them all to adaptive so the body is
 			// always valid for the API.
+			// The M3.1 family has no switch: its thinking cannot be turned
+			// off (the API answers 400 to `thinking: {type: "disabled"}` and to
+			// `effort: "none"`), and the depth is set with reasoning_effort.
+			// Every level goes through that path — a level left over from
+			// another model would otherwise fail the request outright.
+			if (minimaxUsesEffort(model)) {
+				return {
+					body: { reasoning_split: true, reasoning_effort: minimaxEffortFor(effort) },
+					enabled: true,
+				};
+			}
 			if (effort === "off" || effort === "disabled") {
-				// The M3.1 family rejects "disabled" outright (see
-				// MINIMAX_REQUIRES_THINKING_RE), so a level left over from
-				// another model would fail every request. Omitting the
-				// `thinking` field is the always-on body every MiniMax model
-				// accepts; the level itself is normalised by
-				// resolveReasoningLevel so the UI shows what actually runs.
-				if (minimaxRequiresThinking(model)) {
-					return { body: { reasoning_split: true }, enabled: true };
-				}
 				return {
 					body: { reasoning_split: true, thinking: { type: "disabled" } },
 					enabled: false,
@@ -303,11 +327,23 @@ export function getReasoningOptionsForFormat(
 		// The M3.1 family rejects "disabled" with a 400, so that option is
 		// not offered for those models — a picker entry that 400s the next
 		// request is worse than no entry at all.
+		// The M3.1 family has no switch: the depth is the only control, and
+		// its own vocabulary (low … max, defaulting to max) is what the
+		// picker shows.
+		if (minimaxUsesEffort(model)) {
+			return [
+				{ value: "max", label: "Max (provider default)" },
+				{ value: "xhigh", label: "Extra high" },
+				{ value: "high", label: "High" },
+				{ value: "medium", label: "Medium" },
+				{ value: "low", label: "Low (cheapest)" },
+			];
+		}
 		const options = [
 			{ value: "enabled", label: "Always on (provider default)" },
 			{ value: "adaptive", label: "Adaptive" },
+			{ value: "disabled", label: "Off" },
 		];
-		if (!minimaxRequiresThinking(model)) options.push({ value: "disabled", label: "Off" });
 		return options;
 	}
 	if (!meta && format === "deepseek" && modelId.includes("deepseek-v4")) {
@@ -422,7 +458,7 @@ export function getDefaultReasoningLevel(
 				preferred = "off";
 				break;
 		}
-		if (modelId.includes("minimax")) preferred = "enabled";
+		if (modelId.includes("minimax")) preferred = minimaxUsesEffort(model) ? "max" : "enabled";
 	}
 
 	return options.some((option) => option.value === preferred) ? preferred : (options[0]?.value ?? "unknown");

@@ -532,42 +532,60 @@ describe("buildReasoningParams", () => {
 		]);
 	});
 
-	it("MiniMax's M3.1 family never gets a request that turns thinking off", () => {
-		// Verified live against api.minimax.io on 2026-10-22: MiniMax-M3.1-Flash
-		// answers `thinking: { type: "disabled" }` with
-		//   400 invalid params, model "MiniMax-M3.1-Flash" requires adaptive
-		//   thinking; thinking.type="disabled" (including reasoning.effort=none)
-		//   is not allowed (2013)
-		// while M3, M2.7 and M2.5 accept it. cast's default level is "off", so
-		// a session left there sent the rejected body and every request failed
-		// before the model saw a token.
+	it("MiniMax's M3.1 family is tuned by depth, not by a switch", () => {
+		// MiniMax's documentation (platform.minimax.io/docs/guides/text-generation,
+		// read 2026-10-23): "thinking cannot be turned off. Sending `thinking:
+		// { type: disabled }` or `effort: none` returns 400", and the depth is
+		// set with reasoning_effort — low, medium, high, xhigh, max, defaulting
+		// to max. Verified live against api.minimax.io the same day.
 		expect(getReasoningOptionsForFormat(null, "minimax", "MiniMax-M3.1-Flash").map((option) => option.value)).toEqual(
-			["enabled", "adaptive"],
+			["max", "xhigh", "high", "medium", "low"],
 		);
 		expect(buildReasoningParams("off", "minimax", "MiniMax-M3.1-Flash")).toEqual({
-			body: { reasoning_split: true },
+			body: { reasoning_split: true, reasoning_effort: "max" },
 			enabled: true,
 		});
-		expect(buildReasoningParams("disabled", "minimax", "MiniMax-M3.1-Flash").body).toEqual({ reasoning_split: true });
-		// The older models still take the explicit field.
+		// A level cast does not know, and one the model cannot run, both mean
+		// "the provider's own default" — which for this family is the deepest
+		// thinking, because thinking cannot be turned off at all.
+		expect(buildReasoningParams("disabled", "minimax", "MiniMax-M3.1-Flash").body).toEqual({
+			reasoning_split: true,
+			reasoning_effort: "max",
+		});
+		expect(buildReasoningParams("low", "minimax", "MiniMax-M3.1-Flash").body).toEqual({
+			reasoning_split: true,
+			reasoning_effort: "low",
+		});
+		expect(buildReasoningParams("xhigh", "minimax", "MiniMax-M3.1-Flash").body).toEqual({
+			reasoning_split: true,
+			reasoning_effort: "xhigh",
+		});
+		// The older models still take the explicit field, and ignore
+		// reasoning_effort entirely.
 		expect(buildReasoningParams("off", "minimax", "MiniMax-M3").body).toEqual({
 			reasoning_split: true,
 			thinking: { type: "disabled" },
 		});
 		expect(buildReasoningParams("off", "minimax", "MiniMax-M2.7").enabled).toBe(false);
+		expect(getReasoningOptionsForFormat(null, "minimax", "MiniMax-M3").map((option) => option.value)).toEqual([
+			"enabled",
+			"adaptive",
+			"disabled",
+		]);
 	});
 
 	it("a level the model cannot run falls back to the model's default", () => {
 		// "off" is cast's default level and is valid for most providers; on the
 		// MiniMax models that require thinking it is not in the option list, so
 		// it resolves to the model's own default instead of 400ing the request.
-		expect(resolveReasoningLevel("off", null, "minimax", "MiniMax-M3.1-Flash")).toBe("enabled");
+		expect(resolveReasoningLevel("off", null, "minimax", "MiniMax-M3.1-Flash")).toBe("max");
+		expect(resolveReasoningLevel("adaptive", null, "minimax", "MiniMax-M3.1-Flash")).toBe("max");
+		expect(resolveReasoningLevel("high", null, "minimax", "MiniMax-M3.1-Flash")).toBe("high");
+		expect(resolveReasoningLevel("low", null, "minimax", "MiniMax-M3.1-Flash")).toBe("low");
 		// "off" and "disabled" are the same request — a saved "off" on a model
 		// that spells the level "disabled" is not a level it cannot run.
 		expect(resolveReasoningLevel("off", null, "minimax", "MiniMax-M3")).toBe("disabled");
 		expect(resolveReasoningLevel("disabled", null, "minimax", "MiniMax-M3")).toBe("disabled");
-		expect(resolveReasoningLevel("adaptive", null, "minimax", "MiniMax-M3.1-Flash")).toBe("adaptive");
-		expect(resolveReasoningLevel("high", null, "minimax", "MiniMax-M3.1-Flash")).toBe("enabled");
 	});
 
 	it("off returns explicit enabled: false", () => {
