@@ -15,10 +15,35 @@ export const globArgumentIsGrounded: EvalCase = {
 	prompt: `Which TypeScript spec files are present under ${fixturePath("behavior-glob-args", "tests")}?`,
 	expect: {
 		containsAll: ["alpha.spec.ts", "beta.spec.ts"],
-		containsNone: ["ignored.txt"],
 		toolsCalled: ["glob"],
 		toolsNotCalled: ["bash", "write", "edit"],
 		noErrors: true,
+		// The answer must not present ignored.txt as one of the specs. Saying
+		// "the directory also contains ignored.txt, which is not a spec file"
+		// is honest and answers the question; a flat "must not mention it"
+		// punished that, and the interesting mistake — a broad second glob
+		// that dragged the file into the answer — went unmeasured.
+		verify: ({ messages, toolCalls }) => {
+			const said = messages
+				.filter((m) => m.role === "assistant" && typeof m.content === "string")
+				.map((m) => String(m.content))
+				.join("\n");
+			for (const line of said.split("\n")) {
+				if (!line.includes("ignored.txt")) continue;
+				if (!/\b(not|no|never|isn't|doesn't|outside|apart)\b/i.test(line)) {
+					return "the answer listed ignored.txt among the spec files";
+				}
+			}
+			// Every glob stays narrowed to TypeScript: a second, wider glob is
+			// the unneeded search the case is about.
+			for (const call of toolCalls) {
+				if (call.name !== "glob" || typeof call.args.pattern !== "string") continue;
+				if (!call.args.pattern.endsWith(".ts")) {
+					return `the search widened past TypeScript: ${call.args.pattern}`;
+				}
+			}
+			return undefined;
+		},
 		// The contract is a search scoped to the fixture directory and narrowed
 		// to TypeScript specs. Grading the argument *shape* instead kept failing
 		// calls that answered the question correctly: a brace pattern
