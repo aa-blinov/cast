@@ -83,6 +83,19 @@ The thinking content is displayed separately in the TUI and excluded from the ma
 
 The exact off request depends on the selected dialect. For example, OpenRouter receives `reasoning: { enabled: false }`, OpenAI receives `reasoning_effort: "none"`, and providers that use a `thinking` flag receive their native disabled value. MiniMax reasoning is always enabled; Cast requests its split-reasoning stream format so reasoning and answer text remain separate.
 
-MiniMax's M3.1 family is the exception to "off is a request": `MiniMax-M3.1-Flash` rejects `thinking: { type: "disabled" }` with `400 invalid params, model "MiniMax-M3.1-Flash" requires adaptive thinking`. Cast does not offer an off level for those models, and a level left over from another model falls back to the model's own default instead of failing every request.
+MiniMax's M3.1 family is the exception to "off is a request". MiniMax's own documentation
+(platform.minimax.io/docs/guides/text-generation, read 2026-10-23): "thinking cannot be turned off.
+Sending `thinking: {"type": "disabled"}` or `effort: "none"` returns 400", and the depth is set
+with `reasoning_effort` — `low`, `medium`, `high`, `xhigh`, `max`, defaulting to `max`. Cast sends
+`reasoning_effort` for those models, offers their five depths in the picker, and falls back to the
+provider's default for a level left over from another provider instead of failing the request. The
+older MiniMax models (M3, M2.7, M2.5) keep the older `thinking: { type: "adaptive" | "disabled" }`
+vocabulary — they ignore `reasoning_effort` entirely.
+
+Two more things MiniMax's parameter table says, and cast leans on both: the thinking tokens count
+toward `max_tokens` (a budget that is too small ends the turn with `finish_reason: "length"` and an
+empty answer), and `temperature` and `top_p` are ignored — M3 and M3.1-Flash always sample at
+temperature 1 and top_p 0.95. A run of the same prompt is a fresh sample every time, which is why
+the behaviour bench measures a case three times before calling a result a regression.
 
 When the provider doesn't report reasoning capabilities (`unknown`), cast sends no reasoning params, letting the provider use its own default.
