@@ -458,13 +458,16 @@ export function getDefaultReasoningLevel(
 				preferred = "off";
 				break;
 		}
-		// The M3.1 family's default depth is cast's, not the provider's: the
-		// provider would think at "max", which measured both slower and less
-		// steady on the behaviour bench (39/39 tool contracts and 11/12 of the
-		// cases that used to flip, at half the wall time). "low" is the
-		// cheapest depth there is, and the picker opens on it.
-		if (modelId.includes("minimax")) preferred = minimaxUsesEffort(model) ? "low" : "enabled";
 	}
+
+	// MiniMax's own vocabulary outranks the metadata: the M3.1 family's levels
+	// are its five depths, and cast's default for them is the cheapest. The
+	// provider would think at "max", which measured both slower and less
+	// steady on the behaviour bench (39/39 tool contracts and 11/12 of the
+	// cases that used to flip, at half the wall time). This sits outside the
+	// metadata branch on purpose: a model listed with reasoning metadata
+	// would otherwise open the picker on the provider's deepest thinking.
+	if (modelId.includes("minimax")) preferred = minimaxUsesEffort(model) ? "low" : "enabled";
 
 	return options.some((option) => option.value === preferred) ? preferred : (options[0]?.value ?? "unknown");
 }
