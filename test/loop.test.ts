@@ -51,7 +51,10 @@ const {
 	createAgentForkRuntimeSnapshot,
 	defaultCheckpointThresholds,
 	noteRepeatedFailures,
+	checkKeyFor,
+	noteEarlierCheck,
 } = await import("../src/core/loop.ts");
+type CheckMemory = import("../src/core/loop.ts").CheckMemory;
 const { streamAndCollect } = await import("../src/core/llm.ts");
 type AgentEvent = Parameters<Parameters<typeof runAgentLoop>[1]["onEvent"]>[0];
 
@@ -6346,6 +6349,52 @@ describe("runAgentLoop — abort always ends a hung tool batch", () => {
 		expect(endEvents.some((e) => (e as { reason?: string }).reason === "aborted")).toBe(true);
 		// 2s grace + margin — pre-fix this never resolved at all.
 		expect(elapsed).toBeLessThan(5000);
+	});
+});
+
+describe("check memory", () => {
+	it("names the check the same way however the command was piped", () => {
+		expect(checkKeyFor("npm test")).toBe("npm test");
+		expect(checkKeyFor('npm test 2>&1 | grep -E "x|FAIL" | head -60')).toBe("npm test");
+		expect(checkKeyFor('npm test 2>&1 | grep -E "^ FAIL" | sort > out.txt')).toBe("npm test");
+		expect(checkKeyFor("cd /repo && npm test")).toBe("npm test");
+		expect(checkKeyFor("npx vitest run test/tools.test.ts")).not.toBe("npm test");
+	});
+
+	it("shows the model what the same check said when it failed before", () => {
+		// The model re-runs a failing check to learn whether the failure is
+		// its own, and again to confirm the answer did not change. Each run
+		// costs the check's price; the second one can come from memory.
+		const seen = new Map<string, CheckMemory>();
+		const commands = new Map([
+			["a", "npm test"],
+			["b", "npm test 2>&1 | tail -20"],
+		]);
+		const first = {
+			id: "a",
+			name: "bash",
+			result: { content: "FAIL test/x.test.ts", isError: true },
+		};
+		noteEarlierCheck([first], seen, 3, commands);
+		expect(first.result.content).toContain("FAIL test/x.test.ts");
+		expect(first.result.content).not.toContain("ran earlier");
+
+		const second = {
+			id: "b",
+			name: "bash",
+			result: { content: "FAIL test/x.test.ts", isError: true },
+		};
+		noteEarlierCheck([second], seen, 7, commands);
+		expect(second.result.content).toContain("failed earlier too");
+		expect(second.result.content).toContain("turn 3");
+	});
+
+	it("says nothing about a check that passed", () => {
+		const seen = new Map<string, CheckMemory>();
+		const commands = new Map([["a", "npm test"]]);
+		const call = { id: "a", name: "bash", result: { content: "all good", isError: false } };
+		noteEarlierCheck([call], seen, 2, commands);
+		expect(call.result.content).toBe("all good");
 	});
 });
 
