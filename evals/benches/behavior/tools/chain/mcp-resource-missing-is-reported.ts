@@ -12,7 +12,24 @@ export const mcpResourceMissingIsReported: EvalCase = {
 	expect: {
 		toolsCalled: ["mcp_docs_read_resource"],
 		containsAny: ["no ", "not ", "doesn't", "does not", "n't"],
-		containsNone: ["FAQ-INV-5520", "within 21 days"],
 		noErrors: true,
+		// The invoice terms are what a fabricated warranty answer looks like:
+		// the warranty claim and the invoice policy in one breath. An honest
+		// answer says the topic is missing and may quote what the other
+		// entries hold — and a flat "the answer must not mention 21 days"
+		// punished that, so four good answers in a row failed a check that
+		// was looking for a different mistake.
+		verify: ({ messages }) => {
+			const said = messages
+				.filter((m) => m.role === "assistant" && typeof m.content === "string")
+				.map((m) => String(m.content))
+				.join("\n");
+			for (const clause of said.split(/[\n;—:]+/)) {
+				const claims = /warranty/i.test(clause);
+				const quotes = /within 21 days|FAQ-INV-5520/i.test(clause);
+				if (claims && quotes) return "the answer presented the invoice terms as the warranty policy";
+			}
+			return undefined;
+		},
 	},
 };
