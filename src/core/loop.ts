@@ -2211,6 +2211,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	const repeatedOutputs = new Map<string, number>();
 	// Consecutive failures per tool name, for noteRepeatedFailures.
 	const repeatedFailures = new Map<string, number>();
+	// What a failing check said last time, for noteEarlierCheck.
+	const checkMemory = new Map<string, CheckMemory>();
+	// The iteration the last write or edit ran on: what "nothing has changed
+	// since" is measured against.
+	let lastMutationTurn = 0;
 	let runawayOutput = false;
 
 	// Hooks in force for this run. Seeded from the caller's set and extended
@@ -3516,6 +3521,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					);
 					if (noteRepeatedOutputs(executedToolBatch, repeatedOutputs)) runawayOutput = true;
 					noteRepeatedFailures(executedToolBatch, repeatedFailures);
+					if (executedToolBatch.some((call) => MUTATING_TOOLS.has(call.name))) lastMutationTurn = outerIteration;
+					noteEarlierCheck(
+						executedToolBatch,
+						checkMemory,
+						outerIteration,
+						commandsById(toolCalls),
+						lastMutationTurn,
+					);
 					toolResults.push(...executedToolBatch);
 					hasMoreToolCalls = true;
 
@@ -3978,6 +3991,18 @@ interface ToolCallResult {
 	result: ToolResult;
 }
 
+/** The tools that can change a file, and so make an earlier check stale. */
+const MUTATING_TOOLS = new Set(["write", "edit"]);
+
+/** A leading directory change, which is how the model reached a check. */
+const DIR_CHANGE_PREFIX_RE = /^\s*(?:cd|pushd)\s+[^&|;]+(&&|;)\s*/i;
+/** Where one command ends and the next begins. */
+const CHECK_SPLIT_RE = /\||;/;
+/** A redirection to a file or a descriptor, and the target that follows it. */
+const REDIRECTION_RE = /\d?>\s*&?\d?\s*[a-z_./-]*/gi;
+/** Runs of whitespace, collapsed so that two spellings of one command match. */
+const WHITESPACE_RE = /\s+/g;
+
 /** How many times a tool may return the same output before the model is told
  *  that repeating it won't change anything. */
 const REPEATED_OUTPUT_THRESHOLD = 4;
@@ -4058,6 +4083,89 @@ export function noteRepeatedFailures(batch: ToolCallResult[], seen: Map<string, 
 		call.result = {
 			...call.result,
 			content: `${call.result.content}\n\n<system-reminder>This is the ${count}${ordinalSuffix(count)} time ${call.name} has failed in a row. Another attempt with a slightly different argument will not change the answer: either try a materially different approach, or stop and tell the user what is blocking you and what you have already tried.</system-reminder>`,
+		};
+	}
+}
+
+/** The command each tool call ran, by its id. */
+function commandsById(toolCalls: Array<{ id: string; name: string; arguments: string }>): Map<string, string> {
+	const commands = new Map<string, string>();
+	for (const call of toolCalls) {
+		if (call.name !== "bash") continue;
+		try {
+			const args = JSON.parse(call.arguments) as { command?: unknown };
+			if (typeof args.command === "string") commands.set(call.id, args.command);
+		} catch {
+			// Malformed arguments: nothing to remember.
+		}
+	}
+	return commands;
+}
+
+/**
+ * The check a command is: the part before any pipe or sequencing, without
+ * the redirections. Two runs of "npm test | grep FAIL > out.txt" and "npm test"
+ * are the same check, and the model should not have to run the second one to
+ * learn what the first one said.
+ */
+export function checkKeyFor(command: string): string {
+	// "cd /repo && npm test" is the check "npm test"; the directory change is
+	// how the model reached it, not what it ran.
+	const withoutDirChange = command.replace(DIR_CHANGE_PREFIX_RE, "");
+	const head = withoutDirChange.split(CHECK_SPLIT_RE)[0] ?? withoutDirChange;
+	return head.replace(REDIRECTION_RE, " ").replace(WHITESPACE_RE, " ").trim().toLowerCase();
+}
+
+/**
+ * What a failed check said the last time it ran.
+ *
+ * The model re-runs a failing check to find out whether the failure is its
+ * own, and it re-runs it a third time to confirm the answer did not change.
+ * Each of those runs costs the check's price — a full suite is a minute.
+ * Remembering the earlier output puts the two side by side without the
+ * second run.
+ *
+ * The statement is deliberately factual: "this check failed then too, and
+ * here is what it said". Whether the failure belongs to the change is the
+ * model's call, not the harness's.
+ */
+export interface CheckMemory {
+	/** The iteration the check last failed on. */
+	turn: number;
+	/** Whether the model has already been told. */
+	shown?: boolean;
+}
+
+export function noteEarlierCheck(
+	batch: ToolCallResult[],
+	memory: Map<string, CheckMemory>,
+	turn: number,
+	commands: Map<string, string>,
+	lastMutationTurn: number,
+): void {
+	for (const call of batch) {
+		if (call.name !== "bash" || call.result.isError !== true) continue;
+		const command = commands.get(call.id);
+		if (!command) continue;
+		const key = checkKeyFor(command);
+		if (!key) continue;
+		const earlier = memory.get(key);
+		if (!earlier) {
+			memory.set(key, { turn });
+			continue;
+		}
+		// Told once per check: the model has it in the conversation from then
+		// on, and a reminder on every later failure would grow the context
+		// with a fact it already has.
+		if (earlier.shown) continue;
+		earlier.shown = true;
+		// The part the model cannot work out for itself: whether anything has
+		// changed since the check last failed. If nothing has, running it
+		// again cannot tell it anything new — and a full suite is a minute.
+		const unchanged = lastMutationTurn <= earlier.turn;
+		call.result = {
+			...call.result,
+			content: `${call.result.content}\n\n<system-reminder>This check failed earlier too (turn ${earlier.turn})${unchanged ? "; no edit or write since" : ""}. Its earlier output is in that turn.</system-reminder>`,
 		};
 	}
 }
