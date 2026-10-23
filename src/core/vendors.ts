@@ -458,7 +458,12 @@ export function getDefaultReasoningLevel(
 				preferred = "off";
 				break;
 		}
-		if (modelId.includes("minimax")) preferred = minimaxUsesEffort(model) ? "max" : "enabled";
+		// The M3.1 family's default depth is cast's, not the provider's: the
+		// provider would think at "max", which measured both slower and less
+		// steady on the behaviour bench (39/39 tool contracts and 11/12 of the
+		// cases that used to flip, at half the wall time). "low" is the
+		// cheapest depth there is, and the picker opens on it.
+		if (modelId.includes("minimax")) preferred = minimaxUsesEffort(model) ? "low" : "enabled";
 	}
 
 	return options.some((option) => option.value === preferred) ? preferred : (options[0]?.value ?? "unknown");

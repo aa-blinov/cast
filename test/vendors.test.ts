@@ -578,10 +578,16 @@ describe("buildReasoningParams", () => {
 		// "off" is cast's default level and is valid for most providers; on the
 		// MiniMax models that require thinking it is not in the option list, so
 		// it resolves to the model's own default instead of 400ing the request.
-		expect(resolveReasoningLevel("off", null, "minimax", "MiniMax-M3.1-Flash")).toBe("max");
-		expect(resolveReasoningLevel("adaptive", null, "minimax", "MiniMax-M3.1-Flash")).toBe("max");
+		expect(resolveReasoningLevel("off", null, "minimax", "MiniMax-M3.1-Flash")).toBe("low");
+		expect(resolveReasoningLevel("adaptive", null, "minimax", "MiniMax-M3.1-Flash")).toBe("low");
 		expect(resolveReasoningLevel("high", null, "minimax", "MiniMax-M3.1-Flash")).toBe("high");
 		expect(resolveReasoningLevel("low", null, "minimax", "MiniMax-M3.1-Flash")).toBe("low");
+		expect(resolveReasoningLevel("max", null, "minimax", "MiniMax-M3.1-Flash")).toBe("max");
+		// The family's own default is cast's, not the provider's: measured on
+		// the behaviour bench, the cheapest depth was both the steadiest and
+		// the fastest.
+		expect(getDefaultReasoningLevel(null, "minimax", "MiniMax-M3.1-Flash")).toBe("low");
+		expect(getDefaultReasoningLevel(null, "minimax", "MiniMax-M3")).toBe("enabled");
 		// "off" and "disabled" are the same request — a saved "off" on a model
 		// that spells the level "disabled" is not a level it cannot run.
 		expect(resolveReasoningLevel("off", null, "minimax", "MiniMax-M3")).toBe("disabled");

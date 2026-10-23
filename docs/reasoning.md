@@ -87,10 +87,16 @@ MiniMax's M3.1 family is the exception to "off is a request". MiniMax's own docu
 (platform.minimax.io/docs/guides/text-generation, read 2026-10-23): "thinking cannot be turned off.
 Sending `thinking: {"type": "disabled"}` or `effort: "none"` returns 400", and the depth is set
 with `reasoning_effort` — `low`, `medium`, `high`, `xhigh`, `max`, defaulting to `max`. Cast sends
-`reasoning_effort` for those models, offers their five depths in the picker, and falls back to the
-provider's default for a level left over from another provider instead of failing the request. The
-older MiniMax models (M3, M2.7, M2.5) keep the older `thinking: { type: "adaptive" | "disabled" }`
-vocabulary — they ignore `reasoning_effort` entirely.
+`reasoning_effort` for those models and offers their five depths in the picker. The older MiniMax
+models (M3, M2.7, M2.5) keep the older `thinking: { type: "adaptive" | "disabled" }` vocabulary —
+they ignore `reasoning_effort` entirely.
+
+Cast's own default for the M3.1 family is `low`, not the provider's `max`: measured on the behaviour
+bench with MiniMax-M3.1-Flash, three runs of thirteen tool-contract cases and three runs of the four
+cases that used to flip between runs, `low` scored 39/39 and 11/12 at about half the wall time, where
+`max` scored 36/39 and 7/12. A level left over from another provider resolves to that default rather
+than failing the request. Raise it for a task that needs the thinking: `/reasoning` in the terminal,
+`--reasoning <level>` for one run.
 
 Two more things MiniMax's parameter table says, and cast leans on both: the thinking tokens count
 toward `max_tokens` (a budget that is too small ends the turn with `finish_reason: "length"` and an

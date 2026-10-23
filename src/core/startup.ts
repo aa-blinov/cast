@@ -474,7 +474,12 @@ export async function runStartup(
 
 	// Reasoning: CLI > saved (same model) > interactive.
 	if (unconfigured) {
-		config.reasoningLevel = "off";
+		// No provider yet, but the model may still be known from the settings,
+		// and the level that model can take is worth resolving now: a fresh
+		// install on MiniMax's M3.1 family should start on the depth cast
+		// measured, not on the provider's deepest.
+		config.reasoningLevel = resolveReasoningLevel("off", null, config.reasoningFormat, model);
+		config.reasoningParams = buildReasoningParams(config.reasoningLevel, config.reasoningFormat, model);
 	} else if (args.cliReasoning) {
 		config.reasoningLevel = args.cliReasoning;
 		config.reasoningParams = buildReasoningParams(args.cliReasoning, config.reasoningFormat, model);
