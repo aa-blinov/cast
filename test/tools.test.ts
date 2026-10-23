@@ -717,6 +717,17 @@ describe("read", () => {
 		expect(result.content).toContain("the line itself is larger than the output limit");
 	});
 
+	it("counts the lines the way an editor does: a trailing newline ends the last line", async () => {
+		// "alpha\n" is one line. Splitting it produced a phantom empty second
+		// one, and the model read that phantom as content it had to check
+		// again — it ran `diff` to confirm what `read` had already shown.
+		writeFileSync(join(TEST_DIR, "one-line.txt"), "alpha\n");
+		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const result = await exec("read", { path: "one-line.txt" });
+		expect(result.content).toContain("1: alpha");
+		expect(result.content).not.toContain("2: ");
+	});
+
 	it("caps output by bytes across multiple long lines, stopping on a line boundary", async () => {
 		const lineCount = 40;
 		const line = `${"y".repeat(3000)}\n`;
@@ -724,7 +735,9 @@ describe("read", () => {
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("read", { path: "many-long-lines.txt" });
 		expect(Buffer.byteLength(result.content, "utf-8")).toBeLessThanOrEqual(mockConfig.maxToolOutputBytes);
-		expect(result.content).toMatch(new RegExp(`Showing lines 1-\\d+ of ${lineCount + 1}.*stopped at`));
+		// 40 lines, not 41: a trailing newline ends the last line, it does
+		// not start an empty one.
+		expect(result.content).toMatch(new RegExp(`Showing lines 1-\\d+ of ${lineCount}.*stopped at`));
 		expect(result.content).toContain("Use offset=");
 	});
 
