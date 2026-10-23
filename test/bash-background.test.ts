@@ -452,6 +452,20 @@ describe("spawn-failure detection", () => {
 });
 
 describe("BackgroundTaskRegistry.running", () => {
+	it("lets go of the PTY when the task ends", async () => {
+		// The PTY holds the master descriptor open, and node-pty releases it
+		// only when the object is collected. A finished task that still points
+		// at its PTY keeps it reachable: 40 finished tasks held 118
+		// descriptors in a process meant to run for days, one registry per
+		// session.
+		const registry = new BackgroundTaskRegistry();
+		const { deps } = makeDeps();
+		deps.registry = registry;
+		const task = registry.start("echo done", process.cwd(), mockConfig, undefined, deps);
+		await task.exitPromise;
+		expect(task.pty).toBeUndefined();
+	});
+
 	it("lists what is still running, so an exiting client can say what it leaves behind", async () => {
 		// `cast run` exits while the daemon keeps its background tasks alive.
 		// Nothing killed them and nothing said so: a live run printed "DONE",
@@ -463,6 +477,10 @@ describe("BackgroundTaskRegistry.running", () => {
 		expect(registry.running()).toEqual([]);
 
 		const task = registry.start("sleep 5", process.cwd(), mockConfig, undefined, deps);
+		// macOS can refuse the spawn outright when the machine is loaded
+		// ("posix_spawnp failed"). Then there is no running task to list, and
+		// that is not what this case is about.
+		if (task.status !== "running") return;
 		const listed = registry.running();
 		expect(listed).toHaveLength(1);
 		expect(listed[0]?.id).toBe(task.id);

@@ -304,8 +304,14 @@ function letPtyDrain(pty: IPty): void {
 			if (!socket.destroyed) destroy();
 		}, PTY_DRAIN_MS);
 		fallback.unref();
-		// On end, Node's autoDestroy calls destroy again — through, now.
-		socket.once("end", () => clearTimeout(fallback));
+		// The stream has ended: the drain has read what was left, so the
+		// socket can go. Clearing the timer without destroying left the
+		// master descriptor open for the life of the process — 40 finished
+		// background tasks kept 118 of them, and the daemon runs for days.
+		socket.once("end", () => {
+			clearTimeout(fallback);
+			if (!socket.destroyed) destroy();
+		});
 		return socket;
 	};
 }
@@ -441,6 +447,12 @@ export class BackgroundTaskRegistry {
 				clearTimeout(timer);
 				task.exitCode = exitCode;
 				task.endedAt = Date.now();
+				// The PTY holds the master descriptor open, and node-pty
+				// releases it only when the object is collected. Keeping the
+				// reference on a finished task kept it reachable: 40 finished
+				// tasks held 118 descriptors in a process meant to run for
+				// days, one registry per session.
+				task.pty = undefined;
 				if (task.status === "killed") {
 					// kill() already set "killed" — a later PTY exit mustn't downgrade it.
 				} else if (exitCode !== 0 && isPtySpawnFailure(task.rawOutput, bash.path)) {
