@@ -2,6 +2,25 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.58.0
+
+### Added
+- **MiniMax's newest models think by depth, and cast speaks that language.** `MiniMax-M3.1-Flash` cannot turn its thinking off — the API answers `400 … requires adaptive thinking` — and its depth is set with `reasoning_effort` (`low`, `medium`, `high`, `xhigh`, `max`). Cast sends that field for the M3.1 family, offers their five depths in the reasoning picker, and resolves a level left over from another provider to the model's own default instead of failing every request with a 400. The older MiniMax models keep the vocabulary they honour (`thinking: { type: "adaptive" | "disabled" }`).
+- **A script that runs cast and mcode against the same task, the same model, the same repository and the same grading.** `scripts/compare-with-mcode.mjs` ships with four tasks — a one-line comparison bug, a function to implement from a spec, a parser that does not strip `\r`, and a money-in-cents bug that spans six modules — and a hidden test the agent never sees, so "the tests pass" cannot mean "the agent's own tests pass". [docs/harness-comparison.md](harness-comparison.md) has the method and the measurements.
+
+### Fixed
+- **A bash call could not run at all.** On macOS, node-pty runs every command through a prebuilt helper that has to be executable, and an install that skipped scripts (`npm install --ignore-scripts`) left it without that bit: the module loaded, every `pty.spawn` threw `posix_spawnp failed`, and every `bash` call in the session died with it. Cast now checks whether a shell can actually start before it takes the PTY path (and falls back to plain foreground execution when it cannot), `npm run pty:fix` puts the bit back, and the reason is reported instead of a bare failure.
+- **A background task that failed to start reported that it had started.** The model was told "Started in the background as bg-1" for a task whose shell had never run, and then waited for output that could not arrive. It is now reported as the failure it was, and a shell that is not on `PATH` is named as such on every platform.
+- **A file's trailing newline was counted as an extra line.** `read` showed `alpha\n` as two lines, the second one empty — a phantom the model read as content it had to double-check, which cost it a `diff` to confirm what `read` had already shown. Lines are counted the way an editor counts them, and `read` says to pass `offset`/`limit` when a line range is asked for.
+- **The harness on macOS.** Twenty-two tests failed there for platform reasons and were hiding real bugs: the snapshot repository was refused because a resolved temp path was compared with an unresolved one, the directory watcher re-indexed ignored folders and reported a path that did not exist, a context file was counted twice on a case-insensitive filesystem, and the tests compared `/var/...` with `/private/var/...`.
+- **A tool that says the thing does not exist is an answer, not a failure to retry.** An MCP lookup that reports "no such entry" now says so in the tool result — where the model decides what to do next — instead of reading like a transient failure that invited a dozen spelling variants and, finally, an answer about a different item.
+- **The same tool failing over and over is noticed.** The doom-loop guard saw identical calls and the repeated-output guard saw identical results; between them a model that failed the same lookup with different arguments slipped through. After three failures in a row the result says so.
+- **A check that failed twice in one session now says so, and says whether anything changed since.** The model no longer has to run a check again to learn whether the failure is its own: the earlier turn is named, and — the part it cannot work out itself — whether any edit or write has run since.
+
+### Changed
+- **The verification prompt says what a check costs.** The same check, but the narrowest one that shows the failure; one run per kind; to learn whether a failure is yours, that one test on the unmodified source; a check that passed on code you have not changed since still holds. Measured on one real task: 62 tool calls became 50, and the context sent to the provider fell from 5.2M to 2.2M tokens, with the same result.
+- **MiniMax's M3.1 family starts on the cheapest thinking depth.** The provider would think at `max`; measured over the behaviour bench, `low` was both steadier (39/39 tool contracts and 11/12 of the cases that used to flip, against 36/39 and 7/12 at `max`) and about twice as fast. `/reasoning` raises it for the tasks that need the thinking.
+
 ## 0.57.5
 
 ### Fixed

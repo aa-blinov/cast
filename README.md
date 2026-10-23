@@ -42,7 +42,7 @@ The first launch asks for a persona, then a provider URL and an API key, then a 
 Pin a version by putting `CAST_VERSION` in front of the install command, and upgrade later with `cast upgrade`:
 
 ```bash
-CAST_VERSION=0.57.5 curl -fsSL https://aa-blinov.github.io/cast/install | bash
+CAST_VERSION=0.58.0 curl -fsSL https://aa-blinov.github.io/cast/install | bash
 ```
 
 ## What it does
