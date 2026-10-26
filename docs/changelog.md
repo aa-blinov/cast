@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.58.3
+
+### Internal
+- Added regression coverage for valid `PermissionRequest` deny decisions, restoring the hook module's committed per-file coverage floor.
+
 ## 0.58.2
 
 ### Added
