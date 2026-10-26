@@ -1,14 +1,5 @@
 import { execFileSync } from "node:child_process";
-import {
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	symlinkSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +17,7 @@ import {
 	renameEntry,
 	saveUpload,
 } from "../src/server/project-fs.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 let root = "";
 let outside = "";
@@ -97,13 +89,13 @@ describe("listDirectory", () => {
 		expect(second.hasMore).toBe(false);
 	});
 
-	it("marks git-ignored entries and resolves symlinks", async () => {
+	it("marks git-ignored entries and resolves symlinks", async (context) => {
 		execFileSync("git", ["init", "-q"], { cwd: root });
 		writeFileSync(join(root, ".gitignore"), "skipped/\n");
 		mkdirSync(join(root, "skipped"));
 		writeFileSync(join(root, "real.txt"), "x");
-		symlinkSync(join(root, "real.txt"), join(root, "link.txt"));
-		symlinkSync(join(root, "nope"), join(root, "broken"));
+		createTestSymlink(context, join(root, "real.txt"), join(root, "link.txt"), "file");
+		createTestSymlink(context, join(root, "nope"), join(root, "broken"), "file");
 		const byName = Object.fromEntries((await listDirectory(root, "")).entries.map((e) => [e.name, e]));
 		expect(byName.skipped?.ignored).toBe(true);
 		expect(byName["real.txt"]?.ignored).toBeFalsy();
@@ -117,8 +109,8 @@ describe("listDirectory", () => {
 		expect(await status(listDirectory(root, "missing"))).toBe(404);
 	});
 
-	it("refuses to leave the root, by path or by symlink", async () => {
-		symlinkSync(outside, join(root, "escape"));
+	it("refuses to leave the root, by path or by symlink", async (context) => {
+		createTestSymlink(context, outside, join(root, "escape"), "dir");
 		expect(await status(listDirectory(root, ".."))).toBe(400);
 		expect(await status(listDirectory(root, "escape"))).toBe(400);
 	});
@@ -138,8 +130,8 @@ describe("createEntry", () => {
 		expect(readFileSync(join(root, "x.txt"), "utf-8")).toBe("keep");
 	});
 
-	it("refuses traversal and symlink escapes", async () => {
-		symlinkSync(outside, join(root, "escape"));
+	it("refuses traversal and symlink escapes", async (context) => {
+		createTestSymlink(context, outside, join(root, "escape"), "dir");
 		expect(await status(createEntry(root, "", "../evil.txt", "file"))).toBe(400);
 		expect(await status(createEntry(root, "escape", "evil.txt", "file"))).toBe(400);
 		expect(readdirSync(outside)).toEqual([]);
@@ -180,9 +172,9 @@ describe("moveEntry", () => {
 		expect(await status(moveEntry(root, "a", "a"))).toBe(400);
 	});
 
-	it("refuses to leave the root", async () => {
+	it("refuses to leave the root", async (context) => {
 		writeFileSync(join(root, "a.txt"), "a");
-		symlinkSync(outside, join(root, "escape"));
+		createTestSymlink(context, outside, join(root, "escape"), "dir");
 		expect(await status(moveEntry(root, "a.txt", "escape"))).toBe(400);
 		expect(await status(moveEntry(root, "a.txt", ".."))).toBe(400);
 	});
@@ -198,10 +190,10 @@ describe("removeTree and deleteEntries", () => {
 		expect(existsSync(join(root, "t"))).toBe(false);
 	});
 
-	it("does not follow a symlink out of the tree", async () => {
+	it("does not follow a symlink out of the tree", async (context) => {
 		writeFileSync(join(outside, "keep.txt"), "x");
 		mkdirSync(join(root, "t"));
-		symlinkSync(outside, join(root, "t", "link"));
+		createTestSymlink(context, outside, join(root, "t", "link"), "dir");
 		await removeTree(join(root, "t"));
 		expect(existsSync(join(outside, "keep.txt"))).toBe(true);
 	});
@@ -215,9 +207,9 @@ describe("removeTree and deleteEntries", () => {
 		expect(existsSync(join(root, ".git"))).toBe(true);
 	});
 
-	it("deletes a symlink itself, not its target", async () => {
+	it("deletes a symlink itself, not its target", async (context) => {
 		writeFileSync(join(outside, "keep.txt"), "x");
-		symlinkSync(outside, join(root, "link"));
+		createTestSymlink(context, outside, join(root, "link"), "dir");
 		const result = await deleteEntries(root, ["link"]);
 		expect(result.deleted).toEqual(["link"]);
 		expect(existsSync(join(outside, "keep.txt"))).toBe(true);
@@ -248,8 +240,8 @@ describe("saveUpload", () => {
 		expect(readdirSync(root)).toEqual([]);
 	});
 
-	it("refuses to write outside the root", async () => {
-		symlinkSync(outside, join(root, "escape"));
+	it("refuses to write outside the root", async (context) => {
+		createTestSymlink(context, outside, join(root, "escape"), "dir");
 		expect(await status(saveUpload(root, upload(["x"]), "escape/evil.txt"))).toBe(400);
 		expect(await status(saveUpload(root, upload(["x"]), "../evil.txt"))).toBe(400);
 		expect(readdirSync(outside)).toEqual([]);

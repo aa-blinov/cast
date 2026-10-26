@@ -2,6 +2,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	closeMcpConnections,
@@ -866,9 +867,11 @@ describe("what a server sends and asks (real spawned server, not mocked)", () =>
 	it("tells a server which folders it may use", async () => {
 		const result = await connect("--progress");
 		try {
-			result.roots = ["/work/alpha", "/work/beta"];
+			const alpha = join(TEST_DIR, "alpha");
+			const beta = join(TEST_DIR, "beta");
+			result.roots = [alpha, beta];
 			const listed = await call(result, "roots");
-			expect(listed.content).toBe("alpha file:///work/alpha\nbeta file:///work/beta");
+			expect(listed.content).toBe(`alpha ${pathToFileURL(alpha).href}\nbeta ${pathToFileURL(beta).href}`);
 		} finally {
 			await closeMcpConnections(result.connections);
 		}

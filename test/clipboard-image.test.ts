@@ -30,7 +30,7 @@ describe("readClipboardImage", () => {
 	it("names the missing helper instead of blaming the clipboard", async () => {
 		// A shell reports a missing binary as exit 127, never ENOENT — which is
 		// why this message was unreachable while the call went through `exec`.
-		respond(() => Object.assign(new Error("Command failed: xclip …"), { code: 127 }));
+		respond((file) => Object.assign(new Error(`Command failed: ${file} …`), { code: 127 }));
 
 		const result = await readClipboardImage();
 

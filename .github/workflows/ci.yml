@@ -8,11 +8,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-15-intel, windows-2022]
         node-version: [22]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v7
@@ -48,6 +49,7 @@ jobs:
         run: npm test
 
       - name: Coverage + per-file floor
+        if: matrix.os == 'ubuntu-latest'
         # Runs the vitest suite with v8 coverage, then checks every
         # tracked file in coverage-baseline.json against its committed
         # line-coverage floor. Global thresholds (lines 70 / branches

@@ -50,30 +50,33 @@ describe("rules", () => {
 	});
 
 	describe("load diagnostics", () => {
-		it("reports a rule file it could not read instead of dropping it silently", () => {
-			// Skipping one bad file is right; skipping it without a word left
-			// `/rules` showing a list with the rule simply absent, which reads as
-			// "cast never saw my file". Skills, MCP and hooks all report their
-			// load failures — rules were the last subsystem that did not.
-			mkdirSync(join(projectDir, ".git"), { recursive: true });
-			const rulesDir = join(projectDir, ".cast", "rules");
-			mkdirSync(rulesDir, { recursive: true });
-			writeFileSync(join(rulesDir, "good.md"), "---\nalways-apply: true\n---\nGood rule.\n");
-			const broken = join(rulesDir, "broken.md");
-			writeFileSync(broken, "---\nalways-apply: true\n---\nUnreadable.\n");
-			chmodSync(broken, 0o000);
-			clearProjectRootCache();
+		it.skipIf(process.platform === "win32")(
+			"reports a rule file it could not read instead of dropping it silently",
+			() => {
+				// Skipping one bad file is right; skipping it without a word left
+				// `/rules` showing a list with the rule simply absent, which reads as
+				// "cast never saw my file". Skills, MCP and hooks all report their
+				// load failures — rules were the last subsystem that did not.
+				mkdirSync(join(projectDir, ".git"), { recursive: true });
+				const rulesDir = join(projectDir, ".cast", "rules");
+				mkdirSync(rulesDir, { recursive: true });
+				writeFileSync(join(rulesDir, "good.md"), "---\nalways-apply: true\n---\nGood rule.\n");
+				const broken = join(rulesDir, "broken.md");
+				writeFileSync(broken, "---\nalways-apply: true\n---\nUnreadable.\n");
+				chmodSync(broken, 0o000);
+				clearProjectRootCache();
 
-			try {
-				const resolved = resolveRulesForCwd(projectDir, true);
-				expect(resolved.directoryRules.map((r) => r.name)).toEqual(["good"]);
-				expect(resolved.diagnostics).toHaveLength(1);
-				expect(resolved.diagnostics[0]).toContain("broken.md");
-				expect(resolved.diagnostics[0]).toMatch(/unreadable|EACCES/i);
-			} finally {
-				chmodSync(broken, 0o644);
-			}
-		});
+				try {
+					const resolved = resolveRulesForCwd(projectDir, true);
+					expect(resolved.directoryRules.map((r) => r.name)).toEqual(["good"]);
+					expect(resolved.diagnostics).toHaveLength(1);
+					expect(resolved.diagnostics[0]).toContain("broken.md");
+					expect(resolved.diagnostics[0]).toMatch(/unreadable|EACCES/i);
+				} finally {
+					chmodSync(broken, 0o644);
+				}
+			},
+		);
 
 		it("reports nothing when every rule file loads", () => {
 			mkdirSync(join(projectDir, ".git"), { recursive: true });

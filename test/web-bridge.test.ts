@@ -3,14 +3,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as checkpointModule from "../src/core/checkpoint.ts";
 import type { AppConfig } from "../src/core/config.ts";
 import { getDb } from "../src/core/db.ts";
+import * as hooksModule from "../src/core/hooks.ts";
 import type { McpSetupResult } from "../src/core/mcp.ts";
 import { getPendingApproval, setPendingApproval } from "../src/core/pending-approval.ts";
 import type { Persona } from "../src/core/personas.ts";
 import { getModelsCache, setModelsCache } from "../src/core/readline.ts";
 import type { Rule } from "../src/core/rules.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
+import { scratchpadFor } from "../src/core/scratchpad.ts";
 import {
 	createSession,
 	getFullHistory,
@@ -35,6 +38,14 @@ const runAgentLoop = vi.fn().mockImplementation(async (messages: unknown) => mes
  *  flaky on a loaded CI runner. */
 function loopRunsFor(sessionId: string): unknown[] {
 	return runAgentLoop.mock.calls.filter((call) => (call[1] as { sessionId?: string })?.sessionId === sessionId);
+}
+function mockCheckpoints() {
+	return vi.spyOn(checkpointModule, "createCheckpoint").mockImplementation(async (cwd) => ({
+		id: `web-bridge-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+		timestamp: new Date().toISOString(),
+		cwd,
+		backups: [],
+	}));
 }
 const mockAskSideQuestion = vi.fn();
 vi.mock("../src/core/btw.ts", async (importOriginal) => ({
@@ -107,6 +118,8 @@ const testConfig: AppConfig = {
 	reasoningLevel: "off",
 	reasoningParams: { body: {} },
 };
+
+const canRunNativePtyTests = process.platform !== "win32" || Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
 const emptyMcp: McpSetupResult = {
 	toolIndex: new Map(),
@@ -182,7 +195,11 @@ describe("web bridge", () => {
 				return;
 			} catch (error) {
 				const code = (error as NodeJS.ErrnoException).code;
-				if ((code !== "ENOTEMPTY" && code !== "EBUSY") || attempt >= 100) throw error;
+				if (
+					(code !== "ENOTEMPTY" && code !== "EBUSY" && (process.platform !== "win32" || code !== "EPERM")) ||
+					attempt >= 100
+				)
+					throw error;
 				// biome-ignore lint/performance/noAwaitInLoops: waits for the background snapshot to finish writing
 				await new Promise((resolve) => setTimeout(resolve, 100));
 			}
@@ -706,7 +723,7 @@ describe("web bridge", () => {
 				ok: true,
 				result: "Invoked skill: recorder",
 			});
-			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
+			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled(), { timeout: 10_000 });
 			const sent = JSON.stringify(runAgentLoop.mock.calls.at(-1)![0]);
 			expect(sent).toContain(`id=${ws.id} args=hello`);
 		});
@@ -722,14 +739,17 @@ describe("web bridge", () => {
 		});
 
 		it("holds a skill's inline command to read-only in plan mode", async () => {
-			install("probe", "out: !`touch " + join(fakeHome, "planned.txt") + "`");
+			install("probe", "out: !`touch planned.txt`");
 			runAgentLoop.mockImplementation(async (messages: unknown) => messages);
 			const bridge = skillsBridge();
 			const ws = bridge.createSession();
 			ws.session.mode = "plan";
-			await bridge.executeCommand(ws.id, "/skill:probe");
-			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled());
-			expect(existsSync(join(fakeHome, "planned.txt"))).toBe(false);
+			await expect(bridge.executeCommand(ws.id, "/skill:probe")).resolves.toMatchObject({
+				ok: true,
+				result: "Invoked skill: probe",
+			});
+			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled(), { timeout: 10_000 });
+			expect(existsSync(join(cwd, "planned.txt"))).toBe(false);
 			expect(JSON.stringify(runAgentLoop.mock.calls.at(-1)![0])).toContain(
 				"plan mode allows read-only commands only",
 			);
@@ -790,7 +810,7 @@ describe("web bridge", () => {
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 		const result = (await bridge.executeCommand(ws.id, "/current")).result as { scratchpad?: string };
-		expect(result.scratchpad).toMatch(new RegExp(`/\\.cast/scratch/${ws.id}$`));
+		expect(result.scratchpad).toBe(scratchpadFor(ws.id, ws.session.cwd ?? process.cwd()));
 	});
 
 	it("/clear empties the session's messages and forgets the size they measured", async () => {
@@ -4896,25 +4916,59 @@ describe("web bridge", () => {
 	});
 
 	it("claims the turn before an async UserPromptSubmit hook so concurrent sends cannot start two loops", async () => {
-		const { mkdirSync, writeFileSync } = await import("node:fs");
+		const checkpoints = mockCheckpoints();
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
 		mkdirSync(join(cwd, ".cast"));
 		writeFileSync(
 			join(cwd, ".cast", "hooks.json"),
-			JSON.stringify({ UserPromptSubmit: [{ hooks: [{ command: "sleep 0.05" }] }] }),
+			JSON.stringify({ UserPromptSubmit: [{ hooks: [{ command: "wait for the test barrier" }] }] }),
 		);
-		const bridge = createServerBridge(makeResult());
-		const ws = bridge.createSession();
+		let releaseHook!: () => void;
+		const hookBarrier = new Promise<void>((resolve) => {
+			releaseHook = resolve;
+		});
+		let releaseLoop!: () => void;
+		const loopBarrier = new Promise<void>((resolve) => {
+			releaseLoop = resolve;
+		});
+		runAgentLoop.mockImplementationOnce(async (messages: unknown) => {
+			await loopBarrier;
+			return messages;
+		});
+		const runHook = vi.spyOn(hooksModule, "runHooksForEvent").mockImplementation(async (_hooks, options) => {
+			if (options.event !== "UserPromptSubmit") return { blocked: false, stdout: "", exitCode: 0 };
+			await hookBarrier;
+			return { blocked: false, stdout: "", exitCode: 0 };
+		});
 
-		void bridge.submit(ws.id, "first message");
-		void bridge.submit(ws.id, "second message");
+		try {
+			void bridge.submit(ws.id, "first message");
+			void bridge.submit(ws.id, "second message");
 
-		expect(ws.status).toBe("running");
-		expect(runAgentLoop).not.toHaveBeenCalled();
-		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
-		await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(1), { timeout: 5000 });
+			expect(ws.status).toBe("running");
+			await vi.waitFor(() => {
+				expect(runHook.mock.calls.some(([, options]) => options.event === "UserPromptSubmit")).toBe(true);
+			});
+			expect(runAgentLoop).not.toHaveBeenCalled();
+			expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+			releaseHook();
+			await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(1), { timeout: 15_000 });
+			// Keep the first loop alive: a second send may queue, but must not
+			// start another loop until the first releases its runner lease.
+			expect(loopRunsFor(ws.id)).toHaveLength(1);
+			releaseLoop();
+			await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(2), { timeout: 15_000 });
+		} finally {
+			releaseHook();
+			releaseLoop();
+			runHook.mockRestore();
+			checkpoints.mockRestore();
+		}
 	});
 
 	it("claims the turn before async provider reconciliation so concurrent sends cannot start two loops", async () => {
+		const checkpoints = mockCheckpoints();
 		let releaseModels!: (value: { ok: boolean; models: Array<{ id: string }> }) => void;
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
@@ -4930,21 +4984,25 @@ describe("web bridge", () => {
 				}),
 		);
 
-		void bridge.submit(ws.id, "first message");
-		void bridge.submit(ws.id, "second message");
+		try {
+			void bridge.submit(ws.id, "first message");
+			void bridge.submit(ws.id, "second message");
 
-		// The claim is synchronous, so the second send can only queue.
-		expect(runAgentLoop).not.toHaveBeenCalled();
-		expect(ws.runner.steeringQueue.hasItems()).toBe(true);
-		releaseModels({ ok: true, models: [{ id: "gpt-4o" }] });
-		await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled(), { timeout: 5000 });
-		// One loop at a time is the invariant here — never two at once...
-		expect(runAgentLoop.mock.calls.length).toBeGreaterThanOrEqual(1);
-		// ...and the queued message is eventually delivered rather than left on
-		// an idle queue forever, which is what used to happen: runAgentLoop is
-		// stubbed here, so nothing drains the queue during the turn and the
-		// stranded-steer net has to pick it up afterwards.
-		await vi.waitFor(() => expect(ws.runner.steeringQueue.hasItems()).toBe(false), { timeout: 10_000 });
+			// The claim is synchronous, so the second send can only queue.
+			expect(runAgentLoop).not.toHaveBeenCalled();
+			expect(ws.runner.steeringQueue.hasItems()).toBe(true);
+			releaseModels({ ok: true, models: [{ id: "gpt-4o" }] });
+			await vi.waitFor(() => expect(runAgentLoop).toHaveBeenCalled(), { timeout: 5000 });
+			// One loop at a time is the invariant here — never two at once...
+			expect(runAgentLoop.mock.calls.length).toBeGreaterThanOrEqual(1);
+			// ...and the queued message is eventually delivered rather than left on
+			// an idle queue forever, which is what used to happen: runAgentLoop is
+			// stubbed here, so nothing drains the queue during the turn and the
+			// stranded-steer net has to pick it up afterwards.
+			await vi.waitFor(() => expect(ws.runner.steeringQueue.hasItems()).toBe(false), { timeout: 10_000 });
+		} finally {
+			checkpoints.mockRestore();
+		}
 	});
 
 	it("runs MessageDisplay hooks for a completed daemon response", async () => {
@@ -5251,12 +5309,17 @@ describe("web bridge", () => {
 	});
 
 	it("follow-up sent after the daemon turns idle starts a new turn", async () => {
+		const checkpoints = mockCheckpoints();
 		const bridge = createServerBridge(makeResult());
 		const ws = bridge.createSession();
 
-		bridge.followUp(ws.id, "after the turn");
-		await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(1), { timeout: 5000 });
-		expect(ws.runner.followUpQueue.hasItems()).toBe(false);
+		try {
+			bridge.followUp(ws.id, "after the turn");
+			await vi.waitFor(() => expect(loopRunsFor(ws.id)).toHaveLength(1), { timeout: 10_000 });
+			expect(ws.runner.followUpQueue.hasItems()).toBe(false);
+		} finally {
+			checkpoints.mockRestore();
+		}
 	});
 
 	it("restarts a turn when follow-up arrives as the previous loop resolves", async () => {
@@ -5579,43 +5642,49 @@ describe("web bridge", () => {
 		// session is fully idle (no turn to steer into) still gets the model's
 		// attention — via the registry's onIdleWake, wired to submit() at session
 		// construction (bridge.ts's makeBackgroundBash), starting a fresh turn.
-		it("a background task finishing while idle wakes a fresh turn with a <system-reminder>", async () => {
-			const bridge = createServerBridge(makeResult());
-			const ws = bridge.createSession();
+		it.skipIf(!canRunNativePtyTests)(
+			"a background task finishing while idle wakes a fresh turn with a <system-reminder>",
+			async () => {
+				const bridge = createServerBridge(makeResult());
+				const ws = bridge.createSession();
 
-			runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
-			await bridge.submit(ws.id, "hello");
-			await new Promise((r) => setTimeout(r, 0));
-			expect(ws.status).toBe("idle");
+				runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
+				await bridge.submit(ws.id, "hello");
+				await new Promise((r) => setTimeout(r, 0));
+				expect(ws.status).toBe("idle");
 
-			runAgentLoop.mockClear();
-			runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
-			ws.backgroundBash.registry.start("echo bg-wake-marker", cwd, testConfig, 5_000, ws.backgroundBash);
-			// Poll up to 5s — the inline `setTimeout(500)` wait was flaky under
-			// parallel-test load (background tasks schedule on the event loop,
-			// not a wall clock). Polling waits on the actual side effect.
-			await waitFor(() => runAgentLoop.mock.calls.length >= 1);
+				runAgentLoop.mockClear();
+				runAgentLoop.mockImplementationOnce(async (messages: unknown[]) => messages);
+				ws.backgroundBash.registry.start("echo bg-wake-marker", cwd, testConfig, 5_000, ws.backgroundBash);
+				// Poll up to 5s — the inline `setTimeout(500)` wait was flaky under
+				// parallel-test load (background tasks schedule on the event loop,
+				// not a wall clock). Polling waits on the actual side effect.
+				await waitFor(() => runAgentLoop.mock.calls.length >= 1);
 
-			expect(runAgentLoop).toHaveBeenCalledTimes(1);
-			const lastMessage = ws.session.messages.at(-1);
-			expect(lastMessage?.role).toBe("user");
-			expect(String(lastMessage?.content)).toContain("<system-reminder>");
-			expect(String(lastMessage?.content)).toContain("bg-wake-marker");
-		});
+				expect(runAgentLoop).toHaveBeenCalledTimes(1);
+				const lastMessage = ws.session.messages.at(-1);
+				expect(lastMessage?.role).toBe("user");
+				expect(String(lastMessage?.content)).toContain("<system-reminder>");
+				expect(String(lastMessage?.content)).toContain("bg-wake-marker");
+			},
+		);
 
-		it("a background task finishing while a turn is still running enqueues onto followUpQueue instead", async () => {
-			const bridge = createServerBridge(makeResult());
-			const ws = bridge.createSession();
-			ws.runner.startRun(new AbortController());
+		it.skipIf(!canRunNativePtyTests)(
+			"a background task finishing while a turn is still running enqueues onto followUpQueue instead",
+			async () => {
+				const bridge = createServerBridge(makeResult());
+				const ws = bridge.createSession();
+				ws.runner.startRun(new AbortController());
 
-			ws.backgroundBash.registry.start("echo bg-followup-marker", cwd, testConfig, 5_000, ws.backgroundBash);
-			await waitFor(() => ws.runner.followUpQueue.hasItems());
+				ws.backgroundBash.registry.start("echo bg-followup-marker", cwd, testConfig, 5_000, ws.backgroundBash);
+				await waitFor(() => ws.runner.followUpQueue.hasItems());
 
-			expect(runAgentLoop).not.toHaveBeenCalled();
-			expect(ws.runner.followUpQueue.hasItems()).toBe(true);
-			const [queued] = ws.runner.followUpQueue.drain();
-			expect(String(queued?.content)).toContain("bg-followup-marker");
-		});
+				expect(runAgentLoop).not.toHaveBeenCalled();
+				expect(ws.runner.followUpQueue.hasItems()).toBe(true);
+				const [queued] = ws.runner.followUpQueue.drain();
+				expect(String(queued?.content)).toContain("bg-followup-marker");
+			},
+		);
 	});
 
 	describe("active provider sync from settings.json", () => {

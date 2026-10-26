@@ -1,15 +1,5 @@
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	statSync,
-	symlinkSync,
-	writeFileSync,
-} from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { MessageQueue } from "../src/core/loop.ts";
@@ -23,6 +13,7 @@ import {
 import { READ_MAX_BYTES, READ_MAX_LINE_CHARS } from "../src/core/tools/files.ts";
 import { isPermissionError, withAccessNote } from "../src/core/tools/search.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 const TEST_ROOT = join(import.meta.dirname, "__test_tmp__");
 let TEST_DIR = "";
@@ -38,6 +29,8 @@ const mockConfig: AppConfig = {
 	maxToolOutputBytes: 64 * 1024,
 	defaultBashTimeoutMs: 10_000,
 };
+
+const canRunNativePtyTests = process.platform !== "win32" || Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
 beforeEach(() => {
 	mkdirSync(TEST_ROOT, { recursive: true });
@@ -334,7 +327,7 @@ function makeBackgroundDeps(running = false) {
 	};
 }
 
-describe("bash — run_in_background", () => {
+describe.skipIf(!canRunNativePtyTests)("bash — run_in_background", () => {
 	it("automatically backgrounds an obvious server command", async () => {
 		const { deps } = makeBackgroundDeps();
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
@@ -589,7 +582,7 @@ describe("web_search tool definition — provider-dependent schema", () => {
 	});
 });
 
-describe("bash_output", () => {
+describe.skipIf(!canRunNativePtyTests)("bash_output", () => {
 	it("keeps a failed background task marked as an error", async () => {
 		const { deps } = makeBackgroundDeps();
 		const exec = createToolExecutor(TEST_DIR, mockConfig, undefined, undefined, undefined, undefined, deps);
@@ -1240,31 +1233,34 @@ describe("glob", () => {
 		expect(existsSync(canary)).toBe(false);
 	});
 
-	it("cancels a real in-flight fd process without falling back to a tree walk", async () => {
-		const binDir = join(TEST_DIR, "slow-fd-bin");
-		mkdirSync(binDir, { recursive: true });
-		const fdPath = join(binDir, "fd");
-		writeFileSync(fdPath, "#!/bin/sh\nexec /bin/sleep 30\n");
-		chmodSync(fdPath, 0o755);
-		const originalPath = process.env.PATH;
-		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
-		const controller = new AbortController();
-		const exec = createToolExecutor(TEST_DIR, mockConfig);
+	it.skipIf(process.platform === "win32")(
+		"cancels a real in-flight fd process without falling back to a tree walk",
+		async () => {
+			const binDir = join(TEST_DIR, "slow-fd-bin");
+			mkdirSync(binDir, { recursive: true });
+			const fdPath = join(binDir, "fd");
+			writeFileSync(fdPath, "#!/bin/sh\nexec /bin/sleep 30\n");
+			chmodSync(fdPath, 0o755);
+			const originalPath = process.env.PATH;
+			process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+			const controller = new AbortController();
+			const exec = createToolExecutor(TEST_DIR, mockConfig);
 
-		try {
-			const start = Date.now();
-			const resultPromise = exec("glob", { pattern: "*.ts", path: TEST_DIR }, controller.signal);
-			await new Promise((resolve) => setTimeout(resolve, 100));
-			controller.abort();
-			const result = await resultPromise;
+			try {
+				const start = Date.now();
+				const resultPromise = exec("glob", { pattern: "*.ts", path: TEST_DIR }, controller.signal);
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				controller.abort();
+				const result = await resultPromise;
 
-			expect(Date.now() - start).toBeLessThan(5000);
-			expect(result).toMatchObject({ isError: true, error: { code: "ABORTED", retryable: false } });
-			expect(result.content).toContain("[ABORTED]");
-		} finally {
-			process.env.PATH = originalPath;
-		}
-	});
+				expect(Date.now() - start).toBeLessThan(5000);
+				expect(result).toMatchObject({ isError: true, error: { code: "ABORTED", retryable: false } });
+				expect(result.content).toContain("[ABORTED]");
+			} finally {
+				process.env.PATH = originalPath;
+			}
+		},
+	);
 });
 
 // ============================================================================
@@ -1390,27 +1386,41 @@ describe("glob and grep: dot-directories", () => {
 });
 
 describe("glob: a timed-out fd", () => {
-	it("reports the timeout instead of searching again another way", async () => {
-		buildNestedTree();
-		// A fake fd that never finishes; `exec` makes sleep the process itself, so the timeout kills the only process.
-		const binDir = join(TEST_DIR, "slow-bin");
-		mkdirSync(binDir, { recursive: true });
-		writeFileSync(join(binDir, "fd"), "#!/bin/sh\nexec sleep 60\n");
-		chmodSync(join(binDir, "fd"), 0o755);
-		const originalPath = process.env.PATH;
-		process.env.PATH = `${binDir}:${originalPath}`;
-		try {
-			const exec = createToolExecutor(NESTED_ROOT, mockConfig);
-			const result = await exec("glob", { pattern: "**/*.ts", path: NESTED_ROOT });
-			expect(result.isError).toBe(true);
-			expect(result.content).toContain("timed out");
-		} finally {
-			process.env.PATH = originalPath;
-		}
-	}, 30_000);
+	it.skipIf(process.platform === "win32")(
+		"reports the timeout instead of searching again another way",
+		async () => {
+			buildNestedTree();
+			// A fake fd that never finishes; `exec` makes sleep the process itself, so the timeout kills the only process.
+			const binDir = join(TEST_DIR, "slow-bin");
+			mkdirSync(binDir, { recursive: true });
+			writeFileSync(join(binDir, "fd"), "#!/bin/sh\nexec sleep 60\n");
+			chmodSync(join(binDir, "fd"), 0o755);
+			const originalPath = process.env.PATH;
+			process.env.PATH = `${binDir}:${originalPath}`;
+			try {
+				const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+				const result = await exec("glob", { pattern: "**/*.ts", path: NESTED_ROOT });
+				expect(result.isError).toBe(true);
+				expect(result.content).toContain("timed out");
+			} finally {
+				process.env.PATH = originalPath;
+			}
+		},
+		30_000,
+	);
 });
 
 describe("glob: no-fd fallback parity", () => {
+	it.skipIf(process.platform !== "win32")("accepts an absolute pattern written with Windows separators", async () => {
+		buildNestedTree();
+		const exec = createToolExecutor(NESTED_ROOT, mockConfig);
+		const result = await withoutFdOnPath(() =>
+			exec("glob", { pattern: join(NESTED_ROOT, "src", "core", "tools", "*.ts") }),
+		);
+		expect(result.content).toContain("src/core/tools/search.ts");
+		expect(result.content).toContain("src/core/tools/files.ts");
+	});
+
 	it("falls back to the JS tree walk when fd is not on PATH", async () => {
 		mkdirSync(NESTED_ROOT, { recursive: true });
 		writeFileSync(join(NESTED_ROOT, "a.ts"), "");
@@ -1502,31 +1512,34 @@ describe("grep", () => {
 		expect(result.content).not.toContain("foo bar");
 	});
 
-	it("cancels a real in-flight rg process without falling back to a content scan", async () => {
-		const binDir = join(TEST_DIR, "slow-rg-bin");
-		mkdirSync(binDir, { recursive: true });
-		const rgPath = join(binDir, "rg");
-		writeFileSync(rgPath, "#!/bin/sh\nexec /bin/sleep 30\n");
-		chmodSync(rgPath, 0o755);
-		const originalPath = process.env.PATH;
-		process.env.PATH = `${binDir}:${originalPath ?? ""}`;
-		const controller = new AbortController();
-		const exec = createToolExecutor(TEST_DIR, mockConfig);
+	it.skipIf(process.platform === "win32")(
+		"cancels a real in-flight rg process without falling back to a content scan",
+		async () => {
+			const binDir = join(TEST_DIR, "slow-rg-bin");
+			mkdirSync(binDir, { recursive: true });
+			const rgPath = join(binDir, "rg");
+			writeFileSync(rgPath, "#!/bin/sh\nexec /bin/sleep 30\n");
+			chmodSync(rgPath, 0o755);
+			const originalPath = process.env.PATH;
+			process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+			const controller = new AbortController();
+			const exec = createToolExecutor(TEST_DIR, mockConfig);
 
-		try {
-			const start = Date.now();
-			const resultPromise = exec("grep", { pattern: "needle", path: TEST_DIR }, controller.signal);
-			await new Promise((resolve) => setTimeout(resolve, 100));
-			controller.abort();
-			const result = await resultPromise;
+			try {
+				const start = Date.now();
+				const resultPromise = exec("grep", { pattern: "needle", path: TEST_DIR }, controller.signal);
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				controller.abort();
+				const result = await resultPromise;
 
-			expect(Date.now() - start).toBeLessThan(5000);
-			expect(result).toMatchObject({ isError: true, error: { code: "ABORTED", retryable: false } });
-			expect(result.content).toContain("[ABORTED]");
-		} finally {
-			process.env.PATH = originalPath;
-		}
-	});
+				expect(Date.now() - start).toBeLessThan(5000);
+				expect(result).toMatchObject({ isError: true, error: { code: "ABORTED", retryable: false } });
+				expect(result.content).toContain("[ABORTED]");
+			} finally {
+				process.env.PATH = originalPath;
+			}
+		},
+	);
 
 	it("does not let a pattern break out and run injected shell commands", async () => {
 		const canary = join(TEST_DIR, "injected.txt");
@@ -1706,13 +1719,13 @@ describe("brace expansion", () => {
 // ============================================================================
 
 describe("symlink cycle detection", () => {
-	it("does not loop on circular symlinks", async () => {
+	it("does not loop on circular symlinks", async (context) => {
 		const dirA = join(TEST_DIR, "a");
 		const dirB = join(dirA, "b");
 		mkdirSync(dirB, { recursive: true });
 		writeFileSync(join(dirA, "file.txt"), "");
 		// dirA/b/link -> dirA (cycle!)
-		symlinkSync(dirA, join(dirB, "link"));
+		createTestSymlink(context, dirA, join(dirB, "link"), "dir");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		// Should complete without hanging
@@ -1721,12 +1734,12 @@ describe("symlink cycle detection", () => {
 		expect(result.content).toContain("file.txt");
 	});
 
-	it("follows symlinks but does not revisit targets", async () => {
+	it("follows symlinks but does not revisit targets", async (context) => {
 		const realDir = join(TEST_DIR, "real");
 		const linkDir = join(TEST_DIR, "link");
 		mkdirSync(realDir);
 		writeFileSync(join(realDir, "data.txt"), "");
-		symlinkSync(realDir, linkDir);
+		createTestSymlink(context, realDir, linkDir, "dir");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("glob", { pattern: "data.txt", path: TEST_DIR });
@@ -1734,11 +1747,11 @@ describe("symlink cycle detection", () => {
 		expect(result.content).toContain("data.txt");
 	});
 
-	it("handles self-referencing symlink", async () => {
+	it("handles self-referencing symlink", async (context) => {
 		const selfDir = join(TEST_DIR, "self");
 		mkdirSync(selfDir);
 		writeFileSync(join(selfDir, "ok.txt"), "");
-		symlinkSync(selfDir, join(selfDir, "loop"));
+		createTestSymlink(context, selfDir, join(selfDir, "loop"), "dir");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("glob", { pattern: "ok.txt", path: TEST_DIR, timeout: 5 });
@@ -1840,14 +1853,14 @@ describe("ls", () => {
 		expect(result.content).toContain("subdir/");
 	});
 
-	it("classifies a symlink pointing at a directory as a directory, not a file", async () => {
+	it("classifies a symlink pointing at a directory as a directory, not a file", async (context) => {
 		// entry.isDirectory() reflects the symlink itself (false), not its
 		// target — without following it, this used to print the linked
 		// directory as a "file" with the target inode's meaningless "size"
 		// and no trailing slash.
 		const realDir = join(TEST_DIR, "real");
 		mkdirSync(realDir);
-		symlinkSync(realDir, join(TEST_DIR, "linkdir"));
+		createTestSymlink(context, realDir, join(TEST_DIR, "linkdir"), "dir");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("ls", { path: TEST_DIR });
 		const line = result.content.split("\n").find((l) => l.includes("linkdir"));
@@ -1855,9 +1868,9 @@ describe("ls", () => {
 		expect(line?.trimStart().startsWith("d")).toBe(true);
 	});
 
-	it("still classifies a symlink pointing at a file as a file", async () => {
+	it("still classifies a symlink pointing at a file as a file", async (context) => {
 		writeFileSync(join(TEST_DIR, "real.txt"), "hi");
-		symlinkSync(join(TEST_DIR, "real.txt"), join(TEST_DIR, "linkfile"));
+		createTestSymlink(context, join(TEST_DIR, "real.txt"), join(TEST_DIR, "linkfile"), "file");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("ls", { path: TEST_DIR });
 		const line = result.content.split("\n").find((l) => l.includes("linkfile"));
@@ -1865,8 +1878,8 @@ describe("ls", () => {
 		expect(line?.trimStart().startsWith("f")).toBe(true);
 	});
 
-	it("does not throw on a broken symlink", async () => {
-		symlinkSync(join(TEST_DIR, "does-not-exist"), join(TEST_DIR, "broken-link"));
+	it("does not throw on a broken symlink", async (context) => {
+		createTestSymlink(context, join(TEST_DIR, "does-not-exist"), join(TEST_DIR, "broken-link"), "file");
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
 		const result = await exec("ls", { path: TEST_DIR });
 		expect(result.isError).toBeFalsy();
@@ -2280,14 +2293,15 @@ describe("search path relativization", () => {
 
 		const globbed = await execGlob({ pattern: "*.ts", path: "../proj-extra" }, cwd, mockConfig);
 		const globLines = globbed.content.split("\n").filter((line) => !line.startsWith("[note:"));
-		expect(globLines).toContain(join(sibling, "a.ts"));
+		const portable = (path: string) => path.replaceAll("\\", "/");
+		expect(globLines).toContain(portable(join(sibling, "a.ts")));
 		// The mangled form was a relative path with the sibling's name cut
 		// mid-word — nothing in the output may be relative to cwd here.
-		expect(globLines.every((line) => line.startsWith("/"))).toBe(true);
+		expect(globLines.every((line) => isAbsolute(line) || /^[A-Za-z]:\//.test(line))).toBe(true);
 
 		const grepped = await execGrep({ pattern: "hit", path: "../proj-extra" }, cwd, mockConfig);
 		const grepLines = grepped.content.split("\n").filter((line) => !line.startsWith("[note:"));
-		expect(grepLines[0]).toBe(`${join(sibling, "b.txt")}:1:hit here`);
+		expect(grepLines[0]).toBe(`${portable(join(sibling, "b.txt"))}:1:hit here`);
 	});
 
 	// Regression: an absolute pattern with no `path` searched cwd while the
@@ -2380,7 +2394,7 @@ describe("search fallback when fd/rg are unavailable", () => {
 		const byPath = await withoutPath(() => execGlob({ pattern: "src/*.ts", path: root }, root, mockConfig));
 		const hits = byPath.content.split("\n").filter((l) => !l.startsWith("[note:"));
 		expect(hits).toHaveLength(1);
-		expect(hits[0]!.endsWith(join("pkg", "src", "index.ts"))).toBe(true);
+		expect(hits[0]!.endsWith(join("pkg", "src", "index.ts").replaceAll("\\", "/"))).toBe(true);
 	});
 
 	it("greps file contents itself, with case-insensitivity and context", async () => {
@@ -2489,30 +2503,33 @@ describe("file tools on large files", () => {
 		expect(result.imageDataUrl).toBeUndefined();
 	});
 
-	it("refuses a named pipe instead of blocking on it forever (regression)", async () => {
-		// Opening a FIFO blocks until something opens the other end, and these
-		// tools have no timeout and no cancel path — `read` on one simply never
-		// returned, and the turn sat holding an unanswered tool call. A probe
-		// against the old code had to be killed after ten minutes.
-		const { execEdit, execRead, execWrite } = await import("../src/core/tools/files.ts");
-		const { mkfifoSync } = await import("./helpers/mkfifo.ts");
-		const fifoPath = join(TEST_DIR, "pipe");
-		mkfifoSync(fifoPath);
+	it.skipIf(process.platform === "win32")(
+		"refuses a named pipe instead of blocking on it forever (regression)",
+		async () => {
+			// Opening a FIFO blocks until something opens the other end, and these
+			// tools have no timeout and no cancel path — `read` on one simply never
+			// returned, and the turn sat holding an unanswered tool call. A probe
+			// against the old code had to be killed after ten minutes.
+			const { execEdit, execRead, execWrite } = await import("../src/core/tools/files.ts");
+			const { mkfifoSync } = await import("./helpers/mkfifo.ts");
+			const fifoPath = join(TEST_DIR, "pipe");
+			mkfifoSync(fifoPath);
 
-		const read = await withTimeout(execRead({ path: fifoPath }, TEST_DIR, mockConfig));
-		expect(read.isError).toBe(true);
-		expect(read.content).toContain("named pipe");
+			const read = await withTimeout(execRead({ path: fifoPath }, TEST_DIR, mockConfig));
+			expect(read.isError).toBe(true);
+			expect(read.content).toContain("named pipe");
 
-		const write = await withTimeout(execWrite({ path: fifoPath, content: "x" }, TEST_DIR));
-		expect(write.isError).toBe(true);
-		expect(write.content).toContain("named pipe");
+			const write = await withTimeout(execWrite({ path: fifoPath, content: "x" }, TEST_DIR));
+			expect(write.isError).toBe(true);
+			expect(write.content).toContain("named pipe");
 
-		const edit = await withTimeout(
-			execEdit({ filePath: fifoPath, oldString: "a", newString: "b" }, TEST_DIR, mockConfig),
-		);
-		expect(edit.isError).toBe(true);
-		expect(edit.content).toContain("named pipe");
-	});
+			const edit = await withTimeout(
+				execEdit({ filePath: fifoPath, oldString: "a", newString: "b" }, TEST_DIR, mockConfig),
+			);
+			expect(edit.isError).toBe(true);
+			expect(edit.content).toContain("named pipe");
+		},
+	);
 
 	it("still reads and writes an ordinary file", async () => {
 		const { execRead, execWrite } = await import("../src/core/tools/files.ts");

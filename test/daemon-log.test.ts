@@ -31,23 +31,26 @@ describe("openDaemonLog", () => {
 		expect(existsSync(path)).toBe(true);
 	});
 
-	it("explains an unwritable directory instead of surfacing a bare EACCES", () => {
-		const nested = join(dir, "cast");
-		mkdirSync(nested);
-		chmodSync(nested, 0o500);
-		const path = join(nested, "server.log");
+	it.skipIf(process.platform === "win32")(
+		"explains an unwritable directory instead of surfacing a bare EACCES",
+		() => {
+			const nested = join(dir, "cast");
+			mkdirSync(nested);
+			chmodSync(nested, 0o500);
+			const path = join(nested, "server.log");
 
-		const result = openDaemonLog(path);
+			const result = openDaemonLog(path);
 
-		expect(result.ok).toBe(false);
-		if (result.ok) return;
-		const text = result.failure.lines.join("\n");
-		expect(text).toContain(path);
-		expect(text).toContain(nested);
-		expect(text).toMatch(/writable by this user/);
-		expect(text).toMatch(/EACCES|permission denied/);
-		chmodSync(nested, 0o700);
-	});
+			expect(result.ok).toBe(false);
+			if (result.ok) return;
+			const text = result.failure.lines.join("\n");
+			expect(text).toContain(path);
+			expect(text).toContain(nested);
+			expect(text).toMatch(/writable by this user/);
+			expect(text).toMatch(/EACCES|permission denied/);
+			chmodSync(nested, 0o700);
+		},
+	);
 
 	it("creates a missing directory instead of refusing to start", () => {
 		// `cast server start` can be the first cast command on a machine, with
@@ -61,7 +64,7 @@ describe("openDaemonLog", () => {
 		expect(existsSync(path)).toBe(true);
 	});
 
-	it("still explains a directory it cannot create", () => {
+	it.skipIf(process.platform === "win32")("still explains a directory it cannot create", () => {
 		const nested = join(dir, "cast");
 		mkdirSync(nested);
 		chmodSync(nested, 0o500);

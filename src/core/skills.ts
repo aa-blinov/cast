@@ -20,6 +20,7 @@ import { checkDangerousBash } from "./permissions.ts";
 import { checkReadOnlyCommand } from "./plan.ts";
 import { promptsDir, readRequiredPrompt } from "./prompts.ts";
 import { fileMatchesGlob } from "./rules.ts";
+import { getBashResolution } from "./tools/bash.ts";
 
 const SLUG_RE = /^[a-z0-9-]+$/;
 
@@ -860,7 +861,7 @@ async function runInlineCommands(content: string, cwd: string | undefined, gate:
 			// environment in order ("is X installed" then "which version"), and
 			// running a body's commands in parallel would reorder side effects
 			// the author wrote as a sequence.
-			const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
+			const { stdout, stderr } = await execFileAsync(getBashResolution().path, ["-c", command], {
 				cwd,
 				timeout: INJECTION_TIMEOUT_MS,
 				encoding: "utf-8",

@@ -7,7 +7,6 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
-	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,6 +25,7 @@ import {
 	renderSkillInvocation,
 	uninstallUserSkill,
 } from "../src/core/skills.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__test_tmp_skills__");
 const GLOBAL_DIR = join(TEST_DIR, "global");
@@ -357,15 +357,20 @@ describe("loadSkills discovery", () => {
 		expect(isUninstallableSkill(skills.find((s) => s.name === "only-claude")!)).toBe(false);
 	});
 
-	it("follows symlinked skill directories and files, skips dangling ones, and survives a loop", () => {
+	it("follows symlinked skill directories and files, skips dangling ones, and survives a loop", (context) => {
 		const real = join(TEST_DIR, "real-skills");
 		writeSkill(real, "linked-dir/SKILL.md", { name: "linked-dir", description: "Via a linked directory." });
 		writeSkill(real, "file-src/SKILL.md", { name: "linked-file", description: "Via a linked SKILL.md." });
 		mkdirSync(join(GLOBAL_DIR, "linked-file"), { recursive: true });
-		symlinkSync(join(real, "linked-dir"), join(GLOBAL_DIR, "linked-dir"));
-		symlinkSync(join(real, "file-src", "SKILL.md"), join(GLOBAL_DIR, "linked-file", "SKILL.md"));
-		symlinkSync(join(TEST_DIR, "missing"), join(GLOBAL_DIR, "dangling"));
-		symlinkSync(GLOBAL_DIR, join(GLOBAL_DIR, "loop"));
+		createTestSymlink(context, join(real, "linked-dir"), join(GLOBAL_DIR, "linked-dir"), "dir");
+		createTestSymlink(
+			context,
+			join(real, "file-src", "SKILL.md"),
+			join(GLOBAL_DIR, "linked-file", "SKILL.md"),
+			"file",
+		);
+		createTestSymlink(context, join(TEST_DIR, "missing"), join(GLOBAL_DIR, "dangling"), "file");
+		createTestSymlink(context, GLOBAL_DIR, join(GLOBAL_DIR, "loop"), "dir");
 		const names = loadSkills({ globalDir: GLOBAL_DIR, extraPaths: [] }).skills.map((s) => s.name);
 		expect(names).toContain("linked-dir");
 		expect(names).toContain("linked-file");
@@ -517,12 +522,12 @@ describe("formatSkillInvocation", () => {
 			GLOBAL_DIR,
 			"resource-skill/SKILL.md",
 			{ name: "resource-skill", description: "Uses bundled resources." },
-			"Read references/REFERENCE.md, copy assets/template.txt, then run scripts/render.sh.",
+			"Read references/REFERENCE.md, copy assets/template.txt, then run scripts/render.cjs with Node.",
 		);
 		mkdirSync(join(skillDir, "scripts"), { recursive: true });
 		mkdirSync(join(skillDir, "references"), { recursive: true });
 		mkdirSync(join(skillDir, "assets"), { recursive: true });
-		writeFileSync(join(skillDir, "scripts", "render.sh"), "#!/bin/sh\nprintf rendered\n", "utf-8");
+		writeFileSync(join(skillDir, "scripts", "render.cjs"), 'process.stdout.write("rendered");\n', "utf-8");
 		writeFileSync(join(skillDir, "references", "REFERENCE.md"), "Reference content", "utf-8");
 		writeFileSync(join(skillDir, "assets", "template.txt"), "Template content", "utf-8");
 
@@ -532,7 +537,9 @@ describe("formatSkillInvocation", () => {
 		expect(invocation).toContain("references/REFERENCE.md");
 		expect(readFileSync(join(skillDir, "references", "REFERENCE.md"), "utf-8")).toBe("Reference content");
 		expect(readFileSync(join(skillDir, "assets", "template.txt"), "utf-8")).toBe("Template content");
-		expect(execFileSync("sh", [join(skillDir, "scripts", "render.sh")], { encoding: "utf-8" })).toBe("rendered");
+		expect(execFileSync(process.execPath, [join(skillDir, "scripts", "render.cjs")], { encoding: "utf-8" })).toBe(
+			"rendered",
+		);
 	});
 });
 
@@ -858,10 +865,10 @@ describe("skill fixes from the audit", () => {
 		expect(formatSkillDiagnostics([])).toBe("");
 	});
 
-	it("is quiet when two directories hold the same skill through a link, loud when they are different", () => {
+	it("is quiet when two directories hold the same skill through a link, loud when they are different", (context) => {
 		writeSkill(GLOBAL_DIR, "shared/SKILL.md", { description: "one" });
 		mkdirSync(PROJECT_DIR, { recursive: true });
-		symlinkSync(join(GLOBAL_DIR, "shared"), join(PROJECT_DIR, "shared"));
+		createTestSymlink(context, join(GLOBAL_DIR, "shared"), join(PROJECT_DIR, "shared"), "dir");
 		writeSkill(PROJECT_DIR, "other/SKILL.md", { description: "p" });
 		writeSkill(GLOBAL_DIR, "other/SKILL.md", { description: "g" });
 		const { diagnostics } = loadSkills({ projectDir: PROJECT_DIR, globalDir: GLOBAL_DIR, extraPaths: [] });

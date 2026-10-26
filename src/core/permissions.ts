@@ -99,23 +99,26 @@ const PATH_ARG: Record<string, string> = {
 	lsp: "file_path",
 };
 
+function pathArgument(tool: string, args: Record<string, unknown>): unknown {
+	if (tool === "edit") return args.filePath ?? args.path;
+	return PATH_ARG[tool] ? args[PATH_ARG[tool]] : undefined;
+}
+
+function pathForRule(path: string): string {
+	return sep === "/" ? path : path.split(sep).join("/");
+}
+
 /** What a rule's pattern is matched against for this call, if anything. */
 export function permissionSubject(tool: string, args: Record<string, unknown>, cwd: string): string | undefined {
-	if (tool === EXTERNAL_DIRECTORY) return typeof args.path === "string" ? args.path : undefined;
+	if (tool === EXTERNAL_DIRECTORY) return typeof args.path === "string" ? pathForRule(args.path) : undefined;
 	const value =
-		tool === "bash" || tool === "ssh"
-			? args.command
-			: tool === "web_fetch"
-				? args.url
-				: PATH_ARG[tool]
-					? args[PATH_ARG[tool]]
-					: undefined;
+		tool === "bash" || tool === "ssh" ? args.command : tool === "web_fetch" ? args.url : pathArgument(tool, args);
 	if (typeof value !== "string") return undefined;
 	if (!PATH_ARG[tool]) return value;
 	// Paths as written in rules: relative to the project when inside it.
 	const absolute = resolvePath(value, cwd);
 	const rel = relative(cwd, absolute);
-	return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel.split(sep).join("/") : absolute;
+	return pathForRule(rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : absolute);
 }
 
 function globToRegex(glob: string, separator: "/" | undefined): RegExp {
@@ -140,6 +143,7 @@ function ruleMatches(rule: string, tool: string, subject: string | undefined, pa
 	if (subject === undefined || !rule.endsWith(")")) return false;
 	let pattern = rule.slice(open + 1, -1);
 	if (pathLike && (pattern === "~" || pattern.startsWith("~/"))) pattern = homedir() + pattern.slice(1);
+	if (pathLike) pattern = pathForRule(pattern);
 	return globToRegex(pattern, pathLike ? "/" : undefined).test(subject);
 }
 
@@ -222,8 +226,7 @@ export function externalTarget(
 	readableDirs: string[] = [],
 	writableDirs: string[] = [],
 ): ExternalTarget | undefined {
-	const key = PATH_ARG[tool];
-	const value = key ? args[key] : undefined;
+	const value = pathArgument(tool, args);
 	if (typeof value !== "string" || !value.trim()) return undefined;
 	const path = realPath(resolvePath(value, cwd));
 	if ([cwd, projectRoot, ...writableDirs].some((dir) => within(path, realPath(dir)))) return undefined;

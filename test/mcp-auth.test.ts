@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeMcpConnections, connectMcpServers } from "../src/core/mcp.ts";
 import {
@@ -94,7 +94,7 @@ describe("MCP OAuth (the SDK's own OAuth MCP server, spawned, not mocked)", () =
 		await login.done;
 
 		expect(hasMcpLogin("guarded", url)).toBe(true);
-		expect(statSync(join(home, ".cast", "mcp-auth.json")).mode & 0o777).toBe(0o600);
+		if (process.platform !== "win32") expect(statSync(join(home, ".cast", "mcp-auth.json")).mode & 0o777).toBe(0o600);
 		const result = await connectMcpServers({ guarded: { url } });
 		try {
 			expect(result.diagnostics).toEqual([]);
@@ -184,13 +184,20 @@ createMcpAuthProvider(name, "http://127.0.0.1/" + name).saveTokens({ access_toke
 `,
 		);
 		const names = Array.from({ length: 8 }, (_, i) => `srv${i}`);
+		const homePath = win32.parse(home);
 		try {
 			const children = names.map(
 				(name) =>
 					new Promise<{ name: string; code: number | null; stderr: string }>((resolve) => {
 						const child = spawn(process.execPath, ["--import", "tsx", script, name, go], {
 							cwd: join(import.meta.dirname, ".."),
-							env: { ...process.env, HOME: home },
+							env: {
+								...process.env,
+								HOME: home,
+								USERPROFILE: home,
+								HOMEDRIVE: homePath.root.slice(0, 2),
+								HOMEPATH: home.slice(homePath.root.length),
+							},
 							stdio: ["ignore", "ignore", "pipe"],
 						});
 						let stderr = "";

@@ -92,6 +92,7 @@ async function withClient<T>(
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	vi.mocked(loadSession).mockReset().mockReturnValue(null);
 });
 
 describe("ACP integration", () => {

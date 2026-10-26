@@ -30,6 +30,29 @@ export interface SessionCostRequest {
 	settle(reportedCostUsd: number | undefined): void;
 }
 
+function waitForQueueTurn(previous: Promise<void>, signal?: AbortSignal): Promise<void> {
+	if (!signal) return previous;
+	if (signal.aborted)
+		return Promise.reject(signal.reason ?? new Error("Request aborted while waiting in the cost queue."));
+
+	return new Promise<void>((resolve, reject) => {
+		const onAbort = () => {
+			signal.removeEventListener("abort", onAbort);
+			reject(signal.reason ?? new Error("Request aborted while waiting in the cost queue."));
+		};
+		const onTurn = () => {
+			signal.removeEventListener("abort", onAbort);
+			resolve();
+		};
+
+		signal.addEventListener("abort", onAbort, { once: true });
+		previous.then(onTurn, (error: unknown) => {
+			signal.removeEventListener("abort", onAbort);
+			reject(error);
+		});
+	});
+}
+
 /** Tracks reported provider spend and gates new requests when a session cap is set. */
 export class SessionCostBudget {
 	private capUsd: number | undefined;
@@ -78,8 +101,8 @@ export class SessionCostBudget {
 		this.requestQueue = new Promise<void>((resolve) => {
 			releaseQueue = resolve;
 		});
-		await previous;
 		try {
+			await waitForQueueTurn(previous, signal);
 			await this.waitForActiveRequests(signal);
 			if (signal?.aborted) throw signal.reason ?? new Error("Request aborted before it started.");
 			this.assertAllowed();
@@ -102,16 +125,24 @@ export class SessionCostBudget {
 			settle: (reportedCostUsd) => {
 				if (settled) return;
 				settled = true;
-				if (typeof reportedCostUsd === "number" && Number.isFinite(reportedCostUsd) && reportedCostUsd >= 0) {
-					this.reportedSpendUsd += reportedCostUsd;
-				} else {
-					this.markPriceUnknown();
+				let settlementError: unknown;
+				let settlementFailed = false;
+				try {
+					if (typeof reportedCostUsd === "number" && Number.isFinite(reportedCostUsd) && reportedCostUsd >= 0) {
+						this.reportedSpendUsd += reportedCostUsd;
+					} else {
+						this.markPriceUnknown();
+					}
+				} catch (error) {
+					settlementError = error;
+					settlementFailed = true;
 				}
 				this.activeRequests--;
 				if (this.activeRequests === 0) {
 					for (const resolve of this.drainedWaiters.splice(0)) resolve();
 				}
 				releaseQueue();
+				if (settlementFailed) throw settlementError;
 			},
 		};
 	}

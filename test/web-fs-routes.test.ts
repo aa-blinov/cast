@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { invalidateProjectFiles } from "../src/core/file-search.ts";
 import type { ServerBridge } from "../src/server/bridge.ts";
 import { startServer } from "../src/server/server.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 let server: ReturnType<typeof startServer>;
 let origin = "";
@@ -119,8 +120,8 @@ describe("mutations", () => {
 		expect(found.total).toBe(1);
 	});
 
-	it("refuses to leave the project", async () => {
-		symlinkSync(outside, join(project, "escape"));
+	it("refuses to leave the project", async (context) => {
+		createTestSymlink(context, outside, join(project, "escape"), "dir");
 		expect((await send("POST", "/fs/create", { path: "escape", name: "evil.txt", type: "file" })).status).toBe(400);
 		expect((await send("POST", "/fs/move", { path: "..", to: "" })).status).toBeGreaterThanOrEqual(400);
 		expect((await get("/fs?path=escape")).status).toBe(400);

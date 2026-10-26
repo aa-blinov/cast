@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventSource } from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetDbConnectionForTests } from "../src/core/db.ts";
 import { createSession, saveSession } from "../src/core/session.ts";
+import { stopSqliteReader } from "../src/core/sqlite-reader.ts";
 import type { StartupResult } from "../src/core/startup.ts";
 import { apiV1OpenApiDocument } from "../src/server/api-v1.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
@@ -26,8 +28,6 @@ vi.mock("../src/core/loop.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/loop.ts")>();
 	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
 });
-
-const { resetDbConnectionForTests } = await import("../src/core/db.ts");
 
 const LOOPBACK_TOKEN = "test-loopback-token";
 
@@ -140,6 +140,7 @@ afterEach(async () => {
 	server.closeAllConnections?.();
 	server.close();
 	await once(server, "close");
+	await stopSqliteReader();
 	resetDbConnectionForTests();
 	if (previousDbPath === undefined) delete process.env.CAST_SESSIONS_DB;
 	else process.env.CAST_SESSIONS_DB = previousDbPath;
