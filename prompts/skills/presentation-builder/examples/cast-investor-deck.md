@@ -14,7 +14,7 @@ This is the cast investor deck I built using this skill. Read it once to interna
 | 1 | Title | cast — Role-based terminal agent harness |
 | 2 | Problem | LLM-агенты сильны в коде, но слабы в суждении |
 | 3 | Insight | Роль — это не косметика (3 arxiv citations as cards) |
-| 4 | Solution | 20 personas · same tools · different judgment (4 columns) |
+| 4 | Solution | 7 personas · same tools · different judgment (4 columns) |
 | 5 | Demo | One repo · one run · three investigations (3 terminals) |
 | 6 | Product surface | Personas · Skills · MCP · Rules · Sub-agents · Plan (2×3 grid) |
 | 7 | Why now | Commoditization · On-prem · Agent sprawl (3 numbered waves) |

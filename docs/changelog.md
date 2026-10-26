@@ -2,6 +2,20 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.59.0
+
+### Added
+- Spanish translation of the README.
+
+### Fixed
+- Temporary-file guidance now recognizes the canonical system temp directory, including macOS symlink paths and Windows path aliases.
+- Snapshot setup now rejects filesystem roots instead of treating a root directory as a project.
+- Package metadata and the investor-deck example now report seven built-in personas.
+
+### Internal
+- Stabilized cross-platform tests around filesystem watcher startup, temporary-directory cleanup, and Windows Vitest worker reporting.
+- Corrected the README's Vitest file count to match the current suite.
+
 ## 0.58.3
 
 ### Internal

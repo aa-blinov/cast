@@ -42,7 +42,7 @@ The first launch asks for a persona, then a provider URL and an API key, then a 
 Pin a version by putting `CAST_VERSION` in front of the install command, and upgrade later with `cast upgrade`:
 
 ```bash
-CAST_VERSION=0.58.0 curl -fsSL https://aa-blinov.github.io/cast/install | bash
+CAST_VERSION=0.59.0 curl -fsSL https://aa-blinov.github.io/cast/install | bash
 ```
 
 ## What it does
@@ -293,7 +293,7 @@ npm run coverage:check        # the per-file coverage floor
 npm run e2e:plan              # a plan-mode smoke test in tmux, against a real provider
 ```
 
-`npm install --ignore-scripts` skips the `prepare` hook, which installs the git hooks. Run `npm run hooks:install` when you want them. The suite is 234 vitest files, named after the module they cover, and it never makes a real provider call: the tests use a fake `baseURL` and `apiKey`. The exception is `test/mcp.test.ts`, which spawns a local test fixture server.
+`npm install --ignore-scripts` skips the `prepare` hook, which installs the git hooks. Run `npm run hooks:install` when you want them. The suite is 243 vitest files, named after the module they cover, and it never makes a real provider call: the tests use a fake `baseURL` and `apiKey`. The exception is `test/mcp.test.ts`, which spawns a local test fixture server.
 
 | Path | What it holds |
 | --- | --- |
