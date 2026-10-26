@@ -195,12 +195,11 @@ describe("external directory", () => {
 
 	it("leaves paths inside the cwd or the project root alone", () => {
 		const proj = join(root, "proj");
+		const externalPath = join(realpathSync(root), "other", "notes.md");
 		expect(externalTarget("read", { path: "a.ts" }, proj, proj)).toBeUndefined();
 		// A session opened in a subdirectory still owns the whole project.
 		expect(externalTarget("edit", { filePath: "../README.md" }, join(proj, "sub"), proj)).toBeUndefined();
-		expect(externalTarget("edit", { path: join(root, "other", "notes.md") }, proj, proj)?.path).toBe(
-			join(root, "other", "notes.md"),
-		);
+		expect(externalTarget("edit", { path: join(root, "other", "notes.md") }, proj, proj)?.path).toBe(externalPath);
 		expect(externalTarget("grep", {}, proj, proj)).toBeUndefined();
 		expect(externalTarget("bash", { command: "cat /etc/hosts" }, proj, proj)).toBeUndefined();
 	});

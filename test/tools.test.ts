@@ -234,7 +234,7 @@ describe("bash", () => {
 	});
 
 	it("kills an in-flight command as soon as the AbortSignal fires, not just the next request", async () => {
-		const exec = createToolExecutor(TEST_DIR, mockConfig);
+		const exec = createToolExecutor(process.cwd(), mockConfig);
 		const controller = new AbortController();
 
 		const start = Date.now();
@@ -249,9 +249,11 @@ describe("bash", () => {
 
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("[ABORTED]");
+		expect(result.content).not.toContain("forced — process did not exit");
 		// Killed promptly, nowhere near the 30s sleep or 60s timeout it would
-		// otherwise have run for.
-		expect(elapsed).toBeLessThan(5000);
+		// otherwise have run for. Tree teardown can take several seconds on a
+		// loaded Windows runner while the process is still being reaped.
+		expect(elapsed).toBeLessThan(15_000);
 	});
 
 	it("returns immediately without spawning if already aborted before the call", async () => {

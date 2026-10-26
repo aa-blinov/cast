@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearProjectRootCache, findProjectRoot, isUnderProjectRoot } from "../src/core/project-root.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 describe("findProjectRoot", () => {
 	let realHome: string | undefined;
@@ -112,6 +113,35 @@ describe("isUnderProjectRoot", () => {
 	it("rejects a sibling whose name merely starts the same", () => {
 		expect(isUnderProjectRoot("/a/b", "/a/bc")).toBe(false);
 		expect(isUnderProjectRoot("/a/b", "/a")).toBe(false);
+	});
+
+	it("keeps lexical containment when the filesystem cannot resolve a path", () => {
+		const base = mkdtempSync(join(tmpdir(), "cast-unresolved-root-"));
+		const root = join(base, "project");
+		mkdirSync(root);
+		const realpath = vi.spyOn(realpathSync, "native").mockImplementation(() => {
+			throw new Error("filesystem unavailable");
+		});
+		try {
+			expect(isUnderProjectRoot(root, join(root, "missing", "file.ts"))).toBe(true);
+		} finally {
+			realpath.mockRestore();
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("treats paths through a symlinked ancestor as the same project", (context) => {
+		const base = mkdtempSync(join(tmpdir(), "cast-under-root-"));
+		try {
+			const root = join(base, "real-project");
+			const alias = join(base, "project-alias");
+			mkdirSync(root);
+			createTestSymlink(context, root, alias, "dir");
+
+			expect(isUnderProjectRoot(root, join(alias, "src", "index.ts"))).toBe(true);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
 	});
 
 	it.skipIf(process.platform !== "win32")("compares Windows paths without case sensitivity", () => {

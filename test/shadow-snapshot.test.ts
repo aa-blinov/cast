@@ -10,7 +10,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	backupFileForCheckpoint,
@@ -155,7 +155,7 @@ describe("snapshots of a folder that is not a git repository", () => {
 
 	it("never snapshots the home directory or the filesystem root", async () => {
 		expect(await fitsInSnapshot(home)).toBe(false);
-		expect(await fitsInSnapshot("/")).toBe(false);
+		expect(await fitsInSnapshot(parse(project).root)).toBe(false);
 		expect((await createCheckpoint(home)).shadowDir).toBeUndefined();
 		expect(existsSync(join(home, ".cast", "shadow")) ? readdirSync(join(home, ".cast", "shadow")) : []).toEqual([]);
 	});
