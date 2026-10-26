@@ -451,6 +451,29 @@ describe("runHooksForEvent", () => {
 		expect(result.permissionRequestResult).toBeUndefined();
 	});
 
+	it("returns a valid PermissionRequest deny decision and message", async () => {
+		const hooks: HooksFile = {
+			PermissionRequest: [
+				{
+					hooks: [
+						{
+							command: `echo '{"hookSpecificOutput":{"decision":{"behavior":"deny","message":"blocked by policy"}}}'`,
+						},
+					],
+				},
+			],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "PermissionRequest",
+			matchTarget: "bash",
+			cwd: "/tmp",
+			payload: { tool_name: "bash" },
+		});
+
+		expect(result.permissionRequestResult).toEqual({ behavior: "deny", message: "blocked by policy" });
+		expect(result.failure).toBeUndefined();
+	});
+
 	it("rejects a non-object PermissionRequest updatedInput", async () => {
 		const hooks: HooksFile = {
 			PermissionRequest: [
