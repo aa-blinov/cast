@@ -17,8 +17,16 @@ import { orderSlashSuggestions } from "./command-palette.ts";
 import { paint } from "./paint.ts";
 
 const TRAILING_SPACES_RE = / +$/;
+const TRAILING_NONSPACE_RE = /\S+$/;
 /** A slash word at the end of the text before the cursor, after whitespace or at a line start. */
 const SLASH_TOKEN_RE = /(?:^|\s)(\/[\w:.-]*)$/;
+
+function pathInMiddleOfText(text: string): boolean {
+	const token = TRAILING_NONSPACE_RE.exec(text)?.[0];
+	if (!token) return false;
+	const beforeToken = text.slice(0, text.length - token.length);
+	return Boolean(beforeToken.trim()) && (token.includes("/") || token.includes("\\") || token.startsWith("."));
+}
 
 /**
  * A slash word typed after other text ("review it with /forge"), where only a skill makes sense. The
@@ -146,6 +154,9 @@ export class CastAutocompleteProvider implements AutocompleteProvider {
 			// Paths in the middle of a line are for Tab; the list that opens by itself holds skills only.
 			if (!options.force) return null;
 		}
+		// A prose path should not open the file picker while it is being typed;
+		// the user can still force path completion with Tab.
+		if (!options.force && pathInMiddleOfText(before)) return null;
 		const mention = atTokenAt(before, before.length);
 		if (!mention) {
 			const found = await this.inner.getSuggestions(lines, cursorLine, cursorCol, options);

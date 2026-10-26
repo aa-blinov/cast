@@ -10,7 +10,7 @@
 import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, extname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
@@ -761,7 +761,8 @@ export function handlesFile(def: Pick<ServerDef, "extensions">, file: string): b
 export function rootFor(def: ServerDef, file: string, boundary: string): string | undefined {
 	const stop = resolve(boundary);
 	let dir = dirname(resolve(file));
-	const within = dir === stop || dir.startsWith(`${stop}/`);
+	const rel = relative(stop, dir);
+	const within = rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 	while (true) {
 		if (def.excludeMarkers?.some((m) => hasMarker(dir, m))) return undefined;
 		if (def.rootMarkers.some((m) => hasMarker(dir, m))) return dir;

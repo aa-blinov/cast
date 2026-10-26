@@ -21,7 +21,7 @@ import { randomUUID } from "node:crypto";
 import { createWriteStream, type Dirent } from "node:fs";
 import { cp, lstat, mkdir, readdir, realpath, rename, rm, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { invalidateProjectFiles } from "../core/file-search.ts";
@@ -81,8 +81,14 @@ async function inside(cwd: string, target: string): Promise<void> {
 
 /** For acting on an entry itself: it must be under cwd, and its parent really there. */
 async function insideAsEntry(cwd: string, target: string): Promise<void> {
-	if (target === cwd || relative(cwd, target).startsWith("..")) throw new FsError(400, "Invalid path");
+	const rel = relative(cwd, target);
+	if (target === cwd || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+		throw new FsError(400, "Invalid path");
 	if (!(await isInsideRootAsync(cwd, dirname(target)))) throw new FsError(400, "Path outside project");
+}
+
+function portablePath(path: string): string {
+	return path.split(sep).join("/");
 }
 
 const isCode = (error: unknown, ...codes: string[]): boolean =>
@@ -243,7 +249,7 @@ export async function listDirectory(
 		}),
 		gitIgnored(
 			cwd,
-			page.map((row) => join(relDir, row.name)),
+			page.map((row) => portablePath(join(relDir, row.name))),
 		),
 	]);
 	const entries: DirEntry[] = page.map((row, i) => {
@@ -253,14 +259,14 @@ export async function listDirectory(
 			entry.size = detail.size;
 			entry.mtimeMs = detail.mtimeMs;
 		}
-		const isIgnored = ignored ? ignored.has(join(relDir, row.name)) : HEAVY_FOLDERS.has(row.name);
+		const isIgnored = ignored ? ignored.has(portablePath(join(relDir, row.name))) : HEAVY_FOLDERS.has(row.name);
 		if (isIgnored) entry.ignored = true;
 		if (row.link) entry.link = true;
 		if (row.broken) entry.broken = true;
 		return entry;
 	});
 	return {
-		path: relDir,
+		path: portablePath(relDir),
 		entries,
 		total: rows.length,
 		offset,
@@ -290,7 +296,7 @@ export async function createEntry(
 		throw fsError(error);
 	}
 	invalidateProjectFiles(cwd);
-	return { path: relative(cwd, dest), type };
+	return { path: portablePath(relative(cwd, dest)), type };
 }
 
 /** Renames in place: `name` is one segment, never a path, so this can't turn into a move. */
@@ -301,7 +307,7 @@ export async function renameEntry(cwd: string, rel: string, name: string): Promi
 	if (!rel) throw new FsError(400, "Invalid path");
 	await insideAsEntry(cwd, target);
 	const dest = join(dirname(target), trimmed);
-	if (dest === target) return { path: relative(cwd, dest) };
+	if (dest === target) return { path: portablePath(relative(cwd, dest)) };
 	try {
 		const source = await lstat(target);
 		try {
@@ -318,7 +324,7 @@ export async function renameEntry(cwd: string, rel: string, name: string): Promi
 		throw fsError(error);
 	}
 	invalidateProjectFiles(cwd);
-	return { path: relative(cwd, dest) };
+	return { path: portablePath(relative(cwd, dest)) };
 }
 
 /** Moves an entry into another folder of the project, keeping its name. */
@@ -329,7 +335,7 @@ export async function moveEntry(cwd: string, fromRel: string, toDirRel: string):
 	await insideAsEntry(cwd, from);
 	await inside(cwd, toDir);
 	const dest = join(toDir, basename(from));
-	if (dest === from) return { path: relative(cwd, dest) };
+	if (dest === from) return { path: portablePath(relative(cwd, dest)) };
 	try {
 		const [source, target] = await Promise.all([lstat(from), stat(toDir)]);
 		if (!target.isDirectory()) throw new FsError(400, "Not a folder");
@@ -357,7 +363,7 @@ export async function moveEntry(cwd: string, fromRel: string, toDirRel: string):
 		throw fsError(error);
 	}
 	invalidateProjectFiles(cwd);
-	return { path: relative(cwd, dest) };
+	return { path: portablePath(relative(cwd, dest)) };
 }
 
 const yieldToLoop = (): Promise<void> => new Promise((done) => setImmediate(done));
@@ -479,7 +485,7 @@ export async function saveUpload(
 		throw fsError(error);
 	}
 	invalidateProjectFiles(cwd);
-	return { path: relative(cwd, dest), size };
+	return { path: portablePath(relative(cwd, dest)), size };
 }
 
 /** `bytes=a-b`, `bytes=a-`, `bytes=-n` against a file of `size`; null when there is no usable single range. */

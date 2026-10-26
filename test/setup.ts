@@ -3,6 +3,7 @@ import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { stopSqliteReader } from "../src/core/sqlite-reader.ts";
 import {
 	applyTestEnvironment,
 	createTestEnvironment,
@@ -17,6 +18,15 @@ const originalEnvironment = {
 	HOMEPATH: process.env.HOMEPATH,
 	CAST_CWD: process.env.CAST_CWD,
 	CAST_SESSIONS_DB: process.env.CAST_SESSIONS_DB,
+};
+const gitConfigCount = Number.parseInt(process.env.GIT_CONFIG_COUNT ?? "0", 10);
+const gitConfigIndex = Number.isSafeInteger(gitConfigCount) && gitConfigCount >= 0 ? gitConfigCount : 0;
+const gitConfigKeyName = `GIT_CONFIG_KEY_${gitConfigIndex}`;
+const gitConfigValueName = `GIT_CONFIG_VALUE_${gitConfigIndex}`;
+const originalGitConfig = {
+	count: process.env.GIT_CONFIG_COUNT,
+	key: process.env[gitConfigKeyName],
+	value: process.env[gitConfigValueName],
 };
 // The suite overrides HOME to isolate user data. Windows' os.homedir() only
 // reads USERPROFILE, so mirror that POSIX test convention in this process.
@@ -43,10 +53,15 @@ let testEnvironment: TestEnvironment | undefined;
 beforeEach(() => {
 	testEnvironment = createTestEnvironment();
 	applyTestEnvironment(testEnvironment);
+	process.env.GIT_CONFIG_COUNT = String(gitConfigIndex + 1);
+	process.env[gitConfigKeyName] = "core.autocrlf";
+	process.env[gitConfigValueName] = "false";
 	resetDbConnectionForTests();
 });
 
-afterEach(() => {
+afterEach(async () => {
+	// Windows cannot remove a test database while the read-only worker still holds its WAL handles.
+	await stopSqliteReader();
 	resetDbConnectionForTests();
 	if (testEnvironment) destroyTestEnvironment(testEnvironment);
 	testEnvironment = undefined;
@@ -54,4 +69,10 @@ afterEach(() => {
 		if (value === undefined) delete process.env[key];
 		else process.env[key] = value;
 	}
+	if (originalGitConfig.count === undefined) delete process.env.GIT_CONFIG_COUNT;
+	else process.env.GIT_CONFIG_COUNT = originalGitConfig.count;
+	if (originalGitConfig.key === undefined) delete process.env[gitConfigKeyName];
+	else process.env[gitConfigKeyName] = originalGitConfig.key;
+	if (originalGitConfig.value === undefined) delete process.env[gitConfigValueName];
+	else process.env[gitConfigValueName] = originalGitConfig.value;
 });

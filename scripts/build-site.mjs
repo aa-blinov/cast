@@ -1,11 +1,12 @@
 import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
+import { fileURLToPath } from "node:url";
 import { marked } from "marked";
 import hljs from "highlight.js/lib/common";
 import { apiV1OpenApiDocument } from "../src/server/api-v1.ts";
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DOCS = join(ROOT, "docs");
 const SITE = join(ROOT, "site");
 const PACKAGE_VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf-8")).version;

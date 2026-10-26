@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,8 +27,8 @@ describe("release staging", () => {
 			);
 			expect(result.status, result.stderr).toBe(0);
 			const requireFromBundle = createRequire(join(stage, "dist", "index.js"));
-			expect(requireFromBundle.resolve("@anthropic-ai/sandbox-runtime")).toBe(
-				join(stage, "node_modules", "@anthropic-ai", "sandbox-runtime", "dist", "index.js"),
+			expect(realpathSync(requireFromBundle.resolve("@anthropic-ai/sandbox-runtime"))).toBe(
+				realpathSync(join(stage, "node_modules", "@anthropic-ai", "sandbox-runtime", "dist", "index.js")),
 			);
 			expect(existsSync(join(stage, "node_modules", "@anthropic-ai", "sandbox-runtime", "dist", "cli.js"))).toBe(
 				true,

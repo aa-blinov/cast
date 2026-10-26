@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,6 +10,7 @@ import {
 	exactRule,
 	externalTarget,
 } from "../src/core/permissions.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 describe("checkDangerousBash", () => {
 	it("flags recursive force delete", () => {
@@ -194,9 +195,11 @@ describe("external directory", () => {
 
 	it("leaves paths inside the cwd or the project root alone", () => {
 		const proj = join(root, "proj");
+		const externalPath = join(realpathSync(root), "other", "notes.md");
 		expect(externalTarget("read", { path: "a.ts" }, proj, proj)).toBeUndefined();
 		// A session opened in a subdirectory still owns the whole project.
 		expect(externalTarget("edit", { filePath: "../README.md" }, join(proj, "sub"), proj)).toBeUndefined();
+		expect(externalTarget("edit", { path: join(root, "other", "notes.md") }, proj, proj)?.path).toBe(externalPath);
 		expect(externalTarget("grep", {}, proj, proj)).toBeUndefined();
 		expect(externalTarget("bash", { command: "cat /etc/hosts" }, proj, proj)).toBeUndefined();
 	});
@@ -214,9 +217,9 @@ describe("external directory", () => {
 		expect(externalTarget("ls", { path: join(root, "other") }, proj, proj)?.dir).toBe(other);
 	});
 
-	it("follows a symlink that leads out of the project", () => {
+	it("follows a symlink that leads out of the project", (context) => {
 		const proj = join(root, "proj");
-		symlinkSync(join(root, "other"), join(proj, "escape"));
+		createTestSymlink(context, join(root, "other"), join(proj, "escape"), "dir");
 		expect(externalTarget("write", { path: "escape/x.txt" }, proj, proj)?.path).toBe(
 			join(realpathSync(join(root, "other")), "x.txt"),
 		);

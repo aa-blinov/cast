@@ -115,7 +115,7 @@ describe("saveExport", () => {
 		expect(path).toBe(join(root, ".cast", "exports", exportFileName(s)));
 		expect(existsSync(path)).toBe(true);
 		expect(readFileSync(path, "utf-8")).toContain("## Assistant");
-		expect(statSync(path).mode & 0o077).toBe(0);
+		if (process.platform !== "win32") expect(statSync(path).mode & 0o077).toBe(0);
 		vi.unstubAllEnvs();
 	});
 });

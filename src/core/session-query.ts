@@ -1,3 +1,4 @@
+import { sep } from "node:path";
 import { getDb, sessionsDbPath } from "./db.ts";
 import { findProjectRoot } from "./project-root.ts";
 import { queryReadOnly } from "./sqlite-reader.ts";
@@ -83,6 +84,7 @@ function historyRequest(
 	const ftsQuery = buildSearchQuery(query);
 	if (!ftsQuery) return null;
 	const projectRoot = findProjectRoot(cwd);
+	const projectPrefix = projectRoot.endsWith(sep) ? projectRoot : `${projectRoot}${sep}`;
 	return {
 		sql: `SELECT m.session_id, m.seq, m.role, s.cwd, s.title, s.updated_at,
 				snippet(session_history_fts, 3, '', '', '…', 24) AS snippet,
@@ -98,7 +100,7 @@ function historyRequest(
 		// repository root, or from a sibling subdirectory, which is most of
 		// a project's history once any work happens in subdirectories.
 		params: [
-			...(scope === "project" ? [ftsQuery, projectRoot, `${likePrefix(projectRoot)}/%`] : [ftsQuery]),
+			...(scope === "project" ? [ftsQuery, projectRoot, `${likePrefix(projectPrefix)}%`] : [ftsQuery]),
 			...(excludeSessionId ? [excludeSessionId] : []),
 			Math.max(1, Math.min(limit, MAX_RESULTS)) * CANDIDATE_FACTOR,
 		],

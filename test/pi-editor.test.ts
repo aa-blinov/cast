@@ -122,7 +122,7 @@ describe("a slash word in the middle of a message", () => {
 	});
 
 	it("leaves a path and anything that matches no skill alone", async () => {
-		expect((await provider().getSuggestions(["see /etc/ho"], 0, 11, { signal }))?.prefix).toBe("/etc/ho");
+		expect(await provider().getSuggestions(["see /etc/ho"], 0, 11, { signal })).toBeNull();
 		expect(await provider().getSuggestions(["see /tmp"], 0, 8, { signal })).toBeNull();
 		expect(await provider().getSuggestions(["либо и/или"], 0, 10, { signal })).toBeNull();
 		// Tab still completes a path there.

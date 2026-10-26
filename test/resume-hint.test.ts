@@ -92,11 +92,25 @@ describe("shellInit", () => {
 		writeFileSync(join(dir, "init.sh"), shellInit("bash"));
 		const run = spawnSync(
 			"bash",
-			["--norc", "-i", "-c", `source ${join(dir, "init.sh")}; cast; echo "rc=$?"; history | tail -2`],
-			{ env: { PATH: `${dir}:${process.env.PATH}`, HOME: dir, CAST_HOME: dir, HISTFILE: "" }, encoding: "utf-8" },
+			[
+				"--norc",
+				"-i",
+				"-c",
+				`history() { [ "$1" = "-s" ] && printf '%s\\n' "$3" > "$HISTORY_CAPTURE"; }; source ./init.sh; cast; echo "rc=$?"`,
+			],
+			{
+				cwd: dir,
+				env: {
+					PATH: `${dir}:${process.env.PATH}`,
+					HOME: dir,
+					CAST_HOME: dir,
+					HISTORY_CAPTURE: "history-captured.txt",
+				},
+				encoding: "utf-8",
+			},
 		);
 		expect(run.stdout).toContain("rc=3");
-		expect(run.stdout).toContain("cast --resume=abc123");
+		expect(readFileSync(join(dir, "history-captured.txt"), "utf-8")).toBe("cast --resume=abc123\n");
 		expect(existsSync(join(dir, "last-resume"))).toBe(false);
 	});
 
@@ -119,11 +133,26 @@ describe("shellInit", () => {
 		chmodSync(join(dir, "cast"), 0o755);
 		writeFileSync(join(dir, "last-resume"), "cast --resume=stale\n");
 		writeFileSync(join(dir, "init.sh"), shellInit("bash"));
-		const run = spawnSync("bash", ["--norc", "-i", "-c", `source ${join(dir, "init.sh")}; cast; history | tail -2`], {
-			env: { PATH: `${dir}:${process.env.PATH}`, HOME: dir, CAST_HOME: dir, HISTFILE: "" },
-			encoding: "utf-8",
-		});
-		expect(run.stdout).not.toContain("stale");
+		spawnSync(
+			"bash",
+			[
+				"--norc",
+				"-i",
+				"-c",
+				`history() { [ "$1" = "-s" ] && printf '%s\\n' "$3" > "$HISTORY_CAPTURE"; }; source ./init.sh; cast`,
+			],
+			{
+				cwd: dir,
+				env: {
+					PATH: `${dir}:${process.env.PATH}`,
+					HOME: dir,
+					CAST_HOME: dir,
+					HISTORY_CAPTURE: "history-captured.txt",
+				},
+				encoding: "utf-8",
+			},
+		);
+		expect(existsSync(join(dir, "history-captured.txt"))).toBe(false);
 	});
 
 	it("writes a function for fish as well, without bash syntax", () => {

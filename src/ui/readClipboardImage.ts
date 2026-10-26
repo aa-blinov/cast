@@ -91,6 +91,9 @@ export async function readClipboardImage(): Promise<ClipboardImageResult> {
 		if (platform === "linux" && isCommandNotFound(error)) {
 			return { ok: false, error: "xclip not found — install: apt install xclip" };
 		}
+		if (platform === "win32" && isCommandNotFound(error)) {
+			return { ok: false, error: "PowerShell not found — clipboard image paste requires Windows PowerShell." };
+		}
 		if (isNoImageOnClipboard(error)) return { ok: false, error: null };
 		const message = error instanceof Error ? error.message : String(error);
 		return { ok: false, error: `Couldn't read clipboard: ${message.slice(0, 200)}` };

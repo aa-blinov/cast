@@ -15,7 +15,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { score } from "../pickers/match.ts";
 
 const MAX_FILES = 250_000;
@@ -45,6 +45,10 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 
 const yieldToLoop = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+function portablePath(path: string): string {
+	return path.split(sep).join("/");
+}
 
 /** stdout of a command as separator-split lines; undefined when it fails or times out. */
 function lines(cmd: string, args: string[], cwd: string, separator = "\n"): Promise<string[] | undefined> {
@@ -111,7 +115,8 @@ async function walk(
 		for (const entry of entries) {
 			if (entry.isDirectory()) {
 				if (!skip.has(entry.name)) stack.push(join(dir, entry.name));
-			} else if (entry.isFile() || entry.isSymbolicLink()) files.push(relative(root, join(dir, entry.name)));
+			} else if (entry.isFile() || entry.isSymbolicLink())
+				files.push(portablePath(relative(root, join(dir, entry.name))));
 		}
 	}
 	return { files, capped };
@@ -133,10 +138,12 @@ async function build(cwd: string, includeIgnored: boolean): Promise<ProjectFiles
 	// -z: unquoted paths, so a name with spaces or non-ASCII comes back as is.
 	// --cached lists what the index has, files deleted from disk included;
 	// --deleted names exactly those, so they can be taken back out.
-	const [listed, deleted] = await Promise.all([
+	const [listedRaw, deletedRaw] = await Promise.all([
 		lines("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd, "\0"),
 		lines("git", ["ls-files", "-z", "--deleted"], cwd, "\0"),
 	]);
+	const listed = listedRaw?.map(portablePath);
+	const deleted = deletedRaw?.map(portablePath);
 	if (listed) {
 		const gone = new Set(deleted ?? []);
 		const files = (gone.size > 0 ? listed.filter((file) => !gone.has(file)) : listed).slice(0, MAX_FILES);
@@ -144,7 +151,7 @@ async function build(cwd: string, includeIgnored: boolean): Promise<ProjectFiles
 	}
 	const ripgrep = await lines("rg", ["--files"], cwd);
 	if (ripgrep) {
-		const files = ripgrep.slice(0, MAX_FILES);
+		const files = ripgrep.map(portablePath).slice(0, MAX_FILES);
 		return { files, dirs: directoriesOf(files), capped: ripgrep.length > MAX_FILES };
 	}
 	const walked = await walk(cwd, WALK_SKIP, MAX_FILES);

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -25,6 +25,7 @@ import {
 	resolvePlanQuestion,
 	slugifyPlanName,
 } from "../src/core/plan.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 const TEST_PLANS_DIR = join(import.meta.dirname, "__test_tmp__", "plans");
 
@@ -342,7 +343,7 @@ describe("plan", () => {
 			expect(checkPlanFileGate(path, state).ok).toBe(false);
 		});
 
-		it("rejects a plan file that is a symlink pointing out of plansDir", () => {
+		it("rejects a plan file that is a symlink pointing out of plansDir", (context) => {
 			// write follows symlinks, so without resolving them a link planted
 			// during an earlier build-mode turn lets a write in "read-only"
 			// plan mode land wherever it points — after the user switched modes
@@ -352,7 +353,7 @@ describe("plan", () => {
 			const target = join(TEST_PLANS_DIR, "secret-outside.md");
 			writeFileSync(target, "ORIGINAL");
 			const link = join(state.plansDir, "plan.md");
-			symlinkSync(target, link);
+			createTestSymlink(context, target, link, "file");
 
 			expect(isPlanFilePath(link, state.plansDir)).toBe(false);
 			expect(checkPlanFileGate(link, state).ok).toBe(false);

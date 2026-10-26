@@ -175,7 +175,7 @@ export async function resolveProjectTrustForCwd(deps: ProjectResolverDeps, cwd: 
 	const ruleDirs = discoverProjectRuleDirs(findProjectRoot(cwd)).filter(({ dir }) => dirHasRuleFiles(dir));
 	const root = findProjectRoot(cwd);
 	for (const { dir } of ruleDirs.slice(0, MAX_TRUST_RULE_LINES)) {
-		const shown = dir.startsWith(`${root}/`) ? dir.slice(root.length + 1) : dir;
+		const shown = relative(root, dir).split(sep).join("/") || dir;
 		lines.push(`  - ${shown}/ (project rules, written into the system prompt: always-apply, lazy, or manual)`);
 	}
 	if (ruleDirs.length > MAX_TRUST_RULE_LINES)

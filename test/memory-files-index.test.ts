@@ -15,6 +15,8 @@ describe("memory file index", () => {
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "cast-memory-index-"));
+		process.env.HOME = root;
+		process.env.USERPROFILE = root;
 		memoryDir = join(root, "memory");
 		ccDir = join(root, "cc");
 		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");

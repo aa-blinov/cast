@@ -79,6 +79,7 @@ describe("watchDirectories", () => {
 		mkdirSync(join(root, "skipme"));
 		const watcher = start([join(root, "skipme")], (path) => path.includes("skipme"));
 		expect(watcher.size()).toBe(1);
+		await settle();
 		mkdirSync(join(root, "skipme", "inner"));
 		writeFileSync(join(root, "skipme", "x.txt"), "x");
 		await sleep(600);

@@ -68,6 +68,8 @@ describe("project memory", () => {
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "cast-memory-test-"));
+		process.env.HOME = root;
+		process.env.USERPROFILE = root;
 		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
 		process.env.CAST_MEMORY_DIR = join(root, "memory");
 		resetDbConnectionForTests();
@@ -837,8 +839,9 @@ describe("project memory", () => {
 
 	it("reconciles an externally edited project memory file before search", () => {
 		const realHome = process.env.HOME;
-		process.env.HOME = join(root, "home");
-		const projectCwd = join(root, "reconciled-project");
+		const fakeHome = join(root, "home");
+		process.env.HOME = fakeHome;
+		const projectCwd = join(fakeHome, "reconciled-project");
 		const projectId = projectIdForCwd(projectCwd);
 		writeMemoryFile(projectMemoryPath(projectId), "# Project memory\n\n## Rules\n- The first rule is obsolete.\n");
 		reconcileProjectMemoryFiles(projectCwd);
@@ -1085,7 +1088,7 @@ describe("project memory", () => {
 		const realHome = process.env.HOME;
 		const fakeHome = join(root, "home");
 		process.env.HOME = fakeHome;
-		const projectCwd = join(root, "auto-maintenance-project");
+		const projectCwd = join(fakeHome, "auto-maintenance-project");
 		const session = createSession("test-model", projectCwd);
 		saveSession(session);
 		const runAgent = vi.fn(async () => ({ messages: [{ role: "assistant" as const, content: "done" }] }));
@@ -1121,8 +1124,9 @@ describe("project memory", () => {
 
 	it("persists automatic maintenance as an independently inspectable background run", async () => {
 		const realHome = process.env.HOME;
-		process.env.HOME = join(root, "home-background-run");
-		const projectCwd = join(root, "background-run-project");
+		const fakeHome = join(root, "home-background-run");
+		process.env.HOME = fakeHome;
+		const projectCwd = join(fakeHome, "background-run-project");
 		const session = createSession("test-model", projectCwd);
 		saveSession(session);
 		const runAgent = vi.fn(async () => ({ messages: [{ role: "assistant" as const, content: "done" }] }));
@@ -1151,8 +1155,9 @@ describe("project memory", () => {
 
 	it("keeps the automatic scheduler claim durable before an actor is spawned", async () => {
 		const realHome = process.env.HOME;
-		process.env.HOME = join(root, "home-durable-scheduler-claim");
-		const projectCwd = join(root, "durable-scheduler-project");
+		const fakeHome = join(root, "home-durable-scheduler-claim");
+		process.env.HOME = fakeHome;
+		const projectCwd = join(fakeHome, "durable-scheduler-project");
 		const session = createSession("test-model", projectCwd);
 		saveSession(session);
 		getDb()
@@ -1182,8 +1187,9 @@ describe("project memory", () => {
 
 	it("isolates automatic maintenance in its own background session", async () => {
 		const realHome = process.env.HOME;
-		process.env.HOME = join(root, "home-isolated-background-session");
-		const projectCwd = join(root, "isolated-background-session-project");
+		const fakeHome = join(root, "home-isolated-background-session");
+		process.env.HOME = fakeHome;
+		const projectCwd = join(fakeHome, "isolated-background-session-project");
 		const session = createSession("test-model", projectCwd);
 		appendMessage(session, { role: "user", content: "parent conversation" });
 		saveSession(session);
@@ -1230,8 +1236,9 @@ describe("project memory", () => {
 
 	it("cancels an automatic maintenance background run by id", async () => {
 		const realHome = process.env.HOME;
-		process.env.HOME = join(root, "home-cancel-background-run");
-		const projectCwd = join(root, "cancel-background-run-project");
+		const fakeHome = join(root, "home-cancel-background-run");
+		process.env.HOME = fakeHome;
+		const projectCwd = join(fakeHome, "cancel-background-run-project");
 		const session = createSession("test-model", projectCwd);
 		saveSession(session);
 		let started!: () => void;
@@ -1272,8 +1279,9 @@ describe("project memory", () => {
 
 	it("does not schedule automatic maintenance when memory writing is disabled", async () => {
 		const realHome = process.env.HOME;
-		process.env.HOME = join(root, "home-write-off");
-		const projectCwd = join(root, "auto-write-off-project");
+		const fakeHome = join(root, "home-write-off");
+		process.env.HOME = fakeHome;
+		const projectCwd = join(fakeHome, "auto-write-off-project");
 		const session = createSession("test-model", projectCwd);
 		saveSession(session);
 		const runAgent = vi.fn(async () => ({ messages: [{ role: "assistant" as const, content: "done" }] }));

@@ -40,7 +40,7 @@ const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
 const currentByRelative = new Map();
 for (const [absPath, entry] of Object.entries(summary)) {
 	if (absPath === "total") continue;
-	const rel = absPath.startsWith(repoRoot) ? absPath.slice(repoRoot.length + 1) : absPath;
+	const rel = (absPath.startsWith(repoRoot) ? absPath.slice(repoRoot.length + 1) : absPath).replaceAll("\\", "/");
 	currentByRelative.set(rel, entry);
 }
 

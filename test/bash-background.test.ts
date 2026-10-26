@@ -27,6 +27,8 @@ const mockConfig: AppConfig = {
 	defaultBashTimeoutMs: 10_000,
 };
 
+const canRunNativePtyTests = process.platform !== "win32" || Boolean(process.stdin.isTTY && process.stdout.isTTY);
+
 function makeDeps(running = false) {
 	const followUpQueue = new MessageQueue();
 	let isRunningFlag = running;
@@ -44,7 +46,7 @@ function makeDeps(running = false) {
 	};
 }
 
-describe("BackgroundTaskRegistry", () => {
+describe.skipIf(!canRunNativePtyTests)("BackgroundTaskRegistry", () => {
 	it("does not let a task's output forge reminder blocks of its own", async () => {
 		// Completion notices are <system-reminder> blocks, and every surface
 		// strips those before display — so output that closes the envelope and
@@ -352,7 +354,7 @@ describe("BackgroundTaskRegistry", () => {
 	});
 });
 
-describe("BackgroundTaskRegistry retention", () => {
+describe.skipIf(!canRunNativePtyTests)("BackgroundTaskRegistry retention", () => {
 	it("stops holding every finished task's captured output forever", async () => {
 		// Nothing ever removed a task, and on an interactive surface every
 		// foreground bash call goes through this registry — so a session
@@ -451,7 +453,7 @@ describe("spawn-failure detection", () => {
 	});
 });
 
-describe("BackgroundTaskRegistry.running", () => {
+describe.skipIf(!canRunNativePtyTests)("BackgroundTaskRegistry.running", () => {
 	it("lets go of the PTY when the task ends", async () => {
 		// The PTY holds the master descriptor open, and node-pty releases it
 		// only when the object is collected. A finished task that still points
