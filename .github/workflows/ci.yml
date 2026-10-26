@@ -50,7 +50,9 @@ jobs:
         # when a fire-and-forget background task outlives the test.
         env:
           CAST_SESSIONS_DB: ${{ runner.temp }}/cast-ci-sessions-${{ github.run_id }}.db
-        run: npm test -- --maxWorkers=4
+        # Windows runners hit Vitest's worker update timeout with four workers
+        # even after the test files have completed successfully.
+        run: npm test -- --maxWorkers=${{ runner.os == 'Windows' && 2 || 4 }}
 
       - name: Coverage + per-file floor
         if: matrix.os == 'ubuntu-latest'
