@@ -28,10 +28,10 @@ function normalize(dir: string): string {
 
 function canonicalPathForComparison(path: string): string {
 	let resolved = normalize(path);
-	if (process.platform !== "win32") return resolved;
-	// Windows can expose the same profile through both its long name and an
-	// 8.3 alias. Resolve the nearest existing ancestor so a not-yet-created
-	// child retains the canonical prefix used by homedir().
+	// macOS exposes temporary paths through /var and /private/var, while
+	// Windows can expose a profile through its long name or an 8.3 alias.
+	// Resolve the nearest existing ancestor so a missing child keeps that
+	// ancestor's canonical spelling.
 	const suffix: string[] = [];
 	while (!existsSync(resolved)) {
 		const parent = dirname(resolved);
@@ -49,8 +49,11 @@ function canonicalPathForComparison(path: string): string {
 }
 
 function samePath(left: string, right: string): boolean {
-	if (process.platform !== "win32") return left === right;
-	return canonicalPathForComparison(left).toLowerCase() === canonicalPathForComparison(right).toLowerCase();
+	const normalizedLeft = canonicalPathForComparison(left);
+	const normalizedRight = canonicalPathForComparison(right);
+	return process.platform === "win32"
+		? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+		: normalizedLeft === normalizedRight;
 }
 
 /**
