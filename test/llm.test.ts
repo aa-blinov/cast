@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import OpenAI from "openai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionCostBudget } from "../src/core/cost-budget.ts";
 import {
 	createClient,
 	describeTurnError,
@@ -409,6 +410,101 @@ describe("retryDelayMs", () => {
 });
 
 describe("streamAndCollect — usage accounting", () => {
+	it("keeps provider-reported cost distinct from the display estimate", async () => {
+		const client = fakeClient([
+			{
+				choices: [{ delta: {}, finish_reason: "stop" }],
+				usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.015 },
+			},
+		]);
+
+		const result = await streamAndCollect(client, "test-model", [], [], 100);
+
+		expect(result.usage?.reportedCost).toBe(0.015);
+		expect(result.usage?.priceReported).toBe(true);
+	});
+
+	it("does not start another provider request after spend reaches the session cap", async () => {
+		let requests = 0;
+		const client = {
+			chat: {
+				completions: {
+					create: async () => {
+						requests++;
+						return {
+							async *[Symbol.asyncIterator]() {
+								yield {
+									choices: [{ delta: {}, finish_reason: "stop" }],
+									usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.11 },
+								};
+							},
+						};
+					},
+				},
+			},
+		} as unknown as OpenAI;
+		const budget = new SessionCostBudget({ capUsd: 0.1, reportedSpendUsd: 0, priceKnown: true });
+
+		await streamAndCollect(
+			client,
+			"test-model",
+			[],
+			[],
+			100,
+			undefined,
+			undefined,
+			undefined,
+			{},
+			undefined,
+			{},
+			undefined,
+			undefined,
+			budget,
+		);
+		await expect(
+			streamAndCollect(
+				client,
+				"test-model",
+				[],
+				[],
+				100,
+				undefined,
+				undefined,
+				undefined,
+				{},
+				undefined,
+				{},
+				undefined,
+				undefined,
+				budget,
+			),
+		).rejects.toMatchObject({ code: "cost_cap_reached" });
+		expect(requests).toBe(1);
+	});
+
+	it("marks cost unknown when the provider omits the usage and price block", async () => {
+		const budget = new SessionCostBudget({ capUsd: 0.2, reportedSpendUsd: 0, priceKnown: true });
+		const result = await streamAndCollect(
+			fakeClient([]),
+			"test-model",
+			[],
+			[],
+			100,
+			undefined,
+			undefined,
+			undefined,
+			{},
+			undefined,
+			{},
+			undefined,
+			undefined,
+			budget,
+		);
+
+		expect(result.usage).toMatchObject({ promptTokens: 0, totalTokens: 0, priceReported: false });
+		await expect(budget.beginRequest()).rejects.toMatchObject({ code: "cost_unknown" });
+	});
+
 	it("recomputes totalTokens instead of trusting a mismatched raw total_tokens", async () => {
 		// A real OpenAI-compatible gateway reporting an internally inconsistent
 		// total_tokens (999, matching neither prompt+completion nor anything

@@ -105,6 +105,9 @@ function loadPty(): typeof import("node-pty") | null {
 
 import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD } from "../config.ts";
 import type { MessageQueue } from "../loop.ts";
+import { killProcessTree } from "../process.ts";
+import { createShellInvocation } from "../sandbox.ts";
+import { isSandboxSession } from "../scratchpad.ts";
 import { escapeSystemReminderTags } from "../system-reminder.ts";
 import { formatBashResult, getBashResolution, shellResolvable, stripAnsi } from "./bash.ts";
 import { agentShellEnv, BoundedOutput, formatSize, type ToolResult } from "./shared.ts";
@@ -364,6 +367,7 @@ export class BackgroundTaskRegistry {
 		timeoutMs: number | undefined,
 		deps: BashBackgroundDeps,
 		options: BackgroundTaskStartOptions = {},
+		sessionId?: string,
 	): BackgroundTask {
 		const bash = getBashResolution();
 		const id = `bg-${++this.counter}`;
@@ -414,13 +418,23 @@ export class BackgroundTaskRegistry {
 			this.settle(task, config, deps);
 			return task;
 		}
+		let cleanupSandbox = () => {};
+		const requiresSandbox = sessionId !== undefined && isSandboxSession(sessionId, cwd);
 		try {
-			const pty = pty_.spawn(bash.path, ["-c", command], {
+			const invocation = createShellInvocation(
+				sessionId,
+				cwd,
+				bash.path,
+				command,
+				agentShellEnv(cwd, { PAGER: "cat", GIT_PAGER: "cat", TERM: "xterm-256color" }),
+			);
+			cleanupSandbox = invocation.cleanup;
+			const pty = pty_.spawn(invocation.executable, invocation.args, {
 				name: "xterm-256color",
 				cols: 120,
 				rows: 40,
 				cwd,
-				env: agentShellEnv(cwd, { PAGER: "cat", GIT_PAGER: "cat", TERM: "xterm-256color" }),
+				env: invocation.env,
 			});
 			task.pty = pty;
 			letPtyDrain(pty);
@@ -444,6 +458,7 @@ export class BackgroundTaskRegistry {
 						}, timeoutMs);
 
 			pty.onExit(({ exitCode }) => {
+				cleanupSandbox();
 				clearTimeout(timer);
 				task.exitCode = exitCode;
 				task.endedAt = Date.now();
@@ -465,9 +480,12 @@ export class BackgroundTaskRegistry {
 				this.settle(task, config, deps);
 			});
 		} catch (err) {
+			cleanupSandbox();
 			task.status = "error";
 			task.endedAt = Date.now();
-			task.errorMessage = `Failed to start bash ("${bash.path}"): ${err instanceof Error ? err.message : String(err)}`;
+			task.errorMessage = requiresSandbox
+				? `Sandbox could not be prepared; the command was not run: ${err instanceof Error ? err.message : String(err)}`
+				: `Failed to start bash ("${bash.path}"): ${err instanceof Error ? err.message : String(err)}`;
 			resolveExit();
 			this.settle(task, config, deps);
 		}
@@ -509,11 +527,7 @@ export class BackgroundTaskRegistry {
 
 	/** Kill the PTY's process group so children such as dev servers are reaped too. */
 	private killPty(pty: IPty): void {
-		try {
-			process.kill(-pty.pid, "SIGKILL");
-		} catch {
-			// The process group may already have exited or not exist on this platform.
-		}
+		killProcessTree(pty.pid, "SIGKILL");
 		try {
 			pty.kill();
 		} catch {

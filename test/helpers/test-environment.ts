@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import type { Settings } from "../../src/core/settings.ts";
 
 export interface TestEnvironment {
@@ -35,6 +35,12 @@ export function createTestEnvironment(prefix = "cast-test-"): TestEnvironment {
 
 export function applyTestEnvironment(environment: TestEnvironment): void {
 	process.env.HOME = environment.home;
+	process.env.USERPROFILE = environment.home;
+	if (process.platform === "win32") {
+		const drive = win32.parse(environment.home).root.slice(0, 2);
+		process.env.HOMEDRIVE = drive;
+		process.env.HOMEPATH = environment.home.slice(drive.length) || "\\";
+	}
 	process.env.CAST_CWD = environment.cwd;
 	process.env.CAST_SESSIONS_DB = environment.dbPath;
 }

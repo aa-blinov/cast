@@ -221,6 +221,7 @@ Use `/statusbar` to toggle individual segments on/off and reorder them (useful o
 |---------|-------------|
 | `/current` | All status bar data: model, context, tokens in/out with cache %, cost, sub-agent tokens, repo, session |
 | `/cost` | What this session has spent: tokens, cache share, subagent share, the provider's price when it reports one, and a line per kind of request (main, subagent, compaction, `/btw`) from telemetry |
+| `/cost-cap <USD>`, `/cost-cap off` | Set or clear a provider-reported spend threshold for this session. Calls stop after the reported spend reaches the threshold; an unknown price stops the next call while the cap is on. |
 | `/export` | Save the conversation as Markdown in `~/.cast/exports/` (system prompts left out, tool results cut at 2,000 characters), and print the path |
 | `/doctor` | Check what makes cast fail without saying why: Node version, the provider answers and serves the session's model, git, ripgrep, the sessions database, each MCP server |
 | `/context` | The AGENTS.md / CLAUDE.md files loaded for this directory, with their size, plus any file that could not be read |

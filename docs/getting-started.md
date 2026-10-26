@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- **Node.js 22+**
+- **Node.js 22.12+**
 - An OpenAI-compatible API endpoint (OpenRouter, OpenAI, Ollama, vLLM, LiteLLM, or your own)
 
 ## Install
@@ -19,7 +19,7 @@ Windows (PowerShell):
 irm https://aa-blinov.github.io/cast/install.ps1 | iex
 ```
 
-Self-contained bundle with no npm packages needed at runtime.
+Self-contained bundle with no npm installation needed at runtime. Sandbox sessions have additional OS setup; see [Sandbox processes](sessions.md#sandbox-processes).
 
 Pin a version:
 

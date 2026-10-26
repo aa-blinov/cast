@@ -1786,7 +1786,7 @@ describe("gitignore negation", () => {
 	});
 });
 
-describe("nested .gitignore", () => {
+describe("nested .gitignore (fallback walker)", () => {
 	it("applies rules from nested .gitignore in subdirectories", async () => {
 		mkdirSync(join(TEST_DIR, "src"), { recursive: true });
 		writeFileSync(join(TEST_DIR, "src", ".gitignore"), "*.tmp");
@@ -1795,7 +1795,7 @@ describe("nested .gitignore", () => {
 		writeFileSync(join(TEST_DIR, "root.tmp"), "");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("glob", { pattern: "*.tmp", path: TEST_DIR });
+		const result = await withoutFdOnPath(() => exec("glob", { pattern: "*.tmp", path: TEST_DIR }));
 		// src/.gitignore ignores *.tmp only under src/
 		expect(result.content).toContain("root.tmp");
 		expect(result.content).not.toContain("cache.tmp");
@@ -1810,7 +1810,7 @@ describe("nested .gitignore", () => {
 		writeFileSync(join(TEST_DIR, "sub", "cache.tmp"), "");
 
 		const exec = createToolExecutor(TEST_DIR, mockConfig);
-		const result = await exec("glob", { pattern: "*", path: TEST_DIR });
+		const result = await withoutFdOnPath(() => exec("glob", { pattern: "*", path: TEST_DIR }));
 		expect(result.content).toContain("app.ts");
 		expect(result.content).not.toContain("debug.log"); // root rule
 		expect(result.content).not.toContain("cache.tmp"); // nested rule

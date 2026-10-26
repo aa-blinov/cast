@@ -82,6 +82,40 @@ describe("addUsage subagent attribution", () => {
 		expect(s.lastPromptTokens).toBe(100);
 	});
 
+	it("tracks provider-reported spend separately and preserves an unknown-price state", () => {
+		const s = createSession("gpt-4o", tmpdir());
+		addUsage(s, mkUsage({ cost: 0.2, reportedCost: 0.05, priceReported: true }));
+		addUsage(s, { promptTokens: 0, completionTokens: 0, totalTokens: 0, priceReported: false });
+
+		expect(s.usage.cost).toBe(0.2);
+		expect(s.usage.reportedCostUsd).toBe(0.05);
+		expect(s.usage.costPriceKnown).toBe(false);
+		expect(s.lastPromptTokens).toBe(100);
+	});
+
+	it("persists the session cap and fails closed for legacy sessions with prior usage", () => {
+		const session = createSession("gpt-4o", tmpdir());
+		session.usage.costCapUsd = 1.5;
+		session.usage.reportedCostUsd = 0.4;
+		saveSession(session);
+
+		const loaded = loadSession(session.id)!;
+		expect(loaded.usage).toMatchObject({ costCapUsd: 1.5, reportedCostUsd: 0.4, costPriceKnown: true });
+
+		const legacy = createSession("gpt-4o", tmpdir());
+		legacy.usage.totalTokens = 1;
+		saveSession(legacy);
+		const row = getDb().prepare("SELECT usage_json FROM sessions WHERE id = ?").get(legacy.id) as {
+			usage_json: string;
+		};
+		const oldUsage = JSON.parse(row.usage_json) as Record<string, unknown>;
+		delete oldUsage.reportedCostUsd;
+		delete oldUsage.costPriceKnown;
+		getDb().prepare("UPDATE sessions SET usage_json = ? WHERE id = ?").run(JSON.stringify(oldUsage), legacy.id);
+
+		expect(loadSession(legacy.id)?.usage.costPriceKnown).toBe(false);
+	});
+
 	// The summarizer's prompt is the history being compacted away; as the
 	// context size it made a freshly compacted session look full.
 	it("drops the pre-compaction prompt size once a compaction is recorded", () => {

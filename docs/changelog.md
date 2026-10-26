@@ -2,6 +2,15 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.58.2
+
+### Added
+- **Sandbox sessions now isolate shell processes at the OS level.** Commands are limited to the session folder and a private temporary directory, cannot access the user's home or common credentials, and have no network by default. The release archive includes the sandbox runtime; Linux and macOS need their documented system tools, and Windows needs a one-time elevated setup.
+- **`/cost-cap <USD>` sets a session-wide provider-reported spend threshold.** It covers the main loop and auxiliary model calls, including subagents and maintenance. If a provider omits price, cast stops later requests while the cap is enabled.
+
+### Fixed
+- **Background checkpoint writers now share the parent session's cost cap and sandbox identity.** Previously this maintenance path could make uncapped model calls and lose the process boundary after switching to a worktree.
+
 ## 0.58.1
 
 ### Fixed

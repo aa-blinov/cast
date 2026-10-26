@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import type { AppConfig } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
+import { killProcessTree } from "../process.ts";
 import {
 	ensureControlDir,
 	hasSshpass,
@@ -146,11 +147,7 @@ export async function execSsh(
 		// `sleep 30` answered after 30s). A killed client has said all it will; give its last output a
 		// moment to arrive and answer.
 		const killClient = () => {
-			try {
-				process.kill(-proc.pid!, "SIGKILL");
-			} catch {
-				// already dead
-			}
+			killProcessTree(proc.pid, "SIGKILL");
 			setTimeout(() => settle(null), 500);
 		};
 

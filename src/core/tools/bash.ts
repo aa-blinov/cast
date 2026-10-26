@@ -12,6 +12,8 @@ import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD, MAX_BASH_TIMEOUT_MS } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
+import { killProcessTree } from "../process.ts";
+import { createShellInvocation } from "../sandbox.ts";
 import { type BackgroundTask, type BashBackgroundDeps, isPtyAvailable } from "./bash-background.ts";
 import { looksLongRunningCommand } from "./long-running.ts";
 import {
@@ -351,6 +353,7 @@ export async function execBash(
 	confirmBash?: ConfirmBash,
 	signal?: AbortSignal,
 	background?: BashBackgroundDeps,
+	sessionId?: string,
 ): Promise<ToolResult> {
 	const command = typeof args.command === "string" ? args.command : "";
 	if (!command.trim()) {
@@ -417,7 +420,7 @@ export async function execBash(
 	if (args.run_in_background === true && managed) {
 		// Background tasks are open-ended by default (dev servers, long builds)
 		// — only apply a kill timer when the model explicitly asked for one.
-		const task = managed.registry.start(command, cwd, config, explicitTimeoutMs, managed);
+		const task = managed.registry.start(command, cwd, config, explicitTimeoutMs, managed, {}, sessionId);
 		// The shell may have failed to start (a broken PTY backend, a missing
 		// binary). Saying "Started in the background as bg-1" then is a lie the
 		// model acts on: it waits for a task that will never produce output.
@@ -429,9 +432,17 @@ export async function execBash(
 		// Start every interactive-surface command in the managed PTY so a still-
 		// running process can be promoted without trying to hand an OS process
 		// from pipe-based foreground execution to a new terminal later.
-		const task = managed.registry.start(command, cwd, config, undefined, managed, {
-			notifyOnCompletion: false,
-		});
+		const task = managed.registry.start(
+			command,
+			cwd,
+			config,
+			undefined,
+			managed,
+			{
+				notifyOnCompletion: false,
+			},
+			sessionId,
+		);
 		if (task.status !== "running") return formatManagedTaskResult(task, config, warnPrefix, timeoutMs);
 
 		// Known servers/watchers should never consume a full model turn just to
@@ -456,12 +467,28 @@ export async function execBash(
 		return formatBackgroundStart(task, warnPrefix, true);
 	}
 
+	let invocation: ReturnType<typeof createShellInvocation>;
+	try {
+		invocation = createShellInvocation(
+			sessionId,
+			cwd,
+			bash.path,
+			command,
+			agentShellEnv(cwd, { PAGER: "cat", GIT_PAGER: "cat" }),
+		);
+	} catch (error) {
+		return Promise.resolve({
+			content: `Sandbox could not be prepared; the command was not run: ${error instanceof Error ? error.message : String(error)}`,
+			isError: true,
+		});
+	}
+
 	return new Promise<ToolResult>((resolve) => {
 		// stdin: "ignore" — any command waiting for input gets EOF and exits
 		// immediately. No PTY, no prompt detection.
-		const proc = spawn(bash.path, ["-c", command], {
+		const proc = spawn(invocation.executable, invocation.args, {
 			cwd,
-			env: agentShellEnv(cwd, { PAGER: "cat", GIT_PAGER: "cat" }),
+			env: invocation.env,
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: true,
 		});
@@ -484,13 +511,9 @@ export async function execBash(
 		};
 		const timer = setTimeout(() => {
 			timedOut = true;
-			try {
-				process.kill(-proc.pid!, "SIGTERM");
-			} catch {}
+			killProcessTree(proc.pid, "SIGTERM");
 			later(() => {
-				try {
-					process.kill(-proc.pid!, "SIGKILL");
-				} catch {}
+				killProcessTree(proc.pid, "SIGKILL");
 				// A process that survives SIGKILL — stuck in uninterruptible I/O,
 				// or already reaped with its 'close' lost — used to leave this
 				// promise pending forever, hanging the agent's turn on a command
@@ -498,6 +521,7 @@ export async function execBash(
 				// timeout path did not.
 				later(() => {
 					if (finalResult) return;
+					invocation.cleanup();
 					const result = formatBashResult(output.final(), config, {
 						exitCode: null,
 						timedOut: true,
@@ -514,13 +538,10 @@ export async function execBash(
 
 		const onAbort = () => {
 			aborted = true;
-			try {
-				process.kill(-proc.pid!, "SIGKILL");
-			} catch {
-				// already dead
-			}
+			killProcessTree(proc.pid, "SIGKILL");
 			later(() => {
 				if (finalResult) return;
+				invocation.cleanup();
 				const result: ToolResult = {
 					content: "[ABORTED] Command was interrupted by user (forced — process did not exit).",
 					isError: true,
@@ -537,6 +558,7 @@ export async function execBash(
 		// without this handler the promise never settles and Node throws an
 		// unhandled 'error' event instead of the model seeing what went wrong.
 		proc.on("error", (err) => {
+			invocation.cleanup();
 			clearTimeout(timer);
 			for (const t of pending) clearTimeout(t);
 			signal?.removeEventListener("abort", onAbort);
@@ -550,6 +572,7 @@ export async function execBash(
 		});
 
 		proc.on("close", (exitCode) => {
+			invocation.cleanup();
 			if (finalResult) return;
 			clearTimeout(timer);
 			for (const t of pending) clearTimeout(t);

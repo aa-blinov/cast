@@ -6,6 +6,7 @@ import type { Persona } from "../src/core/personas.ts";
 import {
 	buildSystemPrompt,
 	discoverSkillsForCwd,
+	formatPlatformContext,
 	formatSystemEnvironmentBlock,
 	type ProjectResolverDeps,
 } from "../src/core/project.ts";
@@ -23,6 +24,19 @@ describe("formatSystemEnvironmentBlock", () => {
 		expect(builtin).not.toContain("/opt/cast");
 		expect(builtin).toContain("Persona source: builtin");
 		expect(builtin).toContain("Current working directory: /work");
+	});
+
+	it("adds actionable platform guidance for Windows, macOS, and Linux", () => {
+		expect(formatPlatformContext("win32", "x64")).toContain("Git Bash");
+		expect(formatPlatformContext("win32", "x64")).toContain("POSIX shell syntax");
+		expect(formatPlatformContext("darwin", "arm64")).toContain("BSD utility options");
+		expect(formatPlatformContext("linux", "x64")).toContain("distribution and installed utilities");
+	});
+
+	it("includes platform guidance in the shared system environment block", () => {
+		const block = formatSystemEnvironmentBlock("/work", { model: "m", reasoningLevel: "low" });
+		expect(block).toContain("- Platform: ");
+		expect(block).toMatch(/check|use POSIX|Git Bash/i);
 	});
 });
 

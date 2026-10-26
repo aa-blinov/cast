@@ -133,6 +133,9 @@ function createFakeDeps(overrides?: Partial<CommandDeps> & { running?: boolean }
 			completionTokens: 50,
 			totalTokens: 150,
 			cost: 0.001,
+			reportedCostUsd: 0.02,
+			costPriceKnown: true,
+			costCapUsd: undefined,
 			cacheReadTokens: 0,
 			cacheWriteTokens: 0,
 		},
@@ -269,7 +272,7 @@ describe("handleInput", () => {
 			expect(deps.session.usage.totalTokens).toBe(204);
 		});
 
-		it("is accepted while a turn runs, and then leaves the session's totals alone", async () => {
+		it("is accepted while a turn runs, and records its usage", async () => {
 			const { deps, calls } = createFakeDeps({ running: true });
 			answer("Still on it.");
 			await handleInput("/btw status?", undefined, deps);
@@ -277,7 +280,7 @@ describe("handleInput", () => {
 			expect((calls["agent.addDisplayMessage"]!.at(-1)![0] as { content: string }).content).toBe(
 				"btw: Still on it.",
 			);
-			expect(deps.session.usage.totalTokens).toBe(150);
+			expect(deps.session.usage.totalTokens).toBe(204);
 		});
 
 		it("asks the daemon when attached to one", async () => {
@@ -1070,6 +1073,23 @@ describe("handleInput", () => {
 		expect(lastNotice()).toContain("10 to 10000");
 		await handleInput("/turn-cap reset", undefined, deps);
 		expect(loadSettings().maxTurnIterations).toBeUndefined();
+		expect(calls["agent.submit"]).toBeUndefined();
+	});
+
+	it("/cost-cap sets a session-scoped provider spend limit, accepts live changes, and rejects invalid values", async () => {
+		const { deps, calls } = createFakeDeps({ running: true });
+		const lastNotice = () => String(calls.showNotice?.at(-1)?.[0] ?? "");
+		await handleInput("/cost-cap", undefined, deps);
+		expect(lastNotice()).toContain("Session cost cap: off");
+		await handleInput("/cost-cap $0.75", undefined, deps);
+		expect(deps.session.usage.costCapUsd).toBe(0.75);
+		expect(lastNotice()).toContain("$0.7500");
+		await handleInput("/cost-cap 0", undefined, deps);
+		expect(deps.session.usage.costCapUsd).toBe(0.75);
+		expect(lastNotice()).toContain("Usage: /cost-cap");
+		await handleInput("/cost-cap off", undefined, deps);
+		expect(deps.session.usage.costCapUsd).toBeUndefined();
+		expect(lastNotice()).toContain("turned off");
 		expect(calls["agent.submit"]).toBeUndefined();
 	});
 

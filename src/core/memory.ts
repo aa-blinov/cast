@@ -10,6 +10,7 @@ import {
 	agentActorRegistry,
 } from "./actors.ts";
 import type { AppConfig, ProviderCredentials } from "./config.ts";
+import type { SessionCostBudget } from "./cost-budget.ts";
 import { getDb } from "./db.ts";
 import type { HooksFile } from "./hooks.ts";
 import { createClient, type Message, streamAndCollect, type Tool, type Usage } from "./llm.ts";
@@ -49,6 +50,7 @@ import {
 	loadSession,
 	saveSession,
 } from "./session.ts";
+import { getSessionCostBudgetForSession } from "./session-cost.ts";
 import {
 	checkpointPushCapsSetting,
 	isMemoryWriteEnabled,
@@ -176,6 +178,8 @@ export interface MemoryMaintenanceInput {
 	messages: Message[];
 	signal?: AbortSignal;
 	providerOverride?: ProviderCredentials;
+	costBudget?: SessionCostBudget;
+	sandboxSessionId?: string;
 	onUsage?: (usage: Usage) => void;
 	onWarning?: (message: string) => void;
 	runAgent?: MemoryMaintenanceAgent;
@@ -188,6 +192,9 @@ export interface MemoryMaintenanceAgentInput {
 	config: AppConfig;
 	model: string;
 	providerOverride?: ProviderCredentials;
+	sessionId?: string;
+	costBudget?: SessionCostBudget;
+	sandboxSessionId?: string;
 	signal?: AbortSignal;
 	onUsage?: (usage: Usage) => void;
 }
@@ -280,6 +287,8 @@ export interface ProjectMemoryLeaseOptions {
 export interface MemoryCheckpointWriterInput {
 	cwd: string;
 	sessionId: string;
+	/** Parent sandbox identity retained by this background writer. */
+	sandboxSessionId?: string;
 	/** Child session hosting this writer; absent when the writer has not started yet. */
 	writerSessionId?: string;
 	/** Existing actor id used when a stalled writer is resumed. */
@@ -1808,6 +1817,7 @@ function hasMaintenanceMaterial(input: MemoryMaintenanceInput): boolean {
 async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDreamResult> {
 	if (!isMemoryWriteEnabled() || input.signal?.aborted) return { removed: 0, stored: 0, skipped: true };
 	if (!hasMaintenanceMaterial(input)) return { removed: 0, stored: 0, skipped: true };
+	const costBudget = input.costBudget ?? getSessionCostBudgetForSession(input.sessionId);
 	if (input.runAgent) {
 		const before = listProjectMemory(input.cwd, 100);
 		const response = await input.runAgent({
@@ -1817,10 +1827,12 @@ async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<Mem
 			config: input.config,
 			model: input.model,
 			providerOverride: input.providerOverride,
+			sessionId: input.sessionId,
+			costBudget,
+			sandboxSessionId: input.sandboxSessionId ?? input.sessionId,
 			signal: input.signal,
 			onUsage: input.onUsage,
 		});
-		if (response.usage) input.onUsage?.(response.usage);
 		reconcileProjectMemoryFilesLocked(input.cwd, input.sessionId, true);
 		const after = listProjectMemory(input.cwd, 100);
 		const afterContents = new Set(after.map((entry) => `${entry.type}\n${entry.content}`));
@@ -1863,6 +1875,7 @@ async function runDreamProjectMemory(input: MemoryMaintenanceInput): Promise<Mem
 		{},
 		undefined,
 		input.sessionId ? { sessionId: input.sessionId, purpose: "memory-dream" } : undefined,
+		costBudget,
 	);
 	if (response.usage) input.onUsage?.(response.usage);
 	const parsed = parseMemoryDreamOutput(response.content);
@@ -2126,6 +2139,7 @@ export function listProjectMemoryArtifacts(cwd: string, limit = 100): MemoryArti
 async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<MemoryDistillResult> {
 	if (!isMemoryWriteEnabled() || input.signal?.aborted) return { artifacts: [], skipped: true };
 	if (!hasMaintenanceMaterial(input)) return { artifacts: [], skipped: true };
+	const costBudget = input.costBudget ?? getSessionCostBudgetForSession(input.sessionId);
 	if (input.runAgent) {
 		const response = await input.runAgent({
 			prompt: maintenanceAgentPrompt(input, "distill"),
@@ -2134,10 +2148,12 @@ async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<M
 			config: input.config,
 			model: input.model,
 			providerOverride: input.providerOverride,
+			sessionId: input.sessionId,
+			costBudget,
+			sandboxSessionId: input.sandboxSessionId ?? input.sessionId,
 			signal: input.signal,
 			onUsage: input.onUsage,
 		});
-		if (response.usage) input.onUsage?.(response.usage);
 		return { artifacts: reconcileProjectMemoryArtifacts(input.cwd, input.sessionId), usage: response.usage };
 	}
 	const transcript = formatMemoryTranscript(input.messages);
@@ -2170,6 +2186,7 @@ async function runDistillProjectMemory(input: MemoryMaintenanceInput): Promise<M
 		{},
 		undefined,
 		input.sessionId ? { sessionId: input.sessionId, purpose: "memory-distill" } : undefined,
+		costBudget,
 	);
 	if (response.usage) input.onUsage?.(response.usage);
 	const candidates = parseMemoryDistillOutput(response.content);

@@ -48,7 +48,7 @@ Each entry in a matcher group's `hooks` array is one of:
 - **`command`** (default `type`): a shell command. Relative paths resolve against the cwd the hook runs for. Set `"async": true` to detach a non-blocking observer; its output is deliberately ignored.
 - **`http`**: POSTs the event envelope as the JSON body; the response body is read the same way stdout is.
 - **`mcp_tool`**: calls an already-connected MCP server's tool (`server`/`tool` unqualified names) and interprets its result the same way as a command hook's stdout. No-ops (fails open) if that server/tool isn't connected.
-- **`prompt`**: a short, tool-free, capped (500 token) model completion. Cast asks it to return `{"ok":true}` to allow or `{"ok":false,"reason":"…"}` to block. Invalid output and unavailable model/config access fail open (see Scope).
+- **`prompt`**: a short, tool-free, capped (500 token) model completion. Cast asks it to return `{"ok":true}` to allow or `{"ok":false,"reason":"…"}` to block. Invalid output and unavailable model/config access are hook failures; enforcement events fail closed.
 
 `input`/`prompt` support `${field.path}` interpolation against the event's JSON payload (e.g. `${tool_input.command}`, `${cwd}`). Unresolvable paths are left as the literal placeholder.
 
@@ -116,10 +116,11 @@ The hook receives one JSON object on **stdin** (or as the HTTP/`mcp_tool` payloa
 - **`PreToolUse` only**: `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"...","updatedInput":{...}}}`:
   - `permissionDecision: "deny"` blocks, same as `decision:"block"` (with `permissionDecisionReason` as the reason).
   - `updatedInput` replaces the tool call's arguments with whatever object you provide, before it runs. Works whether or not the call is also allowed/denied.
-  - `permissionDecision: "ask"`/`"defer"` are accepted but resolved as `allow`, since cast has no interactive mid-turn prompt to actually honor them (see Scope). A warning is surfaced instead.
+  - `permissionDecision: "ask"`/`"defer"` block the call. Cast has no generic interactive approval UI that can suspend an arbitrary tool call, so the tool is not run; ask the user to approve the action and retry.
 - **`PostToolUse`/`PostToolUseFailure` only**: `{"hookSpecificOutput":{"updatedToolOutput":"..."}}` replaces the tool's result content outright, instead of the block-appends-feedback behavior.
 - **`Stop`/`SubagentStop` only**: `{"continue":false,"stopReason":"..."}` force-ends the turn/run right now, overriding a block from another hook in the same run.
-- Any other non-zero exit is a non-blocking failure: the hook is ignored and the run continues normally. A hook that never responds is killed after its `timeout`.
+- Any other non-zero exit, timeout, or unavailable hook target is reported as a failure. For `PreToolUse` and `PermissionRequest`, the action is denied; for observational lifecycle events, the run continues. A permission hook marked `async` is rejected because its result cannot gate the action.
+- A `PermissionRequest` hook can return `{"hookSpecificOutput":{"decision":{"behavior":"allow"}}}` to approve a pending bash request without another prompt, or `behavior: "deny"` to reject it. `ask`/`defer` leaves the normal interactive bash prompt in place.
 
 A `Stop` block can't loop forever: after 8 continuations in one turn (matching the official cap), the gate is overridden and the turn ends regardless.
 
@@ -171,8 +172,10 @@ This is a **compatible subset** of Claude Code's protocol, not a byte-for-byte c
 - `Elicitation`/`ElicitationResult`: cast's MCP client doesn't implement the MCP elicitation capability.
 - `ConfigChange`: settings are not watched as a live config source yet.
 
-**Accepted as input but resolved as a fixed choice, not truly honored**, because cast has no interactive mid-turn escalation path a hook can suspend the run for:
-- `PreToolUse`'s and `PermissionRequest`'s `ask`/`defer` permission decisions both resolve as `allow` (with a warning).
+**Permission decisions:**
+- `PreToolUse` `ask`/`defer` is denied because cast cannot pause any arbitrary tool call for approval. The user can adjust the hook or make a new request after approving the action.
+- `PermissionRequest` `ask`/`defer` keeps the bash confirmation prompt; `allow` and `deny` are honored directly.
+- Enforcement hooks fail closed on errors. Other lifecycle hooks remain best-effort and do not stop the run when they fail.
 
 **Not implemented for architectural reasons**:
 - The `agent` hook type (spawn a subagent to verify): `task.ts` (the subagent executor) already imports this module for `HooksFile`; importing it back for the `agent` type would create a real circular module dependency. Use `prompt` (a one-shot completion) or `mcp_tool` instead.
@@ -182,6 +185,6 @@ This is a **compatible subset** of Claude Code's protocol, not a byte-for-byte c
 - `MessageDisplay` is daemon-only and fires once per completed assistant message, not once per streamed token. It is observational: Cast deliberately does not let a hook alter the persisted transcript or the in-flight stream.
 - `WorktreeCreate`, `WorktreeRemove`, and `CwdChanged` fire for the daemon's `/worktree` command. Startup `cast --worktree` is intentionally not hookable yet: project hooks have not been trusted/resolved before that worktree is created.
 - `SubagentStart`/`SubagentStop` are a *separate*, observation-only "a subagent started/finished" signal for logging. A subagent's own turn-ending decision is governed by its own recursive `Stop` handling (hooks are inherited from the parent), not by `SubagentStop`. `SubagentStop` here can't itself block/continue a subagent's turn the way the official `Stop`-style decision control can.
-- `prompt`-type hooks need model/provider config, which not every event has in scope (e.g. `SessionStart`), so they no-op (fail open) rather than error when it's unavailable.
+- `prompt`-type hooks need model/provider config, which not every event has in scope (e.g. `SessionStart`). A missing configuration is reported as a hook failure; it blocks only when the hook is enforcing a permission decision.
 
 Hooks apply to the main agent and are inherited by subagents (`task` tool): a `PreToolUse` gate on `bash` applies whether `bash` is called by the main agent or a subagent it spawned.

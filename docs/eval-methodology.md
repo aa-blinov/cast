@@ -116,6 +116,20 @@ Practical rule: before calling a change a regression (or a model gap a real find
 `--repeat 3`. A split result is evidence of instability, not a partial pass: investigate the
 disagreeing attempts with `--trace` (see below) before concluding anything.
 
+## Real-model CI smoke
+
+`.github/workflows/real-model-eval.yml` can run one repeated behavior case against a real provider
+after a push or pull request. It is opt-in so normal CI never spends provider credits by accident.
+Set the repository variable `CAST_REAL_EVALS_ENABLED` to `true`, the secret `CAST_EVAL_API_KEY`, and
+the variable `CAST_EVAL_MODEL`. `CAST_EVAL_PROVIDER_URL` is optional and defaults to the OpenRouter
+API endpoint. A manual workflow run can override the model.
+
+The smoke runs `required-read-tool` three times with concurrency one and uploads the recorded JSON
+report as the `real-model-eval` artifact. A failed attempt fails the job; inspect the repeated trace
+before treating a stochastic model failure as a harness regression. Forked pull requests do not run
+the job because they cannot receive repository secrets. The runner passes the API key through the
+child process environment, never the command line.
+
 ## Recording results
 
 Every run (`-m`, `--compare`, with or without `--repeat`) is auto-recorded to

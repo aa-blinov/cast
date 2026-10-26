@@ -6,7 +6,7 @@
  * symbols. None of those are needed after install; the native loader only
  * needs lib/ plus the matching build/prebuild directory.
  */
-import { cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -46,6 +46,31 @@ function copyRuntimeLibrary(source, destination) {
 
 function copyNativeDirectory(source, destination) {
 	copyTree(source, destination, (entry) => !entry.endsWith(".pdb"));
+}
+
+function resolveLockedDependency(name, fromKey, packages) {
+	let directory = fromKey;
+	for (;;) {
+		const candidate = directory ? `${directory}/node_modules/${name}` : `node_modules/${name}`;
+		if (packages[candidate]) return candidate;
+		if (!directory) return undefined;
+		const parent = directory.slice(0, directory.lastIndexOf("/"));
+		directory = parent === directory ? "" : parent;
+	}
+}
+
+function copyDependencyTree(name, fromKey, root, stage, packages, copied = new Set()) {
+	const packageKey = resolveLockedDependency(name, fromKey, packages);
+	if (!packageKey) throw new Error(`Missing locked runtime dependency ${name} from ${fromKey || "the project"}`);
+	if (copied.has(packageKey)) return;
+	copied.add(packageKey);
+	copyTree(join(root, packageKey), join(stage, packageKey), () => true);
+	const metadata = packages[packageKey];
+	const optional = metadata.optionalDependencies ?? {};
+	for (const dependency of Object.keys({ ...metadata.dependencies, ...optional })) {
+		if (!resolveLockedDependency(dependency, packageKey, packages) && dependency in optional) continue;
+		copyDependencyTree(dependency, packageKey, root, stage, packages, copied);
+	}
 }
 
 function requireFile(path, description) {
@@ -105,6 +130,7 @@ function main() {
 	}
 
 	const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+	const lockfile = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
 	const nodePty = join(root, "node_modules", "node-pty");
 	const nativeSource = nativeSourceFor(target, nodePty);
 	validateNativeFiles(target, nativeSource);
@@ -124,6 +150,7 @@ function main() {
 		? join(stage, "node_modules", "node-pty", "build", "Release")
 		: join(stage, "node_modules", "node-pty", "prebuilds", target);
 	copyNativeDirectory(nativeSource, stagedNative);
+	copyDependencyTree("@anthropic-ai/sandbox-runtime", "", root, stage, lockfile.packages);
 
 	console.log(JSON.stringify({ target, stage, nativeSource }, null, 2));
 }

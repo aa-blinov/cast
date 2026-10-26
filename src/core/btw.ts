@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config.ts";
+import type { SessionCostBudget } from "./cost-budget.ts";
 import {
 	createClient,
 	type Message,
@@ -108,6 +109,8 @@ export interface SideQuestionInput {
 	/** What the running turn has done, when one is running (see describeInFlight). */
 	inFlight?: string;
 	sessionId?: string;
+	costBudget?: SessionCostBudget;
+	onUsage?: (usage: Usage) => void;
 	signal?: AbortSignal;
 }
 
@@ -130,7 +133,7 @@ export async function askSideQuestion(input: SideQuestionInput, question: string
 	const cacheBody = promptCacheRequestBody(resolvePromptCacheStrategy(input.config.baseURL, input.sessionId));
 	const ask = async (messages: Message[]) => {
 		try {
-			return await streamAndCollect(
+			const result = await streamAndCollect(
 				client,
 				input.model,
 				messages,
@@ -144,7 +147,10 @@ export async function askSideQuestion(input: SideQuestionInput, question: string
 				cacheBody,
 				undefined,
 				input.sessionId ? { sessionId: input.sessionId, purpose: "btw" } : undefined,
+				input.costBudget,
 			);
+			if (result.usage) input.onUsage?.(result.usage);
+			return result;
 		} catch (error) {
 			if (input.signal?.aborted) throw new SideQuestionError("Stopped.");
 			throw new SideQuestionError(error instanceof Error ? error.message : String(error));

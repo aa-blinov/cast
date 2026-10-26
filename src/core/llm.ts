@@ -7,6 +7,7 @@ import OpenAI, {
 } from "openai";
 import type { ChatCompletionFunctionTool, ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { type AppConfig, providerFetch } from "./config.ts";
+import type { SessionCostBudget } from "./cost-budget.ts";
 import { forgetValidated } from "./model-validation.ts";
 import { estimateRequestCost } from "./models-dev.ts";
 import { type LoggedRequest, logRequest, type RequestLogTarget } from "./request-log.ts";
@@ -43,6 +44,10 @@ export interface Usage {
 	totalTokens: number;
 	/** Real cost in USD, when the provider reports one (e.g. OpenRouter) — not universal. */
 	cost?: number;
+	/** Provider-reported USD cost, separate from `cost`, which may be an estimate. */
+	reportedCost?: number;
+	/** False when the provider did not include a trustworthy price for this request. */
+	priceReported?: boolean;
 	/** Tokens served from provider's prompt cache (cache hit). */
 	cacheReadTokens?: number;
 	/** Tokens written to provider's prompt cache (cache miss / new entry). */
@@ -602,6 +607,7 @@ export async function* streamChat(
 	onSilence?: (silentMs: number, giveUpMs: number) => void,
 	/** Sees the exact body once, before the first attempt (the request log). */
 	onRequest?: (params: Record<string, unknown>) => void,
+	costBudget?: SessionCostBudget,
 ): AsyncGenerator<StreamChunk> {
 	const params: OpenAI.ChatCompletionCreateParamsStreaming = {
 		model,
@@ -633,6 +639,12 @@ export async function* streamChat(
 
 	// Stream reads are inherently sequential — the next chunk depends on server push.
 	while (true) {
+		// A capped session holds one lease across a provider attempt. This keeps
+		// concurrent subagents from spending the same remaining amount twice.
+		// biome-ignore lint/performance/noAwaitInLoops: each retry must settle its cost before another provider attempt starts
+		const costRequest = await costBudget?.beginRequest(signal);
+		let reportedCost: number | undefined;
+		let costRequestSettled = false;
 		// Per attempt: the caller's abort plus a watchdog that fires when the
 		// provider goes silent, reset by every chunk.
 		const attemptAbort = new AbortController();
@@ -659,7 +671,6 @@ export async function* streamChat(
 			quietTimer = setTimeout(onQuiet, noticeMs);
 		};
 		try {
-			// biome-ignore lint/performance/noAwaitInLoops: streaming requires sequential read
 			const stream = await client.chat.completions.create(params, { signal: attemptAbort.signal });
 
 			const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
@@ -678,6 +689,10 @@ export async function* streamChat(
 				// check it before the no-delta early exit below so neither shape is missed.
 				if (chunk.usage) {
 					const usageAny = chunk.usage as unknown as Record<string, unknown>;
+					reportedCost =
+						typeof usageAny.cost === "number" && Number.isFinite(usageAny.cost) && usageAny.cost >= 0
+							? usageAny.cost
+							: undefined;
 					const promptTokensDetails = usageAny.prompt_tokens_details as
 						| { cached_tokens?: number; cache_write_tokens?: number }
 						| undefined;
@@ -719,6 +734,8 @@ export async function* streamChat(
 										completionTokens: chunk.usage.completion_tokens,
 										cacheReadTokens: cacheReadTokens ?? undefined,
 									}),
+						reportedCost,
+						priceReported: reportedCost !== undefined,
 						cacheReadTokens: cacheReadTokens ?? undefined,
 						cacheWriteTokens: cacheWriteTokens ?? undefined,
 						uncachedTokens: Math.max(
@@ -828,8 +845,12 @@ export async function* streamChat(
 				yieldedAny = true;
 				yield { thinking: remaining.thinking, content: remaining.content };
 			}
+			costRequest?.settle(reportedCost);
+			costRequestSettled = true;
 			return;
 		} catch (caught) {
+			costRequest?.settle(reportedCost);
+			costRequestSettled = true;
 			const error = stalled
 				? new StreamStalledError(`Provider sent nothing for ${Math.round(idleMs / 1000)}s`)
 				: caught;
@@ -884,6 +905,7 @@ export async function* streamChat(
 			// not wait out the timer and fail on the next request.
 			await abortableSleep(Math.min(wait, Math.max(0, remaining)), signal);
 		} finally {
+			if (!costRequestSettled) costRequest?.settle(reportedCost);
 			clearTimeout(idleTimer);
 			clearTimeout(quietTimer);
 			signal?.removeEventListener("abort", forwardAbort);
@@ -1014,6 +1036,7 @@ export async function streamAndCollect(
 	promptCacheBody: Record<string, unknown> = {},
 	onSilence?: (silentMs: number, giveUpMs: number) => void,
 	requestLog?: RequestLogTarget,
+	costBudget?: SessionCostBudget,
 ): Promise<CompletionResult> {
 	let content = "";
 	let thinking = "";
@@ -1050,6 +1073,7 @@ export async function streamAndCollect(
 						logged = logRequest(requestLog, params);
 					}
 				: undefined,
+			costBudget,
 		)) {
 			if (chunk.retrying) {
 				logged?.retry(chunk.retrying.reason);
@@ -1104,6 +1128,16 @@ export async function streamAndCollect(
 	// avoids false-flagging providers that omit finish_reason but still send a
 	// terminal usage chunk (include_usage) on a genuinely complete turn.
 	const disconnected = Boolean(!sawFinish && !signal?.aborted && firstChunkAt !== undefined && usage === undefined);
+	// A capped run needs an explicit persisted "price unknown" event even when
+	// a gateway omitted the whole usage block.
+	if (costBudget && usage === undefined) {
+		usage = {
+			promptTokens: 0,
+			completionTokens: 0,
+			totalTokens: 0,
+			priceReported: false,
+		};
+	}
 	// What the provider sent, before the Hermes recovery below rewrites it.
 	logged?.end({
 		finishReason: disconnected ? "disconnected" : finishReason,

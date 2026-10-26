@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
+import { SessionCostBudget } from "../src/core/cost-budget.ts";
 import {
 	type HooksFile,
 	hookGroupId,
@@ -195,28 +196,28 @@ describe("runHooksForEvent", () => {
 			parts.push(Buffer.alloc(pad, 0x61), emoji);
 			written += pad + emoji.length;
 		}
-		const payloadFile = join(mkdtempSync(join(tmpdir(), "cast-hook-mb-")), "multibyte.txt");
-		writeFileSync(payloadFile, Buffer.concat(parts));
-
-		const hooks: HooksFile = {
-			PreToolUse: [{ matcher: "bash", hooks: [{ command: `cat ${payloadFile}`, timeout: 20 }] }],
-		};
-		const result = await runHooksForEvent(hooks, {
-			event: "PreToolUse",
-			matchTarget: "bash",
-			cwd: "/tmp",
-			payload: {},
-		});
-		expect(result.stdout.match(/\u{1F3AF}/gu)?.length ?? 0).toBe(5);
-		expect(result.stdout).not.toContain("\uFFFD");
+		const cwd = mkdtempSync(join(tmpdir(), "cast-hook-mb-"));
+		try {
+			writeFileSync(join(cwd, "multibyte.txt"), Buffer.concat(parts));
+			const hooks: HooksFile = {
+				PreToolUse: [{ matcher: "bash", hooks: [{ command: "cat multibyte.txt", timeout: 20 }] }],
+			};
+			const result = await runHooksForEvent(hooks, {
+				event: "PreToolUse",
+				matchTarget: "bash",
+				cwd,
+				payload: {},
+			});
+			expect(result.stdout.match(/\u{1F3AF}/gu)?.length ?? 0).toBe(5);
+			expect(result.stdout).not.toContain("\uFFFD");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 
 	it("caps a hook that floods stdout instead of buffering it all (regression)", async () => {
-		// Only the timeout bounded this: a flooding hook reached 24MB of stdout
-		// and RSS 140MB→409MB in five seconds, and a Stop hook gets 600 of
-		// them. The prompt only ever sees 8KB of hook output anyway.
 		const hooks: HooksFile = {
-			PreToolUse: [{ matcher: "bash", hooks: [{ command: "tr '\\0' 'a' < /dev/zero", timeout: 3 }] }],
+			PreToolUse: [{ matcher: "bash", hooks: [{ command: "tr '\\0' 'a' < /dev/zero", timeout: 2 }] }],
 		};
 		const result = await runHooksForEvent(hooks, {
 			event: "PreToolUse",
@@ -417,7 +418,7 @@ describe("runHooksForEvent", () => {
 		}
 	});
 
-	it("fails open when an HTTP hook is unreachable", async () => {
+	it("records a failure when an HTTP hook is unreachable", async () => {
 		const hooks: HooksFile = {
 			PreToolUse: [{ hooks: [{ type: "http", url: "http://127.0.0.1:1", timeout: 2 }] }],
 		};
@@ -428,6 +429,49 @@ describe("runHooksForEvent", () => {
 			payload: {},
 		});
 		expect(result.blocked).toBe(false);
+		expect(result.failure).toContain("HTTP hook failed");
+	});
+
+	it("rejects an invalid PermissionRequest behavior instead of allowing it", async () => {
+		const hooks: HooksFile = {
+			PermissionRequest: [
+				{
+					hooks: [{ command: `echo '{"hookSpecificOutput":{"decision":{"behavior":"ask"}}}'` }],
+				},
+			],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "PermissionRequest",
+			matchTarget: "bash",
+			cwd: "/tmp",
+			payload: { tool_name: "bash" },
+		});
+
+		expect(result.failure).toContain("invalid PermissionRequest decision behavior");
+		expect(result.permissionRequestResult).toBeUndefined();
+	});
+
+	it("rejects a non-object PermissionRequest updatedInput", async () => {
+		const hooks: HooksFile = {
+			PermissionRequest: [
+				{
+					hooks: [
+						{
+							command: `echo '{"hookSpecificOutput":{"decision":{"behavior":"allow","updatedInput":"unsafe"}}}'`,
+						},
+					],
+				},
+			],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "PermissionRequest",
+			matchTarget: "bash",
+			cwd: "/tmp",
+			payload: { tool_name: "bash" },
+		});
+
+		expect(result.failure).toContain("non-object updatedInput");
+		expect(result.permissionRequestResult).toBeUndefined();
 	});
 
 	it("runs PostToolUseFailure/SubagentStart/SubagentStop/StopFailure/PreCompact/PostCompact/SessionStart/SessionEnd/UserPromptSubmit as ordinary events", async () => {
@@ -664,6 +708,36 @@ describe("runHooksForEvent", () => {
 		}
 	});
 
+	it("surfaces a failed hook so permission enforcement can fail closed", async () => {
+		const hooks: HooksFile = { PreToolUse: [{ hooks: [{ command: "exit 1" }] }] };
+		const result = await runHooksForEvent(hooks, {
+			event: "PreToolUse",
+			matchTarget: "bash",
+			cwd: "/tmp",
+			payload: {},
+		});
+
+		expect(result.blocked).toBe(false);
+		expect(result.failure).toContain("exited 1");
+	});
+
+	it("rejects asynchronous hooks for permission decisions", async () => {
+		const hooks: HooksFile = {
+			PreToolUse: [
+				{ hooks: [{ async: true, command: 'echo \'{"hookSpecificOutput":{"permissionDecision":"allow"}}\'' }] },
+			],
+		};
+		const result = await runHooksForEvent(hooks, {
+			event: "PreToolUse",
+			matchTarget: "bash",
+			cwd: "/tmp",
+			payload: {},
+		});
+
+		expect(result.failure).toContain("asynchronous hooks cannot enforce");
+		expect(result.permissionDecision).toBeUndefined();
+	});
+
 	it("PreToolUse updatedInput carries through even when the hook also allows", async () => {
 		const hooks: HooksFile = {
 			PreToolUse: [
@@ -724,7 +798,7 @@ describe("runHooksForEvent", () => {
 		expect(calls[0]?.args).toEqual({ cmd: "rm -rf /" });
 	});
 
-	it("mcp_tool hook no-ops (fails open) when no mcpToolIndex is provided", async () => {
+	it("records a failure when an mcp_tool hook has no connection", async () => {
 		const hooks: HooksFile = {
 			PreToolUse: [{ hooks: [{ type: "mcp_tool", server: "guard", tool: "check" }] }],
 		};
@@ -735,17 +809,19 @@ describe("runHooksForEvent", () => {
 			payload: {},
 		});
 		expect(result.blocked).toBe(false);
+		expect(result.failure).toContain("MCP hook is missing its server, tool, or connection");
 	});
 
-	it("prompt hook no-ops (fails open) when no config is provided", async () => {
+	it("records a failure when a prompt hook has no configuration", async () => {
 		const hooks: HooksFile = {
 			Stop: [{ hooks: [{ type: "prompt", prompt: "Should the agent keep going? Respond yes/no." }] }],
 		};
 		const result = await runHooksForEvent(hooks, { event: "Stop", cwd: "/tmp", payload: {} });
 		expect(result.blocked).toBe(false);
+		expect(result.failure).toContain("missing its prompt or model configuration");
 	});
 
-	it("prompt hook fails open (non-blocking) when the LLM evaluation call errors", async () => {
+	it("records a failure when the LLM evaluation call errors", async () => {
 		mockStreamAndCollect.mockRejectedValueOnce(new Error("provider outage"));
 		const hooks: HooksFile = {
 			Stop: [
@@ -767,6 +843,20 @@ describe("runHooksForEvent", () => {
 			config: testConfig,
 		});
 		expect(result.blocked).toBe(false);
+		expect(result.failure).toContain("provider outage");
+	});
+
+	it("passes the session cost budget to prompt hooks", async () => {
+		const previousCalls = mockStreamAndCollect.mock.calls.length;
+		mockStreamAndCollect.mockResolvedValueOnce({ content: '{"ok":true}', usage: undefined });
+		const costBudget = new SessionCostBudget({ capUsd: 1, reportedSpendUsd: 0, priceKnown: true });
+		await runHooksForEvent(
+			{
+				Stop: [{ hooks: [{ type: "prompt", prompt: "Is the condition met?", model: "test-model" }] }],
+			},
+			{ event: "Stop", cwd: "/tmp", payload: {}, config: testConfig, costBudget },
+		);
+		expect(mockStreamAndCollect.mock.calls[previousCalls]?.[13]).toBe(costBudget);
 	});
 
 	it('backgrounds an async hook that prints {"async":true} on the first stdout line', async () => {
@@ -910,11 +1000,11 @@ describe("runHooksForEvent", () => {
 
 	it("detaches a command explicitly marked async", async () => {
 		const hooks: HooksFile = {
-			PreToolUse: [{ hooks: [{ command: "sleep 0.2", async: true, timeout: 2 }] }],
+			Stop: [{ hooks: [{ command: "sleep 0.2", async: true, timeout: 2 }] }],
 		};
 		const start = Date.now();
 		const result = await runHooksForEvent(hooks, {
-			event: "PreToolUse",
+			event: "Stop",
 			cwd: "/tmp",
 			payload: {},
 		});
