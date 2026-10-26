@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.58.1
+
+### Fixed
+- **Project instructions and extensions no longer need a manual `/reload` after editing.** Cast watches instruction files, skills, rules, personas, and MCP configuration on macOS, Windows, and Linux. Changes are applied when the current turn ends, so a running turn keeps the context it started with.
+
 ## 0.58.0
 
 ### Added

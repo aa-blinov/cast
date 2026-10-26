@@ -397,7 +397,7 @@ describe("runHooksForEvent", () => {
 					);
 				});
 			});
-			srv.listen(0, () => resolve(srv));
+			srv.listen(0, "127.0.0.1", () => resolve(srv));
 		});
 		const port = (server.address() as AddressInfo).port;
 		try {
@@ -801,7 +801,7 @@ describe("runHooksForEvent", () => {
 					);
 				});
 			});
-			srv.listen(0, () => resolve(srv));
+			srv.listen(0, "127.0.0.1", () => resolve(srv));
 		});
 		const port = (server.address() as AddressInfo).port;
 		const testToken = "test-token-123";
@@ -854,7 +854,7 @@ describe("runHooksForEvent", () => {
 					res.end(JSON.stringify({ injected }));
 				});
 			});
-			srv.listen(0, () => resolve(srv));
+			srv.listen(0, "127.0.0.1", () => resolve(srv));
 		});
 		const port = (server.address() as AddressInfo).port;
 		try {
