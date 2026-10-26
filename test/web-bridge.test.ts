@@ -125,6 +125,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
 		source: "builtin",
 		filePath: "/builtin/coding.md",
 		subagents: false,
+		agentsMd: true,
 		...overrides,
 	} as Persona;
 }
@@ -1178,6 +1179,34 @@ describe("web bridge", () => {
 		const ws = bridge.createSession();
 		const result = await bridge.executeCommand(ws.id, "/reload");
 		expect(result).toEqual({ ok: true, result: "Reloaded skills, rules, MCP, and personas" });
+	});
+
+	it("automatically reloads changed instructions and skills when the session is idle", async () => {
+		const projectDeps = {
+			noSkills: false,
+			noMcp: false,
+			cliSkillPaths: [],
+			cliMcpPaths: [],
+			settings: {},
+			pickers: {},
+		} as StartupResult["projectDeps"];
+		const bridge = createServerBridge(makeResult({ projectDeps }));
+		const ws = bridge.createSession();
+		const events: unknown[] = [];
+		bridge.subscribe(ws.id, (event) => events.push(event));
+
+		try {
+			writeFileSync(join(cwd, "AGENTS.md"), "Reloaded context from disk.\n");
+			const skillDir = join(cwd, ".cast", "skills", "sample");
+			mkdirSync(skillDir, { recursive: true });
+			writeFileSync(join(skillDir, "SKILL.md"), "---\nname: sample\ndescription: Sample skill\n---\n");
+
+			await waitFor(() => events.some((event) => (event as { type?: string }).type === "skills_changed"));
+			expect(ws.systemPrompt).toContain("Reloaded context from disk.");
+			expect(bridge.getSlashCommands(ws.id)).toContainEqual(expect.objectContaining({ name: "/sample" }));
+		} finally {
+			bridge.dispose?.();
+		}
 	});
 
 	it("/reload while the agent is running fails with the idle-required error", async () => {

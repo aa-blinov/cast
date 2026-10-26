@@ -24,6 +24,7 @@ import {
 	resolveSkillsForCwd,
 	rulesCwd,
 } from "../core/project.ts";
+import { watchProjectContextFiles } from "../core/project-context-watcher.ts";
 import {
 	formatRulesForTurn,
 	latchedRuleIds,
@@ -170,6 +171,13 @@ export function useAppModel(props: AppModelProps) {
 	// notice line instead of a raw console.log that would corrupt the frame.
 	const { pickers, request: modalRequest } = useModalBridge(showNotice);
 	const projectDeps = useMemo(() => ({ ...result.projectDeps, pickers }), [result.projectDeps, pickers]);
+	const watchedContextPaths = useMemo(
+		() => [...(result.projectDeps.cliSkillPaths ?? []), ...(result.projectDeps.cliMcpPaths ?? [])],
+		[result.projectDeps],
+	);
+	const pendingContextReloadRef = useRef(false);
+	const contextReloadInFlightRef = useRef(false);
+	const runContextReloadRef = useRef<() => void>(() => {});
 
 	const [session] = useState(result.session);
 	const [mcpResult, setMcpResult] = useState(result.mcpResult);
@@ -865,6 +873,38 @@ export function useAppModel(props: AppModelProps) {
 		header,
 		setHeader,
 	};
+	runContextReloadRef.current = () => {
+		if (
+			!pendingContextReloadRef.current ||
+			depsRef.current.running ||
+			modalRequest ||
+			contextReloadInFlightRef.current
+		) {
+			return;
+		}
+		pendingContextReloadRef.current = false;
+		contextReloadInFlightRef.current = true;
+		void handleInput("/reload", undefined, depsRef.current).finally(() => {
+			contextReloadInFlightRef.current = false;
+			if (pendingContextReloadRef.current) runContextReloadRef.current();
+		});
+	};
+
+	useEffect(() => {
+		if (daemonUrl) return;
+		return watchProjectContextFiles(
+			cwd,
+			() => {
+				pendingContextReloadRef.current = true;
+				runContextReloadRef.current();
+			},
+			watchedContextPaths,
+		);
+	}, [cwd, daemonUrl, watchedContextPaths]);
+
+	useEffect(() => {
+		if (!running && !modalRequest) runContextReloadRef.current();
+	}, [running, modalRequest]);
 
 	// PageUp in the composer routes here (the history.older binding) —
 	// same load + replay flow as the /older command.

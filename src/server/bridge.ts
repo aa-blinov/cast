@@ -147,6 +147,7 @@ import { createBroadcaster } from "./bridge/broadcaster.ts";
 // before falling through to its inline logic. Slice 1: only /help and /usage
 // are registered. Future slices add /current, /repo, and the rest.
 import { dispatchRegisteredCommand } from "./bridge/command-registry.ts";
+import { createContextReloader } from "./bridge/context-reloader.ts";
 // DisplayMessage / DisplayStreamBlock and the three display-side helpers
 // (appendActiveText, reconcileActiveStream, toDisplayMessages) live in
 // ./bridge/display.ts — bridge.ts re-exports the public functions below
@@ -619,7 +620,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		broadcaster.broadcast(ws, { type: "agent_actor", actor });
 	});
 
-	const { config, cwd, persona: currentPersona, reasoningMeta: initialReasoningMeta, projectDeps } = result;
+	const { config, cwd, persona: currentPersona, reasoningMeta: initialReasoningMeta } = result;
+	const projectDeps = {
+		...result.projectDeps,
+		cliSkillPaths: result.projectDeps.cliSkillPaths ?? [],
+		cliMcpPaths: result.projectDeps.cliMcpPaths ?? [],
+	};
 	let reasoningMeta = initialReasoningMeta;
 
 	// Everything below is captured once at startup by the TUI's own
@@ -658,7 +664,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 	// What the daemon decided about its own directory when it started. `projectTrusted` above moves (a /reload from
 	// a session elsewhere writes that session's decision into it), so the shared MCP set is resolved from this.
 	const startupProjectTrusted = result.projectTrusted;
-	const contextFilesSuffix = result.contextFilesSuffix;
+	let contextFilesSuffix = result.contextFilesSuffix;
 	let rulesSuffix = result.rulesSuffix;
 	let rulesLazySuffix = result.rulesLazySuffix;
 	let directoryRules = result.directoryRules;
@@ -1147,15 +1153,78 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		});
 	}
 
-	/** /reload and an agent's edit of an mcp.json: apply what the files say now. */
-	async function reloadMcpFromDisk(sessionCwd: string): Promise<void> {
-		await syncMcp(sessionCwd);
-	}
-
 	function recomputeAllSystemPrompts(): void {
 		for (const ws of sessions.values()) {
 			const persona = resolvePersona(ws.session.persona ?? "") ?? currentPersona;
 			ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, ws.session.cwd ?? cwd, ws.session.mode);
+		}
+	}
+
+	async function reloadBridgeState(
+		sessionCwd: string,
+		resolveTrust = true,
+	): Promise<{ ok: boolean; result?: string; error?: string }> {
+		try {
+			const targetTrusted = resolveTrust
+				? await resolveProjectTrustForCwd(projectDeps, sessionCwd)
+				: trustForSessionCwd(sessionCwd);
+			if (sessionCwd === cwd) projectTrusted = targetTrusted;
+			const trustedFor = (path: string) => (path === sessionCwd ? targetTrusted : trustForSessionCwd(path));
+			const projectCwds = new Set([
+				cwd,
+				sessionCwd,
+				...[...sessions.values()]
+					.filter((ws) => ws.session.sessionKind !== "subagent")
+					.map((ws) => ws.session.cwd ?? cwd),
+			]);
+
+			clearProjectRootCache();
+			rulesByCwd.clear();
+			skillsByCwd.clear();
+			contextFilesByCwd.clear();
+			sshHostsByCwd.clear();
+
+			const rootTrusted = trustedFor(cwd);
+			const rootSkills = await resolveSkillsForCwd(projectDeps, cwd, rootTrusted);
+			skills = rootSkills.skills;
+			contextFilesSuffix = formatContextFilesForPrompt(loadProjectContextFiles(cwd, rootTrusted));
+			const rootRules = resolveRulesForCwd(cwd, rootTrusted);
+			rulesSuffix = rootRules.alwaysApplySuffix;
+			rulesLazySuffix = rootRules.lazySuffix;
+			directoryRules = rootRules.directoryRules;
+			ruleDiagnostics = rootRules.diagnostics;
+			ruleNotes = rootRules.notes;
+			sshHosts = resolveSshHosts(cwd, rootTrusted);
+			personas = resolvePersonasForCwd(sessionCwd, targetTrusted).personas;
+
+			const otherProjectState = await Promise.all(
+				[...projectCwds]
+					.filter((projectCwd) => projectCwd !== cwd)
+					.map(async (projectCwd) => {
+						const trusted = trustedFor(projectCwd);
+						return {
+							cwd: projectCwd,
+							trusted,
+							skills: (await resolveSkillsForCwd(projectDeps, projectCwd, trusted)).skills,
+							context: formatContextFilesForPrompt(loadProjectContextFiles(projectCwd, trusted)),
+							rules: resolveRulesForCwd(projectCwd, trusted),
+							sshHosts: resolveSshHosts(projectCwd, trusted),
+						};
+					}),
+			);
+			for (const state of otherProjectState) {
+				skillsByCwd.set(state.cwd, state.skills);
+				contextFilesByCwd.set(state.cwd, state.context);
+				rulesByCwd.set(state.cwd, state.rules);
+				sshHostsByCwd.set(state.cwd, state.sshHosts);
+			}
+
+			await syncMcp(sessionCwd, { allProjects: true });
+			recomputeAllSystemPrompts();
+			announceSkillsChanged();
+			return { ok: true, result: "Reloaded skills, rules, MCP, and personas" };
+		} catch (err) {
+			return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
 		}
 	}
 
@@ -1240,6 +1309,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		};
 
 		sessions.set(session.id, ws);
+		syncContextReloader();
 		ensureProjectMcpForCwd(session.cwd ?? cwd);
 		if (runSessionStartHook) {
 			// Fire-and-forget (SessionStart is non-blocking, matching Grok Build) —
@@ -1325,6 +1395,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			systemPrompt: computeSystemPrompt(persona, session.model, session.cwd ?? cwd, session.mode),
 		};
 		sessions.set(session.id, ws);
+		syncContextReloader();
 		ensureProjectMcpForCwd(session.cwd ?? cwd);
 		fsWatcher.syncFsWatcher(ws);
 		broadcaster.broadcastSessionUpdate(ws);
@@ -1555,7 +1626,40 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		releaseProjectMcpForCwd,
 		stopFsWatcher: fsWatcher.stopFsWatcher,
 	});
-	fsWatcher.setOnIdle(idleEvictor.syncIdleSessionEviction);
+	const contextReloader = createContextReloader({
+		isBusy: () => [...sessions.values()].some((ws) => ws.status === "running"),
+		onChange: async (sessionCwd) => {
+			const reloaded = await reloadBridgeState(sessionCwd, false);
+			if (!reloaded.ok) {
+				for (const ws of sessions.values()) {
+					broadcaster.broadcast(ws, {
+						type: "notice",
+						message: reloaded.error ?? "Project context reload failed.",
+					});
+				}
+				throw new Error(reloaded.error);
+			}
+			for (const ws of sessions.values()) {
+				broadcaster.broadcast(ws, { type: "notice", message: "Project context changed on disk and was reloaded." });
+				broadcaster.broadcast(ws, { type: "skills_changed" });
+			}
+		},
+		extraPathsForCwd: () => [...projectDeps.cliSkillPaths, ...projectDeps.cliMcpPaths],
+	});
+
+	function syncContextReloader(): void {
+		if (!projectDeps.settings || !projectDeps.pickers) return;
+		contextReloader.sync(
+			[...sessions.values()]
+				.filter((ws) => ws.session.sessionKind !== "subagent")
+				.map((ws) => ws.session.cwd ?? cwd),
+		);
+	}
+
+	fsWatcher.setOnIdle((ws) => {
+		idleEvictor.syncIdleSessionEviction(ws);
+		contextReloader.notifyIdle();
+	});
 
 	/** Builds a real user turn's `content` — plain text when there are no
 	 * attachments (matches every existing persisted message and the tests that
@@ -2181,6 +2285,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			// carries on there; the prompt for the next turn is rebuilt against the new directory.
 			onWorkingDirectoryChange: (path, previous) => {
 				ws.session.cwd = path;
+				syncContextReloader();
 				saveSession(ws.session);
 				ws.systemPrompt = computeSystemPrompt(persona, ws.session.model, path, ws.session.mode);
 				void runHooksForEvent(resolveHooksForCwd(path, trustForSessionCwd(sessionCwd)), {
@@ -2410,7 +2515,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				if (event.type === "todos_updated") ws.session.todos = event.todos;
 				// The agent wrote an MCP config: connect the new servers now, so the next turn has their tools.
 				if (event.type === "mcp_changed") {
-					void reloadMcpFromDisk(ws.session.cwd ?? cwd)
+					void syncMcp(ws.session.cwd ?? cwd)
 						.then(() => recomputeAllSystemPrompts())
 						.catch((err) =>
 							console.error("[cast server] MCP reload failed:", err instanceof Error ? err.message : err),
@@ -2981,6 +3086,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		if (eviction) clearTimeout(eviction);
 		idleSessionEvictions.delete(sessionId);
 		sessions.delete(sessionId);
+		syncContextReloader();
 		releaseProjectMcpForCwd(ws.session.cwd ?? cwd);
 		return true;
 	}
@@ -3007,6 +3113,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			broadcaster.broadcast(ws, { type: "session_closed" });
 			ws.listeners.clear();
 			sessions.delete(sessionId);
+			syncContextReloader();
 			releaseProjectMcpForCwd(ws.session.cwd ?? cwd);
 		}
 		const eviction = idleSessionEvictions.get(sessionId);
@@ -3092,6 +3199,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		// A subagent session is only ever viewed here — its runs belong to the
 		// parent's turns, so nothing starts in it.
 		if (session.sessionKind === "subagent") return ws;
+		syncContextReloader();
 		ensureProjectMcpForCwd(session.cwd ?? cwd);
 		void runHooksForEvent(resolveHooksForCwd(session.cwd ?? cwd, trustForSessionCwd(session.cwd ?? cwd)), {
 			event: "SessionStart",
@@ -3519,33 +3627,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				recomputeAllSystemPrompts();
 				announceSkillsChanged();
 			},
-			reloadBridgeState: async (sessionCwd) => {
-				try {
-					projectTrusted = await resolveProjectTrustForCwd(projectDeps, sessionCwd);
-					const skillsResult = await resolveSkillsForCwd(projectDeps, sessionCwd, projectTrusted);
-					skills = skillsResult.skills;
-					rulesByCwd.clear();
-					skillsByCwd.clear();
-					contextFilesByCwd.clear();
-					sshHostsByCwd.clear();
-					// The project root is read off the filesystem, so `git init` (or
-					// a new `.cast/`) during a session changes which directory every
-					// other resolver above answers from.
-					clearProjectRootCache();
-					const rules = resolveRulesForCwd(sessionCwd, projectTrusted);
-					rulesSuffix = rules.alwaysApplySuffix;
-					rulesLazySuffix = rules.lazySuffix;
-					directoryRules = rules.directoryRules;
-					ruleDiagnostics = rules.diagnostics;
-					ruleNotes = rules.notes;
-					personas = resolvePersonasForCwd(sessionCwd, trustForSessionCwd(sessionCwd)).personas;
-					await reloadMcpFromDisk(sessionCwd);
-					recomputeAllSystemPrompts();
-					return { ok: true, result: "Reloaded skills, rules, MCP, and personas" };
-				} catch (err) {
-					return { ok: false, error: `Reload failed: ${err instanceof Error ? err.message : String(err)}` };
-				}
-			},
+			reloadBridgeState,
 			sessionUsingCwd: (path) => {
 				for (const other of sessions.values()) {
 					if (other.session.cwd === path) {
@@ -3620,6 +3702,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		} finally {
 			ws.backgroundBash.registry.killAll();
 			sessions.delete(ws.id);
+			syncContextReloader();
 			releaseProjectMcpForCwd(ws.session.cwd ?? cwd);
 			deleteSession(ws.id);
 		}
@@ -3943,6 +4026,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 		unsubscribeAll,
 		dispose: () => {
 			unsubscribeActorNotifications();
+			contextReloader.dispose();
 			// Stdio MCP servers are child processes; the daemon's shutdown never
 			// closed them, relying on stdin EOF once cast exits — which a server
 			// that ignores EOF survives, leaving an orphan behind every restart.
