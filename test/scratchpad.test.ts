@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -152,6 +152,23 @@ describe("the hint on a refusal to write to a system temp folder", () => {
 		expect(scratchpadRefusalHint(tempPath, "/home/u/.cast/scratch/abc")).toContain("/home/u/.cast/scratch/abc");
 		expect(scratchpadRefusalHint("/etc/hosts", "/home/u/.cast/scratch/abc")).toBe("");
 		expect(scratchpadRefusalHint(tempPath, undefined)).toBe("");
+	});
+
+	it("recognises a canonical system temp path when the OS exposes an alias", () => {
+		const tempPath = join(realpathSync.native(tmpdir()), "x.txt");
+		expect(scratchpadRefusalHint(tempPath, "/home/u/.cast/scratch/abc")).toContain("/home/u/.cast/scratch/abc");
+	});
+
+	it("keeps working when the configured temp directory has disappeared", () => {
+		const variable = process.platform === "win32" ? "TEMP" : "TMPDIR";
+		const previous = process.env[variable];
+		process.env[variable] = join(dir, "missing-temp");
+		try {
+			expect(isTemporaryPath(join(process.env[variable]!, "x.txt"))).toBe(true);
+		} finally {
+			if (previous === undefined) delete process.env[variable];
+			else process.env[variable] = previous;
+		}
 	});
 });
 

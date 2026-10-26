@@ -6,7 +6,7 @@
  * is removed with the session (see `deleteSession`). A sandbox session needs none: its working folder is already a
  * throwaway one of its own, so that folder is its scratchpad.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 
@@ -63,8 +63,14 @@ export function removeScratchpadFor(sessionId: string): void {
 
 /** A path in a system temp folder: where a model reaches for a throwaway file when nobody has told it of a better place. */
 export function isTemporaryPath(path: string): boolean {
-	const roots =
-		process.platform === "win32" ? [tmpdir()] : [tmpdir(), "/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp"];
+	const systemTemp = tmpdir();
+	const roots = [systemTemp];
+	try {
+		roots.push(realpathSync.native(systemTemp));
+	} catch {
+		// TMPDIR/TEMP can point at a folder that disappeared after process start.
+	}
+	if (process.platform !== "win32") roots.push("/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp");
 	return roots.some((root) => {
 		const rel = relative(root, path);
 		return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
