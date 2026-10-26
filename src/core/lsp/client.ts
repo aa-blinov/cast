@@ -520,6 +520,21 @@ export class LspClient {
 		killProcessTree(this.proc.pid, "SIGKILL");
 	}
 
+	private waitForExit(timeoutMs: number): Promise<void> {
+		if (this.exited) return Promise.resolve();
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => {
+				this.proc.off("exit", onExit);
+				resolve();
+			}, timeoutMs);
+			const onExit = () => {
+				clearTimeout(timer);
+				resolve();
+			};
+			this.proc.once("exit", onExit);
+		});
+	}
+
 	/** Diagnostics published since `since` for the file, if any arrived. */
 	publishedSince(path: string, since: number): boolean {
 		return (this.publishTimes.get(fileUri(path)) ?? 0) >= since;
@@ -531,9 +546,13 @@ export class LspClient {
 			await this.request("shutdown", null, 2_000);
 			this.notify("exit", null);
 		} catch {
-			// Unresponsive: killed below.
+			// Unresponsive: kill it below.
 		}
-		setTimeout(() => this.kill(), 1_000).unref();
+		await this.waitForExit(1_000);
+		if (!this.exited) {
+			this.kill();
+			await this.waitForExit(1_000);
+		}
 	}
 }
 

@@ -22,6 +22,7 @@ const mockConfig: AppConfig = {
 const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "" };
 const git = (cwd: string, args: string[]) =>
 	execFileSync("git", args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const canonicalPath = (path: string) => realpathSync.native(path).replaceAll("\\", "/").toLowerCase();
 
 describe("worktree tool", () => {
 	let repo: string;
@@ -49,7 +50,7 @@ describe("worktree tool", () => {
 		const { deps: d, switchTo, where } = deps();
 		const res = await execWorktree({ action: "enter", name: "feature-x" }, d);
 		expect(res.isError).toBeFalsy();
-		expect(where()).toBe(join(repo, ".cast", "worktrees", "feature-x"));
+		expect(canonicalPath(where())).toBe(canonicalPath(join(repo, ".cast", "worktrees", "feature-x")));
 		expect(switchTo).toHaveBeenCalledWith(where(), repo);
 		expect(existsSync(join(where(), "a.txt"))).toBe(true);
 		expect(git(where(), ["branch", "--show-current"])).toBe("cast-feature-x");
@@ -73,7 +74,9 @@ describe("worktree tool", () => {
 		await execWorktree({ action: "enter", name: "one" }, d);
 		const listed = (await execWorktree({ action: "list" }, d)).content;
 		expect(listed).toMatch(/\* one {2}\(cast-one\)/);
-		expect(listed).toContain(`Main checkout: ${repo}`);
+		const mainCheckout = listed.match(/^Main checkout: (.+)$/m)?.[1];
+		expect(mainCheckout).toBeDefined();
+		expect(canonicalPath(mainCheckout!)).toBe(canonicalPath(repo));
 	});
 
 	it("goes back to the main checkout and keeps the worktree", async () => {
@@ -82,7 +85,7 @@ describe("worktree tool", () => {
 		const wt = where();
 		const res = await execWorktree({ action: "exit" }, d);
 		expect(res.isError).toBeFalsy();
-		expect(where()).toBe(repo);
+		expect(canonicalPath(where())).toBe(canonicalPath(repo));
 		expect(existsSync(wt)).toBe(true);
 		const again = await execWorktree({ action: "exit" }, d);
 		expect(again.isError).toBe(true);
@@ -126,11 +129,11 @@ describe("worktree tool", () => {
 			},
 		);
 		const before = await executor("bash", { command: "pwd" });
-		expect(before.content.trim()).toBe(repo);
+		expect(canonicalPath(before.content.trim())).toBe(canonicalPath(repo));
 		await executor("worktree", { action: "enter", name: "ex" });
-		expect(moved).toBe(join(repo, ".cast", "worktrees", "ex"));
+		expect(canonicalPath(moved)).toBe(canonicalPath(join(repo, ".cast", "worktrees", "ex")));
 		const after = await executor("bash", { command: "pwd" });
-		expect(after.content.trim()).toBe(moved);
+		expect(canonicalPath(after.content.trim())).toBe(canonicalPath(moved));
 		const written = await executor("write", { path: "in-worktree.txt", content: "hi\n" });
 		expect(written.isError).toBeFalsy();
 		expect(existsSync(join(moved, "in-worktree.txt"))).toBe(true);

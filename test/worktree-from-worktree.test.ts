@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { testHomeEnvironment } from "./helpers/test-environment.ts";
 
 let tmpRoot: string | undefined;
 let outerRepo: string | undefined;
@@ -23,6 +24,7 @@ let mockPort = 0;
 
 const REPO_ROOT = resolvePath(fileURLToPath(import.meta.url), "..", "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "index.js");
+const worktreeIt = process.platform === "win32" && !process.stdin.isTTY ? it.skip : it;
 
 beforeEach(async () => {
 	tmpRoot = mkdtempSync(join(tmpdir(), "cast-wt-from-wt-"));
@@ -121,7 +123,7 @@ async function runInteractive(
 	cwd: string,
 ): Promise<Array<Record<string, unknown>>> {
 	const fakeHome = join(tmpRoot!, "home");
-	const env = { ...process.env, HOME: fakeHome, CAST_CWD: "" };
+	const env = testHomeEnvironment(fakeHome, { ...process.env, CAST_CWD: "" });
 	const settingsDir = join(fakeHome, ".cast");
 	mkdirSync(settingsDir, { recursive: true });
 	writeFileSync(
@@ -136,7 +138,7 @@ async function runInteractive(
 		}),
 	);
 	return new Promise((resolve, reject) => {
-		const child = spawn("node", [DIST_ENTRY, "run", "--interactive", "--format", "json"], {
+		const child = spawn(process.execPath, [DIST_ENTRY, "run", "--interactive", "--format", "json"], {
 			cwd,
 			env,
 			stdio: ["pipe", "pipe", "pipe"],
@@ -173,37 +175,41 @@ async function runInteractive(
 }
 
 describe("/worktree from inside a worktree", () => {
-	it("anchors the new worktree at the main repo, not the current worktree", async () => {
-		// Start the runner with cwd INSIDE the inner worktree. Without
-		// `findCanonicalGitRoot`'s parent-walk, ensureSessionWorktree
-		// would resolve `<inner>/.cast/worktrees/<name>` and produce a
-		// linked worktree of a worktree — a layout bug the test is
-		// specifically guarding against.
-		const events = await runInteractive(
-			[{ type: "command", name: "worktree", args: " nested" }, { type: "state" }, { type: "exit" }],
-			innerRepo,
-		);
+	worktreeIt(
+		"anchors the new worktree at the main repo, not the current worktree",
+		async () => {
+			// Start the runner with cwd INSIDE the inner worktree. Without
+			// `findCanonicalGitRoot`'s parent-walk, ensureSessionWorktree
+			// would resolve `<inner>/.cast/worktrees/<name>` and produce a
+			// linked worktree of a worktree — a layout bug the test is
+			// specifically guarding against.
+			const events = await runInteractive(
+				[{ type: "command", name: "worktree", args: " nested" }, { type: "state" }, { type: "exit" }],
+				innerRepo,
+			);
 
-		const stateEvents = events.filter((e) => e.type === "state");
-		expect(stateEvents.length).toBeGreaterThan(1);
-		const lastState = stateEvents[stateEvents.length - 1];
-		const stateCwd = String(lastState?.cwd ?? "");
-		// The new worktree must live at `<main>/.cast/worktrees/nested`,
-		// NOT at `<inner>/.cast/worktrees/nested`. The `innerRepo` path
-		// would have a path segment `worktrees/inner/...` somewhere;
-		// assert the nested one lives under `outer/.cast/worktrees/nested`.
-		expect(stateCwd).not.toContain("/worktrees/inner/");
-		expect(stateCwd).toMatch(/[\\/]\.cast[\\/]worktrees[\\/]nested$/);
+			const stateEvents = events.filter((e) => e.type === "state");
+			expect(stateEvents.length).toBeGreaterThan(1);
+			const lastState = stateEvents[stateEvents.length - 1];
+			const stateCwd = String(lastState?.cwd ?? "");
+			// The new worktree must live at `<main>/.cast/worktrees/nested`,
+			// NOT at `<inner>/.cast/worktrees/nested`. The `innerRepo` path
+			// would have a path segment `worktrees/inner/...` somewhere;
+			// assert the nested one lives under `outer/.cast/worktrees/nested`.
+			expect(stateCwd).not.toContain("/worktrees/inner/");
+			expect(stateCwd).toMatch(/[\\/]\.cast[\\/]worktrees[\\/]nested$/);
 
-		// And git worktree list confirms the new worktree is registered
-		// as a peer of the main repo, not as a child of `inner`.
-		const list = execFileSync("git", ["-C", outerRepo, "worktree", "list", "--porcelain"], {
-			encoding: "utf8",
-		});
-		const paths = list
-			.split("\n")
-			.filter((l) => l.startsWith("worktree "))
-			.map((l) => l.slice("worktree ".length).trim());
-		expect(paths).toContain(stateCwd);
-	}, 60_000);
+			// And git worktree list confirms the new worktree is registered
+			// as a peer of the main repo, not as a child of `inner`.
+			const list = execFileSync("git", ["-C", outerRepo, "worktree", "list", "--porcelain"], {
+				encoding: "utf8",
+			});
+			const paths = list
+				.split("\n")
+				.filter((l) => l.startsWith("worktree "))
+				.map((l) => l.slice("worktree ".length).trim());
+			expect(paths).toContain(stateCwd);
+		},
+		60_000,
+	);
 });

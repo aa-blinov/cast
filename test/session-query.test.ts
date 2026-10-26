@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
@@ -20,6 +20,8 @@ describe("session history search", () => {
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "cast-session-query-test-"));
+		process.env.HOME = root;
+		process.env.USERPROFILE = root;
 		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
 		resetDbConnectionForTests();
 	});
@@ -130,6 +132,17 @@ describe("session history search", () => {
 		expect(formatSessionHistoryToolResult("zebras", global)).toContain("another project");
 	});
 
+	it("searches descendants when the project root is the filesystem root", () => {
+		const filesystemRoot = parse(tmpdir()).root;
+		const session = createSession("test-model", join(filesystemRoot, "workspace"));
+		session.messages = [{ role: "assistant", content: "volume boundary marker" }];
+		saveSession(session);
+
+		expect(searchSessionHistory(filesystemRoot, "volume boundary").map((result) => result.sessionId)).toEqual([
+			session.id,
+		]);
+	});
+
 	it("returns no results for an empty or unknown query", () => {
 		const project = join(root, "project");
 		expect(searchSessionHistory(project, "")).toEqual([]);
@@ -176,11 +189,14 @@ describe("execSessionHistorySearch — argument validation", () => {
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "cast-session-query-args-"));
+		process.env.HOME = root;
+		process.env.USERPROFILE = root;
 		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
 		resetDbConnectionForTests();
 	});
 
-	afterEach(() => {
+	afterEach(async () => {
+		await stopSqliteReader();
 		resetDbConnectionForTests();
 		delete process.env.CAST_SESSIONS_DB;
 		rmSync(root, { recursive: true, force: true });
@@ -278,6 +294,8 @@ describe("session history search on a worker thread", () => {
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "cast-session-query-worker-"));
+		process.env.HOME = root;
+		process.env.USERPROFILE = root;
 		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
 		resetDbConnectionForTests();
 	});
@@ -353,6 +371,8 @@ describe("history searches per turn", () => {
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "cast-session-query-cap-"));
+		process.env.HOME = root;
+		process.env.USERPROFILE = root;
 		process.env.CAST_SESSIONS_DB = join(root, "sessions.db");
 		resetDbConnectionForTests();
 	});

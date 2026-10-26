@@ -9,7 +9,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, join, win32 } from "node:path";
 import { type AppConfig, BASH_TIMEOUT_SECONDS_THRESHOLD, MAX_BASH_TIMEOUT_MS } from "../config.ts";
 import { checkDangerousBash } from "../permissions.ts";
 import { killProcessTree } from "../process.ts";
@@ -62,14 +62,14 @@ export type RunCommand = (file: string, args: string[]) => string | null;
  * VS Code locates Git Bash, and unlike hardcoded paths it survives installs
  * on other drives. Read via `reg.exe query` to avoid a registry dependency.
  */
-function gitBashFromRegistry(run: RunCommand, exists: (p: string) => boolean): string | null {
+function gitBashFromRegistry(run: RunCommand, exists: (p: string) => boolean, joinPath: typeof join): string | null {
 	for (const hive of ["HKCU", "HKLM"]) {
 		const out = run("reg.exe", ["query", `${hive}\\Software\\GitForWindows`, "/v", "InstallPath"]);
 		const match = out?.match(INSTALL_PATH_RE);
 		const installPath = match?.[1]?.trim();
 		if (!installPath) continue;
-		for (const rel of [join("bin", "bash.exe"), join("usr", "bin", "bash.exe")]) {
-			const candidate = join(installPath, rel);
+		for (const rel of [joinPath("bin", "bash.exe"), joinPath("usr", "bin", "bash.exe")]) {
+			const candidate = joinPath(installPath, rel);
 			if (exists(candidate)) return candidate;
 		}
 	}
@@ -82,15 +82,15 @@ function gitBashFromRegistry(run: RunCommand, exists: (p: string) => boolean): s
  * in the registry nor at a known path (portable installs). Shim launchers
  * (scoop) don't sit inside a Git root — the exists() check rejects those.
  */
-function gitBashFromPath(run: RunCommand, exists: (p: string) => boolean): string | null {
+function gitBashFromPath(run: RunCommand, exists: (p: string) => boolean, joinPath: typeof join): string | null {
 	const out = run("where.exe", ["git.exe"]);
 	if (!out) return null;
 	for (const line of out.split(NEWLINE_SPLIT_RE)) {
 		const gitExe = line.trim();
 		if (!gitExe) continue;
-		const root = join(gitExe, "..", "..");
-		for (const rel of [join("bin", "bash.exe"), join("usr", "bin", "bash.exe")]) {
-			const candidate = join(root, rel);
+		const root = joinPath(gitExe, "..", "..");
+		for (const rel of [joinPath("bin", "bash.exe"), joinPath("usr", "bin", "bash.exe")]) {
+			const candidate = joinPath(root, rel);
 			if (exists(candidate)) return candidate;
 		}
 	}
@@ -124,21 +124,22 @@ export function resolveBashFrom(
 	if (override) return { path: override };
 
 	if (platform !== "win32") return { path: "bash" };
+	const joinPath = win32.join;
 
-	const fromRegistry = gitBashFromRegistry(run, exists);
+	const fromRegistry = gitBashFromRegistry(run, exists, joinPath);
 	if (fromRegistry) return { path: fromRegistry };
 
 	const candidates = [
-		join(env.ProgramFiles || "C:\\Program Files", "Git", "bin", "bash.exe"),
-		join(env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
-		join(env.LOCALAPPDATA || "", "Programs", "Git", "bin", "bash.exe"),
-		join(env.USERPROFILE || "", "scoop", "apps", "git", "current", "bin", "bash.exe"),
+		joinPath(env.ProgramFiles || "C:\\Program Files", "Git", "bin", "bash.exe"),
+		joinPath(env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
+		joinPath(env.LOCALAPPDATA || "", "Programs", "Git", "bin", "bash.exe"),
+		joinPath(env.USERPROFILE || "", "scoop", "apps", "git", "current", "bin", "bash.exe"),
 	];
 	for (const candidate of candidates) {
 		if (candidate && exists(candidate)) return { path: candidate };
 	}
 
-	const fromPath = gitBashFromPath(run, exists);
+	const fromPath = gitBashFromPath(run, exists, joinPath);
 	if (fromPath) return { path: fromPath };
 
 	return {

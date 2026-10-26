@@ -18,19 +18,33 @@ const mockConfig: AppConfig = {
 };
 
 /** A stand-in formatter: collapses double spaces in the file named last. */
-// The default body squeezes repeated spaces in the file named last. `tr -s`
-// rather than `sed -i`: BSD sed (macOS) takes the backup suffix as the next
-// argument, so a GNU-style `sed -i "s/…/…/" file` edits nothing there.
-function fakeBin(
-	dir: string,
-	name: string,
-	body = 'for f; do :; done; tr -s " " < "$f" > "$f.tmp" && mv "$f.tmp" "$f"',
-) {
+function fakeBin(dir: string, name: string, fail = false) {
 	mkdirSync(dir, { recursive: true });
-	const path = join(dir, name);
-	writeFileSync(path, `#!/bin/sh\n${body}\n`);
-	chmodSync(path, 0o755);
+	if (process.platform === "win32" && (name === "biome" || name === "prettier")) {
+		const packageName = name === "biome" ? "@biomejs/biome" : "prettier";
+		const packageDir = join(dir, "..", packageName);
+		const scriptPath = join(packageDir, "bin", `${name}.cjs`);
+		mkdirSync(join(packageDir, "bin"), { recursive: true });
+		writeFileSync(join(packageDir, "package.json"), JSON.stringify({ bin: { [name]: `bin/${name}.cjs` } }));
+		writeFileSync(scriptPath, formatterSource(fail));
+		const shim = join(dir, `${name}.cmd`);
+		writeFileSync(shim, "@echo off\r\n");
+		return shim;
+	}
+	const path = join(dir, `${name}${process.platform === "win32" ? ".exe" : ""}`);
+	if (name === "biome" && process.platform !== "win32") {
+		writeFileSync(path, `#!/usr/bin/env node\n${formatterSource(fail)}`);
+		chmodSync(path, 0o755);
+	} else {
+		writeFileSync(path, "");
+	}
 	return path;
+}
+
+function formatterSource(fail: boolean): string {
+	return fail
+		? 'process.stderr.write("parse error\\n"); process.exit(1);\n'
+		: 'const fs = require("node:fs"); const file = process.argv.at(-1); const text = fs.readFileSync(file, "utf8"); fs.writeFileSync(file, text.replace(/ {2,}/g, " "));\n';
 }
 
 describe("auto-format", () => {
@@ -53,7 +67,10 @@ describe("auto-format", () => {
 		writeFileSync(join(TEST_DIR, "biome.json"), "{}");
 		const biome = fakeBin(join(TEST_DIR, "node_modules", ".bin"), "biome");
 		const file = join(TEST_DIR, "src", "deep", "a.ts");
-		expect(detectFormatter(file)).toMatchObject({ name: "biome", command: biome, cwd: TEST_DIR });
+		const formatter = detectFormatter(file);
+		expect(formatter).toMatchObject({ name: "biome", cwd: TEST_DIR });
+		if (process.platform === "win32") expect(formatter?.command).toBe(process.execPath);
+		else expect(formatter?.command).toBe(biome);
 		expect(detectFormatter(join(TEST_DIR, "notes.md"))).toBeUndefined();
 	});
 
@@ -92,7 +109,7 @@ describe("auto-format", () => {
 		expect(readFileSync(file, "utf-8")).toBe("const a = 1;\n");
 		expect(await formatWrittenFile(file)).toBeUndefined();
 
-		fakeBin(bin, "biome", 'echo "parse error" >&2; exit 1');
+		fakeBin(bin, "biome", true);
 		writeFileSync(file, "const  broken = ;\n");
 		expect(await formatWrittenFile(file)).toBeUndefined();
 		expect(readFileSync(file, "utf-8")).toBe("const  broken = ;\n");

@@ -17,7 +17,7 @@ export interface TestEnvironment {
 export function createTestEnvironment(prefix = "cast-test-"): TestEnvironment {
 	const root = mkdtempSync(join(tmpdir(), prefix));
 	const home = join(root, "home");
-	const cwd = join(root, "workspace");
+	const cwd = join(home, "workspace");
 	const castDir = join(home, ".cast");
 	const projectCastDir = join(cwd, ".cast");
 	mkdirSync(join(castDir, "sessions"), { recursive: true });
@@ -34,15 +34,29 @@ export function createTestEnvironment(prefix = "cast-test-"): TestEnvironment {
 }
 
 export function applyTestEnvironment(environment: TestEnvironment): void {
-	process.env.HOME = environment.home;
-	process.env.USERPROFILE = environment.home;
-	if (process.platform === "win32") {
-		const drive = win32.parse(environment.home).root.slice(0, 2);
-		process.env.HOMEDRIVE = drive;
-		process.env.HOMEPATH = environment.home.slice(drive.length) || "\\";
-	}
+	setTestHome(environment.home);
 	process.env.CAST_CWD = environment.cwd;
 	process.env.CAST_SESSIONS_DB = environment.dbPath;
+}
+
+export function setTestHome(home: string): void {
+	process.env.HOME = home;
+	process.env.USERPROFILE = home;
+	if (process.platform === "win32") {
+		const root = win32.parse(home).root;
+		process.env.HOMEDRIVE = root.slice(0, 2);
+		process.env.HOMEPATH = home.slice(root.length) || "\\";
+	}
+}
+
+export function testHomeEnvironment(home: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const env = { ...base, HOME: home, USERPROFILE: home };
+	if (process.platform === "win32") {
+		const root = win32.parse(home).root;
+		env.HOMEDRIVE = root.slice(0, 2);
+		env.HOMEPATH = home.slice(root.length) || "\\";
+	}
+	return env;
 }
 
 export function writeTestSettings(environment: TestEnvironment, settings: Partial<Settings>): void {

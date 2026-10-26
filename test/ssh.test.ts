@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import type { AppConfig } from "../src/core/config.ts";
 import { ensureControlDir, loadSshConfig, resolveSshHosts, validateKeyPermissions } from "../src/core/ssh.ts";
 import { execSsh } from "../src/core/tools/ssh.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 const TEST_DIR = join(import.meta.dirname, "__test_tmp__", "ssh");
 
@@ -273,30 +274,33 @@ describe("SSH tool executor", () => {
 		}
 	});
 
-	it("uses the configured default timeout when a non-positive timeout is passed", async () => {
-		const originalPath = process.env.PATH;
-		const binDir = join(TEST_DIR, "fake-bin");
-		mkdirSync(binDir, { recursive: true });
-		const fakeSsh = join(binDir, "ssh");
-		writeFileSync(fakeSsh, "#!/bin/sh\n/bin/sleep 1\n", "utf-8");
-		chmodSync(fakeSsh, 0o755);
-		process.env.PATH = binDir;
-		try {
-			const exec = createToolExecutor(
-				TEST_DIR,
-				{ ...mockConfig, defaultBashTimeoutMs: 50 },
-				undefined,
-				undefined,
-				undefined,
-				[{ name: "h", host: "example.test" }],
-			);
-			const result = await exec("ssh", { host: "h", command: "sleep", timeout: 0 });
-			expect(result.isError).toBe(true);
-			expect(result.content).toContain("[TIMED OUT] after 50ms");
-		} finally {
-			process.env.PATH = originalPath;
-		}
-	});
+	it.skipIf(process.platform === "win32")(
+		"uses the configured default timeout when a non-positive timeout is passed",
+		async () => {
+			const originalPath = process.env.PATH;
+			const binDir = join(TEST_DIR, "fake-bin");
+			mkdirSync(binDir, { recursive: true });
+			const fakeSsh = join(binDir, "ssh");
+			writeFileSync(fakeSsh, "#!/bin/sh\n/bin/sleep 1\n", "utf-8");
+			chmodSync(fakeSsh, 0o755);
+			process.env.PATH = binDir;
+			try {
+				const exec = createToolExecutor(
+					TEST_DIR,
+					{ ...mockConfig, defaultBashTimeoutMs: 50 },
+					undefined,
+					undefined,
+					undefined,
+					[{ name: "h", host: "example.test" }],
+				);
+				const result = await exec("ssh", { host: "h", command: "sleep", timeout: 0 });
+				expect(result.isError).toBe(true);
+				expect(result.content).toContain("[TIMED OUT] after 50ms");
+			} finally {
+				process.env.PATH = originalPath;
+			}
+		},
+	);
 });
 
 // ============================================================================
@@ -315,36 +319,42 @@ describe("ensureControlDir", () => {
 		delete process.env.CAST_SSH_CONTROL_DIR;
 	});
 
-	it("refuses a control path that is a symlink instead of a real directory", () => {
+	it("refuses a control path that is a symlink instead of a real directory", (context) => {
 		const target = join(TEST_DIR, "elsewhere");
 		const link = join(TEST_DIR, "ctl-link");
 		mkdirSync(target, { recursive: true });
-		symlinkSync(target, link);
+		createTestSymlink(context, target, link, "dir");
 		process.env.CAST_SSH_CONTROL_DIR = link;
 
 		expect(() => ensureControlDir()).toThrow(/not a directory/);
 		expect(existsSync(join(target, "%C.sock"))).toBe(false);
 	});
 
-	it("tightens a pre-existing directory of its own that other users can reach", () => {
-		// A directory we own is repaired rather than refused — the refusal is for
-		// one we cannot chmod, which means it belongs to someone else.
-		const dir = join(TEST_DIR, "ctl-open");
-		mkdirSync(dir, { recursive: true });
-		chmodSync(dir, 0o777);
-		process.env.CAST_SSH_CONTROL_DIR = dir;
+	it.skipIf(process.platform === "win32")(
+		"tightens a pre-existing directory of its own that other users can reach",
+		() => {
+			// A directory we own is repaired rather than refused — the refusal is for
+			// one we cannot chmod, which means it belongs to someone else.
+			const dir = join(TEST_DIR, "ctl-open");
+			mkdirSync(dir, { recursive: true });
+			chmodSync(dir, 0o777);
+			process.env.CAST_SSH_CONTROL_DIR = dir;
 
-		expect(ensureControlDir()).toBe(join(dir, "%C.sock"));
-		expect(statSync(dir).mode & 0o777).toBe(0o700);
-	});
+			expect(ensureControlDir()).toBe(join(dir, "%C.sock"));
+			expect(statSync(dir).mode & 0o777).toBe(0o700);
+		},
+	);
 
-	it("creates its own directory private and returns the socket template inside it", () => {
-		const dir = join(TEST_DIR, "ctl-fresh");
-		process.env.CAST_SSH_CONTROL_DIR = dir;
+	it.skipIf(process.platform === "win32")(
+		"creates its own directory private and returns the socket template inside it",
+		() => {
+			const dir = join(TEST_DIR, "ctl-fresh");
+			process.env.CAST_SSH_CONTROL_DIR = dir;
 
-		expect(ensureControlDir()).toBe(join(dir, "%C.sock"));
-		expect(statSync(dir).mode & 0o777).toBe(0o700);
-	});
+			expect(ensureControlDir()).toBe(join(dir, "%C.sock"));
+			expect(statSync(dir).mode & 0o777).toBe(0o700);
+		},
+	);
 });
 
 // ============================================================================
@@ -352,33 +362,36 @@ describe("ensureControlDir", () => {
 // ============================================================================
 
 describe("execSsh timeout", () => {
-	it("answers soon after the timeout even when something outside the process group keeps the pipes open", async () => {
-		// Stands in for ControlMaster, whose persistent master holds the client's pipes until the remote command ends.
-		const bin = join(TEST_DIR, "bin");
-		mkdirSync(bin, { recursive: true });
-		const fake = join(bin, "ssh");
-		writeFileSync(fake, "#!/bin/sh\nsetsid sleep 6 &\nexec sleep 30\n", "utf-8");
-		chmodSync(fake, 0o755);
-		const oldPath = process.env.PATH;
-		const oldCtl = process.env.CAST_SSH_CONTROL_DIR;
-		process.env.PATH = `${bin}:${oldPath}`;
-		process.env.CAST_SSH_CONTROL_DIR = join(TEST_DIR, "ctl");
-		try {
-			const started = Date.now();
-			const result = await execSsh(
-				{ host: "box", command: "sleep 30", timeout: 1000 },
-				[{ name: "box", host: "127.0.0.1" }],
-				mockConfig,
-			);
-			expect(result.isError).toBe(true);
-			expect(String(result.content)).toContain("TIMED OUT");
-			expect(Date.now() - started).toBeLessThan(3500);
-		} finally {
-			process.env.PATH = oldPath;
-			if (oldCtl === undefined) delete process.env.CAST_SSH_CONTROL_DIR;
-			else process.env.CAST_SSH_CONTROL_DIR = oldCtl;
-		}
-	});
+	it.skipIf(process.platform === "win32")(
+		"answers soon after the timeout even when something outside the process group keeps the pipes open",
+		async () => {
+			// Stands in for ControlMaster, whose persistent master holds the client's pipes until the remote command ends.
+			const bin = join(TEST_DIR, "bin");
+			mkdirSync(bin, { recursive: true });
+			const fake = join(bin, "ssh");
+			writeFileSync(fake, "#!/bin/sh\nsetsid sleep 6 &\nexec sleep 30\n", "utf-8");
+			chmodSync(fake, 0o755);
+			const oldPath = process.env.PATH;
+			const oldCtl = process.env.CAST_SSH_CONTROL_DIR;
+			process.env.PATH = `${bin}:${oldPath}`;
+			process.env.CAST_SSH_CONTROL_DIR = join(TEST_DIR, "ctl");
+			try {
+				const started = Date.now();
+				const result = await execSsh(
+					{ host: "box", command: "sleep 30", timeout: 1000 },
+					[{ name: "box", host: "127.0.0.1" }],
+					mockConfig,
+				);
+				expect(result.isError).toBe(true);
+				expect(String(result.content)).toContain("TIMED OUT");
+				expect(Date.now() - started).toBeLessThan(3500);
+			} finally {
+				process.env.PATH = oldPath;
+				if (oldCtl === undefined) delete process.env.CAST_SSH_CONTROL_DIR;
+				else process.env.CAST_SSH_CONTROL_DIR = oldCtl;
+			}
+		},
+	);
 });
 
 describe("execSsh host names", () => {

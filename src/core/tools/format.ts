@@ -28,6 +28,10 @@ const PRETTIER_CONFIGS = [
 	"prettier.config.mjs",
 	"prettier.config.ts",
 ];
+const NODE_FORMATTER_PACKAGES = {
+	biome: { packageName: "@biomejs/biome", binName: "biome" },
+	prettier: { packageName: "prettier", binName: "prettier" },
+} as const;
 
 export interface Formatter {
 	name: string;
@@ -37,10 +41,43 @@ export interface Formatter {
 }
 
 function onPath(bin: string): string | undefined {
+	const extensions =
+		process.platform === "win32" ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")] : [""];
 	for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-		if (dir && existsSync(join(dir, bin))) return join(dir, bin);
+		for (const extension of extensions) {
+			const candidate = join(dir, `${bin}${extension.toLowerCase()}`);
+			if (dir && existsSync(candidate)) return candidate;
+		}
 	}
 	return undefined;
+}
+
+function packageBin(dir: string, formatter: keyof typeof NODE_FORMATTER_PACKAGES): string | undefined {
+	const { packageName, binName } = NODE_FORMATTER_PACKAGES[formatter];
+	const packageDir = join(dir, "node_modules", packageName);
+	try {
+		const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf-8")) as {
+			bin?: string | Record<string, string>;
+		};
+		const entry = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.[binName];
+		const path = entry ? join(packageDir, entry) : undefined;
+		return path && existsSync(path) ? path : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function localBin(dir: string, name: string): { command: string; args: string[] } | undefined {
+	const path = join(dir, "node_modules", ".bin", name);
+	if (process.platform === "win32") {
+		if (existsSync(`${path}.cmd`)) {
+			const entry = packageBin(dir, name as keyof typeof NODE_FORMATTER_PACKAGES);
+			return entry ? { command: process.execPath, args: [entry] } : undefined;
+		}
+		const executable = `${path}.exe`;
+		return existsSync(executable) ? { command: executable, args: [] } : undefined;
+	}
+	return existsSync(path) ? { command: path, args: [] } : undefined;
 }
 
 function hasPrettierKey(dir: string): boolean {
@@ -68,23 +105,25 @@ export function detectFormatter(filePath: string): Formatter | undefined {
 		return gofmt ? { name: "gofmt", command: gofmt, args: ["-w", filePath], cwd: dirname(filePath) } : undefined;
 	}
 	for (let dir = dirname(filePath); ; dir = dirname(dir)) {
-		const bin = (name: string) => {
-			const path = join(dir, "node_modules", ".bin", name);
-			return existsSync(path) ? path : undefined;
-		};
 		if (JS_LIKE.has(ext) && (existsSync(join(dir, "biome.json")) || existsSync(join(dir, "biome.jsonc")))) {
-			const biome = bin("biome");
-			if (biome) return { name: "biome", command: biome, args: ["format", "--write", filePath], cwd: dir };
+			const biome = localBin(dir, "biome");
+			if (biome) return { name: "biome", ...biome, args: [...biome.args, "format", "--write", filePath], cwd: dir };
 		}
 		if (
 			(JS_LIKE.has(ext) || PRETTIER_EXTRA.has(ext)) &&
 			(PRETTIER_CONFIGS.some((name) => existsSync(join(dir, name))) || hasPrettierKey(dir))
 		) {
-			const prettier = bin("prettier");
-			if (prettier) return { name: "prettier", command: prettier, args: ["--write", filePath], cwd: dir };
+			const prettier = localBin(dir, "prettier");
+			if (prettier)
+				return { name: "prettier", ...prettier, args: [...prettier.args, "--write", filePath], cwd: dir };
 		}
 		if ((ext === ".py" || ext === ".pyi") && hasRuffConfig(dir)) {
-			const venv = join(dir, ".venv", "bin", "ruff");
+			const venv = join(
+				dir,
+				".venv",
+				process.platform === "win32" ? "Scripts" : "bin",
+				`ruff${process.platform === "win32" ? ".exe" : ""}`,
+			);
 			const ruff = existsSync(venv) ? venv : onPath("ruff");
 			if (ruff) return { name: "ruff", command: ruff, args: ["format", filePath], cwd: dir };
 		}

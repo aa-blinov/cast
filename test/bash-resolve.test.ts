@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type RunCommand, resolveBashFrom } from "../src/core/tools/bash.ts";
 
@@ -54,14 +54,14 @@ describe("resolveBashFrom", () => {
 	});
 
 	it("resolves through the GitForWindows registry key first (any install drive)", () => {
-		const bash = join("D:\\tools\\Git", "bin", "bash.exe");
+		const bash = win32.join("D:\\tools\\Git", "bin", "bash.exe");
 		const r = resolveBashFrom("win32", winEnv, existsAt(bash), fakeRun({ hklm: "D:\\tools\\Git" }));
 		expect(r).toEqual({ path: bash });
 	});
 
 	it("prefers the per-user HKCU install over the machine-wide HKLM one", () => {
-		const userBash = join("C:\\UserGit", "bin", "bash.exe");
-		const machineBash = join("C:\\MachineGit", "bin", "bash.exe");
+		const userBash = win32.join("C:\\UserGit", "bin", "bash.exe");
+		const machineBash = win32.join("C:\\MachineGit", "bin", "bash.exe");
 		const r = resolveBashFrom(
 			"win32",
 			winEnv,
@@ -72,17 +72,17 @@ describe("resolveBashFrom", () => {
 	});
 
 	it("falls back to usr\\bin\\bash.exe when bin\\bash.exe is absent in the registry install", () => {
-		const usrBash = join("C:\\Git", "usr", "bin", "bash.exe");
+		const usrBash = win32.join("C:\\Git", "usr", "bin", "bash.exe");
 		const r = resolveBashFrom("win32", winEnv, existsAt(usrBash), fakeRun({ hklm: "C:\\Git" }));
 		expect(r).toEqual({ path: usrBash });
 	});
 
 	it("checks the known install paths when the registry has nothing", () => {
 		for (const bash of [
-			join(PF, "Git", "bin", "bash.exe"),
-			join(PF86, "Git", "bin", "bash.exe"),
-			join(LOCAL, "Programs", "Git", "bin", "bash.exe"), // no-admin per-user default
-			join(HOME, "scoop", "apps", "git", "current", "bin", "bash.exe"),
+			win32.join(PF, "Git", "bin", "bash.exe"),
+			win32.join(PF86, "Git", "bin", "bash.exe"),
+			win32.join(LOCAL, "Programs", "Git", "bin", "bash.exe"), // no-admin per-user default
+			win32.join(HOME, "scoop", "apps", "git", "current", "bin", "bash.exe"),
 		]) {
 			expect(resolveBashFrom("win32", winEnv, existsAt(bash), noRun)).toEqual({ path: bash });
 		}
@@ -90,7 +90,7 @@ describe("resolveBashFrom", () => {
 
 	it("derives bash from `git` on PATH as a last discovery step", () => {
 		const gitExe = "E:\\portable\\Git\\cmd\\git.exe";
-		const bash = join("E:\\portable\\Git\\cmd", "..", "..", "bin", "bash.exe");
+		const bash = win32.join("E:\\portable\\Git", "bin", "bash.exe");
 		const r = resolveBashFrom("win32", winEnv, existsAt(bash), fakeRun({ whereGit: [gitExe] }));
 		expect(r).toEqual({ path: bash });
 	});
@@ -114,7 +114,7 @@ describe("resolveBashFrom", () => {
 	});
 
 	it("uses default install roots when the env vars are absent", () => {
-		const gitBash = join("C:\\Program Files", "Git", "bin", "bash.exe");
+		const gitBash = win32.join("C:\\Program Files", "Git", "bin", "bash.exe");
 		expect(resolveBashFrom("win32", {}, existsAt(gitBash), noRun)).toEqual({ path: gitBash });
 	});
 });

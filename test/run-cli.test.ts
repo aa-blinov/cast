@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { testHomeEnvironment } from "./helpers/test-environment.ts";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "index.js");
@@ -16,11 +17,16 @@ const DIST_ENTRY = join(REPO_ROOT, "dist", "index.js");
 let home: string;
 
 function cast(args: string[], options: { input?: string; timeout?: number } = {}) {
-	const result = spawnSync("node", ["--disable-warning=ExperimentalWarning", DIST_ENTRY, "run", ...args], {
+	const result = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", DIST_ENTRY, "run", ...args], {
 		encoding: "utf-8",
 		input: options.input ?? "",
 		timeout: options.timeout ?? 30_000,
-		env: { ...process.env, HOME: home, CAST_CWD: home, CAST_SERVER_PORT: "0", CAST_SERVER_HOST: "127.0.0.1" },
+		env: testHomeEnvironment(home, {
+			...process.env,
+			CAST_CWD: home,
+			CAST_SERVER_PORT: "0",
+			CAST_SERVER_HOST: "127.0.0.1",
+		}),
 	});
 	return { code: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -74,10 +80,14 @@ describe.skipIf(!existsSync(DIST_ENTRY))("cast run command line", () => {
 
 	// A fresh machine (a CI container) has no ~/.cast: the start lock failed with ENOENT, read as "held", and the run
 	// spun for a minute with nothing printed; after that it waited forever for a turn that had already failed.
-	it("on a machine with nothing configured, fails in seconds and says what is missing", () => {
-		const { code, stdout, stderr } = cast(["hi"], { timeout: 45_000 });
-		expect(code).toBe(1);
-		expect(stdout).toBe("");
-		expect(stderr).toContain("No provider is configured");
-	}, 60_000);
+	it.skipIf(process.platform === "win32" && !process.stdin.isTTY)(
+		"on a machine with nothing configured, fails in seconds and says what is missing",
+		() => {
+			const { code, stdout, stderr } = cast(["hi"], { timeout: 45_000 });
+			expect(code).toBe(1);
+			expect(stdout).toBe("");
+			expect(stderr).toContain("No provider is configured");
+		},
+		60_000,
+	);
 });
