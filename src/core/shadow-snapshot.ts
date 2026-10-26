@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { type Dirent, existsSync, realpathSync } from "node:fs";
 import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, parse, resolve, sep } from "node:path";
 
 export const MAX_SNAPSHOT_FILES = 3000;
 export const MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024;
@@ -90,7 +90,7 @@ export function shadowDirFor(cwd: string): string | undefined {
 export async function fitsInSnapshot(cwd: string): Promise<boolean> {
 	const start = resolve(cwd);
 	// The whole home directory or the filesystem root are never a project.
-	if (start === homedir() || start === "/") return false;
+	if (start === homedir() || start === parse(start).root) return false;
 	const stack = [start];
 	let files = 0;
 	let bytes = 0;

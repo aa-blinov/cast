@@ -343,7 +343,7 @@ describe("permission rules in the loop", () => {
 				{ sessionId: "mine" },
 			);
 			expect(content).toContain("declined");
-			expect(content).toContain(join(dir, "home", ".cast", "scratch", "mine"));
+			expect(content).toContain(join(realpathSync(dir), "home", ".cast", "scratch", "mine"));
 			expect(existsSync(temporaryFile)).toBe(false);
 		});
 

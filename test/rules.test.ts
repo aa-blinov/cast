@@ -844,7 +844,7 @@ describe("rules", () => {
 			mkdirSync(join(root, ".cast", "rules"), { recursive: true });
 			writeFileSync(join(root, ".cast", "rules", "root.md"), "---\nalwaysApply: true\n---\nROOT.");
 			// Far more directories than the budget allows.
-			for (let i = 0; i < 4200; i++) mkdirSync(join(root, `d${i}`), { recursive: true });
+			for (let i = 0; i < 4200; i++) mkdirSync(join(root, `d${i}`));
 			const started = Date.now();
 			const found = discoverProjectRuleDirs(root);
 			const scopes = found.map((f) => f.scope);

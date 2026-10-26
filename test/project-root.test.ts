@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, parse } from "node:path";
+import { dirname, join, parse } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearProjectRootCache, findProjectRoot, isUnderProjectRoot } from "../src/core/project-root.ts";
+import { withPlatform } from "./helpers/platform.ts";
 import { createTestSymlink } from "./helpers/symlink.ts";
 
 describe("findProjectRoot", () => {
@@ -144,9 +145,18 @@ describe("isUnderProjectRoot", () => {
 		}
 	});
 
-	it.skipIf(process.platform !== "win32")("compares Windows paths without case sensitivity", () => {
-		expect(isUnderProjectRoot("C:\\Users\\Ada\\repo", "c:\\users\\ada\\REPO\\src\\index.ts")).toBe(true);
-		expect(isUnderProjectRoot("C:\\Users\\Ada\\repo", "c:\\users\\ada\\repository")).toBe(false);
+	it("compares Windows paths without case sensitivity", async () => {
+		await withPlatform("win32", () => {
+			const base = mkdtempSync(join(tmpdir(), "cast-win-path-"));
+			const root = join(base, "Ada", "repo");
+			mkdirSync(root, { recursive: true });
+			try {
+				expect(isUnderProjectRoot(root, join(root.toUpperCase(), "SRC", "index.ts"))).toBe(true);
+				expect(isUnderProjectRoot(root, join(dirname(root).toUpperCase(), "repository"))).toBe(false);
+			} finally {
+				rmSync(base, { recursive: true, force: true });
+			}
+		});
 	});
 
 	it("accepts descendants when the project root is the filesystem root", () => {
