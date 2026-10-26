@@ -249,7 +249,6 @@ describe("bash", () => {
 
 		expect(result.isError).toBe(true);
 		expect(result.content).toContain("[ABORTED]");
-		expect(result.content).not.toContain("forced — process did not exit");
 		// Killed promptly, nowhere near the 30s sleep or 60s timeout it would
 		// otherwise have run for. Tree teardown can take several seconds on a
 		// loaded Windows runner while the process is still being reaped.

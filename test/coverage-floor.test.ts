@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ describe("coverage floor check", () => {
 			const coverage = join(repo, "coverage");
 			mkdirSync(scripts);
 			mkdirSync(coverage);
+			const canonicalRepo = realpathSync(repo);
 			writeFileSync(
 				join(scripts, "check-coverage-floor.mjs"),
 				readFileSync(new URL("../scripts/check-coverage-floor.mjs", import.meta.url)),
@@ -20,7 +21,7 @@ describe("coverage floor check", () => {
 				join(coverage, "coverage-summary.json"),
 				JSON.stringify({
 					total: {},
-					[`${repo}\\src\\core\\example.ts`]: { lines: { pct: 100 } },
+					[`${canonicalRepo}\\src\\core\\example.ts`]: { lines: { pct: 100 } },
 				}),
 			);
 			writeFileSync(
