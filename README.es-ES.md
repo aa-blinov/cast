@@ -42,7 +42,7 @@ La primera vez, cast pide una persona, la URL del proveedor y una clave API, y d
 Para fijar una versión, antepone <code>CAST_VERSION</code> al comando de instalación. Más tarde puedes actualizar con <code>cast upgrade</code>:
 
 ~~~bash
-CAST_VERSION=0.58.0 curl -fsSL https://aa-blinov.github.io/cast/install | bash
+CAST_VERSION=0.59.0 curl -fsSL https://aa-blinov.github.io/cast/install | bash
 ~~~
 
 ## Qué hace

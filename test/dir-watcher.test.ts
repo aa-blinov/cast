@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type DirChange, watchDirectories } from "../src/server/bridge/dir-watcher.ts";
 
@@ -76,14 +76,19 @@ describe("watchDirectories", () => {
 	});
 
 	it("skips ignored folders, as listed and as they appear", async () => {
-		mkdirSync(join(root, "skipme"));
+		const ignored = join(root, "skipme");
+		mkdirSync(ignored);
 		const watcher = start([join(root, "skipme")], (path) => path.includes("skipme"));
 		expect(watcher.size()).toBe(1);
 		await settle();
-		mkdirSync(join(root, "skipme", "inner"));
-		writeFileSync(join(root, "skipme", "x.txt"), "x");
+		mkdirSync(join(ignored, "inner"));
+		writeFileSync(join(ignored, "x.txt"), "x");
 		await sleep(600);
-		expect(changes).toEqual([]);
+		// macOS can coalesce a change under an ignored descendant into a root notification.
+		expect(changes.filter((change) => change.path === ignored || change.path.startsWith(`${ignored}${sep}`))).toEqual(
+			[],
+		);
+		expect(watcher.size()).toBe(1);
 	});
 
 	it("survives a watched folder being deleted", async () => {
