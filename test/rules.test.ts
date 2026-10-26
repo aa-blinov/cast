@@ -835,24 +835,18 @@ describe("rules", () => {
 			expect(scopes).toEqual(["", "apps/web", "services/api"]);
 		});
 
-		it("bounds how much of the tree one discovery pass walks", () => {
-			// The walk is depth-bounded but was unbounded in width, and it runs on
-			// startup and on every subagent spawn. cast's own tree is 68
-			// directories (13ms); running cast straight from a home directory
-			// walked 9,392 of them — 333ms warm, 2s on a cold cache, per spawn.
+		it("bounds how much of a wide tree one discovery pass scans", () => {
 			const root = join(projectDir, "wide");
 			mkdirSync(join(root, ".cast", "rules"), { recursive: true });
 			writeFileSync(join(root, ".cast", "rules", "root.md"), "---\nalwaysApply: true\n---\nROOT.");
-			// Far more directories than the budget allows.
-			for (let i = 0; i < 4200; i++) mkdirSync(join(root, `d${i}`));
-			const started = Date.now();
-			const found = discoverProjectRuleDirs(root);
+			// Exercise the same bound with a small override, so this invariant is
+			// fast on filesystems where thousands of real directories are costly.
+			for (let i = 0; i < 20; i++) mkdirSync(join(root, `d${i}`, ".cast", "rules"), { recursive: true });
+			const found = discoverProjectRuleDirs(root, 8, 5);
 			const scopes = found.map((f) => f.scope);
 
-			// The root's own rules are always found, and the pass ends rather
-			// than walking the whole tree.
+			expect(scopes).toHaveLength(6);
 			expect(scopes).toContain("");
-			expect(Date.now() - started).toBeLessThan(10_000);
 		});
 
 		it("scope-qualifies ids so same-named rules in different subtrees coexist", () => {
