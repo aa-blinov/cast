@@ -12,7 +12,7 @@ import { access, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import type { AppConfig } from "../config.ts";
-import { formatSize, relativeToCwd, resolvePath, type ToolResult, toolError } from "./shared.ts";
+import { formatSize, resolvePath, type ToolResult, toolError } from "./shared.ts";
 
 const REGEX_ESCAPE_RE = /[.*+?^${}()|[\]\\]/g;
 const SEARCH_PATH_PREFIX_RE = /^\.\//gm;
@@ -54,16 +54,10 @@ function throwIfSearchAborted(signal: AbortSignal | undefined): void {
 // prefixes a relative path with `./` (`./b.txt`) — strip it so the join
 // doesn't leave `/root/./b.txt` in the output.
 function relativizeRgPaths(stdout: string, root: string, cwd: string): string {
-	const prefix = root.endsWith(sep) ? root : root + sep;
 	return stdout.replace(RG_PATH_LINE_RE, (_match, rel) => {
-		let absPath: string;
-		if (isAbsolute(rel) || rel.startsWith(prefix)) {
-			absPath = rel;
-		} else {
-			const cleaned = rel.startsWith("./") || rel.startsWith(".\\") ? rel.slice(2) : rel;
-			absPath = `${prefix}${cleaned}`;
-		}
-		return `${relativeToCwd(absPath, cwd)}:`;
+		const cleaned = rel.startsWith("./") || rel.startsWith(".\\") ? rel.slice(2) : rel;
+		const absPath = isAbsolute(rel) ? rel : join(root, cleaned);
+		return `${searchPathFromCwd(absPath, cwd)}:`;
 	});
 }
 
@@ -93,7 +87,7 @@ const DEFAULT_IGNORE_DIRS = new Set([
 	".turbo",
 ]);
 
-const WORKTREES_DIR = join(".cast", "worktrees");
+const WORKTREES_DIR = ".cast/worktrees";
 const MAX_WALK_FILES = 20_000;
 const MAX_GREP_FILE_BYTES = 5 * 1024 * 1024;
 
@@ -105,6 +99,19 @@ interface GitignoreRule {
 
 function escapeRegExp(text: string): string {
 	return text.replace(REGEX_ESCAPE_RE, "\\$&");
+}
+
+function toPosixPath(path: string): string {
+	return sep === "/" ? path : path.split(sep).join("/");
+}
+
+function searchPathFromCwd(path: string, cwd: string): string {
+	const relativePath = relative(cwd, path);
+	if (!relativePath) return ".";
+	if (relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+		return toPosixPath(path);
+	}
+	return toPosixPath(relativePath);
 }
 
 /**
@@ -238,7 +245,7 @@ async function walkFiles(
 			throwIfSearchAborted(signal);
 			if (results.length >= maxFiles) break;
 			const absPath = join(dir, entry.name);
-			const relPath = relative(cwd, absPath);
+			const relPath = toPosixPath(relative(cwd, absPath));
 			const isDir = entry.isDirectory();
 
 			if (isDir && DEFAULT_IGNORE_DIRS.has(entry.name)) continue;
@@ -307,7 +314,7 @@ export async function execGlob(
 	// nothing — the caller gets a silent "No files found" for files that are
 	// right there. Split at the first segment holding a glob metacharacter;
 	// with none, the pattern is a literal path, so its dirname is the root.
-	let pattern = rawPattern;
+	let pattern = process.platform === "win32" ? rawPattern.replaceAll("\\", "/") : rawPattern;
 	let searchRoot = typeof args.path === "string" ? args.path : undefined;
 	if (searchRoot === undefined && isAbsolute(pattern)) {
 		const segments = pattern.split("/");
@@ -410,7 +417,7 @@ export async function execGlob(
 			if (pattern.includes("/")) {
 				const anchoredPattern = pattern.startsWith("**/") ? pattern : `**/${pattern}`;
 				const pathRe = globToFileRegExp(anchoredPattern);
-				absolutePaths = allFiles.filter((p) => pathRe.test(relative(searchPath, p))).slice(0, limit);
+				absolutePaths = allFiles.filter((p) => pathRe.test(toPosixPath(relative(searchPath, p)))).slice(0, limit);
 			} else {
 				const nameRe = globToFileRegExp(pattern);
 				absolutePaths = allFiles.filter((p) => nameRe.test(basename(p))).slice(0, limit);
@@ -423,7 +430,7 @@ export async function execGlob(
 
 	if (absolutePaths.length === 0) return { content: "No files found" };
 
-	const relativePaths = absolutePaths.map((p) => relativeToCwd(p, cwd));
+	const relativePaths = absolutePaths.map((p) => searchPathFromCwd(p, cwd));
 	let content = relativePaths.join("\n");
 	// Few hits → steer the model straight to read instead of another glob/ls.
 	if (relativePaths.length <= 3) {
@@ -520,7 +527,8 @@ export async function execGrep(
 			return { content: `Error: search path not found: ${searchPath}. Check the path and retry.`, isError: true };
 		return { content: `Error: cannot access search path ${searchPath}. Check permissions and retry.`, isError: true };
 	}
-	const glob = args.glob ? String(args.glob) : undefined;
+	const rawGlob = args.glob ? String(args.glob) : undefined;
+	const glob = process.platform === "win32" ? rawGlob?.replaceAll("\\", "/") : rawGlob;
 	const ignoreCase = args.ignoreCase === true;
 	const literal = args.literal === true;
 	const context = typeof args.context === "number" ? args.context : 0;
@@ -631,7 +639,7 @@ export async function execGrep(
 			throw error;
 		}
 		const candidates = globRe
-			? allFiles.filter((p) => globRe.test(globHasDir ? relative(searchPath, p) : basename(p)))
+			? allFiles.filter((p) => globRe.test(globHasDir ? toPosixPath(relative(searchPath, p)) : basename(p)))
 			: allFiles;
 
 		// `limit` caps matches PER FILE here, same as rg's own `--max-count` —
@@ -668,7 +676,7 @@ export async function execGrep(
 			}
 
 			const fileLines = fileText.split("\n");
-			const relPath = relativeToCwd(absPath, cwd);
+			const relPath = searchPathFromCwd(absPath, cwd);
 
 			let fileMatches = 0;
 			for (let i = 0; i < fileLines.length; i++) {

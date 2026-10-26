@@ -383,7 +383,11 @@ function ruleDirsAt(absDir: string): string[] {
 	return [join(absDir, ".cast", "rules"), join(absDir, ".cursor", "rules")].filter((dir) => existsSync(dir));
 }
 
-export function discoverProjectRuleDirs(cwd: string, maxDepth = 8): Array<{ dir: string; scope: string }> {
+export function discoverProjectRuleDirs(
+	cwd: string,
+	maxDepth = 8,
+	maxScannedDirs = MAX_SCANNED_DIRS,
+): Array<{ dir: string; scope: string }> {
 	const found: Array<{ dir: string; scope: string }> = [];
 	// Breadth-first so the budget spends itself on the levels nearest the root
 	// — where rules actually live — instead of exhausting itself down one deep
@@ -395,7 +399,7 @@ export function discoverProjectRuleDirs(cwd: string, maxDepth = 8): Array<{ dir:
 	while (queue.length > 0) {
 		const { absDir, scope, depth } = queue.shift()!;
 		for (const rulesDir of ruleDirsAt(absDir)) found.push({ dir: rulesDir, scope });
-		if (depth >= maxDepth || scanned >= MAX_SCANNED_DIRS) continue;
+		if (depth >= maxDepth || scanned >= maxScannedDirs) continue;
 
 		let entries: Dirent[];
 		try {
@@ -406,7 +410,7 @@ export function discoverProjectRuleDirs(cwd: string, maxDepth = 8): Array<{ dir:
 		for (const e of entries) {
 			if (!e.isDirectory()) continue;
 			if (e.name.startsWith(".") || DISCOVERY_IGNORE_DIRS.has(e.name)) continue;
-			if (++scanned > MAX_SCANNED_DIRS) break;
+			if (++scanned > maxScannedDirs) break;
 			queue.push({ absDir: join(absDir, e.name), scope: scope ? `${scope}/${e.name}` : e.name, depth: depth + 1 });
 		}
 	}

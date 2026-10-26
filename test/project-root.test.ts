@@ -1,22 +1,38 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { dirname, join, parse } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearProjectRootCache, findProjectRoot, isUnderProjectRoot } from "../src/core/project-root.ts";
+import { withPlatform } from "./helpers/platform.ts";
+import { createTestSymlink } from "./helpers/symlink.ts";
 
 describe("findProjectRoot", () => {
 	let realHome: string | undefined;
+	let realUserProfile: string | undefined;
+	let realHomeDrive: string | undefined;
+	let realHomePath: string | undefined;
 	let home: string;
 
 	beforeEach(() => {
 		realHome = process.env.HOME;
+		realUserProfile = process.env.USERPROFILE;
+		realHomeDrive = process.env.HOMEDRIVE;
+		realHomePath = process.env.HOMEPATH;
 		home = mkdtempSync(join(tmpdir(), "cast-root-home-"));
 		process.env.HOME = home;
+		process.env.USERPROFILE = home;
+		if (process.platform === "win32") {
+			process.env.HOMEDRIVE = home.slice(0, 2);
+			process.env.HOMEPATH = home.slice(2) || "\\";
+		}
 		clearProjectRootCache();
 	});
 
 	afterEach(() => {
 		process.env.HOME = realHome;
+		process.env.USERPROFILE = realUserProfile;
+		process.env.HOMEDRIVE = realHomeDrive;
+		process.env.HOMEPATH = realHomePath;
 		rmSync(home, { recursive: true, force: true });
 		clearProjectRootCache();
 	});
@@ -66,6 +82,12 @@ describe("findProjectRoot", () => {
 		expect(findProjectRoot(join(home, "loose/dir"))).toBe(join(home, "loose/dir"));
 	});
 
+	it.skipIf(process.platform !== "win32")("treats case variants of a Windows path as the same project", () => {
+		tree("repo/.git", "repo/src");
+		const alias = join(home, "repo/src").toUpperCase();
+		expect(findProjectRoot(alias).toLowerCase()).toBe(join(home, "repo").toLowerCase());
+	});
+
 	it("sees a .git file, not just a directory (worktrees and submodules)", () => {
 		tree("wt/sub");
 		writeFileSync(join(home, "wt", ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n");
@@ -92,5 +114,53 @@ describe("isUnderProjectRoot", () => {
 	it("rejects a sibling whose name merely starts the same", () => {
 		expect(isUnderProjectRoot("/a/b", "/a/bc")).toBe(false);
 		expect(isUnderProjectRoot("/a/b", "/a")).toBe(false);
+	});
+
+	it("keeps lexical containment when the filesystem cannot resolve a path", () => {
+		const base = mkdtempSync(join(tmpdir(), "cast-unresolved-root-"));
+		const root = join(base, "project");
+		mkdirSync(root);
+		const realpath = vi.spyOn(realpathSync, "native").mockImplementation(() => {
+			throw new Error("filesystem unavailable");
+		});
+		try {
+			expect(isUnderProjectRoot(root, join(root, "missing", "file.ts"))).toBe(true);
+		} finally {
+			realpath.mockRestore();
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("treats paths through a symlinked ancestor as the same project", (context) => {
+		const base = mkdtempSync(join(tmpdir(), "cast-under-root-"));
+		try {
+			const root = join(base, "real-project");
+			const alias = join(base, "project-alias");
+			mkdirSync(root);
+			createTestSymlink(context, root, alias, "dir");
+
+			expect(isUnderProjectRoot(root, join(alias, "src", "index.ts"))).toBe(true);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("compares Windows paths without case sensitivity", async () => {
+		await withPlatform("win32", () => {
+			const base = mkdtempSync(join(tmpdir(), "cast-win-path-"));
+			const root = join(base, "Ada", "repo");
+			mkdirSync(root, { recursive: true });
+			try {
+				expect(isUnderProjectRoot(root, join(root.toUpperCase(), "SRC", "index.ts"))).toBe(true);
+				expect(isUnderProjectRoot(root, join(dirname(root).toUpperCase(), "repository"))).toBe(false);
+			} finally {
+				rmSync(base, { recursive: true, force: true });
+			}
+		});
+	});
+
+	it("accepts descendants when the project root is the filesystem root", () => {
+		const root = parse(tmpdir()).root;
+		expect(isUnderProjectRoot(root, join(root, "workspace", "file.txt"))).toBe(true);
 	});
 });

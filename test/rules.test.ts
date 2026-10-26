@@ -50,30 +50,33 @@ describe("rules", () => {
 	});
 
 	describe("load diagnostics", () => {
-		it("reports a rule file it could not read instead of dropping it silently", () => {
-			// Skipping one bad file is right; skipping it without a word left
-			// `/rules` showing a list with the rule simply absent, which reads as
-			// "cast never saw my file". Skills, MCP and hooks all report their
-			// load failures — rules were the last subsystem that did not.
-			mkdirSync(join(projectDir, ".git"), { recursive: true });
-			const rulesDir = join(projectDir, ".cast", "rules");
-			mkdirSync(rulesDir, { recursive: true });
-			writeFileSync(join(rulesDir, "good.md"), "---\nalways-apply: true\n---\nGood rule.\n");
-			const broken = join(rulesDir, "broken.md");
-			writeFileSync(broken, "---\nalways-apply: true\n---\nUnreadable.\n");
-			chmodSync(broken, 0o000);
-			clearProjectRootCache();
+		it.skipIf(process.platform === "win32")(
+			"reports a rule file it could not read instead of dropping it silently",
+			() => {
+				// Skipping one bad file is right; skipping it without a word left
+				// `/rules` showing a list with the rule simply absent, which reads as
+				// "cast never saw my file". Skills, MCP and hooks all report their
+				// load failures — rules were the last subsystem that did not.
+				mkdirSync(join(projectDir, ".git"), { recursive: true });
+				const rulesDir = join(projectDir, ".cast", "rules");
+				mkdirSync(rulesDir, { recursive: true });
+				writeFileSync(join(rulesDir, "good.md"), "---\nalways-apply: true\n---\nGood rule.\n");
+				const broken = join(rulesDir, "broken.md");
+				writeFileSync(broken, "---\nalways-apply: true\n---\nUnreadable.\n");
+				chmodSync(broken, 0o000);
+				clearProjectRootCache();
 
-			try {
-				const resolved = resolveRulesForCwd(projectDir, true);
-				expect(resolved.directoryRules.map((r) => r.name)).toEqual(["good"]);
-				expect(resolved.diagnostics).toHaveLength(1);
-				expect(resolved.diagnostics[0]).toContain("broken.md");
-				expect(resolved.diagnostics[0]).toMatch(/unreadable|EACCES/i);
-			} finally {
-				chmodSync(broken, 0o644);
-			}
-		});
+				try {
+					const resolved = resolveRulesForCwd(projectDir, true);
+					expect(resolved.directoryRules.map((r) => r.name)).toEqual(["good"]);
+					expect(resolved.diagnostics).toHaveLength(1);
+					expect(resolved.diagnostics[0]).toContain("broken.md");
+					expect(resolved.diagnostics[0]).toMatch(/unreadable|EACCES/i);
+				} finally {
+					chmodSync(broken, 0o644);
+				}
+			},
+		);
 
 		it("reports nothing when every rule file loads", () => {
 			mkdirSync(join(projectDir, ".git"), { recursive: true });
@@ -832,24 +835,18 @@ describe("rules", () => {
 			expect(scopes).toEqual(["", "apps/web", "services/api"]);
 		});
 
-		it("bounds how much of the tree one discovery pass walks", () => {
-			// The walk is depth-bounded but was unbounded in width, and it runs on
-			// startup and on every subagent spawn. cast's own tree is 68
-			// directories (13ms); running cast straight from a home directory
-			// walked 9,392 of them — 333ms warm, 2s on a cold cache, per spawn.
+		it("bounds how much of a wide tree one discovery pass scans", () => {
 			const root = join(projectDir, "wide");
 			mkdirSync(join(root, ".cast", "rules"), { recursive: true });
 			writeFileSync(join(root, ".cast", "rules", "root.md"), "---\nalwaysApply: true\n---\nROOT.");
-			// Far more directories than the budget allows.
-			for (let i = 0; i < 4200; i++) mkdirSync(join(root, `d${i}`), { recursive: true });
-			const started = Date.now();
-			const found = discoverProjectRuleDirs(root);
+			// Exercise the same bound with a small override, so this invariant is
+			// fast on filesystems where thousands of real directories are costly.
+			for (let i = 0; i < 20; i++) mkdirSync(join(root, `d${i}`, ".cast", "rules"), { recursive: true });
+			const found = discoverProjectRuleDirs(root, 8, 5);
 			const scopes = found.map((f) => f.scope);
 
-			// The root's own rules are always found, and the pass ends rather
-			// than walking the whole tree.
+			expect(scopes).toHaveLength(6);
 			expect(scopes).toContain("");
-			expect(Date.now() - started).toBeLessThan(10_000);
 		});
 
 		it("scope-qualifies ids so same-named rules in different subtrees coexist", () => {

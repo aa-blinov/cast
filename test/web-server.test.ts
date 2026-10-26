@@ -9,10 +9,18 @@ import { resetDbConnectionForTests } from "../src/core/db.ts";
 import { storeProjectMemory } from "../src/core/memory.ts";
 import { createAgentRunner } from "../src/core/runner.ts";
 import { appendMessage, createSession, getHistoryPage, saveSession } from "../src/core/session.ts";
+import { stopSqliteReader } from "../src/core/sqlite-reader.ts";
 import { queryEndpointOverview } from "../src/core/telemetry.ts";
 import type { ServerBridge } from "../src/server/bridge.ts";
 import { createServerBridge } from "../src/server/bridge.ts";
 import { bridgeErrorStatus, isInsideRoot, startServer } from "../src/server/server.ts";
+
+const { runAgentLoop } = vi.hoisted(() => ({ runAgentLoop: vi.fn().mockResolvedValue(undefined) }));
+
+vi.mock("../src/core/loop.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/core/loop.ts")>();
+	return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
+});
 
 let server: ReturnType<typeof startServer>;
 let origin: string;
@@ -48,10 +56,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	await stopTestServer();
+	await stopSqliteReader();
 	resetDbConnectionForTests();
 	if (previousDbPath === undefined) delete process.env.CAST_SESSIONS_DB;
 	else process.env.CAST_SESSIONS_DB = previousDbPath;
-	rmSync(testDbDir, { recursive: true, force: true });
+	rmSync(testDbDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe("web session authentication", () => {
@@ -418,16 +427,12 @@ describe("/api/server/status", () => {
 describe("JSON response compression", () => {
 	let memorySessionId = "";
 	let bridge: ReturnType<typeof createServerBridge>;
+	afterEach(() => bridge.dispose?.());
 	// The shared startServer above uses `{} as ServerBridge`, so this
 	// describe swaps it out for a populated one — 80 sessions are enough
 	// to push the /api/sessions responses past the 8 KB compression
 	// threshold without needing to spin up a real provider. runAgentLoop
-	// is fire-and-forget; stub it so the bridge doesn't need one.
-	const runAgentLoop = vi.fn().mockResolvedValue(undefined);
-	vi.mock("../src/core/loop.ts", async (importOriginal) => {
-		const actual = await importOriginal<typeof import("../src/core/loop.ts")>();
-		return { ...actual, runAgentLoop: (...args: unknown[]) => runAgentLoop(...args) };
-	});
+	// is fire-and-forget; the top-level mock keeps it from spawning one.
 	beforeEach(async () => {
 		await stopTestServer();
 		bridge = createServerBridge({
@@ -757,7 +762,7 @@ describe("isInsideRoot", () => {
 		// createReadStream, rmSync, renameSync), so a purely lexical check let
 		// a link inside the cwd list, download and delete outside the project.
 		writeFileSync(join(outside, "secret.txt"), "secret");
-		symlinkSync(outside, join(root, "link"));
+		symlinkSync(outside, join(root, "link"), process.platform === "win32" ? "junction" : "dir");
 
 		expect(isInsideRoot(root, join(root, "link"))).toBe(false);
 		expect(isInsideRoot(root, join(root, "link", "secret.txt"))).toBe(false);

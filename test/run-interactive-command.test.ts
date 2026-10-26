@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { testHomeEnvironment } from "./helpers/test-environment.ts";
 
 let tmpRoot: string | undefined;
 let repo: string | undefined;
@@ -32,8 +33,11 @@ let testHome: string | undefined;
 // reach the package root (test/ → repo/).
 const REPO_ROOT = resolvePath(fileURLToPath(import.meta.url), "..", "..");
 const DIST_ENTRY = join(REPO_ROOT, "dist", "index.js");
+const canRunDaemonIntegration = process.platform !== "win32" || Boolean(process.stdin.isTTY && process.stdout.isTTY);
+const daemonIt = canRunDaemonIntegration ? it : it.skip;
 
 beforeAll(async () => {
+	if (!canRunDaemonIntegration) return;
 	testHome = mkdtempSync(join(tmpdir(), "cast-jsonl-home-"));
 	// Mock OpenAI-compatible `/v1/models` endpoint so runStartup's
 	// `probeProvider` call returns "ok" without leaving the test machine.
@@ -114,9 +118,9 @@ beforeAll(async () => {
 		}),
 	);
 	const statePath = join(settingsDir, "server.json");
-	daemon = spawn("node", [DIST_ENTRY, "server", "start", "--foreground", "--port", "0"], {
+	daemon = spawn(process.execPath, [DIST_ENTRY, "server", "start", "--foreground", "--port", "0"], {
 		cwd: REPO_ROOT,
-		env: { ...process.env, HOME: testHome, CAST_CWD: REPO_ROOT },
+		env: testHomeEnvironment(testHome, { ...process.env, CAST_CWD: REPO_ROOT }),
 		stdio: ["ignore", "ignore", "pipe"],
 	});
 	const stderr: Buffer[] = [];
@@ -189,9 +193,9 @@ async function runInteractive(
 	// real home directory and so we can pre-seed it with a model + persona
 	// + a mock OpenAI-compatible provider. Without those, noPickers aborts
 	// the process before any input is processed.
-	const env = { ...process.env, HOME: testHome!, CAST_CWD: "" };
+	const env = testHomeEnvironment(testHome!, { ...process.env, CAST_CWD: "" });
 	return new Promise((resolve, reject) => {
-		const child = spawn("node", [DIST_ENTRY, "run", "--interactive", "--format", "json"], {
+		const child = spawn(process.execPath, [DIST_ENTRY, "run", "--interactive", "--format", "json"], {
 			cwd: cwdOverride ?? repo,
 			env,
 			stdio: ["pipe", "pipe", "pipe"],
@@ -239,9 +243,9 @@ async function runInteractive(
 /** A `cast run --interactive` process the test can talk to while it runs: lines go in one at a time, and events are
  *  waited for as they arrive, so an `abort` can be sent exactly when a turn is in flight. */
 function startInteractive(extraEnv: Record<string, string> = {}) {
-	const child = spawn("node", [DIST_ENTRY, "run", "--interactive"], {
+	const child = spawn(process.execPath, [DIST_ENTRY, "run", "--interactive"], {
 		cwd: repo,
-		env: { ...process.env, HOME: testHome!, CAST_CWD: "", ...extraEnv },
+		env: testHomeEnvironment(testHome!, { ...process.env, CAST_CWD: "", ...extraEnv }),
 		stdio: ["pipe", "pipe", "pipe"],
 	});
 	const events: Array<Record<string, unknown>> = [];
@@ -305,198 +309,231 @@ async function waitForSessionStatus(
 }
 
 describe("JSONL protocol — command action", () => {
-	it("recovers a real daemon session after aborting an in-flight provider call", async () => {
-		const { baseUrl, headers } = daemonClient();
-		const created = await fetch(`${baseUrl}/api/sessions`, {
-			method: "POST",
-			headers,
-			body: JSON.stringify({ persona: "assistant", model: "minimax-m3", cwd: repo }),
-		});
-		expect(created.status).toBe(201);
-		const { id } = (await created.json()) as { id: string };
+	daemonIt(
+		"recovers a real daemon session after aborting an in-flight provider call",
+		async () => {
+			const { baseUrl, headers } = daemonClient();
+			const created = await fetch(`${baseUrl}/api/sessions`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ persona: "assistant", model: "minimax-m3", cwd: repo }),
+			});
+			expect(created.status).toBe(201);
+			const { id } = (await created.json()) as { id: string };
 
-		const hung = await fetch(`${baseUrl}/api/sessions/${id}/chat`, {
-			method: "POST",
-			headers,
-			body: JSON.stringify({ text: "chaos-hang" }),
-		});
-		expect(hung.status).toBe(202);
-		await waitForSessionStatus(baseUrl, headers, id, "running");
+			const hung = await fetch(`${baseUrl}/api/sessions/${id}/chat`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ text: "chaos-hang" }),
+			});
+			expect(hung.status).toBe(202);
+			await waitForSessionStatus(baseUrl, headers, id, "running");
 
-		const aborted = await fetch(`${baseUrl}/api/sessions/${id}/abort`, { method: "POST", headers });
-		expect(aborted.status).toBe(200);
-		await waitForSessionStatus(baseUrl, headers, id, "idle");
+			const aborted = await fetch(`${baseUrl}/api/sessions/${id}/abort`, { method: "POST", headers });
+			expect(aborted.status).toBe(200);
+			await waitForSessionStatus(baseUrl, headers, id, "idle");
 
-		const recovered = await fetch(`${baseUrl}/api/sessions/${id}/chat`, {
-			method: "POST",
-			headers,
-			body: JSON.stringify({ text: "chaos-hang-recovery" }),
-		});
-		expect(recovered.status).toBe(202);
-		await waitForSessionStatus(baseUrl, headers, id, "running");
-		const reaborted = await fetch(`${baseUrl}/api/sessions/${id}/abort`, { method: "POST", headers });
-		expect(reaborted.status).toBe(200);
-		await waitForSessionStatus(baseUrl, headers, id, "idle");
-	}, 30_000);
+			const recovered = await fetch(`${baseUrl}/api/sessions/${id}/chat`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ text: "chaos-hang-recovery" }),
+			});
+			expect(recovered.status).toBe(202);
+			await waitForSessionStatus(baseUrl, headers, id, "running");
+			const reaborted = await fetch(`${baseUrl}/api/sessions/${id}/abort`, { method: "POST", headers });
+			expect(reaborted.status).toBe(200);
+			await waitForSessionStatus(baseUrl, headers, id, "idle");
+		},
+		30_000,
+	);
 
-	it("dispatches /worktree and updates cwd visible via state", async () => {
-		const events = await runInteractive([
-			{ type: "command", name: "worktree", args: " feature-1" },
-			{ type: "state" },
-			{ type: "exit" },
-		]);
+	daemonIt(
+		"dispatches /worktree and updates cwd visible via state",
+		async () => {
+			const events = await runInteractive([
+				{ type: "command", name: "worktree", args: " feature-1" },
+				{ type: "state" },
+				{ type: "exit" },
+			]);
 
-		// /worktree emits a `notice` with the result, then a `state` event we
-		// asked for. The cwd in state.cwd must be the worktree path.
-		const notices = events.filter((e) => e.type === "notice").map((e) => String(e.text ?? ""));
-		expect(
-			notices.some((t) => t.includes("Worktree ready") && t.includes("feature-1")),
-			`expected a worktree-success notice, got: ${notices.join(" | ")}`,
-		).toBe(true);
-
-		// Multiple `state` events are emitted: one at startup, one after
-		// each `command`/etc. resolves. The last one reflects the cwd
-		// change from /worktree, not the initial snapshot.
-		const stateEvents = events.filter((e) => e.type === "state");
-		expect(stateEvents.length).toBeGreaterThan(1);
-		const lastState = stateEvents[stateEvents.length - 1];
-		const stateCwd = String(lastState?.cwd ?? "");
-		expect(stateCwd).toMatch(/\.cast[\\/]worktrees[\\/]feature-1$/);
-		expect(stateCwd).not.toBe(repo);
-	}, 60_000);
-
-	it("reuses an existing worktree on the same name (no duplicate)", async () => {
-		const first = await runInteractive([{ type: "command", name: "worktree", args: " reuse-me" }]);
-		const second = await runInteractive([{ type: "command", name: "worktree", args: " reuse-me" }]);
-
-		const firstNotice = first
-			.filter((e) => e.type === "notice")
-			.map((e) => String(e.text ?? ""))
-			.find((t) => t.includes("Worktree ready"));
-		const secondNotice = second
-			.filter((e) => e.type === "notice")
-			.map((e) => String(e.text ?? ""))
-			.find((t) => t.includes("Worktree ready"));
-		expect(firstNotice).toBeDefined();
-		expect(secondNotice).toBeDefined();
-		// Same worktree, same path — and `git worktree list` shouldn't show a
-		// duplicate. (Path is reported as the worktree argument's resolved
-		// absolute form, so the equality check is path-level.)
-		const pathMatch = /Worktree ready: (.+)$/;
-		const firstPath = firstNotice!.match(pathMatch)?.[1] ?? "";
-		const secondPath = secondNotice!.match(pathMatch)?.[1] ?? "";
-		expect(secondPath).toBe(firstPath);
-
-		const list = execFileSync("git", ["-C", repo!, "worktree", "list", "--porcelain"], {
-			encoding: "utf8",
-		});
-		// Each entry is a block; the worktree path appears on the `worktree <path>` line.
-		const worktreePaths = list
-			.split("\n")
-			.filter((l) => l.startsWith("worktree "))
-			.map((l) => l.slice("worktree ".length).trim());
-		const matches = worktreePaths.filter((p) => p.endsWith("reuse-me"));
-		expect(matches.length).toBe(1);
-	}, 90_000);
-
-	it("emits an error notice when /worktree is invoked outside a git repo", async () => {
-		// Build a JSONL run from /tmp (not a git repo). The runner's cwd
-		// resolution walks up looking for `.git`; starting in /tmp means
-		// nothing is found, which is exactly the `not a git repository` path
-		// the upstream error message targets.
-		const nonRepoTmp = mkdtempSync(join(tmpdir(), "cast-jsonl-norepo-"));
-		try {
-			const events = await runInteractive(
-				[{ type: "command", name: "worktree", args: " foo" }, { type: "exit" }],
-				nonRepoTmp,
-			);
+			// /worktree emits a `notice` with the result, then a `state` event we
+			// asked for. The cwd in state.cwd must be the worktree path.
 			const notices = events.filter((e) => e.type === "notice").map((e) => String(e.text ?? ""));
-			const errors = events.filter((e) => e.type === "error").map((e) => String(e.message ?? ""));
-			const failure =
-				notices.find((t) => t.startsWith("[Worktree failed")) ?? errors.find((t) => t.includes("git repository"));
 			expect(
-				failure,
-				`expected a worktree-failed notice/error, got notices=[${notices.join(" | ")}] errors=[${errors.join(" | ")}]`,
-			).toBeDefined();
-		} finally {
-			rmSync(nonRepoTmp, { recursive: true, force: true });
-		}
-	}, 60_000);
+				notices.some((t) => t.includes("Worktree ready") && t.includes("feature-1")),
+				`expected a worktree-success notice, got: ${notices.join(" | ")}`,
+			).toBe(true);
 
-	it("runs a task, forks its context, and continues on the new session", async () => {
-		const events = await runInteractive([
-			{ type: "state" },
-			{ type: "prompt", text: "Reply with the word forked." },
-			{ type: "command", name: "fork", args: "" },
-			{ type: "state" },
-			{ type: "exit" },
-		]);
+			// Multiple `state` events are emitted: one at startup, one after
+			// each `command`/etc. resolves. The last one reflects the cwd
+			// change from /worktree, not the initial snapshot.
+			const stateEvents = events.filter((e) => e.type === "state");
+			expect(stateEvents.length).toBeGreaterThan(1);
+			const lastState = stateEvents[stateEvents.length - 1];
+			const stateCwd = String(lastState?.cwd ?? "");
+			expect(stateCwd).toMatch(/\.cast[\\/]worktrees[\\/]feature-1$/);
+			expect(stateCwd).not.toBe(repo);
+		},
+		60_000,
+	);
 
-		const states = events.filter((event) => event.type === "state");
-		const sourceId = String(states[0]?.sessionID ?? "");
-		const forkedState = states[states.length - 1];
-		expect(String(forkedState?.sessionID ?? "")).not.toBe(sourceId);
-		expect(forkedState?.messages).toEqual(
-			expect.arrayContaining([expect.objectContaining({ role: "user", content: "Reply with the word forked." })]),
-		);
-		expect(events.some((event) => event.type === "error")).toBe(false);
-	}, 60_000);
+	daemonIt(
+		"reuses an existing worktree on the same name (no duplicate)",
+		async () => {
+			const first = await runInteractive([{ type: "command", name: "worktree", args: " reuse-me" }]);
+			const second = await runInteractive([{ type: "command", name: "worktree", args: " reuse-me" }]);
+
+			const firstNotice = first
+				.filter((e) => e.type === "notice")
+				.map((e) => String(e.text ?? ""))
+				.find((t) => t.includes("Worktree ready"));
+			const secondNotice = second
+				.filter((e) => e.type === "notice")
+				.map((e) => String(e.text ?? ""))
+				.find((t) => t.includes("Worktree ready"));
+			expect(firstNotice).toBeDefined();
+			expect(secondNotice).toBeDefined();
+			// Same worktree, same path — and `git worktree list` shouldn't show a
+			// duplicate. (Path is reported as the worktree argument's resolved
+			// absolute form, so the equality check is path-level.)
+			const pathMatch = /Worktree ready: (.+)$/;
+			const firstPath = firstNotice!.match(pathMatch)?.[1] ?? "";
+			const secondPath = secondNotice!.match(pathMatch)?.[1] ?? "";
+			expect(secondPath).toBe(firstPath);
+
+			const list = execFileSync("git", ["-C", repo!, "worktree", "list", "--porcelain"], {
+				encoding: "utf8",
+			});
+			// Each entry is a block; the worktree path appears on the `worktree <path>` line.
+			const worktreePaths = list
+				.split("\n")
+				.filter((l) => l.startsWith("worktree "))
+				.map((l) => l.slice("worktree ".length).trim());
+			const matches = worktreePaths.filter((p) => p.endsWith("reuse-me"));
+			expect(matches.length).toBe(1);
+		},
+		90_000,
+	);
+
+	daemonIt(
+		"emits an error notice when /worktree is invoked outside a git repo",
+		async () => {
+			// Build a JSONL run from /tmp (not a git repo). The runner's cwd
+			// resolution walks up looking for `.git`; starting in /tmp means
+			// nothing is found, which is exactly the `not a git repository` path
+			// the upstream error message targets.
+			const nonRepoTmp = mkdtempSync(join(tmpdir(), "cast-jsonl-norepo-"));
+			try {
+				const events = await runInteractive(
+					[{ type: "command", name: "worktree", args: " foo" }, { type: "exit" }],
+					nonRepoTmp,
+				);
+				const notices = events.filter((e) => e.type === "notice").map((e) => String(e.text ?? ""));
+				const errors = events.filter((e) => e.type === "error").map((e) => String(e.message ?? ""));
+				const failure =
+					notices.find((t) => t.startsWith("[Worktree failed")) ??
+					errors.find((t) => t.includes("git repository"));
+				expect(
+					failure,
+					`expected a worktree-failed notice/error, got notices=[${notices.join(" | ")}] errors=[${errors.join(" | ")}]`,
+				).toBeDefined();
+			} finally {
+				rmSync(nonRepoTmp, { recursive: true, force: true });
+			}
+		},
+		60_000,
+	);
+
+	daemonIt(
+		"runs a task, forks its context, and continues on the new session",
+		async () => {
+			const events = await runInteractive([
+				{ type: "state" },
+				{ type: "prompt", text: "Reply with the word forked." },
+				{ type: "command", name: "fork", args: "" },
+				{ type: "state" },
+				{ type: "exit" },
+			]);
+
+			const states = events.filter((event) => event.type === "state");
+			const sourceId = String(states[0]?.sessionID ?? "");
+			const forkedState = states[states.length - 1];
+			expect(String(forkedState?.sessionID ?? "")).not.toBe(sourceId);
+			expect(forkedState?.messages).toEqual(
+				expect.arrayContaining([expect.objectContaining({ role: "user", content: "Reply with the word forked." })]),
+			);
+			expect(events.some((event) => event.type === "error")).toBe(false);
+		},
+		60_000,
+	);
 });
 
 describe("JSONL protocol — session control", () => {
-	it("sends the startup state, echoes ids, ignores blank lines, and reports bad input without stopping", async () => {
-		const session = startInteractive();
-		try {
-			await session.waitFor((e) => e.type === "state");
-			session.send("this is not json");
-			session.send("");
-			session.send({ type: "nosuch" });
-			session.send({ id: "s1", type: "state" });
-			await session.waitFor((e) => e.type === "action_done" && e.id === "s1");
-			session.send({ id: "bye", type: "exit" });
-			await session.waitFor((e) => e.type === "action_done" && e.id === "bye");
-			expect(await session.exitCode()).toBe(0);
-			const errors = session.events.filter((e) => e.type === "error").map((e) => String(e.message));
-			expect(errors).toHaveLength(2);
-			expect(errors[1]).toContain("unknown action type: nosuch");
-			expect(session.events.at(-1)?.type).toBe("action_done");
-		} finally {
-			session.kill();
-		}
-	}, 60_000);
+	daemonIt(
+		"sends the startup state, echoes ids, ignores blank lines, and reports bad input without stopping",
+		async () => {
+			const session = startInteractive();
+			try {
+				await session.waitFor((e) => e.type === "state");
+				session.send("this is not json");
+				session.send("");
+				session.send({ type: "nosuch" });
+				session.send({ id: "s1", type: "state" });
+				await session.waitFor((e) => e.type === "action_done" && e.id === "s1");
+				session.send({ id: "bye", type: "exit" });
+				await session.waitFor((e) => e.type === "action_done" && e.id === "bye");
+				expect(await session.exitCode()).toBe(0);
+				const errors = session.events.filter((e) => e.type === "error").map((e) => String(e.message));
+				expect(errors).toHaveLength(2);
+				expect(errors[1]).toContain("unknown action type: nosuch");
+				expect(session.events.at(-1)?.type).toBe("action_done");
+			} finally {
+				session.kill();
+			}
+		},
+		60_000,
+	);
 
-	it("lets abort reach a turn in progress, instead of waiting behind it", async () => {
-		const session = startInteractive();
-		try {
-			await session.waitFor((e) => e.type === "state");
-			// The mock holds this request for 10s; an abort that waited for the prompt to finish would take that long.
-			const startedAt = Date.now();
-			session.send({ id: "p1", type: "prompt", text: "chaos-hang" });
-			const sessionId = String(session.events.find((e) => e.type === "state")?.sessionID);
-			const { baseUrl, headers } = daemonClient();
-			await waitForSessionStatus(baseUrl, headers, sessionId, "running");
-			session.send({ id: "x1", type: "abort" });
-			await session.waitFor((e) => e.type === "action_done" && e.id === "x1");
-			await session.waitFor((e) => e.type === "action_done" && e.id === "p1");
-			expect(Date.now() - startedAt).toBeLessThan(9000);
-			session.endInput();
-			expect(await session.exitCode()).toBe(0);
-		} finally {
-			session.kill();
-		}
-	}, 60_000);
+	daemonIt(
+		"lets abort reach a turn in progress, instead of waiting behind it",
+		async () => {
+			const session = startInteractive();
+			try {
+				await session.waitFor((e) => e.type === "state");
+				// The mock holds this request for 10s; an abort that waited for the prompt to finish would take that long.
+				const startedAt = Date.now();
+				session.send({ id: "p1", type: "prompt", text: "chaos-hang" });
+				const sessionId = String(session.events.find((e) => e.type === "state")?.sessionID);
+				const { baseUrl, headers } = daemonClient();
+				await waitForSessionStatus(baseUrl, headers, sessionId, "running");
+				session.send({ id: "x1", type: "abort" });
+				await session.waitFor((e) => e.type === "action_done" && e.id === "x1");
+				await session.waitFor((e) => e.type === "action_done" && e.id === "p1");
+				expect(Date.now() - startedAt).toBeLessThan(9000);
+				session.endInput();
+				expect(await session.exitCode()).toBe(0);
+			} finally {
+				session.kill();
+			}
+		},
+		60_000,
+	);
 
-	it("finishes the actions already sent when stdin closes, then exits 0", async () => {
-		const session = startInteractive();
-		try {
-			session.send({ id: "p1", type: "prompt", text: "Reply with the word done." });
-			session.endInput();
-			expect(await session.exitCode()).toBe(0);
-			// The turn's own `state` snapshot is written before its `action_done`, and both before the process exits.
-			expect(session.events.at(-1)).toMatchObject({ type: "action_done", id: "p1" });
-			expect(session.events.at(-2)?.type).toBe("state");
-		} finally {
-			session.kill();
-		}
-	}, 60_000);
+	daemonIt(
+		"finishes the actions already sent when stdin closes, then exits 0",
+		async () => {
+			const session = startInteractive();
+			try {
+				session.send({ id: "p1", type: "prompt", text: "Reply with the word done." });
+				session.endInput();
+				expect(await session.exitCode()).toBe(0);
+				// The turn's own `state` snapshot is written before its `action_done`, and both before the process exits.
+				expect(session.events.at(-1)).toMatchObject({ type: "action_done", id: "p1" });
+				expect(session.events.at(-2)?.type).toBe("state");
+			} finally {
+				session.kill();
+			}
+		},
+		60_000,
+	);
 });

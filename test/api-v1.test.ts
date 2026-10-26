@@ -9,7 +9,9 @@ describe("API v1 contract", () => {
 	it("is a valid OpenAPI document and is published with the GitHub Pages site", async () => {
 		await expect(SwaggerParser.validate(apiV1OpenApiDocument)).resolves.toMatchObject({ openapi: "3.1.1" });
 
-		execFileSync("npm", ["run", "build-site"], { cwd: process.cwd(), stdio: "pipe" });
+		const npmCli = process.env.npm_execpath;
+		if (!npmCli) throw new Error("npm_execpath is required to build the API docs in this test");
+		execFileSync(process.execPath, [npmCli, "run", "build-site"], { cwd: process.cwd(), stdio: "pipe" });
 		const publishedSpec = JSON.parse(readFileSync("site/openapi/v1.json", "utf-8")) as object;
 		await expect(SwaggerParser.validate(publishedSpec)).resolves.toMatchObject({ openapi: "3.1.1" });
 		expect(publishedSpec).toEqual(apiV1OpenApiDocument);

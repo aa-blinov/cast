@@ -34,6 +34,25 @@ describe("SessionCostBudget", () => {
 		expect(budget.snapshot().priceKnown).toBe(false);
 	});
 
+	it("releases the request queue when persisting an unknown price fails", async () => {
+		const persistenceError = new Error("session store unavailable");
+		const budget = new SessionCostBudget({ capUsd: 1, reportedSpendUsd: 0, priceKnown: true }, () => {
+			throw persistenceError;
+		});
+		const request = await budget.beginRequest();
+
+		expect(() => request.settle(undefined)).toThrow(persistenceError);
+		const outcome = await Promise.race([
+			budget.beginRequest().then(
+				() => "started",
+				(error: unknown) => (error instanceof Error && "code" in error ? error.code : String(error)),
+			),
+			new Promise<string>((resolve) => setTimeout(() => resolve("still waiting"), 25)),
+		]);
+
+		expect(outcome).toBe("cost_unknown");
+	});
+
 	it("serializes capped requests so parallel subagents cannot pass the same remaining budget", async () => {
 		const budget = new SessionCostBudget({ capUsd: 1, reportedSpendUsd: 0, priceKnown: true });
 		const first = await budget.beginRequest();
@@ -50,6 +69,27 @@ describe("SessionCostBudget", () => {
 		expect(secondStarted).toBe(true);
 		second.settle(0.6);
 		await expect(budget.beginRequest()).rejects.toBeInstanceOf(SessionCostLimitError);
+	});
+
+	it("cancels a request while it waits for an earlier capped request", async () => {
+		const budget = new SessionCostBudget({ capUsd: 1, reportedSpendUsd: 0, priceKnown: true });
+		const first = await budget.beginRequest();
+		const controller = new AbortController();
+		const second = budget.beginRequest(controller.signal);
+		controller.abort(new Error("cancelled while queued"));
+
+		const outcome = await Promise.race([
+			second.then(
+				() => "started",
+				(error: unknown) => (error instanceof Error ? error.message : String(error)),
+			),
+			new Promise<string>((resolve) => setTimeout(() => resolve("still waiting"), 25)),
+		]);
+
+		first.settle(0);
+		expect(outcome).toBe("cancelled while queued");
+		const third = await budget.beginRequest();
+		third.settle(0);
 	});
 
 	it("releases a deleted session's live budget so the daemon does not retain it", () => {

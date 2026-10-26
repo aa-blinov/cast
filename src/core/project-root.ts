@@ -14,15 +14,46 @@
  * nested project inside a monorepo still wins over the outer one.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, resolve, sep } from "node:path";
+import { basename, dirname, join, parse, resolve, sep } from "node:path";
 
 const rootCache = new Map<string, string>();
 
 function normalize(dir: string): string {
 	const resolved = resolve(dir);
-	return resolved.length > 1 && resolved.endsWith(sep) ? resolved.slice(0, -1) : resolved;
+	const root = parse(resolved).root;
+	return resolved !== root && resolved.endsWith(sep) ? resolved.slice(0, -1) : resolved;
+}
+
+function canonicalPathForComparison(path: string): string {
+	let resolved = normalize(path);
+	// macOS exposes temporary paths through /var and /private/var, while
+	// Windows can expose a profile through its long name or an 8.3 alias.
+	// Resolve the nearest existing ancestor so a missing child keeps that
+	// ancestor's canonical spelling.
+	const suffix: string[] = [];
+	while (!existsSync(resolved)) {
+		const parent = dirname(resolved);
+		if (parent === resolved) break;
+		suffix.unshift(basename(resolved));
+		resolved = parent;
+	}
+	try {
+		resolved = realpathSync.native(resolved);
+	} catch {
+		// Keep the resolved path when the filesystem cannot canonicalize it.
+	}
+	for (const segment of suffix) resolved = join(resolved, segment);
+	return normalize(resolved);
+}
+
+function samePath(left: string, right: string): boolean {
+	const normalizedLeft = canonicalPathForComparison(left);
+	const normalizedRight = canonicalPathForComparison(right);
+	return process.platform === "win32"
+		? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+		: normalizedLeft === normalizedRight;
 }
 
 /**
@@ -45,12 +76,12 @@ export function findProjectRoot(cwd: string): string {
 	let dir = start;
 	while (true) {
 		chain.push(dir);
-		if (dir === home) break;
+		if (samePath(dir, home)) break;
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		dir = parent;
 	}
-	const candidates = chain.filter((d) => d !== home);
+	const candidates = chain.filter((d) => !samePath(d, home));
 
 	// `.git` first, nearest one wins: a submodule or a nested checkout inside a
 	// monorepo is its own project, which is exactly what its own `.git` says.
@@ -78,7 +109,13 @@ export function clearProjectRootCache(): void {
 
 /** True when `path` is `root` or lives underneath it. */
 export function isUnderProjectRoot(root: string, path: string): boolean {
-	const normalizedRoot = normalize(root);
-	const normalizedPath = normalize(path);
-	return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}${sep}`);
+	const normalizedRoot = canonicalPathForComparison(root);
+	const normalizedPath = canonicalPathForComparison(path);
+	const descendantPrefix = normalizedRoot.endsWith(sep) ? normalizedRoot : `${normalizedRoot}${sep}`;
+	return (
+		samePath(normalizedPath, normalizedRoot) ||
+		(process.platform === "win32"
+			? normalizedPath.toLowerCase().startsWith(descendantPrefix.toLowerCase())
+			: normalizedPath.startsWith(descendantPrefix))
+	);
 }

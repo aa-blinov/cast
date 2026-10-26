@@ -33,18 +33,23 @@ function isAlive(pid: number): boolean {
 
 /** Exclusive create with our pid in it. False when the lock already exists. */
 function createLock(path: string, owner: string): boolean {
+	let fd: number;
 	try {
-		const fd = openSync(path, "wx");
-		try {
-			writeSync(fd, owner);
-		} finally {
-			closeSync(fd);
-		}
-		return true;
+		fd = openSync(path, "wx");
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+		const code = (error as NodeJS.ErrnoException).code;
+		// Windows reports EPERM, rather than EEXIST, for a competing `wx` open.
+		// The owner may release the lock before existsSync checks it, so retry
+		// instead of turning that race into a failed write.
+		if (code === "EEXIST" || (process.platform === "win32" && code === "EPERM")) return false;
 		throw error;
 	}
+	try {
+		writeSync(fd, owner);
+	} finally {
+		closeSync(fd);
+	}
+	return true;
 }
 
 /**

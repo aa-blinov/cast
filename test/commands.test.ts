@@ -1,16 +1,7 @@
 import { execFileSync } from "node:child_process";
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCheckpoint } from "../src/core/checkpoint.ts";
@@ -2260,7 +2251,8 @@ describe("/compact fires the compaction hooks", () => {
 	afterEach(() => {
 		if (previousHome === undefined) delete process.env.HOME;
 		else process.env.HOME = previousHome;
-		rmSync(dir, { recursive: true, force: true });
+		// PostCompact runs in the background, so Windows may briefly keep its cwd locked.
+		rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 	});
 
 	const writeHooks = (hooks: unknown) =>
@@ -2409,8 +2401,7 @@ describe("/context", () => {
 			const nested = join(dir, "sub");
 			mkdirSync(nested, { recursive: true });
 			const broken = join(nested, "AGENTS.md");
-			writeFileSync(broken, "Unreadable.\n");
-			chmodSync(broken, 0o000);
+			mkdirSync(broken);
 
 			const { deps, calls } = createFakeDeps({ cwd: nested });
 			await handleInput("/context", undefined, deps);
@@ -2425,7 +2416,6 @@ describe("/context", () => {
 			const unreadable = readdirSync(nested).filter((name) => name.toLowerCase() === "agents.md").length;
 			expect(listing).toContain(`Could not load ${unreadable} context file`);
 			expect(listing).toMatch(/unreadable|EACCES/i);
-			chmodSync(broken, 0o644);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -2746,7 +2736,8 @@ describe("/fork with the files of a point", () => {
 				return options.find((o) => o.label === wanted)!.value;
 			},
 		};
-		const fork = createSession("test-model", "/tmp/forked-copy");
+		const forkCwd = resolve("/tmp/forked-copy");
+		const fork = createSession("test-model", forkCwd);
 		let forkedWith: { beforeSeq?: number; withFiles?: boolean } | undefined;
 		(deps.agent.forkSession as (beforeSeq?: number, withFiles?: boolean) => Promise<SessionState | undefined>) =
 			async (beforeSeq, withFiles) => {
@@ -2758,8 +2749,8 @@ describe("/fork with the files of a point", () => {
 
 		expect(asked.map((a) => a.title)).toEqual(["Fork from where?", "Give the fork the files of that point?"]);
 		expect(forkedWith).toEqual({ beforeSeq: second!.seq, withFiles: true });
-		expect(calls.setCwd?.[0]).toEqual(["/tmp/forked-copy"]);
-		expect(noticeText(calls)).toContain("its own copy of the files in /tmp/forked-copy");
+		expect(calls.setCwd?.[0]).toEqual([forkCwd]);
+		expect(noticeText(calls)).toContain(`its own copy of the files in ${forkCwd}`);
 		rmSync(shadowDir, { recursive: true, force: true });
 	});
 

@@ -11,6 +11,7 @@ import { resetDbConnectionForTests } from "../src/core/db.ts";
 import type { Message } from "../src/core/llm.ts";
 import { getPendingApproval } from "../src/core/pending-approval.ts";
 import { createSession, saveSession } from "../src/core/session.ts";
+import { setTestHome } from "./helpers/test-environment.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/core/llm.ts")>();
@@ -34,20 +35,25 @@ const testConfig: AppConfig = {
 };
 
 let dir: string;
-let realHome: string | undefined;
+let realHomeEnvironment: Record<string, string | undefined>;
 let realDb: string | undefined;
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "cast-loop-perm-"));
-	realHome = process.env.HOME;
+	realHomeEnvironment = Object.fromEntries(
+		["HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"].map((key) => [key, process.env[key]]),
+	);
 	realDb = process.env.CAST_SESSIONS_DB;
-	process.env.HOME = join(dir, "home");
+	setTestHome(join(dir, "home"));
 	process.env.CAST_SESSIONS_DB = join(dir, "sessions.db");
 	resetDbConnectionForTests();
 	mkdirSync(join(dir, "home", ".cast"), { recursive: true });
-	mkdirSync(join(dir, "proj"));
+	mkdirSync(join(dir, "home", "proj"));
 });
 afterEach(() => {
-	process.env.HOME = realHome;
+	for (const [key, value] of Object.entries(realHomeEnvironment)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
 	if (realDb === undefined) delete process.env.CAST_SESSIONS_DB;
 	else process.env.CAST_SESSIONS_DB = realDb;
 	resetDbConnectionForTests();
@@ -74,10 +80,11 @@ async function run(
 	confirmBash?: (command: string, reason: string, rule?: string) => Promise<boolean>,
 	extra: { sessionId?: string; preApproved?: string } = {},
 ) {
+	setTestHome(join(dir, "home"));
 	const messages: Message[] = await runAgentLoop([{ role: "user", content: "go" }], {
 		config: testConfig,
 		model: "test-model",
-		cwd: join(dir, "proj"),
+		cwd: join(dir, "home", "proj"),
 		systemPrompt: "test",
 		confirmBash,
 		onEvent: () => {},
@@ -109,7 +116,7 @@ describe("the scratchpad in the system prompt", () => {
 	};
 
 	it("tells a session in a project where its scratchpad is, and makes the folder", async () => {
-		await talk(join(dir, "proj"), "sess1");
+		await talk(join(dir, "home", "proj"), "sess1");
 		const prompt = systemPromptSent();
 		const path = join(dir, "home", ".cast", "scratch", "sess1");
 		expect(prompt).toContain("BASE PROMPT");
@@ -126,7 +133,7 @@ describe("the scratchpad in the system prompt", () => {
 		await runAgentLoop([{ role: "user", content: "look" }], {
 			config: testConfig,
 			model: "test-model",
-			cwd: join(dir, "proj"),
+			cwd: join(dir, "home", "proj"),
 			systemPrompt: "BASE PROMPT",
 			onEvent: () => {},
 			sessionId: "sess5",
@@ -140,20 +147,20 @@ describe("the scratchpad in the system prompt", () => {
 	it("does not name a scratchpad it could not make", async () => {
 		// A file where the scratch root should be: the folder cannot be created under it.
 		writeFileSync(join(dir, "home", ".cast", "scratch"), "in the way");
-		await talk(join(dir, "proj"), "sess3");
+		await talk(join(dir, "home", "proj"), "sess3");
 		expect(systemPromptSent()).not.toContain("Your scratchpad");
 	});
 
 	it("is off when the settings say so: no block, no folder", async () => {
 		rules({});
 		writeFileSync(join(dir, "home", ".cast", "settings.json"), JSON.stringify({ scratchpad: false }));
-		await talk(join(dir, "proj"), "sess4");
+		await talk(join(dir, "home", "proj"), "sess4");
 		expect(systemPromptSent()).not.toContain("Your scratchpad");
 		expect(existsSync(join(dir, "home", ".cast", "scratch", "sess4"))).toBe(false);
 	});
 
 	it("says nothing, and makes nothing, for a run that is not a session (no id)", async () => {
-		await talk(join(dir, "proj"));
+		await talk(join(dir, "home", "proj"));
 		expect(systemPromptSent()).not.toContain("scratchpad");
 		expect(existsSync(join(dir, "home", ".cast", "scratch"))).toBe(false);
 	});
@@ -206,7 +213,7 @@ describe("permission rules in the loop", () => {
 	});
 
 	it("keeps the request in the session while it waits, so another process can answer it", async () => {
-		const session = createSession("test-model", join(dir, "proj"));
+		const session = createSession("test-model", join(dir, "home", "proj"));
 		saveSession(session);
 		rules({ ask: ["write(*.md)"] });
 		oneCall("write", { path: "notes.md", content: "x" });
@@ -228,14 +235,14 @@ describe("permission rules in the loop", () => {
 		const confirm = vi.fn(async () => false);
 		expect(await run(confirm, { preApproved: "write notes.md" })).not.toContain("declined");
 		expect(confirm).not.toHaveBeenCalled();
-		expect(readFileSync(join(dir, "proj", "notes.md"), "utf-8")).toBe("x");
+		expect(readFileSync(join(dir, "home", "proj", "notes.md"), "utf-8")).toBe("x");
 	});
 
 	it("an edit sent with write's `path` still edits, and the guard sees that path", async () => {
-		writeFileSync(join(dir, "proj", "a.txt"), "old");
+		writeFileSync(join(dir, "home", "proj", "a.txt"), "old");
 		oneCall("edit", { path: "a.txt", oldString: "old", newString: "new" });
 		await run(vi.fn(async () => true));
-		expect(readFileSync(join(dir, "proj", "a.txt"), "utf-8")).toBe("new");
+		expect(readFileSync(join(dir, "home", "proj", "a.txt"), "utf-8")).toBe("new");
 
 		writeFileSync(join(dir, "out.txt"), "old");
 		oneCall("edit", { path: join(dir, "out.txt"), oldString: "old", newString: "new" });
@@ -328,15 +335,16 @@ describe("permission rules in the loop", () => {
 			expect(confirm).toHaveBeenCalledTimes(1);
 		});
 
-		it("a refused write to /tmp says where a temporary file may go", async () => {
-			oneCall("write", { path: "/tmp/cast-test-never-written.txt", content: "x" });
+		it("a refused write to the system temp directory says where a temporary file may go", async () => {
+			const temporaryFile = join(tmpdir(), `cast-test-never-written-${process.pid}.txt`);
+			oneCall("write", { path: temporaryFile, content: "x" });
 			const content = await run(
 				vi.fn(async () => false),
 				{ sessionId: "mine" },
 			);
 			expect(content).toContain("declined");
 			expect(content).toContain(join(dir, "home", ".cast", "scratch", "mine"));
-			expect(existsSync("/tmp/cast-test-never-written.txt")).toBe(false);
+			expect(existsSync(temporaryFile)).toBe(false);
 		});
 
 		it("with nobody to ask (bypass) it runs; inside the project it never asks", async () => {
@@ -344,7 +352,7 @@ describe("permission rules in the loop", () => {
 			oneCall("read", { path: join(dir, "free.txt") });
 			expect(await run(undefined)).toContain("free");
 
-			writeFileSync(join(dir, "proj", "local.txt"), "local");
+			writeFileSync(join(dir, "home", "proj", "local.txt"), "local");
 			oneCall("read", { path: "local.txt" });
 			const confirm = vi.fn(async () => false);
 			expect(await run(confirm)).toContain("local");

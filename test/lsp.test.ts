@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
-import { lspStatus, resetLspForTests } from "../src/core/lsp/index.ts";
+import { lspStatus, resetLspForTests, shutdownAllLspServers } from "../src/core/lsp/index.ts";
 import { rootFor } from "../src/core/lsp/servers.ts";
 import { createToolExecutor, getToolDefinitions } from "../src/core/tools.ts";
+import { setTestHome } from "./helpers/test-environment.ts";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "fake-lsp-server.mjs");
 
@@ -25,7 +26,7 @@ const config = {
 
 let home = "";
 let project = "";
-let realHome: string | undefined;
+let realHomeEnvironment: Record<string, string | undefined>;
 
 function settings(extra: Record<string, unknown> = {}, pull = false): void {
 	mkdirSync(join(home, ".cast"), { recursive: true });
@@ -47,19 +48,25 @@ function settings(extra: Record<string, unknown> = {}, pull = false): void {
 
 beforeEach(() => {
 	delete process.env.CAST_LSP;
-	realHome = process.env.HOME;
+	realHomeEnvironment = Object.fromEntries(
+		["HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"].map((key) => [key, process.env[key]]),
+	);
 	home = mkdtempSync(join(tmpdir(), "cast-lsp-home-"));
-	project = mkdtempSync(join(tmpdir(), "cast-lsp-project-"));
-	process.env.HOME = home;
+	project = join(home, "project");
+	mkdirSync(project, { recursive: true });
+	setTestHome(home);
 	settings();
 });
 
-afterEach(() => {
+afterEach(async () => {
+	await shutdownAllLspServers();
 	resetLspForTests();
 	process.env.CAST_LSP = "off";
-	process.env.HOME = realHome;
+	for (const [key, value] of Object.entries(realHomeEnvironment)) {
+		if (value === undefined) delete process.env[key];
+		else process.env[key] = value;
+	}
 	rmSync(home, { recursive: true, force: true });
-	rmSync(project, { recursive: true, force: true });
 });
 
 const exec = (name: string, args: Record<string, unknown>) => createToolExecutor(project, config)(name, args);

@@ -178,7 +178,7 @@ export function reconcileMemoryFileIndex(includeCc: boolean): { indexed: number;
 				continue;
 			}
 			const root = file.isCc ? ccRoot : memoryTreeRoot;
-			const locator = locateMemoryFile(relative(root, file.path), file.isCc, body);
+			const locator = locateMemoryFile(relative(root, file.path).split(sep).join("/"), file.isCc, body);
 			if (!locator) continue;
 			upsert.run(file.path, locator.scope, locator.scopeId, locator.type, body, fingerprint, Date.now());
 			indexed++;

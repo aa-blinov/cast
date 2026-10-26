@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	BoundedOutput,
@@ -139,7 +139,7 @@ describe("BoundedOutput spill", () => {
 		utimesSync(join(dir, "old.txt"), eightDaysAgo, eightDaysAgo);
 		const path = saveToolOutput("full text");
 		expect(readFileSync(path as string, "utf-8")).toBe("full text");
-		expect(readdirSync(dir).sort()).toEqual([path?.split("/").pop(), "recent.txt"].sort());
+		expect(readdirSync(dir).sort()).toEqual([path ? basename(path) : undefined, "recent.txt"].sort());
 	});
 
 	it("writes the whole stream byte-exact, even when the cut splits a character", () => {
