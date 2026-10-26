@@ -6,7 +6,7 @@
  * is removed with the session (see `deleteSession`). A sandbox session needs none: its working folder is already a
  * throwaway one of its own, so that folder is its scratchpad.
  */
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 
@@ -22,6 +22,11 @@ export function sandboxDirFor(sessionId: string): string {
 /** Matched exactly, never by prefix: a project that merely lives under ~/.cast/sandbox is not a sandbox. */
 export function isSandboxCwd(sessionId: string, cwd: string | undefined): boolean {
 	return cwd !== undefined && cwd === sandboxDirFor(sessionId);
+}
+
+/** Retain process isolation after a sandbox session switches its working folder to a git worktree. */
+export function isSandboxSession(sessionId: string, cwd: string | undefined): boolean {
+	return isSandboxCwd(sessionId, cwd) || existsSync(sandboxDirFor(sessionId));
 }
 
 /** Where the scratchpad of the session `sessionId` working in `cwd` is. */

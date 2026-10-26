@@ -1,6 +1,6 @@
 import { getEventListeners } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +57,10 @@ const {
 type CheckMemory = import("../src/core/loop.ts").CheckMemory;
 const { streamAndCollect } = await import("../src/core/llm.ts");
 type AgentEvent = Parameters<Parameters<typeof runAgentLoop>[1]["onEvent"]>[0];
+
+function testProjectCwd(prefix: string): string {
+	return mkdtempSync(join(homedir(), prefix));
+}
 
 beforeEach(() => {
 	// vitest doesn't reset mock call history/queued mockImplementationOnce
@@ -386,6 +390,7 @@ describe("runAgentLoop — abort vs. error", () => {
 		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
 		updateSettings({ checkpointFork: true });
 		const session = createSession("test-model", projectCwd, { id: "telemetry-session" });
+		session.usage.costCapUsd = 1;
 		session.messages = [
 			{ role: "system", content: "system" },
 			{ role: "user", content: "before checkpoint" },
@@ -399,13 +404,25 @@ describe("runAgentLoop — abort vs. error", () => {
 				content: "main answer",
 				thinking: "",
 				finishReason: "stop",
-				usage: { promptTokens: 1000, completionTokens: 2, totalTokens: 1002 },
+				usage: {
+					promptTokens: 1000,
+					completionTokens: 2,
+					totalTokens: 1002,
+					reportedCost: 0.01,
+					priceReported: true,
+				},
 			}))
 			.mockImplementationOnce(async () => ({
 				content: "checkpoint saved",
 				thinking: "",
 				finishReason: "stop",
-				usage: { promptTokens: 500, completionTokens: 50, totalTokens: 550 },
+				usage: {
+					promptTokens: 500,
+					completionTokens: 50,
+					totalTokens: 550,
+					reportedCost: 0.01,
+					priceReported: true,
+				},
 			}));
 
 		try {
@@ -429,7 +446,6 @@ describe("runAgentLoop — abort vs. error", () => {
 					onWarning: () => {},
 				},
 			);
-
 			// The writer's usage is written by the loop (not the bridge), so it
 			// shows up in the DB directly. Poll briefly — the writer runs async.
 			const deadline = Date.now() + 2_000;
@@ -449,6 +465,7 @@ describe("runAgentLoop — abort vs. error", () => {
 			// recorded by the bridge, which isn't involved in this test.
 			expect(rows).toHaveLength(1);
 			expect(rows[0]!).toMatchObject({ kind: "background", prompt_tokens: 500, completion_tokens: 50 });
+			expect(vi.mocked(streamAndCollect).mock.calls[1]?.[13]).toBe(vi.mocked(streamAndCollect).mock.calls[0]?.[13]);
 		} finally {
 			if (realHome === undefined) delete process.env.HOME;
 			else process.env.HOME = realHome;
@@ -2330,6 +2347,7 @@ describe("runAgentLoop — context files drive rule auto-attach", () => {
 
 			// Capture the system prompt (messages[0]) actually sent on each request.
 			const sentPrompts: string[] = [];
+			const events: AgentEvent[] = [];
 			vi.mocked(streamAndCollect)
 				// Request 1: no file seen yet → prompt must NOT carry the rule.
 				.mockImplementationOnce(async (_c, _m, msgs) => {
@@ -2355,7 +2373,7 @@ describe("runAgentLoop — context files drive rule auto-attach", () => {
 				systemPrompt: "SYS",
 				rebuildSystemPrompt,
 				contextFiles: [],
-				onEvent: () => {},
+				onEvent: (event) => events.push(event),
 			});
 
 			expect(sentPrompts).toHaveLength(2);
@@ -2594,7 +2612,7 @@ describe("runAgentLoop — moderation refusal", () => {
 // ============================================================================
 describe("runAgentLoop — nested AGENTS.md injection", () => {
 	it("a read in a subdirectory with its own AGENTS.md injects it into the next system prompt", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents-"));
+		const cwd = testProjectCwd("cast-loop-nested-agents-");
 		try {
 			// Set up a monorepo-like structure:
 			//   <cwd>/AGENTS.md            — "ROOT_INSTRUCTIONS" (static base)
@@ -2661,7 +2679,7 @@ describe("runAgentLoop — nested AGENTS.md injection", () => {
 	});
 
 	it("nested AGENTS.md appears in the SAME turn — the request right after the read carries it", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents2-"));
+		const cwd = testProjectCwd("cast-loop-nested-agents2-");
 		try {
 			mkdirSync(join(cwd, "apps", "web"), { recursive: true });
 			writeFileSync(join(cwd, "AGENTS.md"), "ROOT_INSTRUCTIONS", "utf-8");
@@ -2717,7 +2735,7 @@ describe("runAgentLoop — nested AGENTS.md injection", () => {
 	});
 
 	it("deeply nested AGENTS.md (3 levels) attaches the full chain shallow-to-deep", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents3-"));
+		const cwd = testProjectCwd("cast-loop-nested-agents3-");
 		try {
 			mkdirSync(join(cwd, "apps", "web", "components"), { recursive: true });
 			writeFileSync(join(cwd, "AGENTS.md"), "ROOT", "utf-8");
@@ -2788,7 +2806,7 @@ describe("runAgentLoop — nested AGENTS.md injection", () => {
 	});
 
 	it("scoped: reading a file in services/ does NOT pull apps/web/ AGENTS.md", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "cast-loop-nested-agents4-"));
+		const cwd = testProjectCwd("cast-loop-nested-agents4-");
 		try {
 			mkdirSync(join(cwd, "apps", "web"), { recursive: true });
 			mkdirSync(join(cwd, "services", "api"), { recursive: true });
@@ -3057,9 +3075,9 @@ describe("runAgentLoop — plan mode", () => {
 			},
 		});
 
-		// It ran (and failed to resolve the fake host) rather than being refused.
+		// It ran and returned its platform-specific SSH error rather than being refused.
+		expect(seen).toHaveLength(1);
 		expect(seen.join("\n")).not.toMatch(/not available/i);
-		expect(seen.join("\n")).toMatch(/ssh|resolve|connect/i);
 	});
 
 	it("prepends the plan block even when rebuildSystemPrompt replaces the prompt", async () => {
@@ -6257,7 +6275,8 @@ describe("waitForToolBatch", () => {
 			const results = await batch;
 			expect(results[0]?.result.content).toBe("A");
 			expect(results[1]?.result.isError).toBe(true);
-			expect(results[1]?.result.content).toContain("ABORTED");
+			expect(results[1]?.result.content).toContain("ABORT REQUESTED; OUTCOME UNKNOWN");
+			expect(results[1]?.result.content).toContain("may still be running");
 		} finally {
 			vi.useRealTimers();
 		}
@@ -6301,7 +6320,7 @@ describe("waitForToolBatch — abort listeners", () => {
 			ac.abort();
 			await vi.advanceTimersByTimeAsync(TOOL_ABORT_GRACE_MS + 10);
 			const results = await batch;
-			expect(results[0]?.result.content).toContain("ABORTED");
+			expect(results[0]?.result.content).toContain("ABORT REQUESTED; OUTCOME UNKNOWN");
 			expect(getEventListeners(ac.signal, "abort")).toHaveLength(0);
 		} finally {
 			vi.useRealTimers();

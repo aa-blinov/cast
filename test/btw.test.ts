@@ -7,6 +7,7 @@ import {
 	sideQuestionMessages,
 } from "../src/core/btw.ts";
 import type { AppConfig } from "../src/core/config.ts";
+import { SessionCostBudget } from "../src/core/cost-budget.ts";
 import { type Message, streamAndCollect } from "../src/core/llm.ts";
 
 vi.mock("../src/core/llm.ts", async (importOriginal) => ({
@@ -108,8 +109,9 @@ describe("askSideQuestion", () => {
 			usage: { promptTokens: 10, completionTokens: 3, totalTokens: 13 },
 		} as never);
 		const before = JSON.stringify(history);
+		const costBudget = new SessionCostBudget({ capUsd: 1, reportedSpendUsd: 0, priceKnown: true });
 		const answer = await askSideQuestion(
-			{ config, model: "m", systemPrompt: "SYSTEM", history, sessionId: "s1" },
+			{ config, model: "m", systemPrompt: "SYSTEM", history, sessionId: "s1", costBudget },
 			"how many passes?",
 		);
 		expect(answer.text).toBe("Two passes.");
@@ -120,6 +122,7 @@ describe("askSideQuestion", () => {
 		expect(String((call[2] as Message[]).at(-1)!.content)).toContain("how many passes?");
 		expect(JSON.stringify(history)).toBe(before);
 		expect(call[12]).toEqual({ sessionId: "s1", purpose: "btw" });
+		expect(call[13]).toBe(costBudget);
 	});
 
 	it("says so when the model returned nothing, instead of showing an empty answer", async () => {

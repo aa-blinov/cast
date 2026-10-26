@@ -6,6 +6,7 @@ import { filesLostByRestore, restoreCheckpoint } from "../core/checkpoint.ts";
 import { reminderStateFromPlan } from "../core/compaction-reminder.ts";
 import { type AppConfig, probeProvider, resolveProvider, runOnboardingCheck } from "../core/config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../core/context-files.ts";
+import { parseSessionCostCapArgument, setActiveSessionCostCap } from "../core/cost-budget.ts";
 import { formatDoctor, runDoctor } from "../core/doctor.ts";
 import { previewForkFiles } from "../core/fork-files.ts";
 import {
@@ -87,6 +88,7 @@ import {
 	saveSession,
 	updateSessionIdentity,
 } from "../core/session.ts";
+import { getSessionCostBudgetForSession } from "../core/session-cost.ts";
 import { saveExport, sessionCostText } from "../core/session-report.ts";
 import {
 	type HeaderConfig,
@@ -279,6 +281,11 @@ export const SLASH_COMMANDS: Array<{ name: string; description: string; takesArg
 	{ name: "/continue", description: "Resume the most recent session" },
 	{ name: "/copy", description: "Copy last assistant response" },
 	{ name: "/cost", description: "Show what this session has spent, by kind of request" },
+	{
+		name: "/cost-cap",
+		description: "Set a provider-reported spend limit for this session — USD or off",
+		takesArgs: true,
+	},
 	{ name: "/current", description: "Show all status bar data" },
 	{ name: "/distill", description: "Package a repeated workflow as a reusable project artifact" },
 	{ name: "/doctor", description: "Check the provider, model, tools and MCP servers" },
@@ -1605,6 +1612,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 							history: session.messages,
 							inFlight: running ? describeInFlight(agent.streaming?.blocks) : undefined,
 							sessionId: session.id,
+							costBudget: getSessionCostBudgetForSession(session.id),
+							onUsage: running ? (usage) => addUsage(session, usage) : undefined,
 						},
 						question,
 					);
@@ -1728,6 +1737,11 @@ const COMMAND_ROUTES: CommandRoute[] = [
 						model: session.model,
 						config,
 						messages: session.messages,
+						costBudget: getSessionCostBudgetForSession(session.id),
+						onUsage: (usage) => {
+							addUsage(session, usage);
+							saveSession(session);
+						},
 						runAgent: runMemoryMaintenanceAgent,
 					});
 					showNotice(result.skipped ? NOTHING_TO_CONSOLIDATE : dreamNotice(result.stored, result.removed));
@@ -1738,6 +1752,11 @@ const COMMAND_ROUTES: CommandRoute[] = [
 						model: session.model,
 						config,
 						messages: session.messages,
+						costBudget: getSessionCostBudgetForSession(session.id),
+						onUsage: (usage) => {
+							addUsage(session, usage);
+							saveSession(session);
+						},
 						runAgent: runMemoryMaintenanceAgent,
 					});
 					showNotice(
@@ -2138,6 +2157,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				cwd: deps.cwd,
 				sessionId: session.id,
 				payload: { trigger: "manual" },
+				costBudget: getSessionCostBudgetForSession(session.id),
+				onUsage: (usage) => addUsage(session, usage, { compaction: true }),
 			});
 			if (preCompact.blocked) {
 				showNotice(`[Compaction blocked by hook: ${preCompact.reason ?? "no reason given"}]`);
@@ -2158,6 +2179,7 @@ const COMMAND_ROUTES: CommandRoute[] = [
 					reminderStateFromPlan(planState),
 					undefined,
 					session.id,
+					getSessionCostBudgetForSession(session.id),
 				);
 				if (result.compacted) {
 					recordCompaction(session, session.messages, result.messages);
@@ -2169,6 +2191,8 @@ const COMMAND_ROUTES: CommandRoute[] = [
 						cwd: deps.cwd,
 						sessionId: session.id,
 						payload: { trigger: "manual", messagesCompacted: result.messagesCompacted },
+						costBudget: getSessionCostBudgetForSession(session.id),
+						onUsage: (usage) => addUsage(session, usage, { compaction: true }),
 					});
 				} else if (result.error) {
 					showNotice(`[Compaction failed: ${result.error}]`);
@@ -3356,6 +3380,35 @@ const COMMAND_ROUTES: CommandRoute[] = [
 				return;
 			}
 			applyTurnCap(deps, arg);
+		},
+	},
+	{
+		match: (input) => input === "/cost-cap" || input.startsWith("/cost-cap "),
+		whileRunning: "submit",
+		run: ({ input, session, showNotice }) => {
+			const argument = input.slice("/cost-cap".length).trim();
+			if (!argument) {
+				const cap = session.usage.costCapUsd;
+				const spent =
+					session.usage.costPriceKnown === true
+						? `$${(session.usage.reportedCostUsd ?? 0).toFixed(4)} provider-reported`
+						: "unknown (a provider omitted its price)";
+				showNotice(`[Session cost cap: ${cap === undefined ? "off" : `$${cap.toFixed(4)}`} — ${spent}]`);
+				return;
+			}
+			const parsed = parseSessionCostCapArgument(argument);
+			if (!parsed.ok) {
+				showNotice("[Usage: /cost-cap <USD> | off]");
+				return;
+			}
+			session.usage.costCapUsd = parsed.capUsd;
+			setActiveSessionCostCap(session.id, parsed.capUsd);
+			saveSession(session);
+			showNotice(
+				parsed.capUsd === undefined
+					? "[Session cost cap turned off]"
+					: `[Session cost cap set to $${parsed.capUsd.toFixed(4)}]`,
+			);
 		},
 	},
 	{

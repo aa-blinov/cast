@@ -43,7 +43,6 @@ import {
 	setPendingApproval,
 } from "../core/pending-approval.ts";
 import { addAllowRule, exactRule } from "../core/permissions.ts";
-
 import { DEFAULT_PERSONA, type Persona } from "../core/personas.ts";
 import {
 	createPlanState,
@@ -110,6 +109,7 @@ import {
 	type TurnMeta,
 	updateLastCheckpoint,
 } from "../core/session.ts";
+import { getSessionCostBudgetForSession } from "../core/session-cost.ts";
 import {
 	contextWindowSetting,
 	getProjectTrust,
@@ -2675,7 +2675,12 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 			.join("\n");
 	}
 
-	async function runCompactLlm(system: string, user: string, maxTokens: number): Promise<{ content: string } | null> {
+	async function runCompactLlm(
+		system: string,
+		user: string,
+		maxTokens: number,
+		sessionId?: string,
+	): Promise<{ content: string } | null> {
 		try {
 			const ac = new AbortController();
 			const timer = setTimeout(() => ac.abort(), 20_000);
@@ -2690,8 +2695,23 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				[],
 				maxTokens,
 				ac.signal,
+				undefined,
+				undefined,
+				{},
+				undefined,
+				{},
+				undefined,
+				sessionId ? { sessionId, purpose: "evolve" } : undefined,
+				sessionId ? getSessionCostBudgetForSession(sessionId) : undefined,
 			);
 			clearTimeout(timer);
+			if (sessionId && resp.usage) {
+				const session = sessions.get(sessionId)?.session;
+				if (session) {
+					addUsage(session, resp.usage);
+					saveSession(session);
+				}
+			}
 			return resp;
 		} catch {
 			return null;
@@ -2716,12 +2736,18 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 
 	/** Ask the model to flesh out a full SKILL.md for a named procedure based
 	 *  on the session transcript. Returns the body (with YAML frontmatter). */
-	async function generateSkillBody(name: string, description: string, messages: Message[]): Promise<string | null> {
+	async function generateSkillBody(
+		name: string,
+		description: string,
+		messages: Message[],
+		sessionId: string,
+	): Promise<string | null> {
 		const transcript = compactTurnTranscript(messages);
 		const resp = await runCompactLlm(
 			'Write a concise Agent-Skills-style SKILL.md for a reusable project procedure. YAML frontmatter: name (kebab-case), description (one sentence, "Use when …"). Then a short ordered list of steps. Keep it under 30 lines — every line is a recurring token cost once loaded. Output only the SKILL.md file contents.',
 			`Skill name: ${name}\nSkill description: ${description}\n\nProcedure performed in the session:\n\n${transcript}`,
 			800,
+			sessionId,
 		);
 		if (!resp) return null;
 		let body = resp.content.replace(CODE_FENCE_OPEN_RE, "").replace(CODE_FENCE_CLOSE_RE, "").trim();
@@ -2753,6 +2779,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 				EVOLVE_SYSTEM_PROMPT,
 				EVOLVE_PROMPT.replace("{{PROJECT}}", project).replace("{{TRANSCRIPT}}", transcript),
 				800,
+				ws.id,
 			);
 		} finally {
 			ws.evolving = false;
@@ -2971,7 +2998,7 @@ export function createServerBridge(result: StartupResult): ServerBridge {
 					if (!option) return null;
 					const name = normalizeSkillName(option.value);
 					if (!name) return null;
-					const body = await generateSkillBody(name, option.description ?? "", ws.session.messages);
+					const body = await generateSkillBody(name, option.description ?? "", ws.session.messages, ws.id);
 					if (!body) return null;
 					writeSkillFile(ws.session.cwd ?? cwd, name, body);
 					return name;

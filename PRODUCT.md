@@ -8,7 +8,7 @@ terminal
 
 The schema's values are web, ios, android and adaptive, and none of them fits the primary surface. cast is a terminal application: the full-screen interface in `src/ui-pi` is drawn in a character grid on `@earendil-works/pi-tui`. The browser client in `src/server/public` is a second surface of the same product rather than a different one, and `cast run` is a third.
 
-The runtime is Node.js 22 or newer. The product ships as a self-contained bundle, with no npm packages needed at runtime, for macOS x64 and arm64, Linux x64 and arm64, and Windows x64 and arm64.
+The runtime is Node.js 22.12 or newer. The product ships as a self-contained bundle with its required runtime packages for macOS x64 and arm64, Linux x64 and arm64, and Windows x64 and arm64.
 
 ## Users
 
@@ -59,6 +59,8 @@ Confirmed by the code:
 - Dangerous shell commands ask first. The file tools never ask, because git undoes them.
 - Permission rules resolve in one order: deny beats approved, approved beats ask, ask beats allow.
 - The `bash` timeout is in milliseconds, 180000 by default and 3600000 at most.
+- Sandbox sessions run the shell process tree under OS isolation: writes are confined to the session folder and a private temp folder, home-directory reads and credential files are denied, and network access is blocked by default. Linux needs bubblewrap, socat and ripgrep; macOS needs ripgrep; Windows support is alpha and needs a one-time elevated install. Built-in file tools use cast permissions, and MCP server processes stay outside this shell boundary.
+- `/cost-cap <USD>` sets a cumulative per-session threshold from provider-reported prices across main calls, compaction, hooks, memory upkeep and subagents. Unknown prices block later requests while the cap is on; because price is reported after a call, the call that crosses the cap may exceed its remaining amount.
 - A `web_fetch` through the Jina backend refuses a private or internal address and a URL with a login in it.
 - The daemon's local token is accepted only from a loopback socket, even when the daemon is bound publicly.
 - Every rendered line has to fit the width.
@@ -70,6 +72,7 @@ Deliberately not true, and worth knowing before a change:
 
 - The release archives carry no signature and no checksum file: the release workflow uploads the tarballs as they are, and the installer fetches them over HTTPS without verifying a digest.
 - There is no automatic update. `cast upgrade` re-runs the installer.
+- The OS process sandbox applies to shell commands and their children, not to already-running MCP servers. Its Windows backend is alpha and requires a one-time elevated machine setup.
 - `--public` serves plain HTTP, so it protects nothing on a network the machine does not trust.
 - The full-screen interface needs a terminal. In a pipe or in CI, `cast run` is the path.
 - The project memory write is best-effort: a failing writer leaves the conversation successful and reports a warning.

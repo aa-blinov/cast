@@ -8,6 +8,7 @@
 import { type AgentActorHandle, type AgentActorRegistry, agentActorRegistry } from "../actors.ts";
 import type { AppConfig } from "../config.ts";
 import { formatContextFilesForPrompt, loadProjectContextFiles } from "../context-files.ts";
+import type { SessionCostBudget } from "../cost-budget.ts";
 import { type HooksFile, runHooksForEvent } from "../hooks.ts";
 import { EMPTY_ASSISTANT_PLACEHOLDER, type Message, type Tool, type Usage } from "../llm.ts";
 import { type AgentEvent, type LoopConfig, MessageQueue } from "../loop.ts";
@@ -188,6 +189,8 @@ function serializeConfirm(confirm: ConfirmBash | undefined): ConfirmBash | undef
 
 export interface TaskExecutorDeps {
 	model: string;
+	/** Main session budget is shared with every child request, including background tasks. */
+	costBudget?: SessionCostBudget;
 	/** Subagent prompts available for the task tool. */
 	subagentPrompts?: SubagentPrompt[];
 	mcpTools?: Tool[];
@@ -466,6 +469,7 @@ export async function execTask(
 					deps.runAgentLoop(childMessages, {
 						config,
 						model: deps.model,
+						costBudget: deps.costBudget,
 						modelProvider: deps.subagentModelProvider,
 						cwd,
 						systemPrompt: childSystemPrompt,
@@ -654,5 +658,7 @@ function addUsage(total: Usage, usage: Usage): void {
 	if (usage.uncachedTokens) total.uncachedTokens = (total.uncachedTokens ?? 0) + usage.uncachedTokens;
 	// Provider-reported cost (e.g. OpenRouter) must be folded in too, otherwise
 	// the subagent's spend silently vanishes from the session's cost total.
-	if (usage.cost) total.cost = (total.cost ?? 0) + usage.cost;
+	if (usage.cost !== undefined) total.cost = (total.cost ?? 0) + usage.cost;
+	if (usage.reportedCost !== undefined) total.reportedCost = (total.reportedCost ?? 0) + usage.reportedCost;
+	if (usage.priceReported !== undefined) total.priceReported = total.priceReported !== false && usage.priceReported;
 }

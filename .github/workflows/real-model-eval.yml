@@ -1,0 +1,45 @@
+name: Real-model behavior eval
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model ID (defaults to CAST_EVAL_MODEL repository variable)
+        required: false
+        type: string
+
+jobs:
+  evaluate:
+    if: ${{ github.event_name == 'workflow_dispatch' || (vars.CAST_REAL_EVALS_ENABLED == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run repeated real-model behavior check
+        env:
+          CAST_REAL_EVALS_ENABLED: "true"
+          CAST_EVAL_API_KEY: ${{ secrets.CAST_EVAL_API_KEY }}
+          CAST_EVAL_MODEL: ${{ github.event.inputs.model || vars.CAST_EVAL_MODEL }}
+          CAST_EVAL_PROVIDER_URL: ${{ vars.CAST_EVAL_PROVIDER_URL }}
+          CAST_EVAL_OUTPUT: ${{ runner.temp }}/cast-real-model-eval.json
+        run: node --import tsx scripts/real-model-eval.ts
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: real-model-eval
+          path: ${{ runner.temp }}/cast-real-model-eval.json
+          if-no-files-found: ignore

@@ -10,6 +10,7 @@ import {
 	formatBytes,
 	formatScratchpadListing,
 	isSandboxCwd,
+	isSandboxSession,
 	isTemporaryPath,
 	lastActivityMs,
 	removeScratchpadFor,
@@ -23,17 +24,23 @@ import { createSession, deleteSession, pruneOrphanScratchpads, saveSession } fro
 
 let dir: string;
 let realHome: string | undefined;
+let realUserProfile: string | undefined;
 let realDb: string | undefined;
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "cast-scratch-"));
 	realHome = process.env.HOME;
+	realUserProfile = process.env.USERPROFILE;
 	realDb = process.env.CAST_SESSIONS_DB;
 	process.env.HOME = dir;
+	process.env.USERPROFILE = dir;
 	process.env.CAST_SESSIONS_DB = join(dir, "sessions.db");
 	resetDbConnectionForTests();
 });
 afterEach(() => {
-	process.env.HOME = realHome;
+	if (realHome === undefined) delete process.env.HOME;
+	else process.env.HOME = realHome;
+	if (realUserProfile === undefined) delete process.env.USERPROFILE;
+	else process.env.USERPROFILE = realUserProfile;
 	if (realDb === undefined) delete process.env.CAST_SESSIONS_DB;
 	else process.env.CAST_SESSIONS_DB = realDb;
 	resetDbConnectionForTests();
@@ -57,6 +64,15 @@ describe("scratchpadFor", () => {
 		expect(isSandboxCwd("abc123", sandboxDirFor("other"))).toBe(false);
 		expect(isSandboxCwd("abc123", undefined)).toBe(false);
 	});
+
+	it("keeps sandbox identity after switching to a worktree, and drops it when the sandbox is deleted", () => {
+		const sandbox = sandboxDirFor("abc123");
+		const worktree = join(dir, "worktree");
+		mkdirSync(sandbox, { recursive: true });
+		expect(isSandboxSession("abc123", worktree)).toBe(true);
+		rmSync(sandbox, { recursive: true, force: true });
+		expect(isSandboxSession("abc123", worktree)).toBe(false);
+	});
 });
 
 describe("the scratchpad folder", () => {
@@ -65,7 +81,7 @@ describe("the scratchpad folder", () => {
 		ensureScratchpad(path);
 		ensureScratchpad(path);
 		expect(statSync(path).isDirectory()).toBe(true);
-		expect(statSync(path).mode & 0o077).toBe(0);
+		if (process.platform !== "win32") expect(statSync(path).mode & 0o077).toBe(0);
 	});
 
 	it("says whether the folder is there afterwards", () => {
@@ -116,16 +132,26 @@ describe("scratchpadPromptBlock", () => {
 
 describe("the hint on a refusal to write to a system temp folder", () => {
 	it("recognises a system temp path and nothing else", () => {
-		for (const path of ["/tmp/x.txt", "/var/tmp/a/b", "/tmp"]) expect(isTemporaryPath(path), path).toBe(true);
-		for (const path of ["/tmpfoo/x", "/home/u/tmp/x", "/etc/hosts", "/work/project/tmp.txt", "/tmp/../etc/hosts"]) {
+		const tempPaths =
+			process.platform === "win32" ? [join(tmpdir(), "x.txt"), tmpdir()] : ["/tmp/x.txt", "/var/tmp/a/b", "/tmp"];
+		for (const path of tempPaths) expect(isTemporaryPath(path), path).toBe(true);
+		for (const path of [
+			"/tmpfoo/x",
+			"/home/u/tmp/x",
+			"/etc/hosts",
+			"/work/project/tmp.txt",
+			"/tmp/../etc/hosts",
+			...(process.platform === "win32" ? ["/tmp/x.txt", "/var/tmp/a/b"] : []),
+		]) {
 			expect(isTemporaryPath(path), path).toBe(false);
 		}
 	});
 
 	it("points at the scratchpad for a temp path, and says nothing for another path or with no scratchpad", () => {
-		expect(scratchpadRefusalHint("/tmp/x.txt", "/home/u/.cast/scratch/abc")).toContain("/home/u/.cast/scratch/abc");
+		const tempPath = join(tmpdir(), "x.txt");
+		expect(scratchpadRefusalHint(tempPath, "/home/u/.cast/scratch/abc")).toContain("/home/u/.cast/scratch/abc");
 		expect(scratchpadRefusalHint("/etc/hosts", "/home/u/.cast/scratch/abc")).toBe("");
-		expect(scratchpadRefusalHint("/tmp/x.txt", undefined)).toBe("");
+		expect(scratchpadRefusalHint(tempPath, undefined)).toBe("");
 	});
 });
 
@@ -212,7 +238,7 @@ describe("describing and clearing a scratchpad", () => {
 describe("the scratch root is private, and retention follows real activity", () => {
 	it("makes the root private along with the folder", () => {
 		ensureScratchpad(scratchpadFor("abc123", "/work/project"));
-		expect(statSync(scratchpadRoot()).mode & 0o077).toBe(0);
+		if (process.platform !== "win32") expect(statSync(scratchpadRoot()).mode & 0o077).toBe(0);
 	});
 
 	it("takes work in a subfolder for activity: a folder's own time only moves when an entry is added to it directly", () => {

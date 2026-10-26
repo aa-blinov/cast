@@ -32,8 +32,25 @@ the project. It keeps those files out of your repository and out of a shared `/t
 - Turn it off with `"scratchpad": false` in `settings.json`: the agent is then told nothing and no folder is made. The folder is
   also not named to the agent when it could not be created.
 
-It is a convenience and not a security boundary: `bash` is not confined to it. The folder is private to the user (`0700`, root
-included). A fork's scratchpad starts empty, so a file the original session wrote there is outside the project for the fork.
+The scratchpad itself is not a security boundary. Sandbox sessions also confine the `bash` process tree with the operating system; see [Sandbox processes](#sandbox-processes). The folder is private to the user (`0700`, root included). A fork's scratchpad starts empty, so a file the original session wrote there is outside the project for the fork.
+
+## Sandbox processes
+
+In a sandbox session, every `bash` command and its child processes run inside an OS sandbox. The session's working folder and an invocation-specific temporary directory are writable; the user's home is denied except for that working folder. Common credential files, `.env` files and credential-shaped environment variables are withheld. Network access is denied by default. If the OS sandbox cannot start, cast refuses to run the shell command.
+
+This boundary covers shell processes. Cast's built-in file tools continue to use cast's path and permission checks, and MCP servers run as separate daemon processes outside the shell sandbox.
+
+The release archive includes the sandbox runtime. Linux needs `bubblewrap`, `socat` and `ripgrep`; macOS needs `ripgrep`. On Windows, sandbox support is alpha and requires a one-time elevated setup. From PowerShell, use the runtime bundled with cast:
+
+```powershell
+node "$env:USERPROFILE\.cast\install\node_modules\@anthropic-ai\sandbox-runtime\dist\cli.js" windows-install --skip-profile-grant
+```
+
+The Windows setup adds a machine-wide sandbox account and network filter. `--skip-profile-grant` avoids granting that account read access to the rest of the user profile. Do not run sandbox sessions on Windows until setup completes.
+
+## Session cost cap
+
+`/cost-cap 1.00` sets a USD threshold for all model calls made by the session, including compaction, hooks, memory upkeep and subagents. `/cost-cap` shows the current threshold and reported spend; `/cost-cap off` clears it. The cap counts provider-reported price. When a provider omits price, cast allows that request to finish, then blocks later calls until the cap is turned off or a new session is started. Since price arrives after a request, the call that crosses the threshold may exceed the remaining amount.
 
 ## Request Log
 
@@ -81,6 +98,7 @@ Each session tracks:
 - **Usage**: cumulative token/cost metrics:
   - `promptTokens`, `completionTokens`, `totalTokens`
   - `cost`
+  - `reportedCostUsd`, `costPriceKnown`, `costCapUsd`
   - `cacheReadTokens`, `cacheWriteTokens`, `uncachedTokens`
   - `subagentTokens` (subset of total, tracked separately)
 - **Timestamps**: created and updated

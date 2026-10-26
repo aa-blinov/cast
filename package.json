@@ -1,10 +1,10 @@
 {
 	"name": "cast",
-	"version": "0.58.1",
+	"version": "0.58.2",
 	"description": "Role-based terminal agent harness with 20 built-in personas",
 	"type": "module",
 	"engines": {
-		"node": ">=22"
+		"node": ">=22.12.0"
 	},
 	"bin": {
 		"cast": "./cast.sh"
@@ -37,6 +37,7 @@
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "~1.3.0",
+		"@anthropic-ai/sandbox-runtime": "^0.0.81",
 		"@earendil-works/pi-tui": "^1.3.0",
 		"@jsquash/jpeg": "^1.6.0",
 		"@jsquash/png": "^3.1.1",

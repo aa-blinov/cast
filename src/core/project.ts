@@ -442,14 +442,24 @@ export function resolveRulesForCwd(cwd: string, trusted: boolean): ResolvedRules
 	};
 }
 
-// One line telling the model what OS it's driving, so it picks the right
-// commands and path conventions. The bash tool always spawns `bash -c` (on
-// Windows that means Git Bash), so the syntax hint stays POSIX everywhere —
-// what changes per platform is the OS toolchain and path conventions around it.
+// Shell syntax is POSIX on every platform, while available tools and utility
+// flags differ enough that the model needs a platform-specific reminder.
 const PLATFORM_NAMES: Record<string, string> = { darwin: "macOS", linux: "Linux", win32: "Windows" };
-const PLATFORM_LINE = `${platform()}${PLATFORM_NAMES[platform()] ? ` (${PLATFORM_NAMES[platform()]})` : ""}, ${arch()}${
-	platform() === "win32" ? " — the bash tool runs commands via Git Bash, use POSIX syntax" : ""
-}`;
+
+export function formatPlatformContext(os: NodeJS.Platform, architecture: string): string {
+	const name = PLATFORM_NAMES[os] ? `${os} (${PLATFORM_NAMES[os]})` : os;
+	const guidance =
+		os === "win32"
+			? "bash runs via Git Bash; use POSIX shell syntax and check Windows tool availability before choosing commands"
+			: os === "darwin"
+				? "use POSIX shell syntax; check BSD utility options before using GNU-only flags and follow macOS path conventions"
+				: os === "linux"
+					? "use POSIX shell syntax; check the distribution and installed utilities before assuming command options or package names"
+					: "check available shell commands and path conventions before assuming them";
+	return `${name}, ${architecture} — ${guidance}`;
+}
+
+const PLATFORM_LINE = formatPlatformContext(platform(), arch());
 
 function localDateString(now = new Date()): string {
 	return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;

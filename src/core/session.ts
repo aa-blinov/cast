@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { releaseCheckpointRefs, type TurnCheckpoint } from "./checkpoint.ts";
 import { type AppConfig, inputTokenBudget } from "./config.ts";
+import { deleteSessionCostBudget } from "./cost-budget.ts";
 import { formatLocalDate } from "./date-rollover-reminder.ts";
 import { getDb, sessionsDbPath } from "./db.ts";
 import { clearGoal } from "./goal.ts";
@@ -42,6 +43,12 @@ export interface SessionUsage {
 	completionTokens: number;
 	totalTokens: number;
 	cost: number;
+	/** Cumulative cost in USD explicitly reported by the provider. */
+	reportedCostUsd?: number;
+	/** False after any request whose price was missing or untrusted. */
+	costPriceKnown?: boolean;
+	/** Optional per-session cap in USD; absence means uncapped. */
+	costCapUsd?: number;
 	/** Cumulative tokens served from provider's prompt cache (hits). */
 	cacheReadTokens: number;
 	/** Cumulative tokens written to provider's prompt cache (new entries). */
@@ -206,6 +213,10 @@ export function addUsage(
 	session.usage.completionTokens += safe(usage.completionTokens);
 	session.usage.totalTokens += safe(usage.totalTokens);
 	if (usage.cost !== undefined) session.usage.cost += safe(usage.cost);
+	if (usage.reportedCost !== undefined) {
+		session.usage.reportedCostUsd = (session.usage.reportedCostUsd ?? 0) + safe(usage.reportedCost);
+	}
+	if (usage.priceReported === false) session.usage.costPriceKnown = false;
 	if (usage.cacheReadTokens !== undefined) session.usage.cacheReadTokens += safe(usage.cacheReadTokens);
 	if (usage.cacheWriteTokens !== undefined) session.usage.cacheWriteTokens += safe(usage.cacheWriteTokens);
 	if (usage.uncachedTokens !== undefined) session.usage.uncachedTokens += safe(usage.uncachedTokens);
@@ -215,7 +226,7 @@ export function addUsage(
 	}
 	// A summarizer's prompt is the history being compacted away: taking it as
 	// the context size left a session looking full right after /compact.
-	if (opts?.background || opts?.compaction) return;
+	if (opts?.background || opts?.compaction || usage.totalTokens === 0) return;
 	// Track the latest promptTokens as the authoritative context size.
 	session.lastPromptTokens = usage.promptTokens;
 }
@@ -1435,6 +1446,9 @@ function withUsageDefault(usage: SessionUsage | undefined): SessionUsage {
 		completionTokens: usage?.completionTokens ?? 0,
 		totalTokens: usage?.totalTokens ?? 0,
 		cost: usage?.cost ?? 0,
+		reportedCostUsd: usage?.reportedCostUsd ?? 0,
+		costPriceKnown: usage?.costPriceKnown ?? usage?.totalTokens === 0,
+		...(usage?.costCapUsd === undefined ? {} : { costCapUsd: usage.costCapUsd }),
 		cacheReadTokens: usage?.cacheReadTokens ?? 0,
 		cacheWriteTokens: usage?.cacheWriteTokens ?? 0,
 		uncachedTokens: usage?.uncachedTokens ?? 0,
@@ -1872,6 +1886,9 @@ export function deleteSession(id: string, cwd?: string): boolean {
 			db.exec("ROLLBACK");
 			throw error;
 		}
+	}
+	if (result.changes > 0) {
+		for (const sessionId of [id, ...children]) deleteSessionCostBudget(sessionId);
 	}
 	// A sandbox session owns its throwaway working copy
 	// (~/.cast/sandbox/cast-<id>); remove it with the session so these dirs
@@ -2505,6 +2522,8 @@ export function createSession(model: string, cwd: string, options: SessionCreati
 			completionTokens: 0,
 			totalTokens: 0,
 			cost: 0,
+			reportedCostUsd: 0,
+			costPriceKnown: true,
 			cacheReadTokens: 0,
 			cacheWriteTokens: 0,
 			uncachedTokens: 0,
@@ -2570,6 +2589,7 @@ export function pruneBackgroundSessions(now: number = Date.now(), limit = BACKGR
 			() => db.prepare(`DELETE FROM sessions WHERE id IN (${placeholders})`).run(...ids).changes,
 		);
 		for (const row of rows) {
+			deleteSessionCostBudget(row.id);
 			removeSandboxDirFor(row.id, row.cwd ?? undefined);
 			removeInputsDirFor(row.id);
 			removeSessionMemoryDirFor(row.id);

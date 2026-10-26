@@ -1906,11 +1906,30 @@ describe("web bridge", () => {
 			completionTokens: 0,
 			totalTokens: 0,
 			cost: 0,
+			reportedCostUsd: 0,
+			costPriceKnown: true,
 			cacheReadTokens: 0,
 			cacheWriteTokens: 0,
 			uncachedTokens: 0,
 			subagentTokens: 0,
 		});
+	});
+
+	it("sets and persists the per-session cost cap through the command bridge", async () => {
+		const bridge = createServerBridge(makeResult());
+		const ws = bridge.createSession();
+
+		await expect(bridge.executeCommand(ws.id, "/cost-cap 0.25")).resolves.toMatchObject({
+			ok: true,
+			result: "Session cost cap set to $0.2500",
+		});
+		expect(loadSession(ws.id)?.usage.costCapUsd).toBe(0.25);
+		await expect(bridge.executeCommand(ws.id, "/cost-cap 0")).resolves.toMatchObject({ ok: false });
+		await expect(bridge.executeCommand(ws.id, "/cost-cap off")).resolves.toMatchObject({
+			ok: true,
+			result: "Session cost cap turned off",
+		});
+		expect(loadSession(ws.id)?.usage.costCapUsd).toBeUndefined();
 	});
 
 	it("/repo returns isGit:false for a fresh tmpdir cwd that has no .git", async () => {

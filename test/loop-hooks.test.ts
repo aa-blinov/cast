@@ -5,7 +5,7 @@
  * a real `bash` tool call inside a real `runAgentLoop` run; only the LLM
  * call itself is stubbed.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -187,6 +187,69 @@ describe("runAgentLoop — PostToolUse hook blocking (real bash spawn)", () => {
 });
 
 describe("runAgentLoop — PreToolUse hook blocking (real bash spawn)", () => {
+	it("fails closed when a PreToolUse hook asks or defers without an interactive approval path", async () => {
+		for (const decision of ["ask", "defer"] as const) {
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [
+						{ id: `t-${decision}`, name: "bash", arguments: JSON.stringify({ command: "echo should-not-run" }) },
+					],
+				}))
+				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+			const hooks: HooksFile = {
+				PreToolUse: [
+					{
+						hooks: [
+							{
+								command: `echo '{"hookSpecificOutput":{"permissionDecision":"${decision}"}}'`,
+							},
+						],
+					},
+				],
+			};
+
+			const messages = await runAgentLoop([{ role: "user", content: "go" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd: process.cwd(),
+				systemPrompt: "test",
+				hooks,
+				onEvent: () => {},
+			});
+
+			expect(toolMessage(messages).content).toContain("was not executed");
+			expect(toolMessage(messages).content).not.toContain("should-not-run");
+		}
+	});
+
+	it("fails closed when an enforcing PreToolUse hook exits unsuccessfully", async () => {
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "echo should-not-run" }) }],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		const hooks: HooksFile = { PreToolUse: [{ hooks: [{ command: "echo hook-failed 1>&2; exit 1" }] }] };
+		const messages = await runAgentLoop([{ role: "user", content: "go" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: process.cwd(),
+			systemPrompt: "test",
+			hooks,
+			onEvent: () => {},
+		});
+
+		expect(toolMessage(messages).content).toContain("PreToolUse hook failed");
+		expect(toolMessage(messages).content).not.toContain("should-not-run");
+	});
+
 	it("blocks the tool call outright and never runs the command", async () => {
 		const events: AgentEvent[] = [];
 		vi.mocked(streamAndCollect)
@@ -251,5 +314,91 @@ describe("runAgentLoop — PreToolUse hook blocking (real bash spawn)", () => {
 
 		expect(toolMessage(messages).content).toContain("rewritten");
 		expect(toolMessage(messages).content).not.toContain("original");
+	});
+});
+
+describe("runAgentLoop — PermissionRequest hook decisions", () => {
+	it("fails closed on an invalid hook decision without executing the command", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-permission-hook-test-"));
+		const target = join(cwd, "remove-me");
+		mkdirSync(target);
+		const confirmBash = vi.fn(async () => true);
+		try {
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "rm -rf remove-me" }) }],
+				}))
+				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+			const hooks: HooksFile = {
+				PermissionRequest: [
+					{
+						hooks: [{ command: `echo '{"hookSpecificOutput":{"decision":{"behavior":"ask"}}}'` }],
+					},
+				],
+			};
+
+			await runAgentLoop([{ role: "user", content: "go" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "test",
+				hooks,
+				confirmBash,
+				onEvent: () => {},
+			});
+
+			expect(confirmBash).not.toHaveBeenCalled();
+			expect(existsSync(target)).toBe(true);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it("honors an allow decision without showing a second confirmation", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "cast-permission-hook-test-"));
+		const target = join(cwd, "remove-me");
+		mkdirSync(target);
+		const confirmBash = vi.fn(async () => false);
+		try {
+			vi.mocked(streamAndCollect)
+				.mockImplementationOnce(async () => ({
+					content: "",
+					thinking: "",
+					finishReason: "stop",
+					toolCalls: [{ id: "t1", name: "bash", arguments: JSON.stringify({ command: "rm -rf remove-me" }) }],
+				}))
+				.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+			const hooks: HooksFile = {
+				PermissionRequest: [
+					{
+						hooks: [
+							{
+								command: `echo '{"hookSpecificOutput":{"decision":{"behavior":"allow"}}}'`,
+							},
+						],
+					},
+				],
+			};
+
+			await runAgentLoop([{ role: "user", content: "go" }], {
+				config: testConfig,
+				model: "test-model",
+				cwd,
+				systemPrompt: "test",
+				hooks,
+				confirmBash,
+				onEvent: () => {},
+			});
+
+			expect(confirmBash).not.toHaveBeenCalled();
+			expect(existsSync(target)).toBe(false);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 });

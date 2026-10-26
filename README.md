@@ -12,7 +12,7 @@ A role-based terminal agent harness. Seven built-in personas change the agent's 
 
 ## Quick start
 
-Node.js 22 or newer is the only requirement.
+Node.js 22.12 or newer is the only runtime requirement.
 
 ```bash
 # macOS and Linux
@@ -22,7 +22,7 @@ curl -fsSL https://aa-blinov.github.io/cast/install | bash
 irm https://aa-blinov.github.io/cast/install.ps1 | iex
 ```
 
-On macOS and Linux the installer unpacks a release archive into `~/.cast/install` and symlinks `bin/cast` onto your `PATH` at `~/.local/bin`. On Windows it unpacks into the `.cast\install` folder in your home directory and adds its `bin` directory to your user `PATH`. The archive carries the bundle and the one native dependency it needs, so there is no `npm install` at runtime. Both installers open port 1337 in the firewall, since that is where the web server listens.
+On macOS and Linux the installer unpacks a release archive into `~/.cast/install` and symlinks `bin/cast` onto your `PATH` at `~/.local/bin`. On Windows it unpacks into the `.cast\install` folder in your home directory and adds its `bin` directory to your user `PATH`. The archive carries the bundle and its runtime dependencies, so there is no `npm install` at runtime. Sandbox sessions also need platform tools; see [sandbox setup](docs/sessions.md#sandbox-processes). Both installers open port 1337 in the firewall, since that is where the web server listens.
 
 ```bash
 cast                                   # open the terminal screen

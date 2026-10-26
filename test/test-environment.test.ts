@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
@@ -14,6 +15,7 @@ import {
 let environments: TestEnvironment[] = [];
 
 afterEach(() => {
+	resetDbConnectionForTests();
 	for (const environment of environments) destroyTestEnvironment(environment);
 	environments = [];
 });
@@ -39,6 +41,7 @@ describe("test environment", () => {
 		writeTestSettings(environment, { model: "fixture-model", cwd: environment.cwd });
 
 		expect(process.env.HOME).toBe(environment.home);
+		expect(homedir()).toBe(environment.home);
 		expect(process.env.CAST_CWD).toBe(environment.cwd);
 		expect(process.env.CAST_SESSIONS_DB).toBe(environment.dbPath);
 		expect(loadSettings()).toMatchObject({ model: "fixture-model", cwd: environment.cwd });
@@ -46,6 +49,13 @@ describe("test environment", () => {
 			model: "fixture-model",
 			cwd: environment.cwd,
 		});
+	});
+
+	it("honors a suite-local HOME override when code asks Node for the home directory", () => {
+		const override = join(tmpdir(), "cast-suite-local-home");
+		process.env.HOME = override;
+
+		expect(homedir()).toBe(override);
 	});
 
 	it("creates parent directories for a custom database path", () => {

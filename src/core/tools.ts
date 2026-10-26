@@ -955,6 +955,7 @@ export function createToolExecutor(
 	personaDeps?: PersonaToolDeps,
 	currentSessionId?: string,
 	worktreeDeps?: Omit<WorktreeToolDeps, "cwd">,
+	sandboxSessionId?: string,
 ): ToolExecutor {
 	// One executor serves one turn. A weaker model that can't find what it is
 	// after keeps rewording the query: 50 searches in a row on a real store,
@@ -971,7 +972,15 @@ export function createToolExecutor(
 			try {
 				switch (name) {
 					case "bash":
-						return await execBash(args, cwd, config, confirmBash, signal, backgroundBash);
+						return await execBash(
+							args,
+							cwd,
+							config,
+							confirmBash,
+							signal,
+							backgroundBash,
+							sandboxSessionId ?? currentSessionId,
+						);
 					case "bash_output":
 						return await execBashOutput(args, config, backgroundBash, signal);
 					case "bash_kill":

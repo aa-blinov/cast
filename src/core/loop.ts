@@ -24,6 +24,7 @@ import {
 	reminderStateFromPlan,
 } from "./compaction-reminder.ts";
 import { type AppConfig, inputTokenBudget, type ProviderCredentials, reservedResponseTokens } from "./config.ts";
+import type { SessionCostBudget } from "./cost-budget.ts";
 import { type AnnouncedLocalDate, appendDateRolloverReminder } from "./date-rollover-reminder.ts";
 import { matchesToolsAllowlist } from "./frontmatter.ts";
 import {
@@ -150,6 +151,7 @@ import {
 	saveSession,
 	shouldCompact,
 } from "./session.ts";
+import { getSessionCostBudgetForSession, recordSessionCostUsage } from "./session-cost.ts";
 import {
 	checkpointFork as checkpointForkSetting,
 	checkpointPushCapsSetting,
@@ -165,6 +167,16 @@ import { resolveSshHosts, type SshHost } from "./ssh.ts";
 import type { SubagentPrompt } from "./subagents.ts";
 import { recordLlmRequest } from "./telemetry.ts";
 import { formatTodoList, remainingTodoCount, type TodoItem, validateTodos } from "./todo.ts";
+import {
+	type CheckMemory,
+	DOOM_LOOP_EXEMPT,
+	DOOM_LOOP_MESSAGE,
+	noteEarlierCheck,
+	noteRepeatedFailures,
+	noteRepeatedOutputs,
+	REPEATED_OUTPUT_STOP,
+	type ToolCallResult,
+} from "./tool-feedback.ts";
 import { BackgroundTaskRegistry } from "./tools/bash-background.ts";
 import type { PersonaActivation } from "./tools/persona.ts";
 import {
@@ -193,6 +205,9 @@ import {
 	releaseTurnRunner,
 } from "./turn-runner-state.ts";
 
+export type { CheckMemory } from "./tool-feedback.ts";
+export { checkKeyFor, noteEarlierCheck, noteRepeatedFailures, noteRepeatedOutputs } from "./tool-feedback.ts";
+
 const IMAGE_VISION_RE = /image|vision/i;
 const MEMORY_EMPTY_LINE_RE = /^\(none/;
 const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
@@ -201,14 +216,12 @@ const DEFAULT_MEMORY_SERVICE = createProjectMemoryService();
 // window before we treat it as a doom loop and block execution — the model
 // gets an error result and must try something different.
 const DOOM_LOOP_THRESHOLD = 3;
-// A call is blocked once the same name+args has been attempted this many times
-// in the last DOOM_LOOP_WINDOW calls. A window, not a run: a loop that
+// The window is four times the threshold, not a run: a loop that
 // alternates two identical calls (bash, todo_write, bash, todo_write, …) has
 // no two consecutive calls equal, so the old run-only check never fired on it —
 // which is exactly how one session reached 100 iterations. 4× the threshold
 // gives the alternating case room to accumulate repeats while still letting a
 // genuinely different call displace old entries quickly.
-const DOOM_LOOP_WINDOW = DOOM_LOOP_THRESHOLD * 4;
 // Safety cap for turns without an explicit /goal budget: a model that keeps
 // calling DIFFERENT tools (so the doom-loop detector can't catch it) must not
 // loop forever. Matches the settings default; the bridge overrides it with the
@@ -398,7 +411,6 @@ function replaceLargestToolResult(messages: Message[]): { bytesRemoved: number; 
 // task_id are the expected usage pattern while waiting on a background task,
 // not a stuck model. bash_kill is deliberately NOT exempt: repeated identical
 // kills is a legitimate doom pattern.
-const DOOM_LOOP_EXEMPT = new Set<string>(["bash_output"]);
 
 // Terminal (signal) tools: once one succeeds, the turn ends — the UI opens a
 // mode-transition dialog when the run settles. Enforced by the loop, not by
@@ -643,6 +655,7 @@ export async function compactSessionMessages(
 	providerOverride?: { baseURL: string; apiKey: string },
 	/** The session the summary request is logged under (request-log.ts). */
 	sessionId?: string,
+	costBudget?: SessionCostBudget,
 ): Promise<CompactSessionResult> {
 	const client = createClient(config, providerOverride);
 	try {
@@ -672,6 +685,7 @@ export async function compactSessionMessages(
 					{},
 					undefined,
 					sessionId ? { sessionId, purpose: "compaction" } : undefined,
+					costBudget,
 				);
 				// The summarization call itself is a real request against the
 				// model — it costs real tokens/money and was previously just
@@ -772,6 +786,8 @@ async function performCompaction(
 			sessionId: loopConfig.sessionId,
 			payload: { trigger: "auto" },
 			signal,
+			costBudget: loopConfig.costBudget,
+			onUsage: (usage) => onEvent({ type: "usage", usage }),
 		});
 		if (preCompact.blocked) {
 			loopConfig.onWarning?.(
@@ -793,6 +809,7 @@ async function performCompaction(
 		reminderStateFromPlan(loopConfig.planState),
 		loopConfig.modelProvider,
 		loopConfig.sessionId,
+		loopConfig.costBudget,
 	);
 	if (result.compacted) {
 		const fullHistoryBeforeCompaction = [...messages];
@@ -811,6 +828,8 @@ async function performCompaction(
 				sessionId: loopConfig.sessionId,
 				payload: { trigger: "auto", messagesCompacted: result.messagesCompacted },
 				signal,
+				costBudget: loopConfig.costBudget,
+				onUsage: (usage) => onEvent({ type: "usage", usage }),
 			});
 		}
 	} else if (!result.error) {
@@ -988,6 +1007,10 @@ export type AgentEvent =
 export interface LoopConfig {
 	config: AppConfig;
 	model: string;
+	/** Shared across the session's main loop, compaction and subagents. */
+	costBudget?: SessionCostBudget;
+	/** Original sandbox owner when a background child uses its own session id. */
+	sandboxSessionId?: string;
 	cwd: string;
 	systemPrompt: string;
 	/** Enables durable project memory after a completed turn. A service override
@@ -1424,6 +1447,9 @@ export async function runMemoryMaintenanceAgent(
 		const messages = await runAgentLoop([{ role: "user", content: input.prompt }], {
 			config: input.config,
 			model: input.model,
+			sessionId: input.sessionId,
+			costBudget: input.costBudget,
+			sandboxSessionId: input.sandboxSessionId,
 			modelProvider: input.providerOverride,
 			cwd: input.cwd,
 			systemPrompt: input.systemPrompt,
@@ -1541,6 +1567,8 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 				writerMessages = await runAgentLoop(writerMessages, {
 					config: input.config,
 					model: input.model,
+					costBudget: getSessionCostBudgetForSession(input.sessionId),
+					sandboxSessionId: input.sandboxSessionId ?? input.sessionId,
 					modelProvider: input.providerOverride,
 					cwd: input.cwd,
 					// A maintenance session must never self-compact: the checkpoint
@@ -1552,8 +1580,11 @@ async function runCheckpointWriter(input: MemoryCheckpointWriterInput): Promise<
 					signal: actorSignal,
 					onEvent: (event) => {
 						// The checkpoint writer is a background session; capture its
-						// usage so it lands in telemetry as kind=background.
-						if (event.type === "usage") recordBackgroundUsage(input, event);
+						// usage in the parent session as well as kind=background telemetry.
+						if (event.type === "usage") {
+							recordBackgroundUsage(input, event);
+							recordSessionCostUsage(input.sessionId, event.usage);
+						}
 					},
 					onWarning: () => {},
 					...(forkMode && actorFork.toolDefinitions
@@ -1726,6 +1757,7 @@ async function recoverCheckpointWriter(snapshot: AgentActorSnapshot): Promise<vo
 			cwd: recovery.cwd,
 			sessionId: recovery.sessionId,
 			writerSessionId: recovery.writerSessionId ?? snapshot.sessionId,
+			sandboxSessionId: snapshot.parentSessionId ?? recovery.sessionId,
 			writerActorId: snapshot.id,
 			parentSystemPrompt: recovery.parentSystemPrompt,
 			parentForkContext: snapshot.forkContext,
@@ -1762,6 +1794,13 @@ async function recoverMemoryMaintenance(snapshot: AgentActorSnapshot): Promise<v
 			config,
 			messages: recovery.messages,
 			providerOverride: recovery.providerBaseURL === config.baseURL ? undefined : provider,
+			costBudget: snapshot.parentSessionId
+				? getSessionCostBudgetForSession(snapshot.parentSessionId)
+				: getSessionCostBudgetForSession(recovery.sessionId),
+			sandboxSessionId: snapshot.parentSessionId ?? recovery.sessionId,
+			onUsage: snapshot.parentSessionId
+				? (usage) => recordSessionCostUsage(snapshot.parentSessionId as string, usage)
+				: undefined,
 			runAgent: runMemoryMaintenanceAgent,
 		},
 		recovery.maintenanceKind,
@@ -1893,7 +1932,10 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 			config: loopConfig.config,
 			messages: loopConfig.automaticMemoryMessages ?? initialMessages,
 			providerOverride: loopConfig.modelProvider,
+			costBudget: loopConfig.costBudget ?? getSessionCostBudgetForSession(loopConfig.sessionId),
+			sandboxSessionId: loopConfig.sandboxSessionId ?? loopConfig.sessionId,
 			signal: loopConfig.signal,
+			onUsage: (usage) => loopConfig.onEvent({ type: "usage", usage, background: true }),
 			onWarning: loopConfig.onWarning,
 			runAgent: runMemoryMaintenanceAgent,
 		});
@@ -1940,6 +1982,7 @@ export async function runAgentLoop(initialMessages: Message[], loopConfig: LoopC
 						checkpointBoundary: writerBoundary,
 						checkpointFork,
 						parentSystemPrompt: loopConfig.checkpointForkContext?.systemPrompt,
+						sandboxSessionId: loopConfig.sandboxSessionId ?? loopConfig.sessionId,
 						parentForkContext: loopConfig.checkpointForkContext,
 						parentToolRuntime: checkpointWriterRuntime(loopConfig),
 					},
@@ -1995,6 +2038,9 @@ async function runLoop(messages: Message[], loopConfig: LoopConfig): Promise<voi
 
 async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promise<void> {
 	const { config, model: initialModel, systemPrompt, onEvent, onWarning, signal, mcpToolIndex } = loopConfig;
+	if (!loopConfig.costBudget && loopConfig.sessionId) {
+		loopConfig.costBudget = getSessionCostBudgetForSession(loopConfig.sessionId);
+	}
 	// Moves when the agent enters a worktree: everything below that reads it (permission rules, hooks, paths) follows.
 	let cwd = loopConfig.cwd;
 	// The session's scratchpad: told to the model, open to its file tools, made on first use. A sandbox session's
@@ -2238,7 +2284,11 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	/** Runs an event against the active set and retires any `once` group that
 	 * fired successfully. Every in-run hook dispatch goes through this. */
 	const runHook = async (opts: Parameters<typeof runHooksForEvent>[1]): Promise<HookRunResult> => {
-		const result = await runHooksForEvent(activeHooks ?? {}, opts);
+		const result = await runHooksForEvent(activeHooks ?? {}, {
+			...opts,
+			costBudget: opts.costBudget ?? loopConfig.costBudget,
+			onUsage: opts.onUsage ?? ((usage) => onEvent({ type: "usage", usage })),
+		});
 		retireOnceHooks(opts.event, result.blocked);
 		return result;
 	};
@@ -2316,7 +2366,10 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					sessionId: loopConfig.sessionId,
 					payload: { tool_name: "bash", tool_input: { command, description: reason } },
 					signal,
+					costBudget: loopConfig.costBudget,
+					onUsage: (usage) => onEvent({ type: "usage", usage }),
 				});
+				if (pr.failure) return false;
 				if (pr.blocked) {
 					void runHooksForEvent(hooksForConfirm, {
 						event: "PermissionDenied",
@@ -2325,9 +2378,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						sessionId: loopConfig.sessionId,
 						payload: { tool_name: "bash", tool_input: { command } },
 						signal,
+						costBudget: loopConfig.costBudget,
+						onUsage: (usage) => onEvent({ type: "usage", usage }),
 					});
 					return false;
 				}
+				if (pr.permissionRequestResult?.behavior === "allow") return true;
 				const allowed = await askUser!(command, reason, rule);
 				if (!allowed) {
 					void runHooksForEvent(hooksForConfirm, {
@@ -2337,6 +2393,8 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 						sessionId: loopConfig.sessionId,
 						payload: { tool_name: "bash", tool_input: { command } },
 						signal,
+						costBudget: loopConfig.costBudget,
+						onUsage: (usage) => onEvent({ type: "usage", usage }),
 					});
 				}
 				return allowed;
@@ -2421,6 +2479,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		subagentsEnabled
 			? {
 					model: loopConfig.subagentModel ?? initialModel,
+					costBudget: loopConfig.costBudget,
 					subagentPrompts: allowedSubagentPrompts,
 					// Forward the already persona-filtered mcps/skills (not the raw
 					// loopConfig lists) — otherwise a `mcp:`/`skills:` restriction on
@@ -2497,6 +2556,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					},
 				}
 			: undefined,
+		loopConfig.sandboxSessionId,
 	);
 	const executeTool = async (
 		name: string,
@@ -2707,11 +2767,12 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 					args,
 					cwd,
 					sessionId: loopConfig.sessionId,
+					costBudget: loopConfig.costBudget,
+					onUsage: (usage) => onEvent({ type: "usage", usage }),
 					signal: toolSignal ?? signal,
 					mcpToolIndex,
 					config,
 					model: currentModel,
-					onWarning,
 					toolCallId,
 					permissionMode: loopConfig.permissionMode,
 				},
@@ -2743,7 +2804,9 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				{},
 				undefined,
 				loopConfig.sessionId ? { sessionId: loopConfig.sessionId, purpose: "mcp-sampling" } : undefined,
+				loopConfig.costBudget,
 			);
+			if (done.usage) onEvent({ type: "usage", usage: done.usage });
 			return { text: done.content, truncated: done.finishReason === "length" };
 		},
 	});
@@ -2832,6 +2895,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				{},
 				undefined,
 				loopConfig.sessionId ? { sessionId: loopConfig.sessionId, purpose: "goal-judge" } : undefined,
+				loopConfig.costBudget,
 			);
 			if (verdict.usage) onEvent({ type: "usage", usage: verdict.usage });
 			return parseGoalJudgeVerdict(verdict.content)?.gap;
@@ -3224,6 +3288,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 								`The provider has sent nothing for ${Math.round(silentMs / 1000)}s; still waiting (cast retries at ${Math.round(giveUpMs / 1000)}s). Esc stops the turn.`,
 							),
 						turnLog,
+						loopConfig.costBudget,
 					);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
@@ -3288,6 +3353,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 							promptCacheBody,
 							undefined,
 							turnLog,
+							loopConfig.costBudget,
 						);
 						recovered = true;
 					} else if (isContextOverflow(err) && !toolResultTrimmed) {
@@ -3902,9 +3968,10 @@ interface ToolHookContext {
 	mcpToolIndex: Map<string, McpToolHandle> | undefined;
 	config: AppConfig;
 	model: string;
-	onWarning?: (message: string) => void;
 	toolCallId?: string;
 	permissionMode?: string;
+	costBudget?: SessionCostBudget;
+	onUsage?: (usage: Usage) => void;
 }
 
 /**
@@ -3921,8 +3988,20 @@ async function runToolWithHooks(
 	ctx: ToolHookContext,
 	dispatch: (args: Record<string, unknown>) => Promise<ToolResult>,
 ): Promise<ToolResult> {
-	const { hooks, name, cwd, sessionId, signal, mcpToolIndex, config, model, onWarning, toolCallId, permissionMode } =
-		ctx;
+	const {
+		hooks,
+		name,
+		cwd,
+		sessionId,
+		signal,
+		mcpToolIndex,
+		config,
+		model,
+		toolCallId,
+		permissionMode,
+		costBudget,
+		onUsage,
+	} = ctx;
 	let args = ctx.args;
 	const pre = await runHooksForEvent(hooks, {
 		event: "PreToolUse",
@@ -3935,14 +4014,23 @@ async function runToolWithHooks(
 		config,
 		model,
 		permissionMode,
+		costBudget,
+		onUsage,
 	});
-	if (pre.permissionDecision === "ask" || pre.permissionDecision === "defer") {
-		onWarning?.(
-			`A PreToolUse hook for "${name}" returned "${pre.permissionDecision}" — cast has no interactive mid-turn prompt to honor that, so the call was allowed.`,
-		);
-	}
 	if (pre.blocked) {
 		return { content: pre.reason || `Blocked by a PreToolUse hook for "${name}".`, isError: true };
+	}
+	if (pre.failure) {
+		return {
+			content: `Blocked: PreToolUse hook failed (${pre.failure}); ${name} was not executed.`,
+			isError: true,
+		};
+	}
+	if (pre.permissionDecision === "ask" || pre.permissionDecision === "defer") {
+		return {
+			content: `Blocked: PreToolUse hook returned "${pre.permissionDecision}", which requires an interactive approval that is unavailable here; ${name} was not executed.`,
+			isError: true,
+		};
 	}
 	if (pre.updatedInput) args = pre.updatedInput;
 	const result = await dispatch(args);
@@ -3965,6 +4053,8 @@ async function runToolWithHooks(
 		config,
 		model,
 		permissionMode,
+		costBudget,
+		onUsage,
 	});
 	if (post.updatedToolOutput !== undefined) return { ...result, content: post.updatedToolOutput };
 	if (post.blocked) {
@@ -3985,107 +4075,8 @@ async function runToolWithHooks(
 // Tool execution — parallel
 // ============================================================================
 
-interface ToolCallResult {
-	id: string;
-	name: string;
-	result: ToolResult;
-}
-
 /** The tools that can change a file, and so make an earlier check stale. */
 const MUTATING_TOOLS = new Set(["write", "edit"]);
-
-/** A leading directory change, which is how the model reached a check. */
-const DIR_CHANGE_PREFIX_RE = /^\s*(?:cd|pushd)\s+[^&|;]+(&&|;)\s*/i;
-/** Where one command ends and the next begins. */
-const CHECK_SPLIT_RE = /\||;/;
-/** A redirection to a file or a descriptor, and the target that follows it. */
-const REDIRECTION_RE = /\d?>\s*&?\d?\s*[a-z_./-]*/gi;
-/** Runs of whitespace, collapsed so that two spellings of one command match. */
-const WHITESPACE_RE = /\s+/g;
-
-/** How many times a tool may return the same output before the model is told
- *  that repeating it won't change anything. */
-const REPEATED_OUTPUT_THRESHOLD = 4;
-/** Where the reminder gives way to stopping the turn. The reminder fires every
- *  REPEATED_OUTPUT_THRESHOLD-th repeat, so this leaves several rounds of
- *  "you're repeating yourself" before the turn ends. A subagent once ran 335
- *  model calls of parallel globs that all found nothing and ignored the
- *  reminder ~490 times, so the stop must exist — but the old 100 meant a turn
- *  burned ~100 model calls before stopping (observed live: a bash/todo_write
- *  loop ran to exactly 100). 25 stops a runaway while still tolerating a check
- *  re-run a few times after a real change. */
-const REPEATED_OUTPUT_STOP = 25;
-const DIGITS_RE = /\d+/g;
-
-/**
- * The doom-loop guard above only sees identical calls. A model stuck on a
- * check it can't fix varies the command cosmetically (another `echo`, a
- * reordered flag) and gets the same answer each time: measured, a broken
- * interpreter held one run for 227 calls and 15 minutes. This counts
- * outputs instead, numbers masked so timings and PIDs don't hide a repeat,
- * and on every REPEATED_OUTPUT_THRESHOLD-th repeat tells the model so. The call
- * still runs: rerunning a check after a real change is legitimate. Returns true
- * once an output has repeated REPEATED_OUTPUT_STOP times: the caller ends the turn.
- */
-export function noteRepeatedOutputs(batch: ToolCallResult[], seen: Map<string, number>): boolean {
-	let runaway = false;
-	for (const call of batch) {
-		const content = call.result.content;
-		if (typeof content !== "string" || !content.trim()) continue;
-		const key = `${call.name}\0${content.slice(0, 4000).replace(DIGITS_RE, "#")}`;
-		const count = (seen.get(key) ?? 0) + 1;
-		seen.set(key, count);
-		// Polling a running job legitimately returns the same output over and over.
-		if (count >= REPEATED_OUTPUT_STOP && !DOOM_LOOP_EXEMPT.has(call.name)) runaway = true;
-		if (count % REPEATED_OUTPUT_THRESHOLD !== 0) continue;
-		call.result = {
-			...call.result,
-			content: `${content}\n\n<system-reminder>This is the ${count}th time ${call.name} has returned this same output. Repeating the check won't change it. Either do something materially different, or stop and tell the user what is blocking you and what you already tried.</system-reminder>`,
-		};
-	}
-	return runaway;
-}
-
-/** How many failures of the same tool in a row earn the model a reminder. */
-const REPEATED_FAILURE_NUDGE = 3;
-
-/** The doom-loop block's own words — it already tells the model to stop, so
- *  the repeated-failure nudge has nothing to add to it. */
-const DOOM_LOOP_MESSAGE = "Doom loop detected:";
-
-/**
- * The same tool failing over and over is the other shape of a stuck model.
- *
- * The doom-loop guard sees identical calls, and noteRepeatedOutputs sees
- * identical results — between them a model that tries thirteen component
- * names and gets thirteen "not found" answers slips through: the arguments
- * change, the outcome does not. Measured on MiniMax-M3.1-Flash, an MCP
- * lookup that cannot find its target ran thirteen calls deep and fifteen
- * turns long, never once reporting the miss.
- *
- * A nudge, not a block: the call still runs and the model still decides.
- * Only the same tool, failing repeatedly, counts — a tool that succeeds
- * clears its own count, so a workflow that alternates failures and real
- * work is untouched.
- */
-export function noteRepeatedFailures(batch: ToolCallResult[], seen: Map<string, number>): void {
-	for (const call of batch) {
-		if (!call.result.isError) {
-			seen.delete(call.name);
-			continue;
-		}
-		// The doom-loop block already says "try something else" — a second
-		// reminder on the same result only makes the transcript longer.
-		if (call.result.content.startsWith(DOOM_LOOP_MESSAGE)) continue;
-		const count = (seen.get(call.name) ?? 0) + 1;
-		seen.set(call.name, count);
-		if (count % REPEATED_FAILURE_NUDGE !== 0) continue;
-		call.result = {
-			...call.result,
-			content: `${call.result.content}\n\n<system-reminder>This is the ${count}${ordinalSuffix(count)} time ${call.name} has failed in a row. Another attempt with a slightly different argument will not change the answer: either try a materially different approach, or stop and tell the user what is blocking you and what you have already tried.</system-reminder>`,
-		};
-	}
-}
 
 /** The command each tool call ran, by its id. */
 function commandsById(toolCalls: Array<{ id: string; name: string; arguments: string }>): Map<string, string> {
@@ -4100,90 +4091,6 @@ function commandsById(toolCalls: Array<{ id: string; name: string; arguments: st
 		}
 	}
 	return commands;
-}
-
-/**
- * The check a command is: the part before any pipe or sequencing, without
- * the redirections. Two runs of "npm test | grep FAIL > out.txt" and "npm test"
- * are the same check, and the model should not have to run the second one to
- * learn what the first one said.
- */
-export function checkKeyFor(command: string): string {
-	// "cd /repo && npm test" is the check "npm test"; the directory change is
-	// how the model reached it, not what it ran.
-	const withoutDirChange = command.replace(DIR_CHANGE_PREFIX_RE, "");
-	const head = withoutDirChange.split(CHECK_SPLIT_RE)[0] ?? withoutDirChange;
-	return head.replace(REDIRECTION_RE, " ").replace(WHITESPACE_RE, " ").trim().toLowerCase();
-}
-
-/**
- * What a failed check said the last time it ran.
- *
- * The model re-runs a failing check to find out whether the failure is its
- * own, and it re-runs it a third time to confirm the answer did not change.
- * Each of those runs costs the check's price — a full suite is a minute.
- * Remembering the earlier output puts the two side by side without the
- * second run.
- *
- * The statement is deliberately factual: "this check failed then too, and
- * here is what it said". Whether the failure belongs to the change is the
- * model's call, not the harness's.
- */
-export interface CheckMemory {
-	/** The iteration the check last failed on. */
-	turn: number;
-	/** Whether the model has already been told. */
-	shown?: boolean;
-}
-
-export function noteEarlierCheck(
-	batch: ToolCallResult[],
-	memory: Map<string, CheckMemory>,
-	turn: number,
-	commands: Map<string, string>,
-	lastMutationTurn: number,
-): void {
-	for (const call of batch) {
-		if (call.name !== "bash" || call.result.isError !== true) continue;
-		const command = commands.get(call.id);
-		if (!command) continue;
-		const key = checkKeyFor(command);
-		if (!key) continue;
-		const earlier = memory.get(key);
-		if (!earlier) {
-			memory.set(key, { turn });
-			continue;
-		}
-		// Told once per check: the model has it in the conversation from then
-		// on, and a reminder on every later failure would grow the context
-		// with a fact it already has.
-		if (earlier.shown) continue;
-		earlier.shown = true;
-		// The part the model cannot work out for itself: whether anything has
-		// changed since the check last failed. If nothing has, running it
-		// again cannot tell it anything new — and a full suite is a minute.
-		const unchanged = lastMutationTurn <= earlier.turn;
-		call.result = {
-			...call.result,
-			content: `${call.result.content}\n\n<system-reminder>This check failed earlier too (turn ${earlier.turn})${unchanged ? "; no edit or write since" : ""}. Its earlier output is in that turn.</system-reminder>`,
-		};
-	}
-}
-
-/** "3rd", "21st" — the count in the reminders, in the English the rest of cast uses. */
-function ordinalSuffix(count: number): string {
-	const lastTwo = count % 100;
-	if (lastTwo >= 11 && lastTwo <= 13) return "th";
-	switch (count % 10) {
-		case 1:
-			return "st";
-		case 2:
-			return "nd";
-		case 3:
-			return "rd";
-		default:
-			return "th";
-	}
 }
 
 async function executeToolCalls(
@@ -4353,7 +4260,11 @@ function abortedToolResult(tc: { id: string; name: string }): ToolCallResult {
 	return {
 		id: tc.id,
 		name: tc.name,
-		result: { content: "[ABORTED] Tool execution was cancelled.", isError: true },
+		result: {
+			content:
+				"[ABORT REQUESTED; OUTCOME UNKNOWN] The tool did not stop before the turn closed and may still be running or may have completed side effects. Check its status before retrying.",
+			isError: true,
+		},
 	};
 }
 

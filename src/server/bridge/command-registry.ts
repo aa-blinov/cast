@@ -54,9 +54,10 @@ const WORKTREE_FORCE_STRIP_RE = /(^|\s)(--force|-f)(?=\s|$)/g;
 import { askSideQuestion, describeInFlight } from "../../core/btw.ts";
 import type { AppConfig, ModelInfo } from "../../core/config.ts";
 import { fetchModels, probeProvider } from "../../core/config.ts";
+import { parseSessionCostCapArgument, setActiveSessionCostCap } from "../../core/cost-budget.ts";
 import { formatDoctor, runDoctor } from "../../core/doctor.ts";
 import { runHooksForEvent } from "../../core/hooks.ts";
-import type { Message } from "../../core/llm.ts";
+import type { Message, Usage } from "../../core/llm.ts";
 import { compactSessionMessages, runMemoryMaintenanceAgent } from "../../core/loop.ts";
 import {
 	closeMcpConnections,
@@ -100,6 +101,7 @@ import {
 	listSubagentSessions,
 	recordCompaction,
 } from "../../core/session.ts";
+import { getSessionCostBudgetForSession } from "../../core/session-cost.ts";
 import { saveExport, sessionCostText } from "../../core/session-report.ts";
 import type { PermissionMode, Settings } from "../../core/settings.ts";
 import {
@@ -394,6 +396,31 @@ function getHelpText(): string {
 const commandHandlers: Record<string, CommandHandler> = {
 	"/help": () => ({ ok: true, result: getHelpText() }),
 	"/usage": ({ ws }) => ({ ok: true, result: ws.session.usage }),
+	"/cost-cap": ({ arg, ws, saveSession }) => {
+		const argument = arg.trim();
+		if (!argument) {
+			return {
+				ok: true,
+				result: {
+					capUsd: ws.session.usage.costCapUsd,
+					reportedSpendUsd: ws.session.usage.reportedCostUsd,
+					priceKnown: ws.session.usage.costPriceKnown,
+				},
+			};
+		}
+		const parsed = parseSessionCostCapArgument(argument);
+		if (!parsed.ok) return { ok: false, error: "Usage: /cost-cap <USD> | off" };
+		ws.session.usage.costCapUsd = parsed.capUsd;
+		setActiveSessionCostCap(ws.session.id, parsed.capUsd);
+		saveSession(ws.session);
+		return {
+			ok: true,
+			result:
+				parsed.capUsd === undefined
+					? "Session cost cap turned off"
+					: `Session cost cap set to $${parsed.capUsd.toFixed(4)}`,
+		};
+	},
 	"/doctor": async ({ ws, cwd, config, mcpForSessionCwd }) => {
 		const sessionCwd = ws.session.cwd ?? cwd;
 		const checks = await runDoctor({
@@ -975,6 +1002,8 @@ const commandHandlers: Record<string, CommandHandler> = {
 					history: ws.session.messages,
 					inFlight: running ? describeInFlight(ws.activeStream) : undefined,
 					sessionId: ws.id,
+					costBudget: getSessionCostBudgetForSession(ws.id),
+					onUsage: running ? (usage) => addUsage(ws.session, usage) : undefined,
 				},
 				question,
 			);
@@ -1011,6 +1040,11 @@ const commandHandlers: Record<string, CommandHandler> = {
 			cwd: ws.session.cwd ?? cwd,
 			sessionId: ws.id,
 			payload: { trigger: "manual" },
+			costBudget: getSessionCostBudgetForSession(ws.id),
+			onUsage: (usage: Usage) => {
+				addUsage(ws.session, usage, { compaction: true });
+				saveSession(ws.session);
+			},
 		});
 		if (preCompact.blocked) return { ok: false, error: preCompact.reason ?? "Compaction blocked by hook" };
 		// Runs the same async summarization call `submit()` uses for the agent
@@ -1049,6 +1083,7 @@ const commandHandlers: Record<string, CommandHandler> = {
 			undefined,
 			undefined,
 			ws.id,
+			getSessionCostBudgetForSession(ws.id),
 		)
 			.then((result) => {
 				ws.status = "idle";
@@ -1066,6 +1101,11 @@ const commandHandlers: Record<string, CommandHandler> = {
 						cwd: ws.session.cwd ?? cwd,
 						sessionId: ws.id,
 						payload: { trigger: "manual", messagesCompacted: result.messagesCompacted },
+						costBudget: getSessionCostBudgetForSession(ws.id),
+						onUsage: (usage) => {
+							addUsage(ws.session, usage, { compaction: true });
+							saveSession(ws.session);
+						},
 					});
 				} else if (result.error) {
 					broadcaster.broadcast(ws, { type: "error", message: `Compaction failed: ${result.error}` });
@@ -2093,7 +2133,7 @@ function splitArgInline(s: string): [string, string] {
  *  function to call. Pulled out so both registry entries stay
  *  one-liners and the disable-checks live in one place. */
 async function runMemoryMaintenance(
-	{ ws, cwd, config, loadSettings }: CommandContext,
+	{ ws, cwd, config, loadSettings, saveSession }: CommandContext,
 	kind: "dream" | "distill",
 ): Promise<CommandResult> {
 	if (loadSettings().memoryEnabled === false) return { ok: false, error: "Project memory is disabled" };
@@ -2105,6 +2145,11 @@ async function runMemoryMaintenance(
 			model: ws.session.model,
 			config,
 			messages: ws.session.messages,
+			costBudget: getSessionCostBudgetForSession(ws.id),
+			onUsage: (usage: Usage) => {
+				addUsage(ws.session, usage);
+				saveSession(ws.session);
+			},
 			runAgent: runMemoryMaintenanceAgent,
 		};
 		if (kind === "dream") {

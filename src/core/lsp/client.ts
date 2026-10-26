@@ -8,6 +8,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { killProcessTree } from "../process.ts";
 
 export interface LspDiagnostic {
 	range: { start: { line: number; character: number }; end: { line: number; character: number } };
@@ -516,12 +517,7 @@ export class LspClient {
 	/** Immediate, for process exit, when there is no time to ask nicely. */
 	kill(): void {
 		if (this.exited) return;
-		try {
-			if (this.proc.pid && process.platform !== "win32") process.kill(-this.proc.pid, "SIGKILL");
-			else this.proc.kill("SIGKILL");
-		} catch {
-			this.proc.kill("SIGKILL");
-		}
+		killProcessTree(this.proc.pid, "SIGKILL");
 	}
 
 	/** Diagnostics published since `since` for the file, if any arrived. */

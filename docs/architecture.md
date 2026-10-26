@@ -139,7 +139,7 @@ sequenceDiagram
     D-->>U: SSE: end aborted
 ```
 
-**Abort.** An `AbortController` signal threads through the active LLM stream and tool calls; `abort` (from either surface) flips it, the in-flight stream is cancelled, and the turn closes with `end { reason: "aborted" }`. No partial turn is silently dropped: the already-streamed blocks are promoted to history before close.
+**Abort.** An `AbortController` signal threads through the active LLM stream and tool calls; `abort` (from either surface) cancels cooperative work, and the turn closes with `end { reason: "aborted" }`. A tool that ignores cancellation is given a short grace period; if it still has not settled, its result says the outcome is unknown and that it may still be running. No partial turn is silently dropped: the already-streamed blocks are promoted to history before close.
 
 **Compaction.** When history exceeds ~75% of the context window, older messages are summarized by the LLM (see Context Compaction below). The split snaps to turn boundaries so tool calls and results stay paired.
 

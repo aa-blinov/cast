@@ -31,8 +31,8 @@
  *   - PreToolUse only: `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"...","updatedInput":{...}}}`
  *     — `deny` blocks (same as `decision:"block"`); `updatedInput` replaces
  *     the tool call's arguments before it runs (works alongside `allow`).
- *     `ask`/`defer` are accepted but treated as `allow` — cast has no
- *     interactive escalation path to actually prompt the user mid-hook.
+ *     `ask`/`defer` block the call — cast has no generic interactive
+ *     escalation path for an arbitrary tool call.
  *   - PostToolUse only: `{"hookSpecificOutput":{"updatedToolOutput":"..."}}`
  *     replaces the tool's result content outright (`additionalContext`
  *     appends instead, same as elsewhere).
@@ -43,9 +43,8 @@
  *   - `{"continue":false,"stopReason":"..."}` (Stop/SubagentStop only) —
  *     force the turn/subagent to end right now, overriding any block from
  *     another hook in the same run.
- *   - Any other non-zero exit is a non-blocking failure: recorded, but the
- *     run continues as if the hook had allowed it (fail-open — a broken
- *     hook must not be able to wedge or silently corrupt a session).
+ *   - Any other non-zero exit is a hook failure. Lifecycle hooks remain
+ *     non-blocking; PreToolUse and PermissionRequest callers fail closed.
  *
  * ## Not implemented (and why)
  *
@@ -54,10 +53,9 @@
  *     importing it back here for the `agent` type would create a circular
  *     module dependency. Use `prompt` (a one-shot completion) or
  *     `mcp_tool` instead.
- *   - `PermissionRequest`'s `ask`/`defer` decisions, and `PreToolUse`'s
- *     `ask`/`defer` — both accepted as input but always resolved as `allow`
- *     (with a warning), since cast has no mid-turn interactive prompt a
- *     hook can suspend the run for.
+ *   - Generic mid-turn approval for `PreToolUse` `ask`/`defer` — these
+ *     decisions fail closed because only bash has a resumable approval UI.
+ *     A `PermissionRequest` hook can still allow/deny a pending bash prompt.
  *   - PowerShell shell targeting (`shell: "powershell"`) — cast always
  *     uses bash. PowerShell hooks are rare and the added complexity
  *     (dual spawn paths, cygpath vs native paths, env-var syntax
@@ -73,9 +71,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { AppConfig } from "./config.ts";
-import { createClient, streamAndCollect } from "./llm.ts";
+import type { SessionCostBudget } from "./cost-budget.ts";
+import { createClient, streamAndCollect, type Usage } from "./llm.ts";
 import type { McpToolHandle } from "./mcp.ts";
 import { mcpToolName } from "./mcp.ts";
+import { killProcessTree, windowsTimeoutPath } from "./process.ts";
+import { getSessionCostBudgetForSession, recordSessionCostUsage } from "./session-cost.ts";
 import { getBashResolution } from "./tools/bash.ts";
 
 /** A matcher made only of these characters is compared literally, rather than
@@ -352,6 +353,8 @@ export function hasHooks(hooks: HooksFile): boolean {
 export interface HookRunResult {
 	blocked: boolean;
 	reason?: string;
+	/** A hook that did not complete successfully; enforcement events must fail closed. */
+	failure?: string;
 	forceStop?: boolean;
 	updatedInput?: Record<string, unknown>;
 	updatedToolOutput?: string;
@@ -386,11 +389,7 @@ function defaultTimeoutFor(event: HookEvent): number {
 }
 
 function killProcessGroup(proc: ChildProcess): void {
-	try {
-		process.kill(process.platform === "win32" ? proc.pid! : -proc.pid!, "SIGKILL");
-	} catch {
-		// already dead
-	}
+	killProcessTree(proc.pid, "SIGKILL");
 }
 
 interface ParsedHookOutput {
@@ -404,7 +403,7 @@ interface ParsedHookOutput {
 		permissionDecisionReason?: string;
 		updatedInput?: Record<string, unknown>;
 		updatedToolOutput?: string;
-		decision?: { behavior: "allow" | "deny"; updatedInput?: Record<string, unknown>; message?: string };
+		decision?: unknown;
 		retry?: boolean;
 	};
 }
@@ -417,6 +416,10 @@ function tryParseJson(text: string): ParsedHookOutput | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const RESERVED_ENV_KEYS = new Set(["CAST_HOOK_EVENT", "CAST_SESSION_ID", "CAST_WORKSPACE_ROOT"]);
@@ -584,16 +587,25 @@ function runCommandHook(
 	signal?: AbortSignal,
 ): Promise<HookRunResult> {
 	const bash = getBashResolution();
+	const timeoutCandidate = process.platform === "win32" && !background ? windowsTimeoutPath(bash.path) : undefined;
+	const timeoutExecutable = timeoutCandidate && existsSync(timeoutCandidate) ? timeoutCandidate : undefined;
+	const timeoutManaged = timeoutExecutable !== undefined;
 	return new Promise((resolve) => {
-		const proc = spawn(bash.path, ["-c", command], {
-			cwd,
-			env,
-			// Detached hooks must not retain stdout/stderr pipes: even without
-			// listeners those handles keep a CLI/test process alive until the
-			// background command exits.
-			stdio: background ? ["pipe", "ignore", "ignore"] : ["pipe", "pipe", "pipe"],
-			detached: process.platform !== "win32",
-		});
+		const proc = spawn(
+			timeoutExecutable ?? bash.path,
+			timeoutExecutable
+				? ["--signal=KILL", "--kill-after=1s", `${timeoutSeconds}s`, bash.path, "-c", command]
+				: ["-c", command],
+			{
+				cwd,
+				env,
+				// Detached hooks must not retain stdout/stderr pipes: even without
+				// listeners those handles keep a CLI/test process alive until the
+				// background command exits.
+				stdio: background ? ["pipe", "ignore", "ignore"] : ["pipe", "pipe", "pipe"],
+				detached: process.platform !== "win32",
+			},
+		);
 		proc.on("error", (err) => {
 			// ENOENT/EACCES: the command never started. Silently resolving as
 			// "not blocked" made a broken hook look like an approving one.
@@ -643,23 +655,45 @@ function runCommandHook(
 			asyncResolve = r;
 		});
 
-		const timer = setTimeout(() => killProcessGroup(proc), timeoutSeconds * 1000);
+		let timedOut = false;
+		const timer = setTimeout(() => {
+			timedOut = true;
+			if (!timeoutManaged) killProcessGroup(proc);
+		}, timeoutSeconds * 1000);
+		const killTimer = timeoutManaged
+			? setTimeout(() => killProcessGroup(proc), (timeoutSeconds + 2) * 1000)
+			: undefined;
+		const clearTimers = () => {
+			clearTimeout(timer);
+			if (killTimer) clearTimeout(killTimer);
+		};
 		const onAbort = () => killProcessGroup(proc);
 		signal?.addEventListener("abort", onAbort, { once: true });
 
 		const stdoutEndPromise = new Promise<void>((r) => stdoutStream.on("end", r));
 		const stderrEndPromise = new Promise<void>((r) => stderrStream.on("end", r));
 
-		const finish = (exitCode: number | null) => {
+		const finish = (exitCode: number | null, outputPipesHeldOpen = false) => {
 			if (settled) return;
 			settled = true;
-			clearTimeout(timer);
+			clearTimers();
 			signal?.removeEventListener("abort", onAbort);
 			// Flush whatever the decoders are holding: a stream that ends on an
 			// incomplete sequence otherwise drops those bytes entirely.
 			if (!stdoutClipped) stdout += stdoutDecoder.end();
 			if (!stderrClipped) stderr += stderrDecoder.end();
-			resolve(interpretHookOutput(stdout, stderr, exitCode));
+			const result = interpretHookOutput(stdout, stderr, exitCode);
+			const timedOutByCommand =
+				timeoutManaged && (exitCode === 124 || exitCode === 137 || exitCode === 4_294_967_159);
+			resolve(
+				timedOut || timedOutByCommand
+					? { ...result, failure: `command hook timed out after ${timeoutSeconds}s` }
+					: outputPipesHeldOpen
+						? { ...result, failure: "command hook left a child process holding its output pipes" }
+						: exitCode === 0 || exitCode === 2
+							? result
+							: { ...result, failure: `command hook exited ${exitCode ?? "without an exit code"}` },
+			);
 		};
 
 		stdoutStream.on("data", (d: Buffer) => {
@@ -671,6 +705,10 @@ function runCommandHook(
 				if (!stdoutClipped) {
 					stdoutClipped = true;
 					stdout += `\n[hook output truncated at ${MAX_HOOK_OUTPUT_BYTES} bytes]`;
+					// A continuously writable child can starve the timeout callback
+					// on Windows. Stop the process tree as soon as its output cap is
+					// reached, while continuing to drain until its pipes close.
+					if (!timeoutManaged) killProcessGroup(proc);
 				}
 				return;
 			}
@@ -690,8 +728,9 @@ function runCommandHook(
 							stderrStream.destroy();
 							proc.removeAllListeners("close");
 							proc.removeAllListeners("error");
-							clearTimeout(timer);
+							clearTimers();
 							signal?.removeEventListener("abort", onAbort);
+							if (timeoutManaged) proc.kill();
 							proc.unref();
 							asyncResolve?.({
 								blocked: false,
@@ -711,17 +750,33 @@ function runCommandHook(
 				if (!stderrClipped) {
 					stderrClipped = true;
 					stderr += `\n[hook stderr truncated at ${MAX_HOOK_OUTPUT_BYTES} bytes]`;
+					if (!timeoutManaged) killProcessGroup(proc);
 				}
 				return;
 			}
 			stderr += stderrDecoder.write(d);
 		});
 		proc.on("error", () => finish(null));
-		proc.on("close", async (code) => {
-			// Wait for both streams to end before resolving to avoid
-			// the close-vs-data race (matching Claude Code's behavior).
-			await Promise.all([stdoutEndPromise, stderrEndPromise]);
-			finish(code);
+		proc.on("exit", async (code) => {
+			let graceExpired = false;
+			const streamsEnded = await new Promise<boolean>((resolveStreams) => {
+				const timer = setTimeout(() => {
+					graceExpired = true;
+					resolveStreams(false);
+				}, 250);
+				void Promise.all([stdoutEndPromise, stderrEndPromise]).then(() => {
+					if (graceExpired) return;
+					clearTimeout(timer);
+					resolveStreams(true);
+				});
+			});
+			// A shell can exit while a detached descendant still owns its pipe
+			// handles. Don't let that orphan keep the hook (and turn) open forever.
+			if (!streamsEnded) {
+				stdoutStream.destroy();
+				stderrStream.destroy();
+			}
+			finish(code, !streamsEnded);
 		});
 		stdin.on("error", () => {});
 		try {
@@ -733,7 +788,7 @@ function runCommandHook(
 		void Promise.race([asyncPromise]).then((r) => {
 			if (!settled) {
 				settled = true;
-				clearTimeout(timer);
+				clearTimers();
 				signal?.removeEventListener("abort", onAbort);
 				resolve(r);
 			}
@@ -780,10 +835,16 @@ async function runHttpHook(
 			signal: controller.signal,
 		});
 		const text = await res.text().catch(() => "");
-		if (!res.ok) return { blocked: false, stdout: text, exitCode: res.status };
+		if (!res.ok)
+			return { blocked: false, failure: `HTTP hook returned ${res.status}`, stdout: text, exitCode: res.status };
 		return interpretHookOutput(text, "", 0);
-	} catch {
-		return { blocked: false, stdout: "", exitCode: null };
+	} catch (error) {
+		return {
+			blocked: false,
+			failure: `HTTP hook failed: ${error instanceof Error ? error.message : String(error)}`,
+			stdout: "",
+			exitCode: null,
+		};
 	} finally {
 		clearTimeout(timer);
 		signal?.removeEventListener("abort", onAbort);
@@ -821,7 +882,7 @@ function interpolateDeep(value: unknown, payload: Record<string, unknown>): unkn
  * waiting on a wedged server, or a prompt hook waiting on a stalled provider,
  * blocked forever, and for a PreToolUse hook that stalls the tool call with
  * it. Aborting the shared signal is not an option (it belongs to the turn),
- * so the wait is bounded here and the hook reports as not-blocking.
+ * so the wait is bounded here and enforcement callers treat a timeout as a failure.
  */
 async function withHookTimeout(
 	work: Promise<HookRunResult>,
@@ -831,8 +892,8 @@ async function withHookTimeout(
 	let timer: NodeJS.Timeout | undefined;
 	const timeout = new Promise<HookRunResult>((resolve) => {
 		timer = setTimeout(() => {
-			console.error(`[cast] ${label} hook timed out after ${timeoutSeconds}s — treated as not blocking.`);
-			resolve({ blocked: false, stdout: "", exitCode: null });
+			console.error(`[cast] ${label} hook timed out after ${timeoutSeconds}s.`);
+			resolve({ blocked: false, failure: `hook timed out after ${timeoutSeconds}s`, stdout: "", exitCode: null });
 		}, timeoutSeconds * 1000);
 		timer.unref?.();
 	});
@@ -850,16 +911,26 @@ async function runMcpToolHook(
 	signal?: AbortSignal,
 ): Promise<HookRunResult> {
 	if (!cmd.server || !cmd.tool || !mcpToolIndex) {
-		return { blocked: false, stdout: "", exitCode: null };
+		return {
+			blocked: false,
+			failure: "MCP hook is missing its server, tool, or connection",
+			stdout: "",
+			exitCode: null,
+		};
 	}
 	const handle = mcpToolIndex.get(mcpToolName(cmd.server, cmd.tool));
-	if (!handle) return { blocked: false, stdout: "", exitCode: null };
+	if (!handle) return { blocked: false, failure: "MCP hook target is unavailable", stdout: "", exitCode: null };
 	const args = (interpolateDeep(cmd.input ?? {}, payload) as Record<string, unknown>) ?? {};
 	try {
 		const result = await handle.call(args, signal);
 		return interpretHookOutput(result.content, "", result.isError ? 1 : 0);
-	} catch {
-		return { blocked: false, stdout: "", exitCode: null };
+	} catch (error) {
+		return {
+			blocked: false,
+			failure: `MCP hook failed: ${error instanceof Error ? error.message : String(error)}`,
+			stdout: "",
+			exitCode: null,
+		};
 	}
 }
 
@@ -869,11 +940,19 @@ async function runPromptHook(
 	config: AppConfig | undefined,
 	fallbackModel: string | undefined,
 	signal?: AbortSignal,
+	costBudget?: SessionCostBudget,
+	onUsage?: (usage: Usage) => void,
 ): Promise<HookRunResult> {
-	if (!cmd.prompt || !config) return { blocked: false, stdout: "", exitCode: null };
+	if (!cmd.prompt || !config)
+		return {
+			blocked: false,
+			failure: "prompt hook is missing its prompt or model configuration",
+			stdout: "",
+			exitCode: null,
+		};
 	const text = interpolate(cmd.prompt, payload);
 	const model = cmd.model ?? fallbackModel;
-	if (!model) return { blocked: false, stdout: "", exitCode: null };
+	if (!model) return { blocked: false, failure: "prompt hook has no model", stdout: "", exitCode: null };
 	try {
 		const client = createClient(config);
 		const completion = await streamAndCollect(
@@ -890,7 +969,16 @@ async function runPromptHook(
 			[],
 			500,
 			signal,
+			undefined,
+			undefined,
+			{},
+			undefined,
+			{},
+			undefined,
+			undefined,
+			costBudget,
 		);
+		if (completion.usage) onUsage?.(completion.usage);
 		const response = (completion.content ?? "").trim();
 		try {
 			const parsed = JSON.parse(response);
@@ -903,9 +991,14 @@ async function runPromptHook(
 		} catch {
 			// JSON parse failed — fall through to non-blocking
 		}
-		return { blocked: false, stdout: response, exitCode: 0 };
-	} catch {
-		return { blocked: false, stdout: "", exitCode: null };
+		return { blocked: false, failure: "prompt hook returned invalid JSON", stdout: response, exitCode: 0 };
+	} catch (error) {
+		return {
+			blocked: false,
+			failure: `prompt hook failed: ${error instanceof Error ? error.message : String(error)}`,
+			stdout: "",
+			exitCode: null,
+		};
 	}
 }
 
@@ -930,13 +1023,27 @@ function interpretHookOutput(stdout: string, stderr: string, exitCode: number | 
 	// PermissionRequest: hookSpecificOutput.decision is an object {behavior, updatedInput?, message?}
 	let permissionRequestResult: HookRunResult["permissionRequestResult"];
 	let updatedInputFromPermission: Record<string, unknown> | undefined;
+	let decisionFailure: string | undefined;
 	const hsoDecision = parsed?.hookSpecificOutput?.decision;
-	if (hsoDecision && typeof hsoDecision === "object" && "behavior" in hsoDecision) {
-		if (hsoDecision.behavior === "deny") {
-			permissionRequestResult = { behavior: "deny", message: hsoDecision.message };
+	if (hsoDecision !== undefined) {
+		if (!isRecord(hsoDecision) || !("behavior" in hsoDecision)) {
+			decisionFailure = "hook returned an invalid PermissionRequest decision object";
+		} else if (hsoDecision.behavior === "deny") {
+			permissionRequestResult = {
+				behavior: "deny",
+				message: typeof hsoDecision.message === "string" ? hsoDecision.message : undefined,
+			};
+		} else if (hsoDecision.behavior === "allow") {
+			const input = hsoDecision.updatedInput;
+			if (input !== undefined && !isRecord(input)) {
+				decisionFailure = "hook returned a non-object updatedInput for PermissionRequest";
+			} else {
+				const updatedInput = input as Record<string, unknown> | undefined;
+				permissionRequestResult = { behavior: "allow", updatedInput };
+				updatedInputFromPermission = updatedInput;
+			}
 		} else {
-			permissionRequestResult = { behavior: "allow", updatedInput: hsoDecision.updatedInput };
-			updatedInputFromPermission = hsoDecision.updatedInput;
+			decisionFailure = "hook returned an invalid PermissionRequest decision behavior";
 		}
 	}
 
@@ -953,6 +1060,7 @@ function interpretHookOutput(stdout: string, stderr: string, exitCode: number | 
 		(blockedByExit ? stderr.trim() || stdout.trim() || undefined : undefined);
 	return {
 		blocked,
+		failure: decisionFailure,
 		reason,
 		forceStop,
 		updatedInput: updatedInputFromPermission ?? parsed?.hookSpecificOutput?.updatedInput,
@@ -977,6 +1085,8 @@ export interface RunHooksOptions {
 	config?: AppConfig;
 	model?: string;
 	permissionMode?: string;
+	costBudget?: SessionCostBudget;
+	onUsage?: (usage: Usage) => void;
 }
 
 /**
@@ -1052,10 +1162,21 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 	}
 
 	const deduped = deduplicateHooks(matchedGroups);
+	const costBudget = opts.costBudget ?? (opts.sessionId ? getSessionCostBudgetForSession(opts.sessionId) : undefined);
+	const onUsage =
+		opts.onUsage ?? (opts.sessionId ? (usage: Usage) => recordSessionCostUsage(opts.sessionId!, usage) : undefined);
 
 	const promises = deduped.flatMap((group) =>
 		group.hooks.map(async (cmd): Promise<HookRunResult> => {
 			const timeoutSeconds = cmd.timeout ?? defaultTimeoutFor(opts.event);
+			if (cmd.async === true && (opts.event === "PreToolUse" || opts.event === "PermissionRequest")) {
+				return {
+					blocked: false,
+					failure: "asynchronous hooks cannot enforce a permission decision",
+					stdout: "",
+					exitCode: null,
+				};
+			}
 			const payload = {
 				hook_event_name: opts.event,
 				cwd: opts.cwd,
@@ -1075,7 +1196,7 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 			}
 			if (cmd.type === "prompt") {
 				return withHookTimeout(
-					runPromptHook(cmd, payload, opts.config, opts.model, opts.signal),
+					runPromptHook(cmd, payload, opts.config, opts.model, opts.signal, costBudget, onUsage),
 					timeoutSeconds,
 					`${opts.event} prompt`,
 				);
@@ -1100,13 +1221,21 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 	// execute bit — used to be indistinguishable from one that ran and
 	// approved: exitCode was recorded on the result and then read by nobody.
 	// Exit 2 is the documented "block" signal and 0 is success; anything else
-	// from a command hook means the user's guard silently isn't guarding.
+	// from an enforcement hook must remain visible to its caller.
+	const failures: string[] = [];
 	for (const result of results) {
-		if (result.exitCode === null || result.exitCode === 0 || result.exitCode === 2) continue;
+		if (result.failure) {
+			failures.push(result.failure);
+			console.error(`[cast] ${opts.event} ${result.failure} — the result is treated as a failure.`);
+			continue;
+		}
+		if (result.exitCode === 0 || result.exitCode === 2) continue;
+		const failure = `hook exited ${result.exitCode ?? "without an exit code"}`;
+		failures.push(failure);
 		console.error(
-			`[cast] ${opts.event} hook exited ${result.exitCode}${
+			`[cast] ${opts.event} ${failure}${
 				result.stdout.trim() ? `: ${result.stdout.trim().slice(0, 200)}` : " with no output"
-			} — it did not block, and its result was ignored.`,
+			} — the result is treated as a failure.`,
 		);
 	}
 
@@ -1142,11 +1271,13 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 
 	const combinedContext = additionalContexts.length > 0 ? additionalContexts.join("\n") : undefined;
 	const combinedStdout = allStdout.join("\n");
+	const combinedFailure = failures.length > 0 ? failures.join("; ") : undefined;
 	// forceStop wins over a block from another hook in the same run (see
 	// the doc comment above) — checked first, same merge shape as firstBlock.
 	if (firstForceStop)
 		return {
 			...firstForceStop,
+			failure: combinedFailure,
 			updatedInput,
 			updatedToolOutput,
 			permissionDecision,
@@ -1157,6 +1288,7 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 	if (firstBlock)
 		return {
 			...firstBlock,
+			failure: combinedFailure,
 			updatedInput,
 			updatedToolOutput,
 			permissionDecision,
@@ -1166,6 +1298,7 @@ export async function runHooksForEvent(hooks: HooksFile, opts: RunHooksOptions):
 		};
 	return {
 		blocked: false,
+		failure: combinedFailure,
 		stdout: combinedStdout,
 		exitCode: lastExitCode,
 		updatedInput,

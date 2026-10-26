@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "../src/core/config.ts";
+import { SessionCostBudget } from "../src/core/cost-budget.ts";
 import { getDb, resetDbConnectionForTests } from "../src/core/db.ts";
 import { streamAndCollect } from "../src/core/llm.ts";
 import {
@@ -1036,6 +1037,25 @@ describe("project memory", () => {
 			}),
 		).rejects.toThrow();
 		expect(listProjectMemoryArtifacts(projectCwd)).toEqual([]);
+	});
+
+	it("shares the parent session cost budget with direct distillation requests", async () => {
+		const projectCwd = join(root, "distill-cost-budget-project");
+		const session = createSession("test-model", projectCwd);
+		saveSession(session);
+		const costBudget = new SessionCostBudget({ capUsd: 1, reportedSpendUsd: 0, priceKnown: true });
+		vi.mocked(streamAndCollect).mockResolvedValueOnce({ content: '{"artifacts":[]}' } as never);
+
+		await distillProjectMemory({
+			cwd: projectCwd,
+			sessionId: session.id,
+			model: session.model,
+			config: testConfig,
+			messages: [{ role: "user", content: "distill this repeated workflow" }],
+			costBudget,
+		});
+
+		expect(vi.mocked(streamAndCollect).mock.calls.at(-1)?.[13]).toBe(costBudget);
 	});
 
 	it("keeps one checkpoint writer active and lets the newest pending request win", async () => {
