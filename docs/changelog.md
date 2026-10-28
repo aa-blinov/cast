@@ -2,6 +2,28 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.59.1
+
+### Fixed
+- **A Windows install can start its own daemon again.** `cast run` and every other headless surface that had to start the daemon itself read the bundle path with a POSIX-only check, took the source-checkout branch, and launched `tsx` against a `src/` an install does not have. The child died at once, the launcher burned the full 60-second startup budget, and then reported that the daemon "did not start". One shared check now handles both separators, and the wait ends as soon as the child exits.
+- **`cast server stop` drains before it kills on Windows.** Windows never delivers SIGTERM to a JavaScript handler, so stop was an unconditional `TerminateProcess`: no SessionEnd hooks, no checkpoint drain, a turn's snapshot cut mid-write. Stop now asks the daemon to shut down over its authenticated route first — the same `shutdown()` the signal handler runs — and falls back to signals only if that fails.
+- **`cast upgrade` restarts the daemon on Windows.** The detached restart waiter was a `sh -c` script, and a Windows release carries no `sh`, so the replacement never started. It is a small Node process now, with the same contract: take the start lock, wait for the old pid, start the new daemon, drop the lock.
+- **`cast run` no longer calls a dropped connection a finished turn.** One SSE hiccup printed "output may be incomplete" and exited 1 while the daemon went on running the turn. A reconnect in progress now gets a bounded window; only a stream that is really closed ends the run.
+- **`cast server start --port 0` reports the port it actually bound**, instead of `http://127.0.0.1:0` and no address to open.
+- **A command hook can no longer hang a turn forever.** The timeout only killed the process and waited for an `exit`; on Windows the killer is a separate `taskkill` that can fail silently, and Stop/PreCompact hooks are awaited outside the 2-second net that closes an aborted tool batch — so neither the timeout nor Esc ended the turn. The hook now settles unconditionally shortly after its timeout.
+- **`tools/list` cannot paginate forever.** A server handing out a fresh cursor per page looped during startup and `/mcp reconnect`, where there is no Esc to reach. The listing stops at 50 pages and says so.
+- **An MCP tool call has a real ceiling.** Progress notifications reset the per-request timer and no total timeout was passed, so a chatty server pinned one call until someone pressed Esc.
+- **A busy daemon keeps its registration.** The identity probe read a 1.5-second timeout as "not our daemon", cleared the state file and let a second writer start beside the first. It now retries, tells a refused connection apart from silence, and never clears on silence.
+- **`cast server stop` no longer gives up on a wedged daemon**, clearing its state while the process and its port stay up.
+- **The terminal screen says "Starting the cast daemon..." after 400ms** instead of showing nothing for up to a minute while the daemon comes up.
+- **The screen no longer reconnects in a tight loop.** Each `onerror` re-subscribed immediately from an effect that re-ran on its own result, so a daemon that answered but no longer held the session became an unthrottled request storm with the composer refusing input. Reconnects back off from 1s to 15s, ask whether the session still exists, and stop with a plain message when it is gone.
+- **The `lsp` tool's deadline covers server startup.** Starting — or auto-installing — a language server took no signal, so `npm` and a release download could run for minutes after the tool had given up.
+- **A stale start lock no longer costs a minute.** A lock whose recorded pid had been recycled by a long-lived process looked held forever; it is taken over after five minutes.
+
+### Internal
+- Cross-platform tests for the behaviour above: a probe that never answers is `unknown` rather than a different daemon, a refused connection is a mismatch, a recycled-pid lock is taken over, runaway `tools/list` pagination is refused, and the shutdown route is authenticated.
+- The suite no longer collects the throwaway fixtures under `test/__test_tmp__/`. An interrupted run leaves them behind, one carries a `tools.test.ts` of its own, and the next run reported a failed suite on a tree that was green.
+
 ## 0.59.0
 
 ### Added
