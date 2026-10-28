@@ -56,6 +56,8 @@ Confirmed by the code:
 - Compaction starts at 0.75 of the usable input budget. The default reply reserve is 32000 tokens, capped at half the window.
 - A turn stops after 500 model calls by default, and the work done so far is already persisted.
 - The web tools are off until `/web` turns them on, and while they are off they are not advertised to the model at all.
+- The Web chat uses Monos UI's panel, message and composer components around Cast's existing session, streaming and tool rendering. The terminal keeps its pi-tui interface over the same engine.
+- The Web client is a PWA. The service worker caches static app assets for offline loading; API requests and event streams still need a connection. Remote installs need HTTPS because `--public` serves plain HTTP.
 - Dangerous shell commands ask first. The file tools never ask, because git undoes them.
 - Permission rules resolve in one order: deny beats approved, approved beats ask, ask beats allow.
 - The `bash` timeout is in milliseconds, 180000 by default and 3600000 at most.

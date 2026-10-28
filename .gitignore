@@ -1,5 +1,7 @@
 node_modules/
 dist/
+src/server/public/monos-elements.js
+src/server/public/monos-ui.css
 coverage/
 site/
 .env
