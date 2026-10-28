@@ -123,7 +123,7 @@ Restrained: neutrals plus one accent. Every theme can supply these roles; the st
 
 **Browser.** A sidebar of sessions (272px) beside the chat, a header with the connection dot, and the composer at the foot. On a phone (coarse pointer, under 768px) the sidebar is a drawer, the composer tightens, and every control has a 44px target; the page never scrolls sideways at 320px.
 
-The Web chat frame, message boundary and composer frame are `ChatPanel`, `ChatMessage` and `ChatComposer` from `@monos/ui/chat`. Their geometry and structure come from Monos; their semantic color and type tokens map to Cast's active theme. Cast's existing message, markdown, tool and composer modules stay slotted inside those boundaries. The terminal keeps its pi-tui rendering over the same session state.
+The Web chat frame, message boundary and composer frame are `ChatPanel`, `ChatMessage` and `ChatComposer` from `@monos/ui/chat`. The header, session creation actions and composer actions use Monos `IconButton` and `Button` primitives. Their geometry and structure come from Monos; their semantic color and type tokens map to Cast's active theme. Cast's existing message, markdown, tool and composer modules stay slotted inside those boundaries. The terminal keeps its pi-tui rendering over the same session state.
 
 Tool rows (terminal) sit at the same margin: `  * ` done, `  … ` running (accent), `  ✗ ` plus the word `failed`. Tool name bold, arguments muted; a bash row ends with the deadline it runs under (` * timeout 3m`, or the one the model chose), kept when a running row is cut to one line; a finished command wraps under its text, not under the margin.
 

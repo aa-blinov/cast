@@ -653,26 +653,30 @@ export function Composer({
 					style="display:none"
 					onChange=${handleFilePick}
 				/>
-				<button
-					type="button"
-					class="composer-attach"
-					onClick=${() => fileInputRef.current?.click()}
+				<monos-icon-button
+					data-cast-control="composer-attach"
+					label="Attach image or file"
+					variant="ghost"
+					size="md"
 					disabled=${!ready}
-					aria-label="Attach image or file"
-					title="Attach image or file"
-				><${icons.paperclip} /></button>
+					tooltipText="Attach image or file"
+					onPointerDown=${keepComposerFocus}
+					onClick=${() => fileInputRef.current?.click()}
+				><${icons.paperclip} /></monos-icon-button>
 				${
 					audioInput &&
-					html`<button
-						type="button"
-						class="composer-attach composer-mic${recordingSince !== null ? " composer-mic-recording" : ""}"
+					html`<monos-icon-button
+						data-cast-control="composer-microphone"
+						class=${recordingSince !== null ? "text-accent" : ""}
+						label=${recordingSince !== null ? "Stop recording" : "Record a voice message"}
+						variant="ghost"
+						size="md"
 						onPointerDown=${keepComposerFocus}
 						onClick=${toggleRecording}
 						disabled=${!ready || Boolean(voiceBlockedReason)}
-						aria-pressed=${recordingSince !== null}
-						aria-label=${recordingSince !== null ? "Stop recording" : "Record a voice message"}
-						title=${voiceBlockedReason ?? (recordingSince !== null ? "Stop recording" : "Record a voice message")}
-					><${recordingSince !== null ? icons.stop : icons.microphone} /></button>`
+						pressed=${recordingSince !== null}
+						tooltipText=${voiceBlockedReason ?? (recordingSince !== null ? "Stop recording" : "Record a voice message")}
+					><${recordingSince !== null ? icons.stop : icons.microphone} /></monos-icon-button>`
 				}
 				<textarea
 					ref=${textareaRef}
@@ -693,8 +697,8 @@ export function Composer({
 				/>
 				${
 						running
-						? html`<button class="composer-abort" onPointerDown=${keepComposerFocus} onClick=${onAbort} disabled=${aborting} aria-label=${aborting ? "Aborting…" : "Abort"} title=${aborting ? "Aborting…" : sendReady ? "Abort (Esc)" : "Abort — waiting for connection"} aria-busy=${aborting ? "true" : "false"}><${aborting ? icons.spinner : icons.stop} /></button>`
-						: html`<button class="composer-send" onPointerDown=${keepComposerFocus} onClick=${() => handleSubmit()} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs && !voice)} aria-label="Send" title=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></button>`
+						? html`<monos-icon-button data-cast-control="composer-abort" class="text-danger-text border-danger hover:bg-surface" variant="ghost" size="md" onPointerDown=${keepComposerFocus} onClick=${onAbort} disabled=${aborting} label=${aborting ? "Aborting…" : "Abort"} tooltipText=${aborting ? "Aborting…" : sendReady ? "Abort (Esc)" : "Abort — waiting for connection"} aria-busy=${aborting ? "true" : "false"}><${aborting ? icons.spinner : icons.stop} class=${aborting ? "monos-spinner" : ""} /></monos-icon-button>`
+						: html`<monos-icon-button data-cast-control="composer-send" class="bg-accent border border-accent text-accent-text hover:opacity-90" variant="ghost" size="md" onPointerDown=${keepComposerFocus} onClick=${() => handleSubmit()} disabled=${sendBlocked || attachmentsBlocked || (!value.trim() && images.length === 0 && !hasReadyDocs && !voice)} label="Send" tooltipText=${attachmentsBlocked ? "Wait for attachments to finish uploading" : !sendReady ? "Waiting for the daemon connection" : sending ? "Sending…" : "Send (Enter)"}><${icons.send} /></monos-icon-button>`
 				}
 			</div>
 		</div>

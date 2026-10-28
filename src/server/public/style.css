@@ -99,7 +99,7 @@ body.resizing-sidebar * { user-select: none; }
 @media (max-width: 360px) {
 	.header { padding: 0 8px; gap: 6px; }
 	.header-right { gap: 4px; }
-	.header .menu-toggle { padding: 4px; }
+	.header monos-icon-button[data-cast-control^="header-"] { padding: 0; }
 }
 .header-logo {
 	display: inline-flex; align-items: center;
@@ -158,23 +158,12 @@ body.resizing-sidebar * { user-select: none; }
 }
 .header-btn:hover { border-color: var(--cyan); color: var(--cyan); background: var(--accent-subtle); }
 .header-btn.active { color: var(--text); border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 12%, transparent); }
-.menu-toggle {
-	display: flex;
-	background: none; border: none;
-	color: var(--text);
-	cursor: pointer; padding: 6px;
+.header monos-icon-button[data-cast-control^="header-"] {
+	display: inline-flex;
 	align-items: center; justify-content: center;
 	flex-shrink: 0;
 	border-radius: var(--radius-sm);
-	transition: color var(--dur-fast), background var(--dur-fast);
 }
-.menu-toggle:hover { color: var(--cyan); background: var(--accent-subtle); }
-.menu-toggle:disabled { opacity: .35; cursor: default; }
-.menu-toggle:disabled:hover { color: var(--text); background: none; }
-/* diff-toggle reuses .menu-toggle's plain icon-button look (no border/box)
- * so both header chevrons read as the same control — only the rotation
- * direction and which side of the layout they act on differ. */
-.menu-toggle.active { color: var(--cyan); }
 /* Chevron rotates to reflect open/closed state instead of a static glyph —
  * shared by the sidebar toggle (points left = collapse this way, right =
  * expand) and the diff toggle (mirrored: right = open, left = close). */
@@ -594,42 +583,21 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 	gap: 8px;
 	margin: 0 12px 12px;
 }
-.new-session-btn {
-	display: flex; align-items: center; justify-content: center; gap: 6px;
-	height: 32px;
-	padding: 0 10px;
-	border-radius: var(--radius-sm);
-	cursor: pointer;
-	font-size: var(--fs-body);
-	color: var(--text-dim);
-	border: 1px dashed var(--border-active);
-	background: none;
-	font-family: var(--font);
+.sidebar-new-buttons monos-button[data-cast-control="new-session"] {
+	display: flex;
 	flex: 1;
 	min-width: 0;
-	transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
 }
-.new-session-btn:hover { border-color: var(--cyan); color: var(--text); background: var(--bg-hover); }
-.new-session-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
 /* Icon-only companion button — a small square rather than a second full-width
    text button, so "New session" (the primary action) stays visually
    dominant and this reads as a quick secondary shortcut next to it, not a
    competing equal choice. */
-.new-session-btn-quick {
+.sidebar-new-buttons monos-icon-button[data-cast-control="quick-session"] {
 	display: flex; align-items: center; justify-content: center;
 	flex: 0 0 auto;
 	width: 32px;
 	height: 32px;
-	padding: 0;
-	border-radius: var(--radius-sm);
-	cursor: pointer;
-	color: var(--text-muted);
-	border: 1px dashed var(--border-active);
-	background: none;
-	transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
 }
-.new-session-btn-quick:hover { border-color: var(--cyan); color: var(--cyan); background: var(--bg-hover); }
-.new-session-btn-quick svg { width: 15px; height: 15px; }
 /* ── Composer ─────────────────────────────────────────────────────── */
 .composer-role {
 	display: flex; align-items: center; justify-content: space-between;
@@ -763,50 +731,13 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 .composer-input::placeholder { color: var(--text-muted); }
 /* Not faded: while it is disabled the placeholder (Connecting…) is the only thing saying why. */
 .composer-input:disabled { cursor: wait; }
-.composer-send {
-	background: var(--cyan);
-	border: 1px solid var(--cyan);
-	border-radius: var(--radius);
-	padding: 8px;
-	color: var(--accent-fg);
-	cursor: pointer;
-	display: flex; align-items: center; justify-content: center;
+.composer > monos-icon-button[data-cast-control^="composer-"] {
+	display: inline-flex; align-items: center; justify-content: center;
 	width: 36px; height: 36px;
 	flex-shrink: 0;
-	transition: opacity var(--dur-fast);
 }
-.composer-send:hover { opacity: .9; }
-.composer-send:disabled { opacity: .4; cursor: default; }
-.composer-abort {
-	background: transparent;
-	border: 1px solid var(--danger-border);
-	border-radius: var(--radius);
-	padding: 8px;
-	color: var(--status-error-fg);
-	cursor: pointer;
-	display: flex; align-items: center; justify-content: center;
-	width: 36px; height: 36px;
-	flex-shrink: 0;
-	transition: background var(--dur-fast);
-}
-.composer-abort:hover { background: var(--danger-muted); }
-.composer-abort:disabled { opacity: .6; cursor: wait; }
-.composer-abort[aria-busy="true"] svg, .verify-btn[aria-busy="true"] svg { animation: spin .7s linear infinite; }
+.verify-btn[aria-busy="true"] svg { animation: spin .7s linear infinite; }
 .composer-drag-over { border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 8%, var(--bg-surface)); }
-.composer-attach {
-	background: transparent;
-	border: none;
-	padding: 8px;
-	color: var(--text-muted);
-	cursor: pointer;
-	display: flex; align-items: center; justify-content: center;
-	width: 36px; height: 36px;
-	flex-shrink: 0;
-	border-radius: var(--radius);
-	transition: color var(--dur-fast), background var(--dur-fast);
-}
-.composer-attach:hover { color: var(--text); background: var(--bg-hover); }
-.composer-attach:disabled { opacity: .4; cursor: default; }
 .composer-images {
 	display: flex; flex-wrap: wrap; gap: 8px;
 	padding: 0 max(16px, env(safe-area-inset-left)) 8px;
@@ -852,8 +783,6 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 @keyframes composer-voice-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .composer-voice-live::before { animation: none; } }
 .composer-voice-player { height: 32px; max-width: 240px; min-width: 0; }
-.composer-mic-recording { color: var(--status-error-fg); }
-
 .composer-docs {
 	display: flex; flex-wrap: wrap; gap: 6px;
 	padding: 0 max(16px, env(safe-area-inset-left)) 6px;
@@ -964,7 +893,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 		backdrop-filter: blur(2px);
 	}
 	.sidebar-backdrop.visible { display: block; }
-	.menu-toggle { display: flex; }
+	.header monos-icon-button[data-cast-control^="header-"] { display: flex; }
 
 	.scroll-bottom-btn { bottom: 92px; }
 
@@ -993,7 +922,7 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
  * held upright, so hide the button there. Landscape keeps it since a wider
  * mobile viewport often means an attached/foldable keyboard. */
 @media (max-width: 768px) and (orientation: portrait) {
-	.hotkeys-toggle { display: none; }
+	.header monos-icon-button[data-cast-control="header-shortcuts"] { display: none; }
 }
 
 /* Desktop/tablet: diff opens as a generously wide sidebar alongside chat, not
@@ -1628,9 +1557,14 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 
 @media (pointer: coarse) {
 	/* Stand-alone controls grow to a real 44px target. */
-	.header-btn, .menu-toggle, .composer-send, .composer-abort, .composer-attach,
-	.modal-close, .verify-btn, .sidebar-logout, .new-session-btn, .new-session-btn-quick,
+	.header-btn, .modal-close, .verify-btn, .sidebar-logout,
 	.scroll-bottom-btn, .dash-pager-btn, .fs-collapse-btn, .fs-action {
+		min-width: 44px; min-height: 44px;
+	}
+	.header monos-icon-button[data-cast-control^="header-"],
+	.sidebar-new-buttons monos-button[data-cast-control="new-session"],
+	.sidebar-new-buttons monos-icon-button[data-cast-control="quick-session"],
+	.composer > monos-icon-button[data-cast-control^="composer-"] {
 		min-width: 44px; min-height: 44px;
 	}
 	/* Panel tabs, settings controls and modal buttons grow to the same target. */
@@ -1677,16 +1611,9 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 		margin-right: max(10px, env(safe-area-inset-right));
 	}
 	.composer-input { padding: 6px 4px; }
-	.composer-send, .composer-abort, .composer-attach {
-		min-width: 36px; min-height: 36px;
-		position: relative;
-	}
-	.composer-send::after, .composer-abort::after, .composer-attach::after {
-		content: "";
-		position: absolute;
-		top: 50%; left: 50%;
+	.composer > monos-icon-button[data-cast-control^="composer-"] {
 		width: 44px; height: 44px;
-		transform: translate(-50%, -50%);
+		min-width: 44px; min-height: 44px;
 	}
 	.composer-role, .pending-items, .composer-images {
 		padding-left: max(10px, env(safe-area-inset-left));
@@ -1715,8 +1642,15 @@ body.resizing-sidebar .sidebar-resize-handle::after { background: var(--cyan); }
 }
 
 /* A press answers at once: a control sinks a little under the finger or the pointer, before anything else happens. */
-.modal-btn, .composer-send, .composer-attach, .menu-toggle, .new-session-btn, .plan-decision-option, .settings-tab {
+.modal-btn, .plan-decision-option, .settings-tab,
+.header monos-icon-button[data-cast-control^="header-"],
+.sidebar-new-buttons monos-button[data-cast-control="new-session"],
+.sidebar-new-buttons monos-icon-button[data-cast-control="quick-session"],
+.composer > monos-icon-button[data-cast-control^="composer-"] {
 	transition-property: color, background, border-color, transform;
 }
-.modal-btn:active:not(:disabled), .composer-send:active:not(:disabled), .composer-attach:active:not(:disabled),
-.menu-toggle:active, .new-session-btn:active, .plan-decision-option:active, .settings-tab:active { transform: scale(.97); }
+.modal-btn:active:not(:disabled), .plan-decision-option:active, .settings-tab:active,
+.header monos-icon-button[data-cast-control^="header-"]:active,
+.sidebar-new-buttons monos-button[data-cast-control="new-session"]:active,
+.sidebar-new-buttons monos-icon-button[data-cast-control="quick-session"]:active,
+.composer > monos-icon-button[data-cast-control^="composer-"]:active { transform: scale(.97); }
