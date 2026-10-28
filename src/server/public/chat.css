@@ -4,6 +4,21 @@
 	overflow: hidden;
 	position: relative;
 }
+.chat-composer-slot {
+	width: 100%;
+	max-width: 860px;
+	margin: 0 auto;
+}
+.chat-composer-slot .composer-wrap {
+	max-width: none;
+	margin: 0;
+}
+.chat-composer-slot .composer {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
 .messages {
 	flex: 1;
 	min-height: 0;

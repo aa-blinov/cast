@@ -2,6 +2,12 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.60.0
+
+### Added
+- **The browser chat uses Monos UI's chat components.** The panel, message and composer now follow the shared Monos structure while keeping Cast's session state, streaming, tool cards and message actions. The terminal interface continues to use pi-tui.
+- **The web client can be installed as a PWA.** Its app shell, sign-in page and icons are available offline; sessions and provider requests still require a network connection. Remote installs require HTTPS.
+
 ## 0.59.1
 
 ### Fixed

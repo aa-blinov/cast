@@ -13,20 +13,27 @@ const BUILT_SHELL = "__CAST_SHELL__";
 const DEV_SHELL = [
   "/",
   "/index.html",
+  "/login.html",
   "/manifest.json",
   "/tokens.css",
+  "/monos-ui.css",
   "/chat.css",
   "/tools.css",
   "/workspace.css",
   "/settings.css",
   "/style.css",
   "/login.css",
+  "/login.js",
+  "/monos-elements.js",
   "/app.js",
   "/api.js",
   "/vendor/preact.mjs",
   "/vendor/preact-hooks.mjs",
   "/vendor/htm.mjs",
-  "/favicon.svg"
+  "/favicon.svg",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png"
 ];
 const SHELL = Array.isArray(BUILT_SHELL) ? BUILT_SHELL : DEV_SHELL;
 self.addEventListener("install", (e) => {
@@ -46,7 +53,8 @@ self.addEventListener("fetch", (e) => {
   // APIs and SSE — network only, but fallback to offline page for navigations
   if (url.pathname.startsWith("/api/")) return;
   if (e.request.mode === "navigate") {
-    e.respondWith(fetch(e.request).catch(() => caches.match("/index.html")));
+    const fallback = url.pathname === "/login" || url.pathname === "/login.html" ? "/login.html" : "/index.html";
+    e.respondWith(fetch(e.request).catch(() => caches.match(fallback)));
     return;
   }
   e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {

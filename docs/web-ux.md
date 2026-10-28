@@ -34,6 +34,12 @@ modals      new session . share . shortcuts . command palette (type / in the com
 - Inputs are 16px on iOS so focusing a field does not zoom the page.
 - No horizontal page scroll at any width; long paths and code scroll inside their own box.
 
+## Chat components and offline shell
+
+The Web transcript frame, message boundary and composer frame use `@monos/ui/chat`. Cast still owns the session state, markdown, tool cards, streaming and message actions inside those components. The terminal keeps its existing pi-tui rendering and the same session behaviour.
+
+The Web client is installable as a PWA. Its service worker caches the app shell and static UI assets; `/api/*` requests and event streams stay network-only. Remote installs require HTTPS; loopback development works on HTTP.
+
 ## Decisions
 
 - **A session row says what it is.** An untitled session is "New session" while it is empty, and every row carries the folder and its age. A persona name alone was the same on every row.

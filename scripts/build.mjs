@@ -18,6 +18,7 @@
  * archive is laid out (see .github/workflows/release.yml).
  */
 import { build, transform } from "esbuild";
+import { buildMonosElements } from "./build-monos-elements.mjs";
 
 	await build({
 		entryPoints: ["src/index.ts"],
@@ -53,6 +54,7 @@ import { build, transform } from "esbuild";
 // for public/ as a sibling of dist/index.js.
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+await buildMonosElements("src/server/public");
 // Wiped first, not merged into: the bundle's filenames carry content hashes,
 // so every build would otherwise leave its predecessor behind and the release
 // would ship every historical copy (and any file deleted from src/, like the
@@ -84,6 +86,7 @@ const webJavaScript = [
 	"message.js",
 	"memory-explorer.js",
 	"markdown.js",
+	"monos-elements.js",
 	"plan-cards.js",
 	"reasoning-split.js",
 	"sidebar-utils.js",
@@ -185,7 +188,7 @@ writeFileSync(
 	readFileSync("dist/public/index.html", "utf8").replace('src="/app.js"', `src="${bundleUrl}"`),
 );
 
-const webStylesheets = ["tokens.css", "chat.css", "tools.css", "workspace.css", "settings.css", "style.css", "login.css"];
+const webStylesheets = ["tokens.css", "monos-ui.css", "chat.css", "tools.css", "workspace.css", "settings.css", "style.css", "login.css"];
 for (const file of webStylesheets) {
 	const source = readFileSync(`dist/public/${file}`, "utf8");
 	const result = await transform(source, { loader: "css", minify: true, legalComments: "none" });
@@ -203,15 +206,21 @@ const { version: castVersion } = JSON.parse(readFileSync("package.json", "utf8")
 const shell = [
 	"/",
 	"/index.html",
+	"/login.html",
 	"/manifest.json",
 	"/tokens.css",
+	"/monos-ui.css",
 	"/chat.css",
 	"/tools.css",
 	"/workspace.css",
 	"/settings.css",
 	"/style.css",
 	"/login.css",
+	"/login.js",
 	"/favicon.svg",
+	"/icons/icon-192.png",
+	"/icons/icon-512.png",
+	"/icons/apple-touch-icon.png",
 	bundleUrl,
 ];
 writeFileSync(

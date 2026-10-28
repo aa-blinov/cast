@@ -173,6 +173,56 @@ describe("web session authentication", () => {
 		expect(await app.text()).toContain("cast server");
 	});
 
+	it("serves the installable web app shell and its raster icons", async () => {
+		const [app, login, manifestResponse, worker] = await Promise.all([
+			fetch(`${origin}/index.html`),
+			fetch(`${origin}/login.html`),
+			fetch(`${origin}/manifest.json`),
+			fetch(`${origin}/sw.js`),
+		]);
+		expect(app.status).toBe(200);
+		const appHtml = await app.text();
+		expect(appHtml).toContain('rel="manifest" href="/manifest.json"');
+		expect(appHtml).toContain('href="/monos-ui.css"');
+		expect(appHtml).toContain('rel="apple-touch-icon" sizes="180x180"');
+		expect(appHtml.toLowerCase()).toContain("viewport-fit=cover");
+		expect(login.status).toBe(200);
+		const loginHtml = await login.text();
+		expect(loginHtml).toContain('rel="manifest" href="/manifest.json"');
+		expect(loginHtml).toContain("serviceWorker.register('/sw.js')");
+		expect(manifestResponse.status).toBe(200);
+		const manifest = (await manifestResponse.json()) as {
+			display: string;
+			icons: Array<{ src: string; sizes: string; type: string }>;
+		};
+		expect(manifest.display).toBe("standalone");
+		expect(manifest.icons).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }),
+				expect.objectContaining({ src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }),
+			]),
+		);
+		for (const [icon, dimension] of [
+			["/icons/icon-192.png", 192],
+			["/icons/icon-512.png", 512],
+			["/icons/apple-touch-icon.png", 180],
+		] as const) {
+			const response = await fetch(`${origin}${icon}`);
+			expect(response.status, icon).toBe(200);
+			expect(response.headers.get("content-type"), icon).toContain("image/png");
+			const bytes = new Uint8Array(await response.arrayBuffer());
+			expect(Array.from(bytes.slice(0, 8)), icon).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+			const png = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+			expect(png.getUint32(16), `${icon} width`).toBe(dimension);
+			expect(png.getUint32(20), `${icon} height`).toBe(dimension);
+		}
+		expect(worker.status).toBe(200);
+		const workerSource = await worker.text();
+		expect(workerSource).toContain('url.pathname.startsWith("/api/")');
+		expect(workerSource).toContain('"/monos-elements.js"');
+		expect(workerSource).toContain('"/icons/icon-192.png"');
+	});
+
 	it("rejects the worktree+sandbox combo up front so the modal surfaces a clean 400", async () => {
 		const authenticated = await fetch(`${origin}/api/auth/login`, {
 			method: "POST",
