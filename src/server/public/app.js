@@ -2156,9 +2156,9 @@ function App() {
 			<!-- Header -->
 			<header class="header">
 				<h1 class="sr-only">${session?.title || "Cast"}</h1>
-				<button class="menu-toggle${sidebarVisible ? " active" : " collapsed"}" onClick=${toggleSidebar} aria-label=${sidebarVisible ? "Collapse sessions" : "Expand sessions"}>
+				<monos-icon-button data-cast-control="header-sidebar" class=${sidebarVisible ? "text-accent" : ""} label=${sidebarVisible ? "Collapse sessions" : "Expand sessions"} size="md" variant="ghost" pressed=${sidebarVisible} onClick=${toggleSidebar}>
 					<${icons.panelLeft} />
-				</button>
+				</monos-icon-button>
 				<!-- The title sits on the wrapper too: the dot itself is 10px, and
 				     the padding around it is part of what a pointer aims at. -->
 				<span class="header-logo" title=${statusDotTitle}>
@@ -2169,18 +2169,18 @@ function App() {
 				<span class="sr-only" role="status">${turnAnnouncement}</span>
 				<div class="header-right">
 					${activeId && html`<${StatusPopover} activeId=${activeId} running=${running} />`}
-					<button class="menu-toggle${dashboardOpen ? " active" : ""}" onClick=${() => navigate("/dashboard" + (activeId ? `?session=${activeId}` : ""))} aria-label="Dashboard" title="Dashboard">
+					<monos-icon-button data-cast-control="header-dashboard" class=${dashboardOpen ? "text-accent" : ""} label="Dashboard" size="md" variant="ghost" pressed=${dashboardOpen} onClick=${() => navigate("/dashboard" + (activeId ? `?session=${activeId}` : ""))}>
 						<${icons.chartBar} />
-					</button>
-					<button class="menu-toggle${settingsOpen ? " active" : ""}" onClick=${() => navigate("/settings" + (activeId ? `?session=${activeId}` : ""))} aria-label="Settings" title="Settings">
+					</monos-icon-button>
+					<monos-icon-button data-cast-control="header-settings" class=${settingsOpen ? "text-accent" : ""} label="Settings" size="md" variant="ghost" pressed=${settingsOpen} onClick=${() => navigate("/settings" + (activeId ? `?session=${activeId}` : ""))}>
 						<${icons.settings} />
-					</button>
-					<button class="menu-toggle hotkeys-toggle" onClick=${() => setHotkeysOpen(true)} aria-label="Keyboard shortcuts" title=${`Shortcuts (${modKey}/)`}>
+					</monos-icon-button>
+					<monos-icon-button data-cast-control="header-shortcuts" label="Keyboard shortcuts" tooltipText=${`Shortcuts (${modKey}/)`} size="md" variant="ghost" onClick=${() => setHotkeysOpen(true)}>
 						<${icons.keyboard} />
-					</button>
-					<button class="menu-toggle diff-toggle${diffOpen ? " active" : ""}" onClick=${toggleDiff} aria-label=${diffOpen ? "Close files panel" : "Open files panel"} title="Files and changes">
+					</monos-icon-button>
+					<monos-icon-button data-cast-control="header-files" class=${diffOpen ? "text-accent" : ""} label=${diffOpen ? "Close files panel" : "Open files panel"} size="md" variant="ghost" pressed=${diffOpen} tooltipText="Files and changes" onClick=${toggleDiff}>
 						<${icons.panelRight} />
-					</button>
+					</monos-icon-button>
 				</div>
 			</header>
 

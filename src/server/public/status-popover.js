@@ -79,7 +79,7 @@ export function StatusPopover({ activeId, running }) {
 		wasRunning.current = running;
 	}, [running, open, load]);
 	const modalRef = useModalFocusTrap(open);
-	return html`<button class="menu-toggle" onClick=${openModal} aria-label="Status" title="Status"><${icons.info} /></button>
+	return html`<monos-icon-button data-cast-control="header-status" label="Status" tooltipText="Status" size="md" variant="ghost" onClick=${openModal}><${icons.info} /></monos-icon-button>
 		${
 			open &&
 			html`<div class="modal-backdrop" onClick=${() => setOpen(false)}><div class="modal modal-status" role="dialog" aria-modal="true" aria-label="Status" tabIndex="-1" ref=${modalRef} onClick=${(event) => event.stopPropagation()}>
