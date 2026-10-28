@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## 0.60.1
+
+### Changed
+- **Monos buttons now cover the full browser chat flow.** Header actions, session creation, status and composer controls share the same primitives while keeping Cast's theme and mobile touch targets.
+
 ## 0.60.0
 
 ### Added
