@@ -319,17 +319,24 @@ export function Sidebar({
 		<nav class="sidebar${open ? " open" : ""}" aria-label="Sessions" inert=${collapsed}>
 			<div class="sidebar-new-section">
 				<div class="sidebar-new-buttons">
-					<button
-						class="new-session-btn"
+					<monos-button
+						data-cast-control="new-session"
+						class="normal-case tracking-normal h-8 flex-1 min-w-0 border border-dashed border-line-strong px-2 text-ink-soft hover:border-accent hover:bg-surface"
+						variant="secondary"
+						size="md"
+						full=${true}
 						title="Pick a persona and directory for a new session"
 						onClick=${onOpenNewSession}
-					><${icons.plus} /> New session</button>
-					<button
-						class="new-session-btn-quick"
-						title=${`Quick session — ${personas.find((p) => p.name === quickSessionPersona)?.label ?? quickSessionPersona}, fresh sandbox directory (configurable in Settings > Tools)`}
-						aria-label="Quick session"
+					><${icons.plus} slot="icon" /> New session</monos-button>
+					<monos-icon-button
+						data-cast-control="quick-session"
+						class="border border-dashed border-line-strong text-ink-soft hover:border-accent hover:bg-surface"
+						label="Quick session"
+						variant="ghost"
+						size="md"
+						tooltipText=${`Quick session — ${personas.find((p) => p.name === quickSessionPersona)?.label ?? quickSessionPersona}, fresh sandbox directory (configurable in Settings > Tools)`}
 						onClick=${() => onCreateSession(quickSessionPersona, SANDBOX_CWD)}
-					><${icons.bolt} /></button>
+					><${icons.bolt} /></monos-icon-button>
 				</div>
 			</div>
 			<div class="sidebar-divider" />

@@ -36,7 +36,7 @@ modals      new session . share . shortcuts . command palette (type / in the com
 
 ## Chat components and offline shell
 
-The Web transcript frame, message boundary and composer frame use `@monos/ui/chat`. Cast still owns the session state, markdown, tool cards, streaming and message actions inside those components. The terminal keeps its existing pi-tui rendering and the same session behaviour.
+The Web transcript frame, message boundary and composer frame use `@monos/ui/chat`; the header, session creation actions and composer actions use Monos `IconButton` and `Button` primitives. Their isolated styles receive generated Monos utilities and Cast's active theme tokens. Cast still owns the session state, markdown, tool cards, streaming and message actions inside those components. The terminal keeps its existing pi-tui rendering and the same session behaviour.
 
 The Web client is installable as a PWA. Its service worker caches the app shell and static UI assets; `/api/*` requests and event streams stay network-only. Remote installs require HTTPS; loopback development works on HTTP.
 
