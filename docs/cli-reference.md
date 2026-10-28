@@ -91,7 +91,7 @@ Web UI mode: launches a browser-based control room for managing background agent
 ```bash
 cast web                 # Start in background (daemon)
 cast web start           # Same as above
-cast web stop            # Stop the background server (SIGTERM → SIGKILL after 3s)
+cast web stop            # Stop the background server (shutdown route, then SIGTERM → SIGKILL after 3s)
 cast web status          # Check if running (auto-heals stale state)
 cast web --foreground    # Run inline (for dev/debug)
 cast web --port 8080     # Custom port (default: 1337, or set CAST_SERVER_PORT)
@@ -107,7 +107,7 @@ Binding to a non-loopback address (`--host 0.0.0.0` or `--public`) exposes plain
 
 **The address is remembered.** An address you choose with `--public`, `--host` or `--port` is saved in `~/.cast/settings.json` (`serverBind`). A daemon started later without those flags binds the same address: `cast server start`, the terminal screen when it has to start the daemon itself, and `cast upgrade` restarting it. Before this, an open `cast` window answered every `cast server stop` by starting a private daemon on a random port faster than you could start the public one, and `cast upgrade` could lose the public address the same way. If the remembered port is taken by something else, the terminal screen falls back to a private daemon instead of failing. To forget it: `cast server stop`, then `cast server start --port 0`.
 
-Starting when another instance is already running prints an error and exits. `stop` gracefully shuts down open sessions (SIGTERM), escalating to SIGKILL after 3 seconds if the process doesn't exit. If the recorded process is already gone (crash, OOM, `kill -9`), `status` and `stop` detect the stale state, clean up, and report honestly.
+Starting when another instance is already running prints an error and exits. `stop` asks the daemon to shut down through its authenticated shutdown route first — the only graceful path on Windows, where SIGTERM never reaches a JavaScript handler — then sends SIGTERM, escalating to SIGKILL after 3 seconds if the process doesn't exit. If the recorded process is already gone (crash, OOM, `kill -9`), `status` and `stop` detect the stale state, clean up, and report honestly.
 
 Features:
 - Create/switch/close sessions with different personas, running independently in parallel

@@ -168,6 +168,9 @@ export async function runServerMain(args: string[], options: { foreground: boole
 	// something to check — declared here, read (never reassigned) by that
 	// connect's .then(), and set true by the shutdown handler further down.
 	let shuttingDown = false;
+	// Assigned the real handler once it is defined below; the shutdown route only
+	// has to reach it, and it cannot exist before the server does.
+	let requestShutdown: ((reason: string) => void) | undefined;
 
 	const server = startServer({
 		port,
@@ -177,6 +180,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 		serverPassword,
 		instanceId,
 		version: ver,
+		onShutdownRequest: (reason) => requestShutdown?.(reason),
 		onListening: (boundPort: number) => {
 			// handleServerCommand (the `cast server` CLI path) already refuses to
 			// spawn a second daemon when one's live — but that check is bypassed
@@ -366,6 +370,7 @@ export async function runServerMain(args: string[], options: { foreground: boole
 	};
 	process.on("SIGTERM", () => void shutdown("SIGTERM"));
 	process.on("SIGINT", () => void shutdown("SIGINT"));
+	requestShutdown = (reason) => void shutdown(reason);
 	// One stray rejection must not end every session the daemon is serving: log it
 	// (server.log) and carry on. Callers that can fail on purpose use runDetached.
 	process.on("unhandledRejection", (reason) => {

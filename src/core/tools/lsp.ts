@@ -252,6 +252,33 @@ export async function execLsp(args: Record<string, unknown>, cwd: string, signal
 	return queryLsp(args, cwd, signal, []);
 }
 
+/**
+ * Races a promise that has no abort support against a signal. `touchFile` starts
+ * (and may install) a language server and takes no signal, so the tool's own
+ * deadline never covered that phase: an `npm install` and a release download can
+ * run for many minutes after the turn has moved on.
+ */
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		if (signal.aborted) {
+			reject(new Error("aborted"));
+			return;
+		}
+		const onAbort = () => reject(new Error("aborted"));
+		signal.addEventListener("abort", onAbort, { once: true });
+		void promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
+}
+
 async function queryLsp(
 	args: Record<string, unknown>,
 	cwd: string,
@@ -274,7 +301,13 @@ async function queryLsp(
 	// A file the server hasn't seen yet needs its project loaded before a
 	// query means anything; waiting for its diagnostics is that signal.
 	const firstLook = openClientsFor(path).length === 0;
-	const clients = await touchFile(path, cwd, firstLook || operation === "diagnostics");
+	let clients: LspClient[];
+	try {
+		clients = await raceAbort(touchFile(path, cwd, firstLook || operation === "diagnostics"), sig);
+	} catch (error) {
+		if (sig.aborted) return { content: "The language server did not start in time.", isError: true };
+		throw error;
+	}
 	if (clients.length === 0) return { content: noServerMessage(path), isError: true };
 	used.push(...clients);
 	const [capability, registration] = CAPABILITY[operation];

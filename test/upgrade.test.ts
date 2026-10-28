@@ -196,6 +196,24 @@ describe("restartDaemon", () => {
 
 		expect(spawnSync).not.toHaveBeenCalled();
 		const [command, args, options] = vi.mocked(spawn).mock.calls[0];
+		if (process.platform === "win32") {
+			// A release archive carries no `sh`: the waiter is Node itself, told the
+			// old pid, the entry point and the same start arguments through env.
+			expect(command).toBe(process.execPath);
+			expect(args?.[0]).toBe("-e");
+			expect(String(args?.[1])).toContain("process.kill(oldPid, 0)");
+			expect(options).toMatchObject({
+				detached: true,
+				env: expect.objectContaining({
+					LOCK: expect.any(String),
+					CAST_WAITER_PID: String(process.pid),
+					CAST_WAITER_ARGS: expect.stringContaining(
+						'["server","start","--port","1337","--host","127.0.0.1","--no-remember"]',
+					),
+				}),
+			});
+			return;
+		}
 		expect(command).toBe("sh");
 		expect(String(args?.[1])).toContain(`kill -0 ${process.pid}`);
 		expect(String(args?.[1])).toContain("cast server start '--port' '1337' '--host' '127.0.0.1' '--no-remember'");

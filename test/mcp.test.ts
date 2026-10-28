@@ -557,6 +557,15 @@ describe("connectMcpServers (real spawned MCP server, not mocked)", () => {
 		expect(listTools).toHaveBeenCalledTimes(2);
 	});
 
+	it("gives up on tools/list that never runs out of fresh cursors", async () => {
+		// A fresh cursor per page is not the duplicate the guard above catches, and
+		// this runs during startup and /mcp reconnect where no Esc exists.
+		let page = 0;
+		const listTools = vi.fn(async () => ({ tools: [], nextCursor: `cursor-${page++}` }));
+		await expect(listMcpTools({ listTools } as never, 100)).rejects.toThrow(/still returning another page/);
+		expect(listTools).toHaveBeenCalledTimes(50);
+	});
+
 	it("times out a hung tools/list request after a successful handshake", async () => {
 		const startedAt = Date.now();
 		const result = await connectMcpServers(

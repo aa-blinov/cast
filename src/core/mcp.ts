@@ -285,6 +285,8 @@ type McpListedTool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
 // server unnoticed for too long.
 const CONNECT_TIMEOUT_MS = 30_000;
 const CLOSE_TIMEOUT_MS = 1_000;
+/** What the SDK uses when no timeout is given; passed explicitly so maxTotalTimeout has a value to cap at. */
+const DEFAULT_MCP_TOOL_TIMEOUT_MS = 60_000;
 
 /**
  * Full parent environment for stdio MCP servers, with the config's `env`
@@ -328,24 +330,32 @@ export async function listMcpTools(
 	const tools: McpListedTool[] = [];
 	let cursor: string | undefined;
 	const seenCursors = new Set<string>();
-	do {
+	// A duplicate cursor is not the only way a paginator can fail to end: a
+	// server handing out a fresh cursor per page loops forever at one timeout
+	// each, and this runs during startup and /mcp reconnect where there is no
+	// Esc to reach. Every sibling paginator counts its pages; this one has to.
+	for (let page = 0; page < TOOL_MAX_PAGES; page++) {
 		if (cursor && seenCursors.has(cursor)) {
 			throw new Error(`tools/list returned the cursor "${cursor}" more than once`);
 		}
 		if (cursor) seenCursors.add(cursor);
 		// biome-ignore lint/performance/noAwaitInLoops: pagination — each page's cursor depends on previous response
-		const page = await client.listTools(cursor ? { cursor } : undefined, {
+		const got = await client.listTools(cursor ? { cursor } : undefined, {
 			timeout: requestTimeoutMs,
 			maxTotalTimeout: requestTimeoutMs,
 		});
-		tools.push(...page.tools);
-		cursor = page.nextCursor;
-	} while (cursor);
-	return tools;
+		tools.push(...got.tools);
+		cursor = got.nextCursor;
+		if (!cursor) return tools;
+	}
+	throw new Error(`tools/list was still returning another page after ${TOOL_MAX_PAGES} pages — giving up`);
 }
 
 /** Prompts a server may list before the rest is dropped: a menu, not an index. */
 const PROMPT_MAX_LISTED = 200;
+
+/** Pages of `tools/list` a server may return before the listing is called a runaway. */
+const TOOL_MAX_PAGES = 50;
 
 async function listMcpPrompts(client: Client, requestTimeoutMs: number): Promise<McpPromptInfo[]> {
 	const out: McpPromptInfo[] = [];
@@ -955,7 +965,7 @@ function addServerTools(
 					// tool (a browser step, a heavy query) needs a way past that,
 					// and it's read per call so a settings change applies without
 					// a reconnect.
-					const timeout = mcpToolTimeoutMs();
+					const timeout = mcpToolTimeoutMs() ?? DEFAULT_MCP_TOOL_TIMEOUT_MS;
 					const result = await withInteraction(connectionRef.value, options?.interaction, () =>
 						client.callTool({ name: t.name, arguments: args }, undefined, {
 							signal,
@@ -967,7 +977,10 @@ function addServerTools(
 										resetTimeoutOnProgress: true,
 									}
 								: {}),
-							...(timeout === undefined ? {} : { timeout }),
+							timeout,
+							// Without this the progress notification above resets the timer forever and the
+							// call has no ceiling at all — only Esc got a person out. The SDK throws on this one.
+							maxTotalTimeout: timeout,
 						}),
 					);
 					const parts = (result.content ?? []) as McpContentPart[];

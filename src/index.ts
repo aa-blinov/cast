@@ -20,12 +20,15 @@ import {
 	clearServerState,
 	DAEMON_STARTUP_TIMEOUT_MS,
 	DaemonProtocolMismatchError,
+	daemonBaseUrl,
 	isCurrentDaemonInstance,
 	isDaemonProtocolCompatible,
 	isProcessAlive,
+	RELEASE_PATH_RE,
 	readLiveServerState,
 	readServerState,
 	releaseStartLock,
+	type ServerDaemonState,
 	START_LOCK_WAIT_ATTEMPTS,
 } from "./server/daemon-state.ts";
 import { detectShell, SHELLS, shellInit } from "./ui/resume-hint.ts";
@@ -293,13 +296,23 @@ async function ensureDaemon(): Promise<string | undefined> {
 					}
 					await new Promise((resolve) => setTimeout(resolve, 150));
 				}
-				await handleServerCommand(
-					["start", "--port", String(bind?.port ?? 0), ...(bind ? ["--host", bind.host] : [])],
-					{
-						remember: false,
-						fallback: true,
-					},
-				);
+				// The TUI draws nothing until this returns, so a cold start used to be up
+				// to a minute of blank terminal — indistinguishable from a hang. `cast run`
+				// has warned after 4s since it got a headless path; this is the same notice
+				// for the screen, and it never fires on a warm start.
+				const startingNotice = setTimeout(() => process.stderr.write("Starting the cast daemon...\n"), 400);
+				startingNotice.unref();
+				try {
+					await handleServerCommand(
+						["start", "--port", String(bind?.port ?? 0), ...(bind ? ["--host", bind.host] : [])],
+						{
+							remember: false,
+							fallback: true,
+						},
+					);
+				} finally {
+					clearTimeout(startingNotice);
+				}
 				return tokenFor(readLiveServerState());
 			} finally {
 				releaseStartLock();
@@ -578,8 +591,6 @@ Neovim) to wire it as an agent.`);
  * the servers once a query has started them.
  */
 const WHOLE_NUMBER_RE = /^\d+$/;
-// Either separator: a Windows release path has backslashes, and a dev run must not match a folder named dist.
-const RELEASE_PATH_RE = /[\\/]dist[\\/]/;
 
 function isWholeNumber(text: string): boolean {
 	return WHOLE_NUMBER_RE.test(text);
@@ -777,7 +788,13 @@ async function handleServerCommand(
 		if (options.fallback) throw new Error("the daemon failed to start");
 		process.exit(1);
 	}
-	console.log(`[cast server] started (pid ${child.pid}) — http://${host}:${port}`);
+	// The requested port is not the bound one when it is 0 (or when the daemon
+	// fell back): report what the daemon recorded, or the line says
+	// "http://127.0.0.1:0" and the person has no address to open.
+	const recorded = readLiveServerState();
+	const shownHost = recorded?.host ?? host;
+	const shownPort = recorded?.port ?? port;
+	console.log(`[cast server] started (pid ${child.pid}) — http://${shownHost}:${shownPort}`);
 	if (explicit && options.remember !== false && !args.includes("--no-remember")) {
 		rememberBind({ host, port });
 		if (rememberedBind()) {
@@ -849,6 +866,25 @@ function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
 	});
 }
 
+/**
+ * Asks the daemon to run its graceful shutdown over HTTP. False when the state
+ * carries no token (a public bind) or the daemon predates the route, so the
+ * caller falls back to the signal path.
+ */
+async function requestDaemonShutdown(state: ServerDaemonState): Promise<boolean> {
+	if (!state.token) return false;
+	try {
+		const response = await fetch(`${daemonBaseUrl(state)}/api/server/shutdown`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${state.token}` },
+			signal: AbortSignal.timeout(2_000),
+		});
+		return response.ok;
+	} catch {
+		return false;
+	}
+}
+
 async function stopServerDaemon(): Promise<void> {
 	const state = readServerState();
 	if (!state) {
@@ -869,8 +905,15 @@ async function stopServerDaemon(): Promise<void> {
 		return;
 	}
 
-	process.kill(state.pid, "SIGTERM");
-	let died = await waitForExit(state.pid, 3000);
+	// Ask politely first: the route runs the daemon's own shutdown(), which drains
+	// live sessions and checkpoint writers. On Windows that is the only graceful
+	// path — `process.kill(pid, "SIGTERM")` there is an unconditional
+	// TerminateProcess, so the signal killed it mid-write with no SessionEnd hooks.
+	let died = (await requestDaemonShutdown(state)) && (await waitForExit(state.pid, 5_000));
+	if (!died) {
+		process.kill(state.pid, "SIGTERM");
+		died = await waitForExit(state.pid, 3000);
+	}
 	if (!died) {
 		// The in-process SIGTERM handler didn't finish in time (slow session
 		// drain, or an old build without the handler at all) — escalate

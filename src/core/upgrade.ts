@@ -191,14 +191,33 @@ export async function restartDaemon(options: { turnWaitMs?: number; turnPollMs?:
 			);
 			return false;
 		}
-		spawn(
-			"sh",
-			[
-				"-c",
-				`printf %s "$$" > "$LOCK"; while kill -0 ${state.pid} 2>/dev/null; do sleep 0.2; done; cast server start ${startArgs(state).map(shellQuote).join(" ")}; [ "$(cat "$LOCK" 2>/dev/null)" = "$$" ] && rm -f "$LOCK"`,
-			],
-			{ detached: true, stdio: "ignore", env: { ...process.env, LOCK: startLockPath() } },
-		).unref();
+		const restartEnv = { ...process.env, LOCK: startLockPath() };
+		if (process.platform === "win32") {
+			// `sh` does not exist on Windows, so the POSIX waiter below never ran and an
+			// upgrade left the daemon down until someone started it by hand. Same contract,
+			// in Node: take the lock as ourselves, wait for this pid to go, start the
+			// replacement, then drop the lock if it is still ours.
+			spawn(process.execPath, ["-e", WIN32_RESTART_WAITER], {
+				detached: true,
+				stdio: "ignore",
+				windowsHide: true,
+				env: {
+					...restartEnv,
+					CAST_WAITER_ENTRY: fileURLToPath(import.meta.url),
+					CAST_WAITER_ARGS: JSON.stringify(["server", "start", ...startArgs(state)]),
+					CAST_WAITER_PID: String(state.pid),
+				},
+			}).unref();
+		} else {
+			spawn(
+				"sh",
+				[
+					"-c",
+					`printf %s "$$" > "$LOCK"; while kill -0 ${state.pid} 2>/dev/null; do sleep 0.2; done; cast server start ${startArgs(state).map(shellQuote).join(" ")}; [ "$(cat "$LOCK" 2>/dev/null)" = "$$" ] && rm -f "$LOCK"`,
+				],
+				{ detached: true, stdio: "ignore", env: restartEnv },
+			).unref();
+		}
 		process.kill(state.pid, "SIGTERM");
 		return true;
 	}
@@ -313,6 +332,34 @@ async function acquireStartLockBounded(): Promise<boolean> {
 function shellQuote(word: string): string {
 	return `'${word.replace(/'/g, `'\\''`)}'`;
 }
+
+/**
+ * The Windows restart waiter, run through `node -e` because a release archive
+ * carries no `sh`. Mirrors the POSIX one: hold the start lock under our own pid
+ * while the old daemon goes, start the replacement, then remove the lock only
+ * if it still names us.
+ */
+const WIN32_RESTART_WAITER = `
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const lock = process.env.LOCK || "";
+const oldPid = Number(process.env.CAST_WAITER_PID);
+try { fs.writeFileSync(lock, String(process.pid)); } catch {}
+const startedAt = Date.now();
+const wait = () => {
+	let alive = true;
+	try { process.kill(oldPid, 0); } catch { alive = false; }
+	if (alive && Date.now() - startedAt < 120000) { setTimeout(wait, 200); return; }
+	const child = spawn(process.execPath, [process.env.CAST_WAITER_ENTRY, ...JSON.parse(process.env.CAST_WAITER_ARGS || "[]")], { detached: true, stdio: "ignore", windowsHide: true });
+	child.unref();
+	setTimeout(() => {
+		try {
+			if (fs.readFileSync(lock, "utf8").trim() === String(process.pid)) fs.unlinkSync(lock);
+		} catch {}
+	}, 5000);
+};
+wait();
+`;
 
 function startArgs(state: ServerDaemonState): string[] {
 	const bind = rememberedBind() ?? { host: state.host, port: state.port };

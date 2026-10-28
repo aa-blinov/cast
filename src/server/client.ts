@@ -9,6 +9,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { mkdirSync, openSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +30,7 @@ import {
 	daemonBaseUrl,
 	isCurrentDaemonInstance,
 	isDaemonProtocolCompatible,
+	RELEASE_PATH_RE,
 	readLiveServerState,
 	releaseStartLock,
 	type ServerDaemonState,
@@ -108,7 +110,7 @@ export function spawnBind(saved: ServerBind | undefined, free: boolean): ServerB
 async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 	const logFile = join(homedir(), ".cast", "server.log");
 	const selfPath = fileURLToPath(import.meta.url);
-	const isRelease = selfPath.includes("/dist/");
+	const isRelease = RELEASE_PATH_RE.test(selfPath);
 	// In dev (tsx) this module is src/server/client.ts → repo root is two
 	// levels up; in release it is inlined into dist/index.js → repo root is
 	// one level up from dist/. Match index.ts's spawnCwd accordingly.
@@ -129,7 +131,10 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 				"--no-remember",
 			]
 		: ["--import", "tsx", "./src/server/index.ts", "--port", String(bind.port), "--host", bind.host];
-	const { openSync } = await import("node:fs");
+	// `~/.cast` may not exist yet on a machine that has only ever run `cast run`;
+	// openSync used to fail with ENOENT, the outer catch swallowed it, and the
+	// caller reported a daemon that "did not start" without anything being tried.
+	mkdirSync(dirname(logFile), { recursive: true });
 	const logFd = openSync(logFile, "a");
 	const child = spawn(process.execPath, args, {
 		cwd: spawnCwd,
@@ -157,6 +162,13 @@ async function spawnDetachedDaemon(): Promise<ServerDaemonState | undefined> {
 			resolvePromise(s);
 		};
 		const poll = setInterval(() => {
+			// The child can die before it ever records state (a bad command, a crash
+			// on startup). Waiting the full 60s for a process that is already gone is
+			// the "cast run hangs for a minute" report; the exit is a real answer.
+			if (child.exitCode !== null) {
+				finish(readLiveServerState());
+				return;
+			}
 			const s = readLiveServerState();
 			if (s) finish(s);
 		}, 100);
@@ -524,8 +536,30 @@ export function subscribeServerEvents(
 		markReady = resolve;
 		setTimeout(resolve, 5000).unref();
 	});
-	source.onopen = () => markReady();
+	// A dropped connection is not the end of the stream. undici's EventSource
+	// retries by itself while its readyState is CONNECTING, but cast treated the
+	// first `onerror` as "closed": `cast run` printed "output may be incomplete"
+	// and exited 1 while the daemon kept running (and paying for) the turn. Wait
+	// out a bounded reconnect window instead, and give up only when the stream
+	// really is CLOSED or the window expires.
+	const RECONNECT_WINDOW_MS = 30_000;
+	let reopenTimer: ReturnType<typeof setTimeout> | undefined;
+	let settleClosed: () => void = () => {};
+	source.onopen = () => {
+		markReady();
+		if (reopenTimer) {
+			clearTimeout(reopenTimer);
+			reopenTimer = undefined;
+		}
+	};
 	const done = new Promise<"until" | "closed">((resolve) => {
+		settleClosed = () => {
+			if (resolved) return;
+			resolved = true;
+			if (reopenTimer) clearTimeout(reopenTimer);
+			source.close();
+			resolve("closed");
+		};
 		source.onmessage = (ev) => {
 			let event: import("./bridge.ts").WebEvent;
 			try {
@@ -542,11 +576,9 @@ export function subscribeServerEvents(
 		};
 		source.onerror = () => {
 			markReady();
-			if (!resolved) {
-				resolved = true;
-				source.close();
-				resolve("closed");
-			}
+			// 2 is EventSource.CLOSED: the stream is done and no retry is coming.
+			if (source.readyState === 2) settleClosed();
+			else if (!reopenTimer) reopenTimer = setTimeout(settleClosed, RECONNECT_WINDOW_MS);
 		};
 	});
 	return {
@@ -554,6 +586,7 @@ export function subscribeServerEvents(
 		ready,
 		close: () => {
 			resolved = true;
+			if (reopenTimer) clearTimeout(reopenTimer);
 			source.close();
 		},
 	};

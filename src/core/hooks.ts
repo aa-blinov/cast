@@ -663,9 +663,11 @@ function runCommandHook(
 		const killTimer = timeoutManaged
 			? setTimeout(() => killProcessGroup(proc), (timeoutSeconds + 2) * 1000)
 			: undefined;
+		let settleTimer: ReturnType<typeof setTimeout> | undefined;
 		const clearTimers = () => {
 			clearTimeout(timer);
 			if (killTimer) clearTimeout(killTimer);
+			if (settleTimer) clearTimeout(settleTimer);
 		};
 		const onAbort = () => killProcessGroup(proc);
 		signal?.addEventListener("abort", onAbort, { once: true });
@@ -695,6 +697,22 @@ function runCommandHook(
 							: { ...result, failure: `command hook exited ${exitCode ?? "without an exit code"}` },
 			);
 		};
+
+		// The timers above only kill; `finish` runs from 'exit'/'error' alone. On
+		// Windows the killer is a separate powershell/taskkill process that can
+		// fail silently, and a kill that never lands left this promise pending
+		// forever. Stop/PreCompact/SessionStart hooks are awaited in the loop body,
+		// outside the 2s net that closes an aborted tool batch, so that hang had no
+		// Esc. bash.ts settles unconditionally for exactly this reason; this is the
+		// missing net. Four seconds past the intended kill, not a timeout of its own.
+		settleTimer = setTimeout(
+			() => {
+				timedOut = true;
+				finish(null);
+			},
+			(timeoutSeconds + 4) * 1000,
+		);
+		settleTimer.unref();
 
 		stdoutStream.on("data", (d: Buffer) => {
 			stdoutBytes += d.length;

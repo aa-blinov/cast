@@ -301,6 +301,13 @@ export interface WebServerOptions {
 	version: string;
 	/** Per-process identity used by the CLI to avoid signalling a reused PID. */
 	instanceId?: string;
+	/**
+	 * Asks this daemon to run its graceful shutdown. Used by `cast server stop` on
+	 * Windows, where SIGTERM never reaches a JavaScript handler — Node maps it to
+	 * TerminateProcess, so the signal path killed the daemon mid-write with no
+	 * SessionEnd hooks and no checkpoint drain.
+	 */
+	onShutdownRequest?: (reason: string) => void;
 	/** Fires once the server is actually bound and accepting connections. Receives the real bound port (not the requested one — may differ when 0 was passed for OS assignment). */
 	onListening?: (port: number) => void;
 	/** Fires on a listen failure (e.g. EADDRINUSE) instead of the process crashing on an unhandled error event. */
@@ -1154,6 +1161,16 @@ export function startServer(options: WebServerOptions): ReturnType<typeof create
 	// never terminate an unrelated process that reused the numeric PID.
 	route("GET", "/api/server/identity", (_req, res) => {
 		json(res, { instanceId: options.instanceId });
+	});
+
+	// The graceful stop that works everywhere. Sits behind the same auth gate as
+	// identity, so only a client holding the loopback token can ask. The body is
+	// written before the listener closes: a client waiting on a response from a
+	// server that is shutting down reads the silence as a failed stop.
+	route("POST", "/api/server/shutdown", (_req, res) => {
+		if (!options.onShutdownRequest) return json(res, { error: "shutdown is not available on this server" }, 501);
+		json(res, { ok: true });
+		setTimeout(() => options.onShutdownRequest?.("API"), 10).unref();
 	});
 
 	// Lightweight git probe for the new-session modal: lets the UI show or

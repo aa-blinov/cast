@@ -19,6 +19,15 @@ import { join } from "node:path";
 import { releaseLock, tryAcquireLock } from "../core/file-lock.ts";
 import { API_V1_PREFIX } from "./api-v1.ts";
 
+/**
+ * A bundled build runs from `<install>/dist/index.js`, a source checkout from
+ * `src/`. One check, because the two launchers disagreed once: `index.ts` tested
+ * `/[\\/]dist[\\/]/` while `client.ts` tested `"/dist/"`, and on Windows the
+ * backslashes made a bundled `cast run` take the dev branch — spawning `tsx`
+ * against a `src/` that an install does not have.
+ */
+export const RELEASE_PATH_RE = /[\\/]dist[\\/]/;
+
 /** Increment only when a daemon/client wire contract becomes incompatible. */
 export const DAEMON_PROTOCOL_VERSION = 2;
 /** One startup budget shared by every daemon launcher. */
@@ -70,20 +79,57 @@ export function daemonBaseUrl(state: Pick<ServerDaemonState, "host" | "port">): 
 	return `http://${host}:${state.port}`;
 }
 
-/** Confirms that the HTTP daemon is the same process that wrote this state. */
-export async function isCurrentDaemonInstance(state: ServerDaemonState): Promise<boolean> {
-	if (!state.instanceId || !state.token) return false;
-	try {
-		const response = await fetch(`${daemonBaseUrl(state)}${API_V1_PREFIX}/server/identity`, {
-			headers: { Authorization: `Bearer ${state.token}` },
-			signal: AbortSignal.timeout(1_500),
-		});
-		if (!response.ok) return false;
-		const identity = (await response.json()) as { instanceId?: string };
-		return identity.instanceId === state.instanceId;
-	} catch {
-		return false;
+/**
+ * What the identity probe learned: a definite answer either way, or none.
+ * "unknown" is not "mismatch" — see daemonInstanceIdentity.
+ */
+export type DaemonIdentity = "current" | "mismatch" | "unknown";
+
+/**
+ * Confirms that the HTTP daemon is the same process that wrote this state.
+ *
+ * A timeout is not a mismatch. On a busy machine (a large diff, a SQLite write,
+ * a burst of background MCP work) the identity route can miss a 1.5s budget
+ * while the daemon is perfectly alive; callers that read that as "not ours"
+ * cleared the state file and started a second daemon beside the first — two
+ * writers to sessions.db, and a TUI attached to the wrong one. Retried a few
+ * times, then reported as "unknown" so the caller keeps what it has.
+ */
+export async function daemonInstanceIdentity(state: ServerDaemonState): Promise<DaemonIdentity> {
+	if (!state.instanceId || !state.token) return "mismatch";
+	for (let attempt = 0; attempt < 3; attempt++) {
+		if (attempt > 0) {
+			// biome-ignore lint/performance/noAwaitInLoops: each probe must settle before the next one starts
+			await new Promise((resolve) => setTimeout(resolve, 400));
+		}
+		try {
+			const response = await fetch(`${daemonBaseUrl(state)}${API_V1_PREFIX}/server/identity`, {
+				headers: { Authorization: `Bearer ${state.token}` },
+				signal: AbortSignal.timeout(1_500),
+			});
+			// Any answer is definite: a 404 means some other server owns the port.
+			if (!response.ok) return "mismatch";
+			const identity = (await response.json()) as { instanceId?: string };
+			return identity.instanceId === state.instanceId ? "current" : "mismatch";
+		} catch (error) {
+			// A refused connection is also definite — nothing is listening. Only a slow
+			// or broken probe leaves the question open, and that is the one case worth
+			// retrying instead of treating as a lost daemon.
+			if (isDefiniteAbsence(error)) return "mismatch";
+		}
 	}
+	return "unknown";
+}
+
+/** A transport error that proves nothing is listening on the recorded address. */
+function isDefiniteAbsence(error: unknown): boolean {
+	const code = (error as { cause?: { code?: string } })?.cause?.code ?? (error as { code?: string } | undefined)?.code;
+	return code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "EHOSTUNREACH";
+}
+
+/** True unless the probe definitely reached a different process; "unknown" counts as itself. */
+export async function isCurrentDaemonInstance(state: ServerDaemonState): Promise<boolean> {
+	return (await daemonInstanceIdentity(state)) !== "mismatch";
 }
 
 /** A missing value is intentionally incompatible: an older daemon cannot prove it speaks this protocol. */
