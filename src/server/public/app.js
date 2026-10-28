@@ -6,6 +6,7 @@
 import htm from "htm";
 import { h, render } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
+import "./monos-elements.js";
 import { api } from "./api.js";
 import { HISTORY_PAGE_TURNS, latestPageUrl, mergeHistoryPage } from "./history-merge.js";
 import { escapeHtml, renderMarkdown } from "./markdown.js";
@@ -2304,7 +2305,8 @@ function App() {
 
 			<!-- Chat area -->
 			<main class="chat-area">
-				<div class="messages" ref=${messagesRef} onScroll=${handleScroll}>
+			<monos-chat-panel label="Conversation" busy=${running}>
+				<div slot="messages" class="messages" role="log" aria-label="Conversation messages" aria-live="off" ref=${messagesRef} onScroll=${handleScroll}>
 				<div class="messages-inner" ref=${messagesInnerRef}>
 					${
 						bootstrapping &&
@@ -2372,7 +2374,11 @@ function App() {
 									onRetry: loadOlderMessages,
 								})
 							}
-							${shownMessages.map((msg) => html`<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${isSubagentView ? undefined : forkBeforeMessage} onForkAfter=${!isSubagentView && !running && activeId && isForkableAnswer(msg, msg === shownMessages[shownMessages.length - 1]) ? forkAfterMessage : undefined} onRewind=${!isSubagentView && !running && activeId && rewindSeqs.has(msg.seq) ? rewindToMessage : undefined} />`)}
+							${shownMessages.map((msg) => html`
+								<monos-chat-message key=${keyForMessage(msg)} kind=${msg.role} label=${`${msg.role} message`}>
+									<${MessageModule} key=${keyForMessage(msg)} msg=${msg} renderMarkdown=${renderMarkdown} escapeHtml=${escapeHtml} showReasoning=${showReasoning} onFork=${isSubagentView ? undefined : forkBeforeMessage} onForkAfter=${!isSubagentView && !running && activeId && isForkableAnswer(msg, msg === shownMessages[shownMessages.length - 1]) ? forkAfterMessage : undefined} onRewind=${!isSubagentView && !running && activeId && rewindSeqs.has(msg.seq) ? rewindToMessage : undefined} />
+								</monos-chat-message>
+							`)}
 							${
 								!running &&
 								(messages[messages.length - 1]?.notice === "error" ||
@@ -2398,6 +2404,7 @@ function App() {
 					}
 				</div>
 				</div>
+				<div slot="composer" class="chat-composer-slot">
 				${
 					(activePersonaLabel || session?.cwd) &&
 					html`
@@ -2455,9 +2462,11 @@ function App() {
 							${session.parentSessionId && html`<button type="button" class="subagent-banner-back" onClick=${() => selectSession(session.parentSessionId)}>← Back to the thread</button>`}
 						</div>
 					`
-							: html`<${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} audioInput=${Boolean(session?.isDraft ? draftAudioInput : session?.audioInput)} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} />`
+							: html`<monos-chat-composer label="Message composer" busy=${running}><${ComposerModule} running=${running} aborting=${aborting} ready=${!!session} sendReady=${Boolean(session && connectionUsable())} activeId=${activeId} commands=${commands} personas=${personas} audioInput=${Boolean(session?.isDraft ? draftAudioInput : session?.audioInput)} onSubmit=${submitMessage} onAbort=${abortRun} onDocUploaded=${() => setInputsRefreshNonce((n) => n + 1)} /></monos-chat-composer>`
 					}
 				</div>
+				</div>
+			</monos-chat-panel>
 			</main>
 
 			<!-- Diff — a wide right sidebar alongside the chat on desktop, a
