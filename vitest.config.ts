@@ -3,6 +3,11 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		include: ["test/**/*.test.ts"],
+		// `test/__test_tmp__/` is where fixtures build throwaway projects, and a run
+		// that is interrupted leaves them behind. One of them carries a `tools.test.ts`
+		// of its own, so without this exclude the next run collects that file, finds no
+		// suite in it, and reports a failed suite on a green tree.
+		exclude: ["**/node_modules/**", "**/dist/**", "**/__test_tmp__/**"],
 		setupFiles: ["test/setup.ts"],
 		testTimeout: 30_000,
 		// openai -> node-fetch -> whatwg-url pulls in Node's deprecated builtin

@@ -53,7 +53,7 @@ The original client. Connects over HTTP + SSE, logs in with the auto-generated p
 ## Lifecycle
 
 - **Start:** `cast` (TUI) auto-spawns the daemon if none is live; `cast web start` (or just `cast web`) starts the browser surface explicitly. A detached daemon keeps running after the TUI exits, so the browser can still connect.
-- **Stop:** `cast web stop` sends SIGTERM (escalating to SIGKILL after 3s), drains active turns, and clears the state file. Stopping the daemon also disconnects the TUI's SSE stream. The TUI sees `[terminated]` and can reconnect on next submit.
+- **Stop:** `cast web stop` asks the daemon to shut down over its authenticated route (the only graceful path on Windows, where SIGTERM is a `TerminateProcess` and never reaches a handler), falls back to SIGTERM, escalates to SIGKILL after 3s, drains active turns, and clears the state file. Stopping the daemon also disconnects the TUI's SSE stream. The TUI sees `[terminated]` and can reconnect on next submit.
 - **Stale state:** every reader (`status`, the TUI's `ensureDaemon`, the server's auth check) treats a PID whose process is no longer alive as stale and self-heals by clearing `~/.cast/server.json`.
 - **Protocol compatibility:** TUI and headless clients compare the daemon protocol recorded in `server.json` before connecting. A mismatch (including a legacy daemon without the field) leaves the daemon untouched and asks the user to run `cast server stop` before starting Cast again.
 - **`CAST_NO_DAEMON=1`:** the TUI skips `ensureDaemon()` and runs `runAgentLoop` locally (the pre-0.12.29 fallback). `cast run` and `cast run --interactive` do not have this fallback and report that the daemon is required.

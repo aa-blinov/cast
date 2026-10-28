@@ -30,6 +30,8 @@ vi.mock("../src/core/loop.ts", async (importOriginal) => {
 });
 
 const LOOPBACK_TOKEN = "test-loopback-token";
+/** Reasons a graceful shutdown was requested through the route. */
+const shutdownRequests: string[] = [];
 
 let server: ReturnType<typeof startServer>;
 let origin: string;
@@ -48,6 +50,7 @@ async function startTestServer(): Promise<void> {
 		serverPassword: "test-password",
 		instanceId: "daemon-test-instance",
 		version: "test",
+		onShutdownRequest: (reason) => shutdownRequests.push(reason),
 	});
 	await once(server, "listening");
 	const address = server.address() as AddressInfo;
@@ -409,5 +412,19 @@ describe("daemon single-writer SSE contract", () => {
 		});
 		expect(accepted.status).toBe(200);
 		await expect(accepted.json()).resolves.toEqual({ instanceId: "daemon-test-instance" });
+	});
+
+	it("takes a graceful shutdown request only from an authenticated local client", async () => {
+		// Windows never dispatches SIGTERM to a handler, so this route is the only
+		// way `cast server stop` can drain sessions instead of killing mid-write.
+		const denied = await fetch(`${origin}/api/server/shutdown`, { method: "POST" });
+		expect(denied.status).toBe(401);
+		const accepted = await fetch(`${origin}/api/server/shutdown`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${LOOPBACK_TOKEN}` },
+		});
+		expect(accepted.status).toBe(200);
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		expect(shutdownRequests).toEqual(["API"]);
 	});
 });

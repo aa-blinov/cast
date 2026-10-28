@@ -20,6 +20,12 @@ import { dirname } from "node:path";
 const LOCK_WAIT_MS = 5_000;
 /** A lock file with no pid in it (its holder died between create and write) is judged by its age. */
 const EMPTY_LOCK_GRACE_MS = 5_000;
+/**
+ * A lock whose recorded pid is still alive after this long is not a start in flight: the daemon start it guards
+ * has a 60s budget. Without an age cap, a pid recycled onto some long-lived process kept the lock looking held
+ * forever, and every later `cast` waited the full start-lock budget and then silently ran local.
+ */
+const LOCK_STALE_AGE_MS = 5 * 60_000;
 const SLEEP_CELL = new Int32Array(new SharedArrayBuffer(4));
 
 function isAlive(pid: number): boolean {
@@ -64,10 +70,14 @@ function reclaimIfDead(path: string, owner: string): void {
 		return;
 	}
 	const holder = Number(raw);
+	let age: number;
+	try {
+		age = Date.now() - statSync(path).mtimeMs;
+	} catch {
+		return;
+	}
 	const dead =
-		Number.isInteger(holder) && holder > 0
-			? !isAlive(holder)
-			: Date.now() - statSync(path).mtimeMs > EMPTY_LOCK_GRACE_MS;
+		Number.isInteger(holder) && holder > 0 ? !isAlive(holder) || age > LOCK_STALE_AGE_MS : age > EMPTY_LOCK_GRACE_MS;
 	if (!dead) return;
 	const aside = `${path}.${owner}.${Date.now()}.stale`;
 	try {

@@ -680,6 +680,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 	const [daemonConnected, setDaemonConnected] = useState(!isClient);
 	const daemonConnectedRef = useRef(daemonConnected);
 	daemonConnectedRef.current = daemonConnected;
+	// Survives the reconnect effect's own teardown: the effect re-runs on every
+	// daemonOverride change, and a per-run counter reset to zero each time is
+	// exactly how "reconnecting" became an unthrottled loop.
+	const reconnectRef = useRef({ attempts: 0, timer: null as ReturnType<typeof setTimeout> | null });
 	// Shared HTTP client for the daemon (thin-client mode). Used by all the
 	// server calls below — same wire layer as `cast run`/JSONL (server/client.ts),
 	// so the TUI and headless paths speak to the daemon identically.
@@ -1797,8 +1801,8 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			: `${effectiveDaemonUrl}/api/sessions/${session.id}/events`;
 		const source = new EventSource(url);
 		let opened = false;
-		let recoveryStarted = false;
 		let disposed = false;
+		const baseUrl = effectiveDaemonUrl;
 		const retryPending = async () => {
 			const client = serverClient ?? { baseUrl: effectiveDaemonUrl, token: effectiveDaemonToken };
 			for (const pending of pendingServerMessagesRef.current.values()) {
@@ -1830,7 +1834,33 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 					.catch(() => {});
 			}
 		};
+		// One recovery attempt, run on a backoff timer. Reconnecting must also ask
+		// whether this session still exists: the daemon answering is not the same as
+		// this conversation existing, and a 404 can never be fixed by re-subscribing.
+		const recover = async () => {
+			const client = serverClient ?? { baseUrl, token: effectiveDaemonToken };
+			try {
+				await getServerSession(client, session.id);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				if (message.includes("HTTP 404")) {
+					if (!disposed) setError("This session no longer exists on the daemon. Open another session.");
+					return;
+				}
+			}
+			const live = await ensureServerClient();
+			if (disposed || !live) return;
+			// Replace the EventSource even when the daemon came back on the same URL: a
+			// CLOSED source is not guaranteed to retry after a restart, and the new open
+			// is the commit point for pending sends.
+			setDaemonOverride({ url: live.baseUrl, token: live.token });
+		};
 		source.onopen = () => {
+			reconnectRef.current.attempts = 0;
+			if (reconnectRef.current.timer) {
+				clearTimeout(reconnectRef.current.timer);
+				reconnectRef.current.timer = null;
+			}
 			setDaemonConnected(true);
 			setError(null);
 			void retryPending();
@@ -1845,26 +1875,18 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 			if (disposed) return;
 			setDaemonConnected(false);
 			setError("Daemon connection lost — reconnecting…");
-			if (recoveryStarted) return;
-			recoveryStarted = true;
-			// A failed attempt (daemon still starting, spawn lost a race) re-arms
-			// the flag: EventSource keeps firing onerror while it retries, and with
-			// the flag stuck the TUI sat on "reconnecting" forever.
-			void ensureServerClient()
-				.then((live) => {
-					if (disposed) return;
-					if (!live) {
-						recoveryStarted = false;
-						return;
-					}
-					// Replace the EventSource even when the daemon came back on the
-					// same URL. A CLOSED source is not guaranteed to retry after a
-					// restart; the new open is also the commit point for pending sends.
-					setDaemonOverride({ url: live.baseUrl, token: live.token });
-				})
-				.catch(() => {
-					recoveryStarted = false;
-				});
+			const recovery = reconnectRef.current;
+			if (recovery.timer) return;
+			// Back off before re-subscribing. Reconnecting the instant `onerror` fires
+			// was a hot loop: the flag guarding it lived inside this effect, which the
+			// override-set re-ran, so a permanent non-2xx became an unthrottled request
+			// storm with the composer refusing every message.
+			const delay = Math.min(1000 * 2 ** Math.min(recovery.attempts, 4), 15_000);
+			recovery.attempts += 1;
+			recovery.timer = setTimeout(() => {
+				recovery.timer = null;
+				void recover();
+			}, delay);
 		};
 		source.onmessage = (ev) => {
 			let event: import("../server/bridge.ts").WebEvent;
@@ -2108,6 +2130,10 @@ export function useAgentSession(params: UseAgentSessionParams): UseAgentSession 
 		};
 		return () => {
 			disposed = true;
+			if (reconnectRef.current.timer) {
+				clearTimeout(reconnectRef.current.timer);
+				reconnectRef.current.timer = null;
+			}
 			source.close();
 		};
 	}, [

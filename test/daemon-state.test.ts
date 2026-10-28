@@ -288,12 +288,29 @@ describe("daemon identity and the legacy state file", () => {
 			expect(await isCurrentDaemonInstance(state)).toBe(false);
 
 			globalThis.fetch = (async () => {
-				throw new Error("connection refused");
+				// What undici actually throws when nothing is listening: the code is on `cause`.
+				throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
 			}) as typeof fetch;
 			expect(await isCurrentDaemonInstance(state)).toBe(false);
 
 			// Without an instance id or a token there is nothing to ask, so nothing is confirmed.
 			expect(await isCurrentDaemonInstance({ ...state, instanceId: undefined })).toBe(false);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	});
+
+	it("treats a probe that never answers as unknown, not as a different daemon", async () => {
+		const { daemonInstanceIdentity, isCurrentDaemonInstance } = await import("../src/server/daemon-state.ts");
+		const realFetch = globalThis.fetch;
+		try {
+			// A timeout says nothing about identity. Reading it as "not ours" is what
+			// made a busy daemon lose its registration and get a second writer beside it.
+			globalThis.fetch = (async () => {
+				throw Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+			}) as typeof fetch;
+			expect(await daemonInstanceIdentity(state)).toBe("unknown");
+			expect(await isCurrentDaemonInstance(state)).toBe(true);
 		} finally {
 			globalThis.fetch = realFetch;
 		}

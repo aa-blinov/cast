@@ -47,6 +47,17 @@ describe("tryAcquireLock and releaseLock", () => {
 		releaseLock(lock);
 	});
 
+	it("takes over a lock whose recorded pid was recycled by an unrelated long-lived process", () => {
+		const lock = join(dir, "x.lock");
+		// The pid is alive, but no daemon start lasts this long: the lock is stale
+		// whatever the pid says, or a recycled pid wedges every later start.
+		writeFileSync(lock, String(process.pid));
+		const old = new Date(Date.now() - 10 * 60_000);
+		utimesSync(lock, old, old);
+		expect(tryAcquireLock(lock)).toBe(true);
+		releaseLock(lock);
+	});
+
 	it("leaves a lock that another live process took over, even when asked to release it", () => {
 		const lock = join(dir, "x.lock");
 		writeFileSync(lock, String(process.ppid));
