@@ -5,7 +5,7 @@
 <!-- resizes-content: the on-screen keyboard shrinks the layout viewport instead of
      covering the page, so the composer sits on top of it and the transcript keeps
      its own scroll (the default, resizes-visual, pans the header off-screen). -->
-<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Cast</title>
 <script>
 // Applies the last-known theme/font/scale (cached by app.js — see
@@ -73,10 +73,12 @@ try {
 } catch {}
 </script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0a0a0a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/monos-ui.css">
 <link rel="stylesheet" href="/chat.css">
 <link rel="stylesheet" href="/tools.css">
 <link rel="stylesheet" href="/workspace.css">
