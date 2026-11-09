@@ -6111,6 +6111,56 @@ describe("gateDestructiveWrite", () => {
 		expect(order).toEqual(["start:first", "end:first", "start:second", "end:second"]);
 	});
 
+	it("code mode advertises one codemode tool and confirms each MCP call a script makes", async () => {
+		updateSettings({ mcpCodeMode: true });
+		const mcpDef = {
+			type: "function" as const,
+			function: {
+				name: "mcp_demo_mutate",
+				description: "[demo] mutate",
+				parameters: { type: "object", properties: {} },
+			},
+		};
+		const mcpCall = vi.fn(async () => ({ content: '{"ok":true}' }));
+		const confirmWrite = vi.fn(async () => false);
+		const events: AgentEvent[] = [];
+		vi.mocked(streamAndCollect)
+			.mockImplementationOnce(async () => ({
+				content: "",
+				thinking: "",
+				finishReason: "stop",
+				toolCalls: [
+					{
+						id: "code-1",
+						name: "codemode",
+						arguments: JSON.stringify({ code: "return await codemode.demo.mutate({});" }),
+					},
+				],
+			}))
+			.mockImplementationOnce(async () => ({ content: "done", thinking: "", finishReason: "stop" }));
+
+		await runAgentLoop([{ role: "user", content: "mutate" }], {
+			config: testConfig,
+			model: "test-model",
+			cwd: "/tmp",
+			systemPrompt: "test",
+			mcpTools: [mcpDef],
+			mcpToolIndex: new Map([["mcp_demo_mutate", { definition: mcpDef, call: mcpCall }]]),
+			confirmWrite,
+			onEvent: (e) => events.push(e),
+		});
+
+		const advertised = (vi.mocked(streamAndCollect).mock.calls[0]?.[3] as { function: { name: string } }[]).map(
+			(t) => t.function.name,
+		);
+		expect(advertised).toContain("codemode");
+		expect(advertised).not.toContain("mcp_demo_mutate");
+		expect(confirmWrite).toHaveBeenCalledWith("mcp_demo_mutate", expect.any(String), expect.any(String));
+		expect(mcpCall).not.toHaveBeenCalled();
+		const end = events.find((e) => e.type === "tool_end" && e.name === "codemode");
+		expect(end?.type === "tool_end" && end.result.content).toContain("Permission denied");
+	});
+
 	it("still gates write calls when hooks are configured", async () => {
 		const events: AgentEvent[] = [];
 		const confirmWrite = vi.fn(async () => false);

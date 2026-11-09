@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Tool } from "../src/core/llm.ts";
 import { formatMcpForPrompt, type McpSetupResult, mcpServerNameFromDescription } from "../src/core/mcp.ts";
+import { updateSettings } from "../src/core/settings.ts";
 
 function makeResult(
 	connections: { serverName: string; toolCount: number }[],
@@ -148,5 +149,19 @@ describe("formatMcpForPrompt with persona allowlist", () => {
 			[{ name: "mcp_context7_query-docs", description: "[context7] Query docs" }],
 		);
 		expect(formatMcpForPrompt(result, [])).toBe("");
+	});
+});
+
+describe("formatMcpForPrompt in code mode", () => {
+	it("lists servers but not the mcp_ tool names, which are only reachable through codemode", () => {
+		updateSettings({ mcpCodeMode: true });
+		const result = makeResult(
+			[{ serverName: "shop", toolCount: 1 }],
+			[{ name: "mcp_shop_get_order", description: "[shop] Fetch one order" }],
+		);
+		const out = formatMcpForPrompt(result);
+		expect(out).toContain('<server name="shop" tools="1">');
+		expect(out).toContain("codemode");
+		expect(out).not.toContain("mcp_shop_get_order");
 	});
 });

@@ -2,6 +2,11 @@
 
 All notable user-facing changes to cast, newest first.
 
+## Unreleased
+
+### Added
+- **Experimental MCP code mode (`mcpCodeMode` in `~/.cast/settings.json`, off by default).** The model sees one `codemode` tool instead of every MCP schema and writes a short script against typed declarations (`codemode.<server>.<tool>`; the read-only built-ins `read`, `grep`, `glob`, `ls`, `web_fetch`, `web_search` sit under `fs` and `web`). The script runs in a child process under Node's permission model, with no file system, shell or secret environment variables, at most 8 calls in flight, and a two-minute limit. Every call it makes goes through the normal loop, so confirmations, hooks and plan mode apply to each one. Measured on MiniMax-M3.1-Flash with a 51-tool Bitrix24 server: about half the tokens of the classic scheme over 54 runs with the same number of correct answers, and 1.5 to 4 times cheaper in real `cast run` sessions. Known limit: the script can still reach the network.
+
 ## 0.60.1
 
 ### Changed
