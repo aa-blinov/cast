@@ -2228,7 +2228,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 	// Code mode: the model sees one scripting tool instead of every MCP schema. The real tools stay in knownToolNames and
 	// the dispatch table; a script reaches them through executeTool(..., fromScript) so permissions and hooks still apply.
 	const codeModeTools =
-		loadSettings().mcpCodeMode === true && mcps.length > 0 ? scriptTools(mcps, builtins) : undefined;
+		loadSettings().mcpCodeMode !== false && mcps.length > 0 ? scriptTools(mcps, builtins) : undefined;
 	const scriptCallable = new Set(codeModeTools?.map((t) => t.tool.function.name));
 	const baseTools = loopConfig.toolDefinitionsOverride
 		? structuredClone(loopConfig.toolDefinitionsOverride)

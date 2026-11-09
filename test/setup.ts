@@ -3,6 +3,7 @@ import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach } from "vitest";
 import { resetDbConnectionForTests } from "../src/core/db.ts";
+import { updateSettings } from "../src/core/settings.ts";
 import { stopSqliteReader } from "../src/core/sqlite-reader.ts";
 import {
 	applyTestEnvironment,
@@ -57,6 +58,9 @@ beforeEach(() => {
 	process.env[gitConfigKeyName] = "core.autocrlf";
 	process.env[gitConfigValueName] = "false";
 	resetDbConnectionForTests();
+	// MCP code mode is on by default in the product; the suite's MCP tests assume the classic one-tool-per-schema
+	// layout, and the code mode tests turn it back on for themselves.
+	updateSettings({ mcpCodeMode: false });
 });
 
 afterEach(async () => {

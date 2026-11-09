@@ -635,7 +635,7 @@ describe("runAgentLoop — abort vs. error", () => {
 		const projectCwd = mkdtempSync(join(tmpdir(), "cast-checkpoint-parent-tools-project-"));
 		process.env.HOME = fakeHome;
 		process.env.CAST_MEMORY_DIR = join(fakeHome, "memory");
-		updateSettings({ checkpointFork: true });
+		updateSettings({ checkpointFork: true, mcpCodeMode: false });
 		const sessionId = "parent-tools-session";
 		saveSession(createSession("test-model", projectCwd, { id: sessionId }));
 		const mcpDefinition = {

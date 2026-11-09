@@ -112,7 +112,8 @@ export interface Settings {
 	/** When false, web_search and web_fetch tools are not advertised to the model. */
 	webTools?: boolean;
 	/** Replace the MCP tool list with one `codemode` tool: the model writes a script that calls the tools, and only
-	 * its result enters the context. Cuts the tool-schema cost of many servers; experimental, default off. */
+	 * its result enters the context. Cuts the tool-schema cost of many servers. Default on; set false to give the model
+	 * every MCP tool schema again. */
 	mcpCodeMode?: boolean;
 	/** TUI: notify through the terminal (OSC 9 plus a bell) when a turn ends
 	 * or waits for approval while the terminal is unfocused. Default true. */

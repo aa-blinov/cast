@@ -1352,7 +1352,7 @@ export function formatMcpForPrompt(result: McpSetupResult, personaMcpAllowlist?:
 	}
 	// In code mode the tools are only reachable through the `codemode` tool, which declares them itself; listing the
 	// `mcp_*` names here sent the model to call tools that are not advertised.
-	const codeMode = loadSettings().mcpCodeMode === true;
+	const codeMode = loadSettings().mcpCodeMode !== false;
 	if (codeMode)
 		lines.push(
 			"  <!-- Call these through the codemode tool (codemode.<server>.<tool>); its description declares each tool. -->",
