@@ -50,7 +50,7 @@ jobs:
             runner: macos-15-intel
             format: tar.gz
           - target: darwin-arm64
-            runner: macos-14
+            runner: macos-15
             format: tar.gz
           - target: win32-x64
             runner: windows-2022

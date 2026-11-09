@@ -2251,8 +2251,8 @@ describe("/compact fires the compaction hooks", () => {
 	afterEach(() => {
 		if (previousHome === undefined) delete process.env.HOME;
 		else process.env.HOME = previousHome;
-		// PostCompact runs in the background, so Windows may briefly keep its cwd locked.
-		rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+		// PostCompact runs in the background and its shell can outlive the marker file, so Windows keeps the cwd locked for a moment.
+		rmSync(dir, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
 	});
 
 	const writeHooks = (hooks: unknown) =>
