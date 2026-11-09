@@ -43,7 +43,7 @@ import { matchesToolsAllowlist } from "./frontmatter.ts";
 import type { Tool } from "./llm.ts";
 import { createMcpAuthProvider, hasMcpLogin } from "./mcp-auth.ts";
 import type { McpInteraction } from "./mcp-interaction.ts";
-import { maxToolOutputBytesSetting, maxToolOutputLinesSetting, mcpToolTimeoutMs } from "./settings.ts";
+import { loadSettings, maxToolOutputBytesSetting, maxToolOutputLinesSetting, mcpToolTimeoutMs } from "./settings.ts";
 import type { ToolResult } from "./tools.ts";
 
 /**
@@ -1350,12 +1350,19 @@ export function formatMcpForPrompt(result: McpSetupResult, personaMcpAllowlist?:
 			'  <!-- resources="true": the server also offers resources (documents, files, records); list and read them with its list_resources and read_resource tools. -->',
 		);
 	}
+	// In code mode the tools are only reachable through the `codemode` tool, which declares them itself; listing the
+	// `mcp_*` names here sent the model to call tools that are not advertised.
+	const codeMode = loadSettings().mcpCodeMode === true;
+	if (codeMode)
+		lines.push(
+			"  <!-- Call these through the codemode tool (codemode.<server>.<tool>); its description declares each tool. -->",
+		);
 	for (const c of servers) {
 		lines.push(
 			`  <server name="${escapeXml(c.serverName)}" tools="${c.toolCount}"${c.resources ? ' resources="true"' : ""}>`,
 		);
 		for (const t of result.toolDefinitions) {
-			if (t.function.description?.startsWith(`[${c.serverName}]`)) {
+			if (!codeMode && t.function.description?.startsWith(`[${c.serverName}]`)) {
 				lines.push(`    <tool>${escapeXml(t.function.name)}</tool>`);
 			}
 		}

@@ -70,6 +70,7 @@ import {
 	streamAndCollect,
 } from "./llm.ts";
 import { closeMcpConnections, type McpToolHandle, mcpServerNameFromDescription } from "./mcp.ts";
+import { MCP_CODE_TOOL, mcpCodeToolDefinition, runMcpScript, scriptTools } from "./mcp-code.ts";
 import { isMcpConfigPath } from "./mcp-config.ts";
 import { type AskMcpForm, createMcpInteraction } from "./mcp-interaction.ts";
 import { appendMcpResourceMentions, appendMcpResourceUpdates } from "./mcp-mentions.ts";
@@ -2224,9 +2225,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 			return server !== undefined && matchesToolsAllowlist(server, mcpAllowlist);
 		});
 	}
+	// Code mode: the model sees one scripting tool instead of every MCP schema. The real tools stay in knownToolNames and
+	// the dispatch table; a script reaches them through executeTool(..., fromScript) so permissions and hooks still apply.
+	const codeModeTools =
+		loadSettings().mcpCodeMode === true && mcps.length > 0 ? scriptTools(mcps, builtins) : undefined;
+	const scriptCallable = new Set(codeModeTools?.map((t) => t.tool.function.name));
 	const baseTools = loopConfig.toolDefinitionsOverride
 		? structuredClone(loopConfig.toolDefinitionsOverride)
-		: [...builtins, ...mcps];
+		: [...builtins, ...(codeModeTools ? [mcpCodeToolDefinition(codeModeTools)] : mcps)];
 	// Tools an invoked skill removed for the rest of this turn via its
 	// `disallowed-tools` frontmatter. Per the spec the restriction "clears when
 	// you send your next message", so a steer or follow-up empties it.
@@ -2563,6 +2569,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		args: Record<string, unknown>,
 		toolSignal?: AbortSignal,
 		toolCallId?: string,
+		fromScript = false,
 	): Promise<ToolResult> => {
 		// Legacy aliases (e.g. find → glob) before the allowlist / unknown check
 		// so old model habits and allowlists keep working against one tool.
@@ -2575,7 +2582,7 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 		// real calls: disabledTools denylist, the persona/subagent builtin
 		// `tools:` allowlist, and the persona `mcp:` allowlist (server-scoped
 		// — see the mcp filter further up).
-		if (!advertisedNames.has(name)) {
+		if (!advertisedNames.has(name) && !(fromScript && scriptCallable.has(name))) {
 			if (knownToolNames.has(name) || disabledTools?.has(name)) {
 				return Promise.resolve({
 					content: `Tool "${name}" is not available in the current mode.`,
@@ -2741,6 +2748,14 @@ async function runLoopInner(messages: Message[], loopConfig: LoopConfig): Promis
 				(await gateDestructiveWrite(name, finalArgs, loopConfig.confirmWrite)) ??
 				(await gateWorktreeCreate(name, finalArgs, loopConfig.confirmWrite));
 			if (writeDenial) return writeDenial;
+			if (name === MCP_CODE_TOOL && codeModeTools) {
+				return runMcpScript({
+					code: typeof finalArgs.code === "string" ? finalArgs.code : "",
+					tools: codeModeTools,
+					call: (toolName, toolArgs) => executeTool(toolName, toolArgs, toolSignal, toolCallId, true),
+					signal: toolSignal,
+				});
+			}
 			const mcpTool = mcpToolIndex?.get(name);
 			if (mcpTool) {
 				return mcpTool.call(finalArgs, toolSignal, {
