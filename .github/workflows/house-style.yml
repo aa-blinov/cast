@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: aa-blinov/golden-repo/.github/actions/house-style@6673454f1e903c7bb7fd0254dea3d98272156834 # v1.0.13
+      - uses: aa-blinov/golden-repo/.github/actions/house-style@8e21c37c6fa0aa8a48d3a2f3fef53e13f0dc0b44 # v1.0.14
         with:
           report: house-style.json
 
